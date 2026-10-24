@@ -40,14 +40,14 @@ class EngineRun:
     name: str
     status: str  # "ok" | "fail" | "skipped"
     seconds: float
-    lines: list[str] = field(default_factory=list)
+    lines: list[str] = field(default_factory=lambda: [])
 
 
 @dataclass
 class CheckReport:
-    engines: list[EngineRun] = field(default_factory=list)
-    drift: list[str] = field(default_factory=list)
-    violations: list[Violation] = field(default_factory=list)
+    engines: list[EngineRun] = field(default_factory=lambda: [])
+    drift: list[str] = field(default_factory=lambda: [])
+    violations: list[Violation] = field(default_factory=lambda: [])
     ratchet: ratchet_mod.Ratchet | None = None
     parsed: int = 0
     partial: bool = False

@@ -18,7 +18,7 @@ import re
 import tomllib
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .domain import Policy, Violation, dist_name
 from .facts import STDLIB, ModuleInfo, resolve_targets
@@ -185,7 +185,8 @@ def run_practices(
     out: list[Violation] = []
     if cfg.get("gitignore-shadow"):
         value = cfg["gitignore-shadow"]
-        allow = [str(a) for a in value] if isinstance(value, list) else []
+        items = cast("list[object]", value) if isinstance(value, list) else []
+        allow = [str(a) for a in items]
         out += gitignore_shadow(root, runner, allow)
     if cfg.get("sibling-versions"):
         out += sibling_versions(root, str(cfg["sibling-versions"]))

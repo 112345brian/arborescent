@@ -16,8 +16,8 @@ class FakeToolRunner:
     """Answers by executable name; records every call. ``installed`` is the set of tools that 'exist'."""
 
     installed: set[str] = field(default_factory=lambda: set())
-    results: dict[str, ToolResult] = field(default_factory=dict)
-    calls: list[list[str]] = field(default_factory=list)
+    results: dict[str, ToolResult] = field(default_factory=lambda: {})
+    calls: list[list[str]] = field(default_factory=lambda: [])
 
     def available(self, executable: str) -> bool:
         return executable in self.installed

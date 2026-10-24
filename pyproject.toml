@@ -126,3 +126,8 @@ forbidden_modules = [
     "socket", "urllib",
 ]
 allow_indirect_imports = true
+
+[tool.ruff.lint]
+# PIE807 asks for `field(default_factory=list)`, but pyright strict then reports the
+# field type as partially unknown; `lambda: []` keeps both tools quiet.
+extend-ignore = ["PIE807"]
