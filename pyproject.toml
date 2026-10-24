@@ -31,6 +31,12 @@ basedpyright = ["basedpyright>=1.30"]
 ty = ["ty>=0.0.50"]
 pyrefly = ["pyrefly>=0.40"]
 all = ["import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400"]
+dev = ["pytest>=8", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "build"]
+
+[project.urls]
+Homepage = "https://github.com/112345brian/archlint"
+Repository = "https://github.com/112345brian/archlint"
+Changelog = "https://github.com/112345brian/archlint/blob/main/CHANGELOG.md"
 
 [project.scripts]
 archlint = "archlint.cli:main"
@@ -99,3 +105,24 @@ external = ["@pure", "argparse", "pathlib", "archlint"]
 crlf = ["*.sh", "*.bash"]
 undeclared-imports = true
 secrets-guard = "tests"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = "-q"
+
+# Contract that lived in the launch-runner root pyproject: the core and the ports stay free of process/file/network modules.
+# (`lint-imports` reads this table; the generated archlint-importlinter.toml is checked by `archlint check`.)
+[tool.importlinter]
+root_packages = ["archlint"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "archlint core and ports must not import adapters, the engines or process/file/network modules"
+type = "forbidden"
+source_modules = ["archlint.domain", "archlint.facts", "archlint.rules", "archlint.ports"]
+forbidden_modules = [
+    "archlint.adapters", "archlint.typecheckers", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
+    "socket", "urllib",
+]
+allow_indirect_imports = true
