@@ -20,7 +20,7 @@ from archlint.generate import generate
 from archlint.selftest import selftest
 from archlint.testing import FakeToolRunner
 from archlint.typecheckers import Pyrefly, all_checkers, by_name
-from conftest import mini_policy, write_files
+from archlint_helpers import mini_policy, write_files
 
 CHECKERS = list(all_checkers().values())
 

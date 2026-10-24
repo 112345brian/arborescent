@@ -20,7 +20,7 @@ from .facts import ModuleInfo, RawImport, SourceFacts, extract
 __all__ = ["FsScanner", "ScanData", "SubprocessToolRunner"]
 
 _PRUNE = {"__pycache__", ".git", ".venv", "venv", "node_modules", ".archlint", ".mypy_cache", ".ruff_cache", ".tox"}
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 
 
 class SubprocessToolRunner:
@@ -68,6 +68,9 @@ class FsScanner:
 
     def __init__(self, cache_dir: Path | None = None) -> None:
         self._cache_dir = cache_dir
+
+    def uncached(self) -> FsScanner:
+        return FsScanner(None)
 
     def scan(self, policy: Policy, root: Path, only: frozenset[str] | None = None) -> ScanData:
         cache_file = self._cache_dir / "scan.json" if self._cache_dir else None

@@ -8,7 +8,7 @@ from typing import Any
 from archlint.adapters import FsScanner
 from archlint.domain import Violation
 from archlint.rules import check_modules
-from conftest import CLASSIFY, ring_with, mini_policy, write_files
+from archlint_helpers import CLASSIFY, ring_with, mini_policy, write_files
 
 
 def run(root: Path, **overrides: Any) -> list[Violation]:
@@ -118,3 +118,11 @@ def test_distribution_mapping_is_used_for_entry_scripts(repo: Path) -> None:
 def test_entry_script_without_metadata_block_fails(repo: Path) -> None:
     write_files(repo, {"run.py": "import sys\n"})
     assert [v.rule for v in run(repo, **ENTRY)] == ["undeclared-entry-dependency"]
+
+
+def test_entry_script_metadata_is_read_from_a_file_with_crlf_line_endings(repo: Path) -> None:
+    """Found by running ArchLint on DeepInterview: the scripts there are CRLF and the PEP 723 regex missed the block."""
+    script = b'# /// script\r\n# dependencies = ["psutil"]\r\n# ///\r\nimport sys\r\n'
+    (repo / "run.py").write_bytes(script)
+    scan = FsScanner().scan(mini_policy(**ENTRY), repo)
+    assert scan.entry_deps["run"] == ("psutil",)

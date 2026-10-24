@@ -60,3 +60,5 @@ class ModuleScanner(Protocol):
     """Finds the policy's modules and parses each at most once (content-hash cached)."""
 
     def scan(self, policy: Policy, root: Path, only: frozenset[str] | None = None) -> ScanResult: ...
+
+    def uncached(self) -> ModuleScanner: ...  # same scanner without persistent state (mutation tests)

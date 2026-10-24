@@ -84,7 +84,7 @@ def _walk_stmt(stmt: ast.stmt, lazy: bool, type_only: bool, imports: list[RawImp
 def _script_deps(source: str) -> tuple[str, ...] | None:
     if "# /// script" not in source:
         return None
-    block = _PEP723.search(source)
+    block = _PEP723.search(source.replace("\r\n", "\n"))
     if not block:
         return None
     text = "\n".join(line[2:] if line.startswith("# ") else line[1:] for line in block.group(1).splitlines())

@@ -15,7 +15,7 @@ from archlint.adapters import FsScanner, SubprocessToolRunner
 from archlint.practices import (
     crlf, docs_sync, gitignore_shadow, secrets_guard, sibling_versions, undeclared_imports,
 )  # fmt: skip
-from conftest import mini_policy, write_files
+from archlint_helpers import mini_policy, write_files
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 

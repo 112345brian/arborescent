@@ -33,7 +33,8 @@ def leaves(names: Collection[str]) -> list[str]:
 
 
 def tops_of(names: Collection[str]) -> list[str]:
-    return sorted({n.split(".")[0] for n in names})
+    """Importable packages only: import-linter rejects a single-file module (an entry script) as a root package."""
+    return sorted({n.split(".")[0] for n in names if "." in n})
 
 
 def _q(value: str) -> str:
@@ -50,8 +51,9 @@ def _list(items: Sequence[str], indent: str = "") -> str:
 
 def import_linter(policy: Policy, names: Sequence[str]) -> str:
     by_ring: dict[str, list[str]] = {r.name: [] for r in policy.rings}
+    graph = set(tops_of(names))
     for n in leaves(names):
-        ring = policy.ring_of(n)
+        ring = policy.ring_of(n) if n.split('.')[0] in graph else None
         if ring:
             by_ring[ring].append(n)
     lines = [HEADER, "[tool.importlinter]", f"root_packages = {_list(tops_of(names))}", "include_external_packages = true", ""]

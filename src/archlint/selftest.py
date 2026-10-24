@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .domain import Policy
@@ -76,6 +76,7 @@ def plan(policy: Policy, paths: dict[str, str], known: frozenset[str]) -> tuple[
 
 
 def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
+    services = replace(services, scanner=services.scanner.uncached())  # mutated copies must not touch the real cache
     _, scan = run_own(policy, root, services, practices=False)
     mutations, skipped = plan(policy, dict(scan.paths), scan.known)
     report = SelfTestReport([], [], skipped)

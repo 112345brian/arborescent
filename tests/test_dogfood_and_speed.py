@@ -15,7 +15,7 @@ from archlint.config import load_policy
 from archlint.engine import Options, Services, run_check, run_own
 from archlint.generate import generate
 from archlint.typecheckers import all_checkers
-from conftest import mini_policy, write_files
+from archlint_helpers import mini_policy, write_files
 
 HERE = Path(__file__).resolve().parents[1]
 CHECKERS = list(all_checkers().values())
