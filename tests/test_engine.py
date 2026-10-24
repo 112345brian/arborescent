@@ -1,0 +1,247 @@
+"""check: drift, engines in parallel (faked), cache, --changed, the baseline ratchet, and selftest."""
+
+from __future__ import annotations
+
+import ast
+import shutil
+import subprocess
+import time
+from pathlib import Path
+
+import pytest
+
+import archlint.selftest as selftest_mod
+from archlint import baseline
+from archlint.adapters import FsScanner
+from archlint.cli import main
+from archlint.domain import ToolResult, Violation
+from archlint.engine import Options, Services, run_check, run_own
+from archlint.generate import generate
+from archlint.selftest import selftest
+from archlint.testing import FakeToolRunner
+from archlint.typecheckers import Pyrefly, all_checkers, by_name
+from conftest import mini_policy, write_files
+
+CHECKERS = list(all_checkers().values())
+
+
+def services(runner: FakeToolRunner | None = None, cache: Path | None = None) -> Services:
+    return Services(FsScanner(cache), runner or FakeToolRunner(), CHECKERS)
+
+
+def commit_generated(repo: Path) -> None:
+    policy = mini_policy()
+    scan = FsScanner().scan(policy, repo)
+    for rel, text in generate(policy, sorted(scan.known), by_name(["pyright"])).items():
+        write_files(repo, {rel: text})
+
+
+# --- drift -------------------------------------------------------------------------------------------------------
+
+
+def test_missing_and_stale_generated_configs_are_drift(repo: Path) -> None:
+    report = run_check(mini_policy(), repo, services(), Options(tools=False))
+    assert not report.ok and len(report.drift) == 3  # import-linter, tach, pyright
+    commit_generated(repo)
+    assert run_check(mini_policy(), repo, services(), Options(tools=False)).ok
+    write_files(repo, {"tach.toml": "# hand edited\n"})
+    drift = run_check(mini_policy(), repo, services(), Options(tools=False)).drift
+    assert drift == ["tach.toml: differs from the policy; run `archlint generate`"]
+
+
+def test_a_new_module_changes_the_generated_configs(repo: Path) -> None:
+    commit_generated(repo)
+    write_files(repo, {"app/domain2.py": ""})
+    report = run_check(mini_policy(classify={"app": "domain", "app.*": "domain"}), repo, services(), Options(tools=False))
+    assert any(d.startswith("tach.toml") for d in report.drift)
+
+
+# --- engines -----------------------------------------------------------------------------------------------------
+
+
+def test_missing_engines_are_skipped_unless_required(repo: Path) -> None:
+    commit_generated(repo)
+    lenient = run_check(mini_policy(), repo, services(), Options())
+    assert lenient.ok and {e.status for e in lenient.engines if e.name != "archlint"} == {"skipped"}
+    strict = run_check(mini_policy(), repo, services(), Options(require_tools=True))
+    assert not strict.ok
+
+
+def test_an_engine_failure_fails_the_check_and_shows_its_output(repo: Path) -> None:
+    commit_generated(repo)
+    runner = FakeToolRunner({"lint-imports", "tach", "pyright"}, {"tach": ToolResult(1, "boom: forbidden import", "")})
+    report = run_check(mini_policy(), repo, services(runner), Options())
+    failed = [e for e in report.engines if e.status == "fail"]
+    assert [e.name for e in failed] == ["tach"] and "boom" in failed[0].lines[-1] and not report.ok
+
+
+def test_engines_run_in_parallel_not_one_after_another(repo: Path) -> None:
+    commit_generated(repo)
+
+    class Slow(FakeToolRunner):
+        def run(self, argv, cwd, timeout=600.0):  # type: ignore[no-untyped-def]
+            time.sleep(0.3)
+            return super().run(argv, cwd, timeout)
+
+    started = time.perf_counter()
+    report = run_check(mini_policy(), repo, services(Slow({"lint-imports", "tach", "pyright"})), Options())
+    elapsed = time.perf_counter() - started
+    assert report.ok and elapsed < 0.8, f"three 0.3s engines took {elapsed:.2f}s: they are not concurrent"
+
+
+def test_type_checker_is_swappable(repo: Path) -> None:
+    commit_generated(repo)
+    runner = FakeToolRunner({"ty"})
+    run_check(mini_policy(), repo, services(runner), Options(type_checker="ty"))
+    assert ["ty", "check"] in runner.calls
+
+
+def test_pyrefly_that_silently_dropped_its_config_is_a_failure() -> None:
+    """pyrefly 1.4.0 warns 'failed to parse' and falls back to auto-config with exit 0: not a pass."""
+    sneaky = ToolResult(0, "", "WARN pyrefly.toml: failed to parse, checking with auto configuration")
+    assert not Pyrefly().passed(sneaky)
+    assert Pyrefly().passed(ToolResult(0, " INFO 0 errors", ""))
+
+
+# --- cache and --changed -------------------------------------------------------------------------------------------
+
+
+def test_warm_run_parses_nothing_and_an_edit_parses_one_file(repo: Path, tmp_path: Path) -> None:
+    cache = tmp_path / "cache-dir"
+    svc = services(cache=cache)
+    policy = mini_policy()
+    _, cold = run_own(policy, repo, svc, practices=False)
+    _, warm = run_own(policy, repo, svc, practices=False)
+    assert (cold.parsed, warm.parsed) == (5, 0)
+    write_files(repo, {"app/domain.py": "VALUE = 2\n"})
+    assert run_own(policy, repo, svc, practices=False)[1].parsed == 1
+
+
+def test_cache_is_keyed_by_content_not_by_mtime(repo: Path, tmp_path: Path) -> None:
+    svc = services(cache=tmp_path / "c")
+    policy = mini_policy()
+    _ = run_own(policy, repo, svc, practices=False)
+    target = repo / "app/domain.py"
+    original = target.read_bytes()
+    target.write_bytes(original)  # same bytes, new mtime
+    assert run_own(policy, repo, svc, practices=False)[1].parsed == 0
+
+
+def test_a_corrupt_cache_is_rebuilt_not_trusted(repo: Path, tmp_path: Path) -> None:
+    (tmp_path / "c").mkdir()
+    (tmp_path / "c" / "scan.json").write_text("{ not json", encoding="utf-8")
+    assert run_own(mini_policy(), repo, services(cache=tmp_path / "c"), practices=False)[1].parsed == 5
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_changed_mode_checks_only_files_changed_since_the_ref(repo: Path) -> None:
+    def git(*args: str) -> None:
+        _ = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=repo, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    write_files(repo, {"app/domain.py": "from . import adapters\n"})  # a violation in ONE file
+    real = Services(FsScanner(), __import__("archlint.adapters", fromlist=["x"]).SubprocessToolRunner(), CHECKERS)
+    full = run_check(mini_policy(), repo, real, Options(tools=False, use_baseline=False))
+    part = run_check(mini_policy(), repo, real, Options(changed="HEAD", tools=False, use_baseline=False))
+    assert part.partial and [v.subject for v in part.violations] == ["app.domain"]
+    assert full.parsed >= part.parsed
+    clean = run_check(mini_policy(), repo, real, Options(changed="HEAD~0", tools=False, use_baseline=False))
+    assert clean.violations and len({v.subject for v in clean.violations}) == 1
+
+
+# --- the baseline ratchet -------------------------------------------------------------------------------------------
+
+
+def v(rule: str, subject: str, detail: str = "d") -> Violation:
+    return Violation(rule, subject, detail)
+
+
+def test_ratchet_fails_only_on_new_violations() -> None:
+    old = {v("internal-import", "a").key}
+    result = baseline.apply([v("internal-import", "a"), v("internal-import", "b")], old)
+    assert [x.subject for x in result.new] == ["b"] and result.tolerated == 1 and not result.ok
+
+
+def test_ratchet_is_shrink_only_stale_entries_fail() -> None:
+    old = {v("internal-import", "a").key, v("internal-import", "fixed").key}
+    result = baseline.apply([v("internal-import", "a")], old)
+    assert result.new == [] and result.stale == [v("internal-import", "fixed").key] and not result.ok
+
+
+def test_a_partial_run_cannot_prove_an_entry_stale() -> None:
+    assert baseline.apply([], {"x|y|z"}, complete=False).ok
+
+
+def test_baseline_key_ignores_line_numbers() -> None:
+    assert Violation("r", "s", "d", 3).key == Violation("r", "s", "d", 99).key
+
+
+def test_baseline_command_then_check_end_to_end(repo: Path) -> None:
+    write_files(
+        repo,
+        {
+            "archlint.toml": "",  # placeholder replaced below
+            "app/domain.py": "from . import adapters\n",
+        },
+    )
+    policy_text = (
+        'sources = ["app"]\nrings = ["domain", "ports", "adapters", "composition"]\n'
+        '[ring.domain]\nexternal = ["__future__"]\n[ring.ports]\nmay_import = ["domain"]\nexternal = ["__future__"]\n'
+        '[ring.adapters]\nmay_import = ["domain", "ports"]\nexternal = ["os", "__future__"]\nos_branching = true\n'
+        '[ring.composition]\nmay_import = ["*"]\nexternal = ["sys"]\n'
+        '[classify]\n"app" = "domain"\n"app.domain" = "domain"\n"app.ports" = "ports"\n"app.adapters" = "adapters"\n"app.main" = "composition"\n'
+    )
+    write_files(repo, {"archlint.toml": policy_text})
+    cfg = str(repo / "archlint.toml")
+    assert main(["--config", cfg, "generate"], services()) == 0
+    assert main(["--config", cfg, "check", "--no-tools"], services()) == 1  # the violation fails
+    assert main(["--config", cfg, "baseline"], services()) == 0  # record it
+    assert main(["--config", cfg, "check", "--no-tools"], services()) == 0  # tolerated now
+    write_files(repo, {"app/ports.py": "from . import adapters\n"})  # a NEW one
+    assert main(["--config", cfg, "check", "--no-tools"], services()) == 1
+    write_files(repo, {"app/ports.py": "", "app/domain.py": ""})  # fix both: the old entry is now stale
+    assert main(["--config", cfg, "check", "--no-tools"], services()) == 1
+    assert main(["--config", cfg, "baseline"], services()) == 0
+    assert main(["--config", cfg, "check", "--no-tools"], services()) == 0
+
+
+# --- selftest -------------------------------------------------------------------------------------------------------
+
+
+def test_selftest_kills_every_mutation_on_a_good_policy(repo: Path) -> None:
+    report = selftest(mini_policy(), repo, services())
+    assert report.ok and len(report.killed) >= 12, report
+
+
+def test_selftest_catches_a_rule_that_does_not_bite(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the OS-branching rule were broken, selftest must say so (a mutation that survives = a dead rule)."""
+    real = selftest_mod.run_own
+
+    def broken(*args, **kwargs):  # type: ignore[no-untyped-def]
+        found, scan = real(*args, **kwargs)
+        return [x for x in found if x.rule != "os-branching"], scan
+
+    monkeypatch.setattr(selftest_mod, "run_own", broken)
+    report = selftest(mini_policy(), repo, services())
+    assert not report.ok and all("os-branching" in s or "OS branching" in s for s in report.survived)
+
+
+# --- nobody may discard a result ---------------------------------------------------------------------------------
+
+
+def test_no_caller_discards_the_result_of_a_check() -> None:
+    """A call to run_check/run_own/check_modules/run_practices/drift/selftest as a bare statement would silently drop
+    violations; scan the whole source tree for that."""
+    src = Path(__file__).resolve().parents[1] / "src" / "archlint"
+    watched = {"run_check", "run_own", "check_modules", "run_practices", "drift", "selftest", "gitignore_shadow", "sibling_versions"}
+    bad: list[str] = []
+    for path in src.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                fn = node.value.func
+                name = fn.id if isinstance(fn, ast.Name) else fn.attr if isinstance(fn, ast.Attribute) else ""
+                if name in watched:
+                    bad.append(f"{path.name}:{node.lineno} discards {name}()")
+    assert not bad, bad

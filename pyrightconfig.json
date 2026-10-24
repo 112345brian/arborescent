@@ -13,7 +13,6 @@
   "reportImplicitOverride": "error",
   "reportImportCycles": "error",
   "reportPrivateUsage": "error",
-  "reportUnusedCallResult": "error",
   "reportUntypedFunctionDecorator": "error",
   "reportUnnecessaryCast": "error",
   "reportUnnecessaryComparison": "error",

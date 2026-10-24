@@ -23,9 +23,14 @@ class ToolRunner(Protocol):
 class TypeChecker(Protocol):
     """A swappable type checker. The policy renders its strict configuration; ``command`` runs it."""
 
-    name: str
-    executable: str
-    config_file: str
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def executable(self) -> str: ...
+
+    @property
+    def config_file(self) -> str: ...
 
     def render_config(self, policy: Policy, paths: Sequence[str]) -> str: ...
 
@@ -35,11 +40,20 @@ class TypeChecker(Protocol):
 
 
 class ScanResult(Protocol):
-    known: frozenset[str]  # every module name under the policy's sources
-    modules: Mapping[str, ModuleInfo]  # the ones parsed (all, or only the changed ones)
-    entry_deps: Mapping[str, tuple[str, ...] | None]  # entry script -> PEP 723 dependencies
-    paths: Mapping[str, str]  # module name -> posix path relative to the root
-    parsed: int  # files parsed this run (cache misses)
+    @property
+    def known(self) -> frozenset[str]: ...  # every module name under the policy's sources
+
+    @property
+    def modules(self) -> Mapping[str, ModuleInfo]: ...  # the ones parsed (all, or only the changed ones)
+
+    @property
+    def entry_deps(self) -> Mapping[str, tuple[str, ...] | None]: ...  # entry script -> PEP 723 dependencies
+
+    @property
+    def paths(self) -> Mapping[str, str]: ...  # module name -> posix path relative to the root
+
+    @property
+    def parsed(self) -> int: ...  # files parsed this run (cache misses)
 
 
 class ModuleScanner(Protocol):

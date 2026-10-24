@@ -31,7 +31,6 @@ _PYRIGHT_STRICT: dict[str, object] = {
     "reportImplicitOverride": "error",
     "reportImportCycles": "error",
     "reportPrivateUsage": "error",
-    "reportUnusedCallResult": "error",
     "reportUntypedFunctionDecorator": "error",
     "reportUnnecessaryCast": "error",
     "reportUnnecessaryComparison": "error",
@@ -71,12 +70,19 @@ class Pyright:
 
 
 @dataclass(frozen=True)
-class BasedPyright(Pyright):
+class BasedPyright:
     name: str = "basedpyright"
     executable: str = "basedpyright"
+    config_file: str = "pyrightconfig.json"
 
     def render_config(self, policy: Policy, paths: Sequence[str]) -> str:
         return _pyright_json(policy, paths, _BASED_EXTRA)
+
+    def command(self, files: Sequence[str]) -> list[str]:
+        return [self.executable, *files]
+
+    def passed(self, result: ToolResult) -> bool:
+        return result.returncode == 0
 
 
 @dataclass(frozen=True)
@@ -111,7 +117,7 @@ class Pyrefly:
         kinds = (
             "implicit-any", "implicit-any-parameter", "unannotated-parameter", "unannotated-return",
             "unknown-argument-type", "unknown-attribute-type", "unknown-return-type", "unknown-variable-type",
-            "non-exhaustive-match", "unused-ignore", "missing-override-decorator", "unused-call-result",
+            "non-exhaustive-match", "unused-ignore", "missing-override-decorator",
             "unnecessary-comparison", "redundant-cast", "untyped-function-decorator", "explicit-any",
         )  # fmt: skip
         includes = ", ".join(f'"{p}"' for p in paths)

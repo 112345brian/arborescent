@@ -12,6 +12,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .domain import Policy, ToolResult
 from .facts import ModuleInfo, RawImport, SourceFacts, extract
@@ -51,19 +52,15 @@ class ScanData:
     parsed: int = 0  # files actually parsed this run (cache misses); 0 on a fully warm run
 
 
-def _facts_to_json(f: SourceFacts) -> list[object]:
+def _facts_to_json(f: SourceFacts) -> list[Any]:
     imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only] for i in f.imports]
     return [imports, [list(u) for u in f.os_uses], None if f.script_deps is None else list(f.script_deps)]
 
 
-def _facts_from_json(raw: list[list[object]]) -> SourceFacts:
-    imports = tuple(
-        RawImport(int(i[0]), str(i[1]), tuple(i[2]), int(i[3]), bool(i[4]), bool(i[5]))  # type: ignore[arg-type,call-overload]
-        for i in raw[0]  # type: ignore[union-attr]
-    )
-    os_uses = tuple((int(u[0]), str(u[1])) for u in raw[1])  # type: ignore[index,call-overload]
-    deps = raw[2]
-    return SourceFacts(imports, os_uses, None if deps is None else tuple(str(d) for d in deps))  # type: ignore[union-attr]
+def _facts_from_json(raw: list[Any]) -> SourceFacts:
+    imports = tuple(RawImport(i[0], i[1], tuple(i[2]), i[3], i[4], i[5]) for i in raw[0])
+    os_uses = tuple((u[0], u[1]) for u in raw[1])
+    return SourceFacts(imports, os_uses, None if raw[2] is None else tuple(raw[2]))
 
 
 class FsScanner:
@@ -74,7 +71,7 @@ class FsScanner:
 
     def scan(self, policy: Policy, root: Path, only: frozenset[str] | None = None) -> ScanData:
         cache_file = self._cache_dir / "scan.json" if self._cache_dir else None
-        cache: dict[str, list[object]] = {}
+        cache: dict[str, list[Any]] = {}
         if cache_file and cache_file.is_file():
             try:
                 loaded = json.loads(cache_file.read_text(encoding="utf-8"))
@@ -89,7 +86,7 @@ class FsScanner:
         paths: dict[str, str] = {}
         parsed = 0
         dirty = False
-        fresh: dict[str, list[object]] = {}
+        fresh: dict[str, list[Any]] = {}
         for module, is_pkg, rel in files:
             paths[module] = rel
             if module not in wanted:
@@ -98,7 +95,7 @@ class FsScanner:
             digest = hashlib.blake2b(data, digest_size=16).hexdigest()
             hit = cache.get(rel)
             if hit and hit[0] == digest:
-                facts = _facts_from_json(hit[1])  # type: ignore[arg-type]
+                facts = _facts_from_json(hit[1])
                 fresh[rel] = hit
             else:
                 facts = extract(data.decode("utf-8-sig"), rel)
@@ -109,7 +106,7 @@ class FsScanner:
         if cache_file and (dirty or (only is None and len(fresh) != len(cache))):
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             merged = fresh if only is None else {**cache, **fresh}
-            cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "files": merged}), encoding="utf-8")
+            _ = cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "files": merged}), encoding="utf-8")
         entry = {s: modules[s].facts.script_deps for s in policy.entry_scripts if s in modules}
         return ScanData(known, modules, entry, paths, parsed)
 

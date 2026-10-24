@@ -121,7 +121,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options = Op
     report.parsed = scan.parsed
     report.drift = drift(policy, root, sorted(scan.known), [c for c in services.checkers if c.name in {*policy.type_checkers, checker.name}])
     report.violations = found
-    base = ratchet_mod.load(root / policy.baseline) if opts.use_baseline else set()
+    base: set[str] = ratchet_mod.load(root / policy.baseline) if opts.use_baseline else set()
     report.ratchet = ratchet_mod.apply(found, base, complete=only is None)
     report.engines += [f.result() for f in futures]
     pool.shutdown()

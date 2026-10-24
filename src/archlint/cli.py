@@ -49,7 +49,7 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
     if args.command == "bench":
         from .bench import run_bench  # imported lazily: only this command needs it
 
-        return run_bench(args.dirs, args.checkers)
+        return run_bench(args.dirs, args.checkers, default_services)
     try:
         policy, root = load_policy(args.config or find_policy(Path.cwd()))
     except PolicyError as exc:

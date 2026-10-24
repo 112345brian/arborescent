@@ -25,6 +25,13 @@ IO_STDLIB = (
 )  # fmt: skip
 
 
+def leaves(names: Collection[str]) -> list[str]:
+    """Modules that are not the parent package of another module: the tools' module paths cover descendants,
+    so a package that has children cannot be targeted on its own (its ``__init__`` ring is checked by ArchLint)."""
+    every = set(names)
+    return sorted(n for n in every if not any(o.startswith(n + ".") for o in every))
+
+
 def tops_of(names: Collection[str]) -> list[str]:
     return sorted({n.split(".")[0] for n in names})
 
@@ -43,7 +50,7 @@ def _list(items: Sequence[str], indent: str = "") -> str:
 
 def import_linter(policy: Policy, names: Sequence[str]) -> str:
     by_ring: dict[str, list[str]] = {r.name: [] for r in policy.rings}
-    for n in sorted(names):
+    for n in leaves(names):
         ring = policy.ring_of(n)
         if ring:
             by_ring[ring].append(n)
@@ -98,12 +105,12 @@ def tach(policy: Policy, names: Sequence[str]) -> str:
         'exclude = ["**/__pycache__", "tests", ".venv", "venv", "node_modules"]',
         f"layers = {_list(layers)}",
         'root_module = "ignore"',
-        "forbid_circular_dependencies = true",
+        f"forbid_circular_dependencies = {'false' if explicit else 'true'}  # per-module depends_on lists make same-ring peers mutually dependent",
     ]
     if explicit:
         lines.append("layers_explicit_depends_on = true")
     lines.append("")
-    classified = [(n, policy.ring_of(n)) for n in sorted(names)]
+    classified = [(n, policy.ring_of(n)) for n in leaves(names)]
     for name, ring in classified:
         if ring is None:
             continue

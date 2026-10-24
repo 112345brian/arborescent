@@ -33,7 +33,7 @@ def load(path: Path) -> set[str]:
 
 def save(path: Path, violations: Iterable[Violation]) -> int:
     keys = sorted({v.key for v in violations})
-    path.write_text(json.dumps({"version": 1, "violations": keys}, indent=2) + "\n", encoding="utf-8", newline="\n")
+    _ = path.write_text(json.dumps({"version": 1, "violations": keys}, indent=2) + "\n", encoding="utf-8", newline="\n")
     return len(keys)
 
 
