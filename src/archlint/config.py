@@ -14,9 +14,10 @@ def find_policy(start: Path) -> Path:
     for folder in (start, *start.parents):
         for name in ("archlint.toml", "pyproject.toml"):
             candidate = folder / name
-            if candidate.is_file():
-                if name == "archlint.toml" or "archlint" in tomllib.loads(candidate.read_text(encoding="utf-8")).get("tool", {}):
-                    return candidate
+            if candidate.is_file() and (
+                name == "archlint.toml" or "archlint" in tomllib.loads(candidate.read_text(encoding="utf-8")).get("tool", {})
+            ):
+                return candidate
     raise PolicyError(f"no archlint.toml or [tool.archlint] found from {start}")
 
 

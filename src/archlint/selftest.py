@@ -69,9 +69,9 @@ def plan(policy: Policy, paths: dict[str, str], known: frozenset[str]) -> tuple[
         new = (base + "/" if base else "") + "archlint_probe_unclassified.py"
         out.append(Mutation("unclassified", "a new module matching no pattern", new, "", new_file=True))
     if policy.entry_scripts:
-        host = next((m for m in sorted(known) if policy.ring_of(m) and m not in policy.entry_scripts), None)
-        if host:
-            out.append(Mutation("undeclared-entry-dependency", "a project module imports a package the scripts don't declare", paths[host], "import archlint_probe_dist"))
+        entry_host = next((m for m in sorted(known) if policy.ring_of(m) and m not in policy.entry_scripts), None)
+        if entry_host:
+            out.append(Mutation("undeclared-entry-dependency", "a project module imports a package the scripts don't declare", paths[entry_host], "import archlint_probe_dist"))
     return out, sorted(set(skipped))
 
 

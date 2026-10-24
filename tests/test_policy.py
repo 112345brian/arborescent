@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from archlint_helpers import MINI, mini_policy, ring_with
 
 from archlint.domain import Policy, PolicyError
-from archlint_helpers import MINI, ring_with, mini_policy
 
 
 def test_allowed_rings_are_self_plus_declared_inner_rings() -> None:

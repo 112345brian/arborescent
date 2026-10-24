@@ -12,8 +12,8 @@ from pathlib import Path
 from . import baseline as ratchet_mod
 from .domain import Policy, ToolResult, Violation
 from .generate import IMPORT_LINTER_FILE, generate
-from .practices import run_practices
 from .ports import ModuleScanner, ScanResult, ToolRunner, TypeChecker
+from .practices import run_practices
 from .rules import check_modules
 
 __all__ = ["CheckReport", "EngineRun", "Options", "Services", "changed_files", "drift", "run_check", "run_own"]
@@ -40,14 +40,14 @@ class EngineRun:
     name: str
     status: str  # "ok" | "fail" | "skipped"
     seconds: float
-    lines: list[str] = field(default_factory=lambda: [])
+    lines: list[str] = field(default_factory=list)
 
 
 @dataclass
 class CheckReport:
-    engines: list[EngineRun] = field(default_factory=lambda: [])
-    drift: list[str] = field(default_factory=lambda: [])
-    violations: list[Violation] = field(default_factory=lambda: [])
+    engines: list[EngineRun] = field(default_factory=list)
+    drift: list[str] = field(default_factory=list)
+    violations: list[Violation] = field(default_factory=list)
     ratchet: ratchet_mod.Ratchet | None = None
     parsed: int = 0
     partial: bool = False
@@ -97,7 +97,8 @@ def _tool(services: Services, name: str, argv: list[str], root: Path, opts: Opti
     return EngineRun(name, status, result.seconds, text[-15:] if status == "fail" else text[-1:])
 
 
-def run_check(policy: Policy, root: Path, services: Services, opts: Options = Options()) -> CheckReport:
+def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
+    opts = opts if opts is not None else Options()
     started = time.perf_counter()
     report = CheckReport()
     only = changed_files(services.runner, root, opts.changed) if opts.changed else None

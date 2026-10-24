@@ -9,13 +9,13 @@ import time
 from pathlib import Path
 
 import pytest
+from archlint_helpers import mini_policy, write_files
 
 from archlint.adapters import FsScanner, SubprocessToolRunner
 from archlint.config import load_policy
 from archlint.engine import Options, Services, run_check, run_own
 from archlint.generate import generate
 from archlint.typecheckers import all_checkers
-from archlint_helpers import mini_policy, write_files
 
 HERE = Path(__file__).resolve().parents[1]
 CHECKERS = list(all_checkers().values())
@@ -56,7 +56,7 @@ def test_cold_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> N
 
 
 def test_no_file_is_parsed_twice_in_one_run(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import archlint.adapters as adapters
+    from archlint import adapters
 
     seen: list[str] = []
     real = adapters.extract

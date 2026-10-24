@@ -18,7 +18,7 @@ import re
 import tomllib
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from .domain import Policy, Violation, dist_name
 from .facts import STDLIB, ModuleInfo, resolve_targets
@@ -95,8 +95,8 @@ def sibling_versions(root: Path, pattern: str) -> list[Violation]:
         if "name" in project:
             projects[dist_name(project["name"])] = (str(project.get("version", "0")), path, data)
     out: list[Violation] = []
-    for name, (_, path, data) in projects.items():
-        for dep in _dependencies(data.get("project", {}), data.get("dependency-groups")):
+    for name, (_, path, doc) in projects.items():
+        for dep in _dependencies(doc.get("project", {}), doc.get("dependency-groups")):
             m = re.match(r"\s*([A-Za-z0-9_.\-]+)\s*(?:\[[^\]]*\])?\s*([^;]*)", dep)
             if not m or dist_name(m.group(1)) not in projects or dist_name(m.group(1)) == name:
                 continue
@@ -185,7 +185,7 @@ def run_practices(
     out: list[Violation] = []
     if cfg.get("gitignore-shadow"):
         value = cfg["gitignore-shadow"]
-        allow = [str(a) for a in cast("list[Any]", value)] if isinstance(value, list) else []
+        allow = [str(a) for a in value] if isinstance(value, list) else []
         out += gitignore_shadow(root, runner, allow)
     if cfg.get("sibling-versions"):
         out += sibling_versions(root, str(cfg["sibling-versions"]))

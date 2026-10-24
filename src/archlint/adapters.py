@@ -32,7 +32,7 @@ class SubprocessToolRunner:
     def run(self, argv: Sequence[str], cwd: Path, timeout: float = 600.0) -> ToolResult:
         started = time.perf_counter()
         try:
-            done = subprocess.run(  # noqa: S603 - argv is built by ArchLint, never through a shell
+            done = subprocess.run(
                 list(argv), cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                 stdin=subprocess.DEVNULL, check=False,
             )  # fmt: skip

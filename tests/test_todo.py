@@ -7,10 +7,10 @@ to be removed, so this file cannot silently go stale.
 from __future__ import annotations
 
 import pytest
+from archlint_helpers import mini_policy
 
 from archlint.generate import generate
 from archlint.typecheckers import by_name
-from archlint_helpers import mini_policy
 
 
 def _files() -> dict[str, str]:
@@ -40,4 +40,4 @@ def test_changed_mode_restricts_import_linter_to_changed_files() -> None:
 
     from archlint import engine
 
-    assert "changed" in inspect.getsource(engine._tool)  # type: ignore[attr-defined]  # noqa: SLF001
+    assert "changed" in inspect.getsource(engine._tool)  # type: ignore[attr-defined]

@@ -12,7 +12,7 @@ import tomllib
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
-__all__ = ["ModuleInfo", "OS_BRANCH_ATTRS", "RawImport", "SourceFacts", "extract", "resolve_targets"]
+__all__ = ["OS_BRANCH_ATTRS", "ModuleInfo", "RawImport", "SourceFacts", "extract", "resolve_targets"]
 
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
 _PEP723 = re.compile(r"^# /// script\n((?:#.*\n)+?)# ///$", re.MULTILINE)

@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from archlint_helpers import CLASSIFY, mini_policy, ring_with, write_files
+
 from archlint.adapters import FsScanner
 from archlint.domain import Violation
 from archlint.rules import check_modules
-from archlint_helpers import CLASSIFY, ring_with, mini_policy, write_files
 
 
 def run(root: Path, **overrides: Any) -> list[Violation]:

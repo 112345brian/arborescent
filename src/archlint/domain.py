@@ -80,13 +80,13 @@ class Policy:
     source_roots: tuple[str, ...] = (".",)
     exclude: tuple[str, ...] = ()
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
-    dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
+    dependencies: Mapping[str, str] = field(default_factory=dict)  # import name -> distribution
     forbid_everywhere: tuple[str, ...] = ()
     python: str = "3.11"
     type_checkers: tuple[str, ...] = ("pyright",)
     output_dir: str = "."
     baseline: str = "archlint-baseline.json"
-    practices: Mapping[str, Any] = field(default_factory=lambda: {})
+    practices: Mapping[str, Any] = field(default_factory=dict)
 
     def ring(self, name: str) -> RingRule:
         for r in self.rings:
