@@ -1,0 +1,101 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "archlint"
+version = "0.1.0"
+description = "One architecture policy that generates import-linter, tach and type-checker configs, then enforces more."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Brian Powers" }]
+keywords = ["architecture", "import-linter", "tach", "pyright", "clean-architecture", "lint"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+dependencies = []
+
+# The engines are extras: ArchLint runs them as subprocesses and skips (or, with --require-tools, fails) when absent.
+[project.optional-dependencies]
+importlinter = ["import-linter>=2.0"]
+tach = ["tach>=0.30"]
+pyright = ["pyright>=1.1.400"]
+basedpyright = ["basedpyright>=1.30"]
+ty = ["ty>=0.0.50"]
+pyrefly = ["pyrefly>=0.40"]
+all = ["import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400"]
+
+[project.scripts]
+archlint = "archlint.cli:main"
+
+[tool.setuptools]
+packages = ["archlint"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.package-data]
+archlint = ["py.typed"]
+
+# ArchLint's own architecture, checked by ArchLint (`archlint check` in this folder).
+[tool.archlint]
+python = "3.11"
+sources = ["src/archlint"]
+source_roots = ["src"]
+exclude = ["__pycache__"]
+rings = ["domain", "ports", "application", "adapters", "composition"]
+type_checkers = ["pyright"]
+
+[tool.archlint.groups]
+pure = ["__future__", "collections", "dataclasses", "fnmatch", "re", "typing", "ast", "sys", "tomllib"]
+
+[tool.archlint.ring.domain]
+external = ["@pure", "archlint"]
+
+[tool.archlint.ring.ports]
+may_import = ["domain"]
+external = ["@pure", "pathlib", "archlint"]
+
+[tool.archlint.ring.application]
+may_import = ["domain", "ports"]
+external = ["@pure", "pathlib", "json", "tempfile", "shutil", "time", "concurrent", "archlint"]
+
+[tool.archlint.ring.adapters]
+may_import = ["domain", "ports"]
+external = ["@pure", "pathlib", "json", "hashlib", "os", "shutil", "subprocess", "time", "archlint"]
+os_branching = true
+
+[tool.archlint.ring.composition]
+may_import = ["*"]
+external = ["@pure", "argparse", "pathlib", "archlint"]
+
+[tool.archlint.classify]
+"archlint" = "domain"
+"archlint.domain" = "domain"
+"archlint.facts" = "domain"
+"archlint.rules" = "domain"
+"archlint.ports" = "ports"
+"archlint.generate" = "application"
+"archlint.baseline" = "application"
+"archlint.config" = "application"
+"archlint.engine" = "application"
+"archlint.practices" = "application"
+"archlint.selftest" = "application"
+"archlint.bench" = "application"
+"archlint.adapters" = "adapters"
+"archlint.typecheckers" = "adapters"
+"archlint.testing" = "adapters"
+"archlint.cli" = "composition"
+"archlint.__main__" = "composition"
+
+[tool.archlint.practices]
+crlf = ["*.sh", "*.bash"]
+undeclared-imports = true
+secrets-guard = "tests"

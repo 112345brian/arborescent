@@ -1,0 +1,200 @@
+"""Repository-hygiene practices: small rules seeded with problems that really happened.
+
+Each practice has a reproduction test in ``tests/test_practices.py`` that builds the broken repository in a temp
+directory. Enable them under ``[tool.archlint.practices]``.
+
+``gitignore-shadow``    an unanchored ignore pattern hid a package directory (empty wheel, files never committed)
+``sibling-versions``    a monorepo meta-package pinned ``==0.1.1`` while the component was ``0.2.0``
+``secrets-guard``       tests can read the developer's real secrets unless conftest scrubs the environment
+``docs-sync``           the architecture doc's module table drifted from the policy
+``crlf``                a shell script with CRLF line endings does not run
+``undeclared-imports``  code imports a third-party package that no manifest declares
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import re
+import tomllib
+from collections.abc import Collection, Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+from .domain import Policy, Violation, dist_name
+from .facts import STDLIB, ModuleInfo, resolve_targets
+from .ports import ToolRunner
+
+__all__ = ["PRACTICES", "run_practices"]
+
+_NOISE = {"__pycache__", ".venv", "venv", "node_modules", "build", "dist", ".tox", ".mypy_cache", ".ruff_cache", ".archlint"}
+
+
+def gitignore_shadow(root: Path, runner: ToolRunner, allow: Sequence[str] = ()) -> list[Violation]:
+    listed = runner.run(["git", "ls-files", "--others", "--ignored", "--exclude-standard"], root)
+    if listed.returncode != 0:
+        return []  # not a git repository (or git missing): nothing to compare against
+    out: list[Violation] = []
+    seen: set[str] = set()
+    for rel in listed.stdout.splitlines():
+        parts = rel.split("/")
+        if not rel.endswith(".py") or _NOISE & set(parts) or any(fnmatch.fnmatch(parts[-1], a) for a in allow):
+            continue
+        folder = "/".join(parts[:-1]) or "."
+        if folder in seen:
+            continue
+        seen.add(folder)
+        why = runner.run(["git", "check-ignore", "-v", "--", rel], root).stdout.strip()
+        pattern = why.split("\t")[0] if why else "?"
+        out.append(Violation("gitignore-shadow", folder, f"python source is ignored by {pattern} (never committed, missing from wheels)"))
+    return out
+
+
+def _version_tuple(text: str) -> tuple[int, ...]:
+    m = re.match(r"\d+(?:\.\d+)*", text.strip())
+    return tuple(int(p) for p in m.group(0).split(".")) if m else (0,)
+
+
+def _satisfies(version: str, spec: str) -> bool:
+    have = _version_tuple(version)
+    for clause in (c.strip() for c in spec.split(",") if c.strip()):
+        m = re.match(r"(==|!=|~=|>=|<=|>|<)\s*([\w.*+-]+)", clause)
+        if not m:
+            continue
+        op, want_text = m.groups()
+        want = _version_tuple(want_text)
+        n = max(len(have), len(want))
+        a, b = have + (0,) * (n - len(have)), want + (0,) * (n - len(want))
+        if want_text.endswith(".*"):
+            ok = have[: len(want)] == want
+            if (op == "==") != ok:
+                return False
+            continue
+        ok = {
+            "==": a == b, "!=": a != b, ">=": a >= b, "<=": a <= b, ">": a > b, "<": a < b,
+            "~=": a >= b and have[: max(len(want) - 1, 1)] == want[: max(len(want) - 1, 1)],
+        }[op]  # fmt: skip
+        if not ok:
+            return False
+    return True
+
+
+def _dependencies(project: Mapping[str, Any], groups: Mapping[str, Any] | None = None) -> list[str]:
+    deps: list[str] = list(project.get("dependencies", []))
+    for extra in project.get("optional-dependencies", {}).values():
+        deps += extra
+    for group in (groups or {}).values():
+        deps += [d for d in group if isinstance(d, str)]
+    return deps
+
+
+def sibling_versions(root: Path, pattern: str) -> list[Violation]:
+    projects: dict[str, tuple[str, Path, Mapping[str, Any]]] = {}
+    for path in sorted(root.glob(pattern)):
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        project = data.get("project", {})
+        if "name" in project:
+            projects[dist_name(project["name"])] = (str(project.get("version", "0")), path, data)
+    out: list[Violation] = []
+    for name, (_, path, data) in projects.items():
+        for dep in _dependencies(data.get("project", {}), data.get("dependency-groups")):
+            m = re.match(r"\s*([A-Za-z0-9_.\-]+)\s*(?:\[[^\]]*\])?\s*([^;]*)", dep)
+            if not m or dist_name(m.group(1)) not in projects or dist_name(m.group(1)) == name:
+                continue
+            sibling, spec = dist_name(m.group(1)), m.group(2).strip()
+            version = projects[sibling][0]
+            if spec and not _satisfies(version, spec):
+                rel = path.relative_to(root).as_posix()
+                out.append(Violation("sibling-versions", rel, f"requires {sibling}{spec} but the sibling in this repository is {version}"))
+    return out
+
+
+def secrets_guard(root: Path, tests_dir: str) -> list[Violation]:
+    tests = root / tests_dir
+    if not tests.is_dir():
+        return []
+    conftest = tests / "conftest.py"
+    rel = f"{tests_dir}/conftest.py"
+    if not conftest.is_file():
+        return [Violation("secrets-guard", rel, "no conftest.py: tests can read the developer's real secrets from the environment")]
+    text = conftest.read_text(encoding="utf-8")
+    if not (re.search(r"autouse\s*=\s*True", text) and re.search(r"delenv|environ", text)):
+        return [Violation("secrets-guard", rel, "conftest.py has no autouse fixture that scrubs the environment (monkeypatch.delenv / os.environ)")]
+    return []
+
+
+def docs_sync(root: Path, doc: str, policy: Policy, known: Collection[str]) -> list[Violation]:
+    path = root / doc
+    if not path.is_file():
+        return [Violation("docs-sync", doc, "documented architecture file does not exist")]
+    rows: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"\|\s*`([^`]+)`\s*\|\s*`?([\w-]+)`?\s*\|", line)
+        if m:
+            mod = m.group(1).removesuffix(".py").replace("/", ".").removesuffix(".__init__")
+            rows[mod] = m.group(2)
+    out: list[Violation] = []
+    for mod, ring in sorted(rows.items()):
+        if mod not in known:
+            out.append(Violation("docs-sync", mod, f"{doc} lists a module that does not exist"))
+        elif policy.ring_of(mod) != ring:
+            out.append(Violation("docs-sync", mod, f"{doc} says ring {ring!r} but the policy says {policy.ring_of(mod)!r}"))
+    out += [Violation("docs-sync", m, f"module is not in the {doc} table") for m in sorted(set(known) - set(rows))]
+    return out
+
+
+def crlf(root: Path, patterns: Sequence[str]) -> list[Violation]:
+    out: list[Violation] = []
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root).as_posix()
+        if _NOISE & set(rel.split("/")) or ".git" in rel.split("/") or not path.is_file():
+            continue
+        if any(fnmatch.fnmatch(path.name, p) for p in patterns) and b"\r\n" in path.read_bytes():
+            out.append(Violation("crlf", rel, "has CRLF line endings; the interpreter line becomes '/bin/sh\\r'"))
+    return out
+
+
+def undeclared_imports(
+    root: Path, policy: Policy, modules: Mapping[str, ModuleInfo], known: Collection[str], manifest: str
+) -> list[Violation]:
+    declared: set[str] = set()
+    path = root / manifest
+    if path.is_file():
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        declared = {
+            dist_name(re.split(r"[<>=!~\[ ;]", d, maxsplit=1)[0])
+            for d in _dependencies(data.get("project", {}), data.get("dependency-groups"))
+        }
+    tops = {m.split(".")[0] for m in known}
+    out: dict[str, Violation] = {}
+    for name, info in modules.items():
+        for imp in info.facts.imports:
+            for top in resolve_targets(name, info.is_package, imp, known, tops)[1]:
+                dist = dist_name(policy.dependencies.get(top, top))
+                if top not in STDLIB and dist not in declared:
+                    out[dist] = Violation("undeclared-imports", dist, f"imported (e.g. by {name}) but not declared in {manifest}", imp.line)
+    return list(out.values())
+
+
+PRACTICES = ("gitignore-shadow", "sibling-versions", "secrets-guard", "docs-sync", "crlf", "undeclared-imports")
+
+
+def run_practices(
+    policy: Policy, root: Path, runner: ToolRunner, modules: Mapping[str, ModuleInfo], known: Collection[str]
+) -> list[Violation]:
+    cfg = policy.practices
+    out: list[Violation] = []
+    if cfg.get("gitignore-shadow"):
+        allow = cfg["gitignore-shadow"] if isinstance(cfg["gitignore-shadow"], list) else []
+        out += gitignore_shadow(root, runner, allow)
+    if cfg.get("sibling-versions"):
+        out += sibling_versions(root, str(cfg["sibling-versions"]))
+    if cfg.get("secrets-guard"):
+        out += secrets_guard(root, str(cfg["secrets-guard"]))
+    if cfg.get("docs-sync"):
+        out += docs_sync(root, str(cfg["docs-sync"]), policy, known)
+    if cfg.get("crlf"):
+        out += crlf(root, list(cfg["crlf"]))
+    if cfg.get("undeclared-imports"):
+        manifest = cfg["undeclared-imports"] if isinstance(cfg["undeclared-imports"], str) else "pyproject.toml"
+        out += undeclared_imports(root, policy, modules, known, manifest)
+    return out

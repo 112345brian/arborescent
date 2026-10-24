@@ -1,0 +1,33 @@
+{
+  "typeCheckingMode": "strict",
+  "enableTypeIgnoreComments": false,
+  "reportMatchNotExhaustive": "error",
+  "reportUnknownParameterType": "error",
+  "reportUnknownArgumentType": "error",
+  "reportUnknownVariableType": "error",
+  "reportUnknownMemberType": "error",
+  "reportUnknownLambdaType": "error",
+  "reportMissingTypeStubs": "error",
+  "reportMissingParameterType": "error",
+  "reportUnnecessaryTypeIgnoreComment": "error",
+  "reportImplicitOverride": "error",
+  "reportImportCycles": "error",
+  "reportPrivateUsage": "error",
+  "reportUnusedCallResult": "error",
+  "reportUntypedFunctionDecorator": "error",
+  "reportUnnecessaryCast": "error",
+  "reportUnnecessaryComparison": "error",
+  "reportUnnecessaryIsInstance": "error",
+  "strictListInference": true,
+  "strictDictionaryInference": true,
+  "strictSetInference": true,
+  "pythonVersion": "3.11",
+  "include": [
+    "src/archlint"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "**/.venv"
+  ]
+}
