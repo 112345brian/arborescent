@@ -15,6 +15,8 @@ from .domain import Policy, ToolResult
 
 __all__ = ["BasedPyright", "Pyrefly", "Pyright", "Ty", "all_checkers", "by_name"]
 
+# Deliberately NOT enabled: reportImportCycles. Measured on a 314-file codebase it took pyright from 11.5 s to more than
+# 8 minutes, and cycles are already caught by tach (forbid_circular_dependencies) and import-linter.
 # The Rust-like settings: nothing is Unknown, matches are exhaustive, an ignore comment can't hide an error.
 _PYRIGHT_STRICT: dict[str, object] = {
     "typeCheckingMode": "strict",
@@ -29,7 +31,6 @@ _PYRIGHT_STRICT: dict[str, object] = {
     "reportMissingParameterType": "error",
     "reportUnnecessaryTypeIgnoreComment": "error",
     "reportImplicitOverride": "error",
-    "reportImportCycles": "error",
     "reportPrivateUsage": "error",
     "reportUntypedFunctionDecorator": "error",
     "reportUnnecessaryCast": "error",

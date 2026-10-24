@@ -115,3 +115,9 @@ def test_pyright_strict_config_ignores_type_ignore_comments(repo: Path) -> None:
     _write_generated(repo, ["pyright"])
     write_files(repo, {"app/domain.py": "VALUE: int = 'text'  # type: ignore\n"})
     assert not all_checkers()["pyright"].passed(SubprocessToolRunner().run(["pyright"], repo))
+
+
+def test_generated_pyright_config_avoids_the_setting_that_made_pyright_100x_slower() -> None:
+    """Measured: reportImportCycles took pyright from 11.5 s to >8 min on a 314-file repository (tach covers cycles)."""
+    text = all_checkers()["pyright"].render_config(mini_policy(), ["app"])
+    assert "reportImportCycles" not in text
