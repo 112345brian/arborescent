@@ -98,6 +98,7 @@ external = ["@pure", "argparse", "pathlib", "archlint"]
 "archlint.bench" = "application"
 "archlint.adapters" = "adapters"
 "archlint.typecheckers" = "adapters"
+"archlint.engines" = "adapters"
 "archlint.testing" = "adapters"
 "archlint.cli" = "composition"
 "archlint.__main__" = "composition"
@@ -124,7 +125,7 @@ name = "archlint core and ports must not import adapters, the engines or process
 type = "forbidden"
 source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.rules", "archlint.ports"]
 forbidden_modules = [
-    "archlint.adapters", "archlint.typecheckers", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
+    "archlint.adapters", "archlint.typecheckers", "archlint.engines", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
     "socket", "urllib",
 ]
 allow_indirect_imports = true

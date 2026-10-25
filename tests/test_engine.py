@@ -17,6 +17,7 @@ from archlint.adapters import FsScanner
 from archlint.cli import main
 from archlint.domain import ToolResult, Violation
 from archlint.engine import Options, Services, run_check, run_own
+from archlint.engines import default_engines
 from archlint.generate import generate
 from archlint.selftest import selftest
 from archlint.testing import FakeToolRunner
@@ -26,7 +27,7 @@ CHECKERS = list(all_checkers().values())
 
 
 def services(runner: FakeToolRunner | None = None, cache: Path | None = None) -> Services:
-    return Services(FsScanner(cache), runner or FakeToolRunner(), CHECKERS)
+    return Services(FsScanner(cache), runner or FakeToolRunner(), CHECKERS, default_engines())
 
 
 def commit_generated(repo: Path) -> None:
@@ -142,7 +143,7 @@ def test_changed_mode_checks_only_files_changed_since_the_ref(repo: Path) -> Non
     git("add", "-A")
     git("commit", "-q", "-m", "base")
     write_files(repo, {"app/domain.py": "from . import adapters\n"})  # a violation in ONE file
-    real = Services(FsScanner(), __import__("archlint.adapters", fromlist=["x"]).SubprocessToolRunner(), CHECKERS)
+    real = Services(FsScanner(), __import__("archlint.adapters", fromlist=["x"]).SubprocessToolRunner(), CHECKERS, default_engines())
     full = run_check(mini_policy(), repo, real, Options(tools=False, use_baseline=False))
     part = run_check(mini_policy(), repo, real, Options(changed="HEAD", tools=False, use_baseline=False))
     assert part.partial and [v.subject for v in part.violations] == ["app.domain"]

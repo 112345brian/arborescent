@@ -4,15 +4,15 @@ shared parse, then apply the baseline ratchet."""
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import baseline as ratchet_mod
-from .domain import Policy, ToolResult, Violation
-from .generate import IMPORT_LINTER_FILE, generate
-from .ports import ModuleScanner, ScanResult, ToolRunner, TypeChecker
+from .domain import Policy, PolicyError, Violation
+from .generate import generate
+from .ports import Engine, ModuleScanner, ScanResult, ToolRunner, TypeChecker
 from .practices import run_practices
 from .rules import check_modules
 
@@ -24,6 +24,7 @@ class Services:
     scanner: ModuleScanner
     runner: ToolRunner
     checkers: Sequence[TypeChecker]  # every known adapter; the policy / --type-checker picks which run
+    engines: Sequence[Engine] = ()  # run beside the chosen type checker (import-linter, tach); see archlint.engines
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,18 @@ def drift(policy: Policy, root: Path, names: Sequence[str], checkers: Sequence[T
     return out
 
 
-def _tool(services: Services, name: str, argv: list[str], root: Path, opts: Options, ok: Callable[[ToolResult], bool]) -> EngineRun:
+def pick_checker(policy: Policy, services: Services, override: str | None = None) -> TypeChecker:
+    """The type checker ``check`` runs. Every name the policy lists, and the override, must be a known adapter."""
+    known = sorted(c.name for c in services.checkers)
+    for name in (*policy.type_checkers, *([override] if override else [])):
+        if name not in known:
+            raise PolicyError(f"unknown type checker {name!r}; choose from {known}")
+    chosen = override or policy.type_checkers[0]
+    return next(c for c in services.checkers if c.name == chosen)
+
+
+def _tool(services: Services, engine: Engine, files: Sequence[str], root: Path, opts: Options) -> EngineRun:
+    name, argv, ok = engine.name, engine.command(files), engine.passed
     if not services.runner.available(argv[0]):
         return EngineRun(name, "fail" if opts.require_tools else "skipped", 0.0, [f"{argv[0]} is not installed (extra)"])
     result = services.runner.run(argv, root)
@@ -103,28 +115,23 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
     report = CheckReport()
     only = changed_files(services.runner, root, opts.changed) if opts.changed else None
     report.partial = only is not None
-    chosen = opts.type_checker or policy.type_checkers[0]
-    checker = next((c for c in services.checkers if c.name == chosen), None)
-    if checker is None:
-        raise ValueError(f"unknown type checker {chosen!r}")
-    pool = ThreadPoolExecutor(max_workers=3)
-    futures = []
-    if opts.tools and (only is None or only):
-        files = sorted(only) if only is not None else []
-        futures = [
-            pool.submit(_tool, services, "import-linter", ["lint-imports", "--config", IMPORT_LINTER_FILE], root, opts, lambda r: r.returncode == 0),
-            pool.submit(_tool, services, "tach", ["tach", "check"], root, opts, lambda r: r.returncode == 0),
-            pool.submit(_tool, services, checker.name, checker.command(files), root, opts, checker.passed),
-        ]  # fmt: skip
-    t0 = time.perf_counter()
-    found, scan = run_own(policy, root, services, only)
-    report.engines.append(EngineRun("archlint", "ok", time.perf_counter() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
-    report.parsed = scan.parsed
-    report.drift = drift(policy, root, sorted(scan.known), [c for c in services.checkers if c.name in {*policy.type_checkers, checker.name}])
-    report.violations = found
-    base: set[str] = ratchet_mod.load(root / policy.baseline) if opts.use_baseline else set()
-    report.ratchet = ratchet_mod.apply(found, base, complete=only is None)
-    report.engines += [f.result() for f in futures]
-    pool.shutdown()
+    checker = pick_checker(policy, services, opts.type_checker)
+    pool = ThreadPoolExecutor(max_workers=max(1, len(services.engines) + 1))
+    try:
+        futures = []
+        if opts.tools and (only is None or only):
+            files = sorted(only) if only is not None else []
+            futures = [pool.submit(_tool, services, e, files, root, opts) for e in (*services.engines, checker)]
+        t0 = time.perf_counter()
+        found, scan = run_own(policy, root, services, only)
+        report.engines.append(EngineRun("archlint", "ok", time.perf_counter() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
+        report.parsed = scan.parsed
+        report.drift = drift(policy, root, sorted(scan.known), [c for c in services.checkers if c.name in {*policy.type_checkers, checker.name}])
+        report.violations = found
+        base: set[str] = ratchet_mod.load(root / policy.baseline) if opts.use_baseline else set()
+        report.ratchet = ratchet_mod.apply(found, base, complete=only is None)
+        report.engines += [f.result() for f in futures]
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
     report.seconds = time.perf_counter() - started
     return report

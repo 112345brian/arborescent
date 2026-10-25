@@ -18,6 +18,7 @@ forbidden_modules = [
     "archlint.practices",
     "archlint.selftest",
     "archlint.adapters",
+    "archlint.engines",
     "archlint.testing",
     "archlint.typecheckers",
     "archlint.__main__",
@@ -64,6 +65,7 @@ forbidden_modules = [
     "archlint.practices",
     "archlint.selftest",
     "archlint.adapters",
+    "archlint.engines",
     "archlint.testing",
     "archlint.typecheckers",
     "archlint.__main__",
@@ -110,6 +112,7 @@ source_modules = [
 ]
 forbidden_modules = [
     "archlint.adapters",
+    "archlint.engines",
     "archlint.testing",
     "archlint.typecheckers",
     "archlint.__main__",
@@ -151,7 +154,7 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "adapters ring imports only ['adapters', 'domain', 'ports']"
 type = "forbidden"
-source_modules = ["archlint.adapters", "archlint.testing", "archlint.typecheckers"]
+source_modules = ["archlint.adapters", "archlint.engines", "archlint.testing", "archlint.typecheckers"]
 forbidden_modules = [
     "archlint.baseline",
     "archlint.bench",
@@ -168,7 +171,7 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "adapters ring imports no I/O or third-party package it does not list"
 type = "forbidden"
-source_modules = ["archlint.adapters", "archlint.testing", "archlint.typecheckers"]
+source_modules = ["archlint.adapters", "archlint.engines", "archlint.testing", "archlint.typecheckers"]
 forbidden_modules = [
     "asyncio",
     "ctypes",

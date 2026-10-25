@@ -16,8 +16,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .config import load_policy
-from .engine import Options, Services, run_check, run_own
-from .generate import IMPORT_LINTER_FILE, generate
+from .engine import Options, Services, pick_checker, run_check, run_own
+from .generate import generate
 
 __all__ = ["run_bench"]
 
@@ -30,6 +30,7 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
     policy, _ = load_policy(root / "archlint.toml")
     policy = dataclasses.replace(policy, type_checkers=tuple(names))
     svc = make(root)
+    _ = pick_checker(policy, svc)  # unknown checker names are a PolicyError, not a traceback
     rows: list[tuple[str, str, str, str]] = []  # engine, cold, warm, note
 
     def twice(label: str, fn: Callable[[], str], reset: Callable[[], None] | None = None) -> None:
@@ -67,8 +68,8 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
 
         return go
 
-    twice("import-linter (grimp)", tool(["lint-imports", "--config", IMPORT_LINTER_FILE]))
-    twice("tach check", tool(["tach", "check"]))
+    for e in svc.engines:
+        twice(e.name, tool(e.command([])))
     for c in chosen:
         (root / c.config_file).write_text(c.render_config(policy, sorted(set(policy.sources))), encoding="utf-8", newline="\n")
         twice(f"type checker: {c.name}", tool(c.command([])))

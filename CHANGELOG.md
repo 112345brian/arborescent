@@ -6,6 +6,9 @@
 
 ### Added
 
+- Engine hardening: import-linter and tach are `Engine` adapters (`archlint.engines`) behind a new port, so `run_check`
+  no longer hardcodes their commands; an unknown type checker (policy, `--type-checker`, `bench`) is a `PolicyError`
+  (exit 2) instead of a traceback; `run_check` always shuts its worker pool down, even if the scan raises.
 - Documentation: `docs/configuration.md` (every key, rule and practice) and `docs/architecture.md` (ArchLint's rings
   and module table, kept in sync with the policy by `docs-sync`, which is now enabled for this repository).
 - Presets: `preset = "strict" | "standard" | "relaxed"` in `[tool.archlint]` (default `strict`, identical to the

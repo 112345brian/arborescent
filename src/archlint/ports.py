@@ -9,7 +9,7 @@ from typing import Protocol
 from .domain import Policy, ToolResult
 from .facts import ModuleInfo
 
-__all__ = ["ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker"]
+__all__ = ["Engine", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker"]
 
 
 class ToolRunner(Protocol):
@@ -18,6 +18,21 @@ class ToolRunner(Protocol):
     def available(self, executable: str) -> bool: ...
 
     def run(self, argv: Sequence[str], cwd: Path, timeout: float = 600.0) -> ToolResult: ...
+
+
+class Engine(Protocol):
+    """An external checker run in parallel by ``check``: import-linter, tach, and every ``TypeChecker`` (which satisfies
+    this). Adding one means writing an adapter and passing it in ``Services``; ``run_check`` does not change."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def executable(self) -> str: ...
+
+    def command(self, files: Sequence[str]) -> list[str]: ...  # files: the changed ones (empty = everything)
+
+    def passed(self, result: ToolResult) -> bool: ...
 
 
 class TypeChecker(Protocol):
