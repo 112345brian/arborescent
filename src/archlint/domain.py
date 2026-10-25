@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
+from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 
 __all__ = [
     "ALL",
@@ -91,6 +92,15 @@ class Policy:
     practices: Mapping[str, Any] = field(default_factory=lambda: {})
     preset: Preset = PRESETS[DEFAULT_PRESET]
     io_modules: frozenset[str] = IO_MODULES  # stdlib modules that mean "I/O, process or OS"
+
+    def __post_init__(self) -> None:
+        if self.python not in SUPPORTED_PYTHONS:
+            raise PolicyError(f"`python` {self.python!r} is not supported; choose one of {list(SUPPORTED_PYTHONS)}")
+
+    @property
+    def stdlib(self) -> frozenset[str]:
+        """Top-level stdlib module names of the policy's target Python, not of the interpreter running archlint."""
+        return stdlib_for(self.python)
 
     def ring(self, name: str) -> RingRule:
         for r in self.rings:

@@ -25,6 +25,7 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `archlint` | domain |
 | `archlint.domain` | domain |
 | `archlint.facts` | domain |
+| `archlint.stdlib` | domain |
 | `archlint.presets` | domain |
 | `archlint.rules` | domain |
 | `archlint.ports` | ports |

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import ast
 import re
-import sys
 import tomllib
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
@@ -133,6 +132,3 @@ def _longest_known(parts: Iterable[str], known: Collection[str]) -> str:
     while items and ".".join(items) not in known:
         items.pop()
     return ".".join(items)
-
-
-STDLIB: frozenset[str] = frozenset(sys.stdlib_module_names)

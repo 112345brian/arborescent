@@ -88,6 +88,7 @@ external = ["@pure", "argparse", "pathlib", "archlint"]
 "archlint.facts" = "domain"
 "archlint.rules" = "domain"
 "archlint.presets" = "domain"
+"archlint.stdlib" = "domain"
 "archlint.ports" = "ports"
 "archlint.generate" = "application"
 "archlint.baseline" = "application"
@@ -123,7 +124,7 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "archlint core and ports must not import adapters, the engines or process/file/network modules"
 type = "forbidden"
-source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.rules", "archlint.ports"]
+source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.stdlib", "archlint.rules", "archlint.ports"]
 forbidden_modules = [
     "archlint.adapters", "archlint.typecheckers", "archlint.engines", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
     "socket", "urllib",

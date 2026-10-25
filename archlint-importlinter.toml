@@ -7,7 +7,7 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "domain ring imports only ['domain']"
 type = "forbidden"
-source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.rules"]
+source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.rules", "archlint.stdlib"]
 forbidden_modules = [
     "archlint.ports",
     "archlint.baseline",
@@ -29,7 +29,7 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "domain ring imports no I/O or third-party package it does not list"
 type = "forbidden"
-source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.rules"]
+source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.rules", "archlint.stdlib"]
 forbidden_modules = [
     "asyncio",
     "ctypes",

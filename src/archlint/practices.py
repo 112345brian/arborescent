@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from .domain import Policy, Violation, dist_name
-from .facts import STDLIB, ModuleInfo, resolve_targets
+from .facts import ModuleInfo, resolve_targets
 from .ports import ToolRunner
 
 __all__ = ["PRACTICES", "run_practices"]
@@ -165,12 +165,13 @@ def undeclared_imports(
             for d in _dependencies(data.get("project", {}), data.get("dependency-groups"))
         }
     tops = {m.split(".")[0] for m in known}
+    stdlib = policy.stdlib
     out: dict[str, Violation] = {}
     for name, info in modules.items():
         for imp in info.facts.imports:
             for top in resolve_targets(name, info.is_package, imp, known, tops)[1]:
                 dist = dist_name(policy.dependencies.get(top, top))
-                if top not in STDLIB and dist not in declared:
+                if top not in stdlib and dist not in declared:
                     out[dist] = Violation("undeclared-imports", dist, f"imported (e.g. by {name}) but not declared in {manifest}", imp.line)
     return list(out.values())
 
