@@ -9,7 +9,7 @@ Five rings, innermost first. A ring may import itself and the rings it lists; no
 
 | ring | may import | external packages | role |
 |---|---|---|---|
-| domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the policy, violations, facts about a parsed module, presets |
+| domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types, rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
 | application | domain, ports | `pathlib`, `concurrent` | use cases: generate, check, baseline, selftest, practices |
 | adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time` | the real file system, subprocess and type-checker implementations |
@@ -32,6 +32,7 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `archlint` | domain |
 | `archlint.domain` | domain |
 | `archlint.facts` | domain |
+| `archlint.stdlib` | domain |
 | `archlint.presets` | domain |
 | `archlint.rules` | domain |
 | `archlint.ports` | ports |
@@ -43,6 +44,7 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `archlint.practices` | application |
 | `archlint.selftest` | application |
 | `archlint.adapters` | adapters |
+| `archlint.engines` | adapters |
 | `archlint.testing` | adapters |
 | `archlint.typecheckers` | adapters |
 | `archlint.__main__` | composition |
@@ -50,10 +52,11 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 
 ## Data flow of `archlint check`
 
-1. `cli` loads the policy (`config` -> `domain.Policy`, with its `presets.Preset`) and builds `Services`: a scanner, a tool
-   runner, the type-checker adapters and the file system (`LocalFileSystem`; tests use `testing.FakeFileSystem`).
-2. `engine.run_check` starts import-linter, tach and the type checker in parallel. They run as subprocesses behind the
-   `ToolRunner` port.
+1. `cli` loads the policy (`config.policy_from_mapping` -> `domain.Policy`, which validates itself; with its `presets.Preset`) and builds `Services`: a scanner, a tool
+   runner, the file system (`LocalFileSystem`; tests use `testing.FakeFileSystem`), a clock, the engine adapters (`engines`: import-linter, tach) and the type-checker adapters.
+2. `engine.run_check` starts every `Engine` in `Services` (import-linter, tach) and the chosen type checker in parallel. They run as
+   subprocesses behind the `ToolRunner` port; a new engine is an adapter, not an edit to `run_check`. An unknown type
+   checker name is a `PolicyError`, and the worker pool is always shut down.
 3. Meanwhile the scanner finds every module and parses each file once (content-hash cached); `rules.check_modules` and
    the practices run over that one parse.
 4. `generate.generate` renders the expected tool configs in memory; `engine.drift` diffs them against the committed files.

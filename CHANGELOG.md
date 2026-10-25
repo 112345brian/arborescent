@@ -4,12 +4,29 @@
 
 ## Unreleased -- 0.1.0 (prototype)
 
+### Changed
+
+- The config file's shape no longer lives in the domain: `Policy.from_mapping` is now `config.policy_from_mapping`
+  (`@group` expansion, `preset`, `io_modules`, defaults). `Policy` checks its own invariants on construction (distinct
+  rings, onion rule, `classify` naming known rings), so a hand-built policy cannot be inconsistent. Messages and
+  `PolicyError` are unchanged.
+- Rule ids live in one place, `archlint.domain.Rule` (a `StrEnum`; the string values, and so baseline keys, are
+  unchanged). `selftest.NO_MUTATION` records why a rule has no mutation. `engine.write_generated` now writes the
+  generated files (`cli` only prints), and `rules.check_modules` is split into one function per rule. The unused
+  `rules.RULES` tuple is gone.
+
 ### Added
 
 - `FileSystem` port (`ports`), `LocalFileSystem` (`adapters`) and `FakeFileSystem` (`testing`). Baseline, config, the
   practices, drift, selftest and bench no longer touch the disk themselves; `Services` gains a required `fs` field and
   the functions take it as their first argument. The `application` ring's external list drops `shutil` and `tempfile`
   (`pathlib` stays for `Path` values only; JSON and timing go through `FileSystem.read_json`/`write_json` and a new `Clock` port, `Services.clock`), and a test fails if application code bypasses the port.
+- Engine hardening: import-linter and tach are `Engine` adapters (`archlint.engines`) behind a new port, so `run_check`
+  no longer hardcodes their commands; an unknown type checker (policy, `--type-checker`, `bench`) is a `PolicyError`
+  (exit 2) instead of a traceback; `run_check` always shuts its worker pool down, even if the scan raises.
+- Stdlib detection follows the policy's `python` (`3.11` to `3.14`) instead of the interpreter running ArchLint, from a
+  data table in the new `archlint.stdlib` (domain ring; refresh steps in `docs/stdlib-table.md`). An unsupported
+  `python` is now a policy error. `facts.STDLIB` is gone; use `Policy.stdlib`.
 - Documentation: `docs/configuration.md` (every key, rule and practice) and `docs/architecture.md` (ArchLint's rings
   and module table, kept in sync with the policy by `docs-sync`, which is now enabled for this repository).
 - Presets: `preset = "strict" | "standard" | "relaxed"` in `[tool.archlint]` (default `strict`, identical to the

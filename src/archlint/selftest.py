@@ -9,17 +9,29 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .domain import Policy
+from .domain import Policy, Rule
 from .engine import Services, run_own
 
-__all__ = ["Mutation", "SelfTestReport", "selftest"]
+__all__ = ["NO_MUTATION", "Mutation", "SelfTestReport", "selftest"]
 
 _SKIP_COPY = (".git", ".venv", "venv", "__pycache__", "node_modules", ".archlint", "*.pyc")
+
+_PRACTICE = "repository practice: selftest mutates source files only and runs no practices"
+# Rules with no mutation, and why. A test fails when a rule is in neither this table nor ``plan``'s output.
+NO_MUTATION: dict[Rule, str] = {
+    Rule.BAD_IMPORT: "a relative import above the source root is a syntax-level mistake, not a policy-dependent rule",
+    Rule.GITIGNORE_SHADOW: _PRACTICE,
+    Rule.SIBLING_VERSIONS: _PRACTICE,
+    Rule.SECRETS_GUARD: _PRACTICE,
+    Rule.DOCS_SYNC: _PRACTICE,
+    Rule.CRLF: _PRACTICE,
+    Rule.UNDECLARED_IMPORTS: _PRACTICE,
+}
 
 
 @dataclass(frozen=True)
 class Mutation:
-    rule: str  # the rule id that must newly fire
+    rule: Rule  # the rule id that must newly fire
     label: str
     file: str  # posix path relative to the root
     append: str  # text appended to the file ("" for an added file: see ``new_file``)
@@ -53,25 +65,25 @@ def plan(policy: Policy, paths: dict[str, str], known: frozenset[str]) -> tuple[
             how = "lazy" if lazy else "top-level"
             if target:
                 code = f"import {target}" if not lazy else f"def _archlint_probe() -> None:\n    import {target}"
-                out.append(Mutation("internal-import", f"{ring.name}: forbidden {how} internal import of {target}", paths[host], code))
+                out.append(Mutation(Rule.INTERNAL_IMPORT, f"{ring.name}: forbidden {how} internal import of {target}", paths[host], code))
             else:
                 skipped.append(f"ring {ring.name}: allowed to import every ring, no forbidden internal import to inject")
             if "*" not in ring.external:
                 code = "import archlint_probe_pkg" if not lazy else "def _archlint_probe2() -> None:\n    import archlint_probe_pkg"
-                out.append(Mutation("external-import", f"{ring.name}: unlisted {how} external import", paths[host], code))
+                out.append(Mutation(Rule.EXTERNAL_IMPORT, f"{ring.name}: unlisted {how} external import", paths[host], code))
         if not policy.preset.os_branching:
             skipped.append(f"ring {ring.name}: the {policy.preset.name} preset does not enforce OS branching")
         elif not ring.os_branching:
-            out.append(Mutation("os-branching", f"{ring.name}: OS branching", paths[host], "import os\n_archlint_probe = os.name"))
+            out.append(Mutation(Rule.OS_BRANCHING, f"{ring.name}: OS branching", paths[host], "import os\n_archlint_probe = os.name"))
     anchor = next(iter(sorted(known)), None)
     if anchor:
         base = paths[anchor].rsplit("/", 1)[0] if "/" in paths[anchor] else ""
         new = (base + "/" if base else "") + "archlint_probe_unclassified.py"
-        out.append(Mutation("unclassified", "a new module matching no pattern", new, "", new_file=True))
+        out.append(Mutation(Rule.UNCLASSIFIED, "a new module matching no pattern", new, "", new_file=True))
     if policy.entry_scripts:
         entry_host = next((m for m in sorted(known) if policy.ring_of(m) and m not in policy.entry_scripts), None)
         if entry_host:
-            out.append(Mutation("undeclared-entry-dependency", "a project module imports a package the scripts don't declare", paths[entry_host], "import archlint_probe_dist"))
+            out.append(Mutation(Rule.UNDECLARED_ENTRY_DEPENDENCY, "a project module imports a package the scripts don't declare", paths[entry_host], "import archlint_probe_dist"))
     return out, sorted(set(skipped))
 
 

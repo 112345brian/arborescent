@@ -10,7 +10,7 @@ from typing import Any, Protocol
 from .domain import Policy, ToolResult
 from .facts import ModuleInfo
 
-__all__ = ["Clock", "FileSystem", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker"]
+__all__ = ["Clock", "Engine", "FileSystem", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker"]
 
 
 class ToolRunner(Protocol):
@@ -62,6 +62,21 @@ class FileSystem(Protocol):
     def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = ()) -> None: ...  # ``ignore``: name globs to skip
 
     def temporary_directory(self, prefix: str) -> AbstractContextManager[Path]: ...  # removed with its contents on exit
+
+
+class Engine(Protocol):
+    """An external checker run in parallel by ``check``: import-linter, tach, and every ``TypeChecker`` (which satisfies
+    this). Adding one means writing an adapter and passing it in ``Services``; ``run_check`` does not change."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def executable(self) -> str: ...
+
+    def command(self, files: Sequence[str]) -> list[str]: ...  # files: the changed ones (empty = everything)
+
+    def passed(self, result: ToolResult) -> bool: ...
 
 
 class TypeChecker(Protocol):

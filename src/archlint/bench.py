@@ -8,14 +8,13 @@ the algorithms cost.
 
 from __future__ import annotations
 
-import dataclasses
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .config import load_policy
-from .engine import Options, Services, run_check, run_own
-from .generate import IMPORT_LINTER_FILE, generate
+from .engine import Options, Services, pick_checker, run_check, run_own
+from .generate import generate
 from .ports import FileSystem
 
 __all__ = ["run_bench"]
@@ -29,7 +28,7 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
     svc = make(root)
     fs = svc.fs
     policy, _ = load_policy(fs, root / "archlint.toml")
-    policy = dataclasses.replace(policy, type_checkers=tuple(names))
+    _ = pick_checker(policy, svc)  # unknown checker names are a PolicyError, not a traceback
     rows: list[tuple[str, str, str, str]] = []  # engine, cold, warm, note
 
     def twice(label: str, fn: Callable[[], str], reset: Callable[[], None] | None = None) -> None:
@@ -67,8 +66,8 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
 
         return go
 
-    twice("import-linter (grimp)", tool(["lint-imports", "--config", IMPORT_LINTER_FILE]))
-    twice("tach check", tool(["tach", "check"]))
+    for e in svc.engines:
+        twice(e.name, tool(e.command([])))
     for c in chosen:
         fs.write_text(root / c.config_file, c.render_config(policy, sorted(set(policy.sources))))
         twice(f"type checker: {c.name}", tool(c.command([])))

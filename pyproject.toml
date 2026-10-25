@@ -60,7 +60,7 @@ rings = ["domain", "ports", "application", "adapters", "composition"]
 type_checkers = ["pyright"]
 
 [tool.archlint.groups]
-pure = ["__future__", "collections", "dataclasses", "fnmatch", "re", "typing", "ast", "sys", "tomllib"]
+pure = ["__future__", "collections", "dataclasses", "enum", "fnmatch", "re", "typing", "ast", "sys", "tomllib"]
 
 [tool.archlint.ring.domain]
 external = ["@pure", "archlint"]
@@ -89,6 +89,7 @@ external = ["@pure", "argparse", "pathlib", "archlint"]
 "archlint.facts" = "domain"
 "archlint.rules" = "domain"
 "archlint.presets" = "domain"
+"archlint.stdlib" = "domain"
 "archlint.ports" = "ports"
 "archlint.generate" = "application"
 "archlint.baseline" = "application"
@@ -99,6 +100,7 @@ external = ["@pure", "argparse", "pathlib", "archlint"]
 "archlint.bench" = "application"
 "archlint.adapters" = "adapters"
 "archlint.typecheckers" = "adapters"
+"archlint.engines" = "adapters"
 "archlint.testing" = "adapters"
 "archlint.cli" = "composition"
 "archlint.__main__" = "composition"
@@ -123,9 +125,9 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "archlint core and ports must not import adapters, the engines or process/file/network modules"
 type = "forbidden"
-source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.rules", "archlint.ports"]
+source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.stdlib", "archlint.rules", "archlint.ports"]
 forbidden_modules = [
-    "archlint.adapters", "archlint.typecheckers", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
+    "archlint.adapters", "archlint.typecheckers", "archlint.engines", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
     "socket", "urllib",
 ]
 allow_indirect_imports = true

@@ -10,9 +10,9 @@ from pathlib import Path
 from . import baseline as ratchet_mod
 from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner, SystemClock
 from .config import find_policy, load_policy
-from .domain import PolicyError
-from .engine import Options, Services, run_check, run_own
-from .generate import generate
+from .domain import Policy, PolicyError
+from .engine import Options, Services, pick_checker, run_check, run_own, write_generated
+from .engines import default_engines
 from .selftest import selftest
 from .typecheckers import all_checkers
 
@@ -21,7 +21,7 @@ __all__ = ["default_services", "main"]
 
 def default_services(root: Path, cache: bool = True) -> Services:
     scanner = FsScanner(root / ".archlint" if cache else None)
-    return Services(scanner, SubprocessToolRunner(), list(all_checkers().values()), LocalFileSystem(), SystemClock())
+    return Services(scanner, SubprocessToolRunner(), list(all_checkers().values()), LocalFileSystem(), SystemClock(), default_engines())
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -40,7 +40,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("selftest", help="mutation-test the rules")
     b = sub.add_parser("bench", help="time every engine, cold and warm, on prepared codebases")
     b.add_argument("dirs", nargs="+", type=Path, help="directories that each contain an archlint.toml")
-    b.add_argument("--checkers", nargs="*", default=sorted(all_checkers()))
+    b.add_argument("--checkers", nargs="*", choices=sorted(all_checkers()), default=sorted(all_checkers()))
     return p
 
 
@@ -57,12 +57,17 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
         print(f"archlint: {exc}", file=sys.stderr)
         return 2
     svc = services or default_services(root, cache=not getattr(args, "no_cache", False))
+    try:
+        return _dispatch(args, policy, root, svc)
+    except PolicyError as exc:
+        print(f"archlint: {exc}", file=sys.stderr)
+        return 2
+
+
+def _dispatch(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
     if args.command == "generate":
-        _, scan = run_own(policy, root, svc, practices=False)
-        wanted = [c for c in svc.checkers if c.name in policy.type_checkers]
-        for rel, text in generate(policy, sorted(scan.known), wanted).items():
-            svc.fs.mkdir((root / rel).parent)
-            svc.fs.write_text(root / rel, text)
+        _ = pick_checker(policy, svc)
+        for rel in write_generated(policy, root, svc):
             print(f"wrote {rel}")
         return 0
     if args.command == "baseline":

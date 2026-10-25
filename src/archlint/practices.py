@@ -20,8 +20,8 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from .domain import Policy, Violation, dist_name
-from .facts import STDLIB, ModuleInfo, resolve_targets
+from .domain import Policy, Rule, Violation, dist_name
+from .facts import ModuleInfo, resolve_targets
 from .ports import FileSystem, ToolRunner
 
 __all__ = ["PRACTICES", "run_practices"]
@@ -45,7 +45,7 @@ def gitignore_shadow(root: Path, runner: ToolRunner, allow: Sequence[str] = ()) 
         seen.add(folder)
         why = runner.run(["git", "check-ignore", "-v", "--", rel], root).stdout.strip()
         pattern = why.split("\t")[0] if why else "?"
-        out.append(Violation("gitignore-shadow", folder, f"python source is ignored by {pattern} (never committed, missing from wheels)"))
+        out.append(Violation(Rule.GITIGNORE_SHADOW, folder, f"python source is ignored by {pattern} (never committed, missing from wheels)"))
     return out
 
 
@@ -104,7 +104,7 @@ def sibling_versions(fs: FileSystem, root: Path, pattern: str) -> list[Violation
             version = projects[sibling][0]
             if spec and not _satisfies(version, spec):
                 rel = path.relative_to(root).as_posix()
-                out.append(Violation("sibling-versions", rel, f"requires {sibling}{spec} but the sibling in this repository is {version}"))
+                out.append(Violation(Rule.SIBLING_VERSIONS, rel, f"requires {sibling}{spec} but the sibling in this repository is {version}"))
     return out
 
 
@@ -115,17 +115,17 @@ def secrets_guard(fs: FileSystem, root: Path, tests_dir: str) -> list[Violation]
     conftest = tests / "conftest.py"
     rel = f"{tests_dir}/conftest.py"
     if not fs.is_file(conftest):
-        return [Violation("secrets-guard", rel, "no conftest.py: tests can read the developer's real secrets from the environment")]
+        return [Violation(Rule.SECRETS_GUARD, rel, "no conftest.py: tests can read the developer's real secrets from the environment")]
     text = fs.read_text(conftest)
     if not (re.search(r"autouse\s*=\s*True", text) and re.search(r"delenv|environ", text)):
-        return [Violation("secrets-guard", rel, "conftest.py has no autouse fixture that scrubs the environment (monkeypatch.delenv / os.environ)")]
+        return [Violation(Rule.SECRETS_GUARD, rel, "conftest.py has no autouse fixture that scrubs the environment (monkeypatch.delenv / os.environ)")]
     return []
 
 
 def docs_sync(fs: FileSystem, root: Path, doc: str, policy: Policy, known: Collection[str]) -> list[Violation]:
     path = root / doc
     if not fs.is_file(path):
-        return [Violation("docs-sync", doc, "documented architecture file does not exist")]
+        return [Violation(Rule.DOCS_SYNC, doc, "documented architecture file does not exist")]
     rows: dict[str, str] = {}
     for line in fs.read_text(path).splitlines():
         m = re.match(r"\|\s*`([^`]+)`\s*\|\s*`?([\w-]+)`?\s*\|", line)
@@ -135,10 +135,10 @@ def docs_sync(fs: FileSystem, root: Path, doc: str, policy: Policy, known: Colle
     out: list[Violation] = []
     for mod, ring in sorted(rows.items()):
         if mod not in known:
-            out.append(Violation("docs-sync", mod, f"{doc} lists a module that does not exist"))
+            out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} lists a module that does not exist"))
         elif policy.ring_of(mod) != ring:
-            out.append(Violation("docs-sync", mod, f"{doc} says ring {ring!r} but the policy says {policy.ring_of(mod)!r}"))
-    out += [Violation("docs-sync", m, f"module is not in the {doc} table") for m in sorted(set(known) - set(rows))]
+            out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} says ring {ring!r} but the policy says {policy.ring_of(mod)!r}"))
+    out += [Violation(Rule.DOCS_SYNC, m, f"module is not in the {doc} table") for m in sorted(set(known) - set(rows))]
     return out
 
 
@@ -149,7 +149,7 @@ def crlf(fs: FileSystem, root: Path, patterns: Sequence[str]) -> list[Violation]
         if _NOISE & set(rel.split("/")) or ".git" in rel.split("/") or not fs.is_file(path):
             continue
         if any(fnmatch.fnmatch(path.name, p) for p in patterns) and b"\r\n" in fs.read_bytes(path):
-            out.append(Violation("crlf", rel, "has CRLF line endings; the interpreter line becomes '/bin/sh\\r'"))
+            out.append(Violation(Rule.CRLF, rel, "has CRLF line endings; the interpreter line becomes '/bin/sh\\r'"))
     return out
 
 
@@ -165,17 +165,20 @@ def undeclared_imports(
             for d in _dependencies(data.get("project", {}), data.get("dependency-groups"))
         }
     tops = {m.split(".")[0] for m in known}
+    stdlib = policy.stdlib
     out: dict[str, Violation] = {}
     for name, info in modules.items():
         for imp in info.facts.imports:
             for top in resolve_targets(name, info.is_package, imp, known, tops)[1]:
                 dist = dist_name(policy.dependencies.get(top, top))
-                if top not in STDLIB and dist not in declared:
-                    out[dist] = Violation("undeclared-imports", dist, f"imported (e.g. by {name}) but not declared in {manifest}", imp.line)
+                if top not in stdlib and dist not in declared:
+                    out[dist] = Violation(Rule.UNDECLARED_IMPORTS, dist, f"imported (e.g. by {name}) but not declared in {manifest}", imp.line)
     return list(out.values())
 
 
-PRACTICES = ("gitignore-shadow", "sibling-versions", "secrets-guard", "docs-sync", "crlf", "undeclared-imports")
+PRACTICES = (
+    Rule.GITIGNORE_SHADOW, Rule.SIBLING_VERSIONS, Rule.SECRETS_GUARD, Rule.DOCS_SYNC, Rule.CRLF, Rule.UNDECLARED_IMPORTS
+)  # fmt: skip
 
 
 def run_practices(
@@ -183,20 +186,20 @@ def run_practices(
 ) -> list[Violation]:
     cfg = policy.practices
     out: list[Violation] = []
-    if cfg.get("gitignore-shadow"):
-        value = cfg["gitignore-shadow"]
+    if cfg.get(Rule.GITIGNORE_SHADOW):
+        value = cfg[Rule.GITIGNORE_SHADOW]
         items = cast("list[object]", value) if isinstance(value, list) else []
         allow = [str(a) for a in items]
         out += gitignore_shadow(root, runner, allow)
-    if cfg.get("sibling-versions"):
-        out += sibling_versions(fs, root, str(cfg["sibling-versions"]))
-    if cfg.get("secrets-guard"):
-        out += secrets_guard(fs, root, str(cfg["secrets-guard"]))
-    if cfg.get("docs-sync"):
-        out += docs_sync(fs, root, str(cfg["docs-sync"]), policy, known)
-    if cfg.get("crlf"):
-        out += crlf(fs, root, list(cfg["crlf"]))
-    if cfg.get("undeclared-imports"):
-        manifest = cfg["undeclared-imports"] if isinstance(cfg["undeclared-imports"], str) else "pyproject.toml"
+    if cfg.get(Rule.SIBLING_VERSIONS):
+        out += sibling_versions(fs, root, str(cfg[Rule.SIBLING_VERSIONS]))
+    if cfg.get(Rule.SECRETS_GUARD):
+        out += secrets_guard(fs, root, str(cfg[Rule.SECRETS_GUARD]))
+    if cfg.get(Rule.DOCS_SYNC):
+        out += docs_sync(fs, root, str(cfg[Rule.DOCS_SYNC]), policy, known)
+    if cfg.get(Rule.CRLF):
+        out += crlf(fs, root, list(cfg[Rule.CRLF]))
+    if cfg.get(Rule.UNDECLARED_IMPORTS):
+        manifest = cfg[Rule.UNDECLARED_IMPORTS] if isinstance(cfg[Rule.UNDECLARED_IMPORTS], str) else "pyproject.toml"
         out += undeclared_imports(fs, root, policy, modules, known, manifest)
     return out

@@ -19,6 +19,7 @@ from archlint.adapters import (
 )
 from archlint.config import load_policy
 from archlint.engine import Options, Services, run_check, run_own
+from archlint.engines import default_engines
 from archlint.generate import generate
 from archlint.typecheckers import all_checkers
 
@@ -27,7 +28,7 @@ CHECKERS = list(all_checkers().values())
 
 
 def own_services(cache: Path | None = None) -> Services:
-    return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock())
+    return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines())
 
 
 def test_archlint_passes_its_own_policy_and_its_generated_files_are_current() -> None:
@@ -66,7 +67,7 @@ def test_no_file_is_parsed_twice_in_one_run(repo: Path, monkeypatch: pytest.Monk
     seen: list[str] = []
     real = adapters.extract
     monkeypatch.setattr(adapters, "extract", lambda src, name="": (seen.append(name), real(src, name))[1])
-    _ = run_check(mini_policy(), repo, Services(FsScanner(), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock()), Options(tools=False))
+    _ = run_check(mini_policy(), repo, Services(FsScanner(), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines()), Options(tools=False))
     assert len(seen) == len(set(seen)) == 5
 
 
