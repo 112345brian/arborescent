@@ -22,7 +22,7 @@ from typing import Any, cast
 
 from .domain import Policy, Violation, dist_name
 from .facts import STDLIB, ModuleInfo, resolve_targets
-from .ports import ToolRunner
+from .ports import FileSystem, ToolRunner
 
 __all__ = ["PRACTICES", "run_practices"]
 
@@ -87,10 +87,10 @@ def _dependencies(project: Mapping[str, Any], groups: Mapping[str, Any] | None =
     return deps
 
 
-def sibling_versions(root: Path, pattern: str) -> list[Violation]:
+def sibling_versions(fs: FileSystem, root: Path, pattern: str) -> list[Violation]:
     projects: dict[str, tuple[str, Path, Mapping[str, Any]]] = {}
-    for path in sorted(root.glob(pattern)):
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    for path in fs.glob(root, pattern):
+        data = tomllib.loads(fs.read_text(path))
         project = data.get("project", {})
         if "name" in project:
             projects[dist_name(project["name"])] = (str(project.get("version", "0")), path, data)
@@ -108,26 +108,26 @@ def sibling_versions(root: Path, pattern: str) -> list[Violation]:
     return out
 
 
-def secrets_guard(root: Path, tests_dir: str) -> list[Violation]:
+def secrets_guard(fs: FileSystem, root: Path, tests_dir: str) -> list[Violation]:
     tests = root / tests_dir
-    if not tests.is_dir():
+    if not fs.is_dir(tests):
         return []
     conftest = tests / "conftest.py"
     rel = f"{tests_dir}/conftest.py"
-    if not conftest.is_file():
+    if not fs.is_file(conftest):
         return [Violation("secrets-guard", rel, "no conftest.py: tests can read the developer's real secrets from the environment")]
-    text = conftest.read_text(encoding="utf-8")
+    text = fs.read_text(conftest)
     if not (re.search(r"autouse\s*=\s*True", text) and re.search(r"delenv|environ", text)):
         return [Violation("secrets-guard", rel, "conftest.py has no autouse fixture that scrubs the environment (monkeypatch.delenv / os.environ)")]
     return []
 
 
-def docs_sync(root: Path, doc: str, policy: Policy, known: Collection[str]) -> list[Violation]:
+def docs_sync(fs: FileSystem, root: Path, doc: str, policy: Policy, known: Collection[str]) -> list[Violation]:
     path = root / doc
-    if not path.is_file():
+    if not fs.is_file(path):
         return [Violation("docs-sync", doc, "documented architecture file does not exist")]
     rows: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in fs.read_text(path).splitlines():
         m = re.match(r"\|\s*`([^`]+)`\s*\|\s*`?([\w-]+)`?\s*\|", line)
         if m:
             mod = m.group(1).removesuffix(".py").replace("/", ".").removesuffix(".__init__")
@@ -142,24 +142,24 @@ def docs_sync(root: Path, doc: str, policy: Policy, known: Collection[str]) -> l
     return out
 
 
-def crlf(root: Path, patterns: Sequence[str]) -> list[Violation]:
+def crlf(fs: FileSystem, root: Path, patterns: Sequence[str]) -> list[Violation]:
     out: list[Violation] = []
-    for path in sorted(root.rglob("*")):
+    for path in fs.rglob(root, "*"):
         rel = path.relative_to(root).as_posix()
-        if _NOISE & set(rel.split("/")) or ".git" in rel.split("/") or not path.is_file():
+        if _NOISE & set(rel.split("/")) or ".git" in rel.split("/") or not fs.is_file(path):
             continue
-        if any(fnmatch.fnmatch(path.name, p) for p in patterns) and b"\r\n" in path.read_bytes():
+        if any(fnmatch.fnmatch(path.name, p) for p in patterns) and b"\r\n" in fs.read_bytes(path):
             out.append(Violation("crlf", rel, "has CRLF line endings; the interpreter line becomes '/bin/sh\\r'"))
     return out
 
 
 def undeclared_imports(
-    root: Path, policy: Policy, modules: Mapping[str, ModuleInfo], known: Collection[str], manifest: str
+    fs: FileSystem, root: Path, policy: Policy, modules: Mapping[str, ModuleInfo], known: Collection[str], manifest: str
 ) -> list[Violation]:
     declared: set[str] = set()
     path = root / manifest
-    if path.is_file():
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    if fs.is_file(path):
+        data = tomllib.loads(fs.read_text(path))
         declared = {
             dist_name(re.split(r"[<>=!~\[ ;]", d, maxsplit=1)[0])
             for d in _dependencies(data.get("project", {}), data.get("dependency-groups"))
@@ -179,7 +179,7 @@ PRACTICES = ("gitignore-shadow", "sibling-versions", "secrets-guard", "docs-sync
 
 
 def run_practices(
-    policy: Policy, root: Path, runner: ToolRunner, modules: Mapping[str, ModuleInfo], known: Collection[str]
+    policy: Policy, root: Path, runner: ToolRunner, fs: FileSystem, modules: Mapping[str, ModuleInfo], known: Collection[str]
 ) -> list[Violation]:
     cfg = policy.practices
     out: list[Violation] = []
@@ -189,14 +189,14 @@ def run_practices(
         allow = [str(a) for a in items]
         out += gitignore_shadow(root, runner, allow)
     if cfg.get("sibling-versions"):
-        out += sibling_versions(root, str(cfg["sibling-versions"]))
+        out += sibling_versions(fs, root, str(cfg["sibling-versions"]))
     if cfg.get("secrets-guard"):
-        out += secrets_guard(root, str(cfg["secrets-guard"]))
+        out += secrets_guard(fs, root, str(cfg["secrets-guard"]))
     if cfg.get("docs-sync"):
-        out += docs_sync(root, str(cfg["docs-sync"]), policy, known)
+        out += docs_sync(fs, root, str(cfg["docs-sync"]), policy, known)
     if cfg.get("crlf"):
-        out += crlf(root, list(cfg["crlf"]))
+        out += crlf(fs, root, list(cfg["crlf"]))
     if cfg.get("undeclared-imports"):
         manifest = cfg["undeclared-imports"] if isinstance(cfg["undeclared-imports"], str) else "pyproject.toml"
-        out += undeclared_imports(root, policy, modules, known, manifest)
+        out += undeclared_imports(fs, root, policy, modules, known, manifest)
     return out

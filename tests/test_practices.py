@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from archlint_helpers import mini_policy, write_files
 
-from archlint.adapters import FsScanner, SubprocessToolRunner
+from archlint.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from archlint.practices import (
     crlf,
     docs_sync,
@@ -22,6 +22,7 @@ from archlint.practices import (
     undeclared_imports,
 )  # fmt: skip
 
+FS = LocalFileSystem()
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
 
@@ -75,7 +76,7 @@ def test_sibling_distributions_pinned_to_inconsistent_versions_are_caught(tmp_pa
             ),
         },
     )
-    found = sibling_versions(tmp_path, "distributions/*/pyproject.toml")
+    found = sibling_versions(FS, tmp_path, "distributions/*/pyproject.toml")
     assert [(v.subject, v.rule) for v in found] == [("distributions/launch-runner/pyproject.toml", "sibling-versions")]
     assert "proclaunch==0.1.1" in found[0].detail and "0.2.0" in found[0].detail
 
@@ -90,20 +91,20 @@ def test_version_specifier_evaluation(tmp_path: Path, spec: str, ok: bool) -> No
         tmp_path,
         {"d/a/pyproject.toml": _dist("a", "0.2.0", []), "d/b/pyproject.toml": _dist("b", "1.0.0", [f"a{spec}"])},
     )
-    assert (sibling_versions(tmp_path, "d/*/pyproject.toml") == []) is ok
+    assert (sibling_versions(FS, tmp_path, "d/*/pyproject.toml") == []) is ok
 
 
 def test_tests_that_can_read_real_secrets_need_a_conftest_guard(tmp_path: Path) -> None:
     """Real bug: a test run picked up the developer's real API key from the environment."""
     write_files(tmp_path, {"tests/test_x.py": "import os\n\ndef test_x():\n    assert os.environ.get('ANTHROPIC_API_KEY')\n"})
-    assert [v.rule for v in secrets_guard(tmp_path, "tests")] == ["secrets-guard"]
+    assert [v.rule for v in secrets_guard(FS, tmp_path, "tests")] == ["secrets-guard"]
     write_files(tmp_path, {"tests/conftest.py": "import pytest\n\n@pytest.fixture\ndef nothing():\n    pass\n"})
-    assert [v.rule for v in secrets_guard(tmp_path, "tests")] == ["secrets-guard"]  # a conftest alone is not a guard
+    assert [v.rule for v in secrets_guard(FS, tmp_path, "tests")] == ["secrets-guard"]  # a conftest alone is not a guard
     write_files(
         tmp_path,
         {"tests/conftest.py": "import pytest\n\n@pytest.fixture(autouse=True)\ndef scrub(monkeypatch):\n    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)\n"},
     )
-    assert secrets_guard(tmp_path, "tests") == []
+    assert secrets_guard(FS, tmp_path, "tests") == []
 
 
 def test_docs_that_drift_from_the_policy_are_caught(repo: Path) -> None:
@@ -114,10 +115,10 @@ def test_docs_that_drift_from_the_policy_are_caught(repo: Path) -> None:
         f"| `{m}` | {policy.ring_of(m)} |\n" for m in sorted(known)
     )
     write_files(repo, {"docs/architecture.md": table})
-    assert docs_sync(repo, "docs/architecture.md", policy, known) == []
+    assert docs_sync(FS, repo, "docs/architecture.md", policy, known) == []
     drifted = table.replace("| `app.adapters` | adapters |", "| `app.adapters` | ports |").replace("| `app.main` | composition |\n", "") + "| `app.gone` | domain |\n"
     write_files(repo, {"docs/architecture.md": drifted})
-    details = sorted(v.detail for v in docs_sync(repo, "docs/architecture.md", policy, known))
+    details = sorted(v.detail for v in docs_sync(FS, repo, "docs/architecture.md", policy, known))
     assert any("says ring 'ports'" in d for d in details)
     assert any("does not exist" in d for d in details)
     assert any("not in the docs/architecture.md table" in d for d in details)
@@ -128,14 +129,14 @@ def test_generated_scripts_with_crlf_are_caught(tmp_path: Path) -> None:
     (tmp_path / "run.sh").write_bytes(b"#!/bin/sh\r\necho hi\r\n")
     (tmp_path / "ok.sh").write_bytes(b"#!/bin/sh\necho hi\n")
     (tmp_path / "notes.txt").write_bytes(b"a\r\nb\r\n")
-    assert [v.subject for v in crlf(tmp_path, ["*.sh"])] == ["run.sh"]
+    assert [v.subject for v in crlf(FS, tmp_path, ["*.sh"])] == ["run.sh"]
 
 
 def test_imports_of_undeclared_dependencies_are_caught(repo: Path) -> None:
     write_files(repo, {"app/adapters.py": "import psutil\nimport requests\n", "pyproject.toml": _dist("app", "1", ["psutil>=5"])})
     policy = mini_policy()
     scan = FsScanner().scan(policy, repo)
-    found = undeclared_imports(repo, policy, scan.modules, scan.known, "pyproject.toml")
+    found = undeclared_imports(FS, repo, policy, scan.modules, scan.known, "pyproject.toml")
     assert [(v.rule, v.subject) for v in found] == [("undeclared-imports", "requests")]
 
 
@@ -143,4 +144,4 @@ def test_import_name_to_distribution_mapping_is_honoured(repo: Path) -> None:
     write_files(repo, {"app/adapters.py": "import yaml\n", "pyproject.toml": _dist("app", "1", ["PyYAML"])})
     policy = mini_policy(dependencies={"yaml": "pyyaml"})
     scan = FsScanner().scan(policy, repo)
-    assert undeclared_imports(repo, policy, scan.modules, scan.known, "pyproject.toml") == []
+    assert undeclared_imports(FS, repo, policy, scan.modules, scan.known, "pyproject.toml") == []

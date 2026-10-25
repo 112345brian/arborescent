@@ -6,24 +6,25 @@ import tomllib
 from pathlib import Path
 
 from .domain import Policy, PolicyError
+from .ports import FileSystem
 
 __all__ = ["find_policy", "load_policy"]
 
 
-def find_policy(start: Path) -> Path:
+def find_policy(fs: FileSystem, start: Path) -> Path:
     for folder in (start, *start.parents):
         for name in ("archlint.toml", "pyproject.toml"):
             candidate = folder / name
-            if candidate.is_file() and (
-                name == "archlint.toml" or "archlint" in tomllib.loads(candidate.read_text(encoding="utf-8")).get("tool", {})
+            if fs.is_file(candidate) and (
+                name == "archlint.toml" or "archlint" in tomllib.loads(fs.read_text(candidate)).get("tool", {})
             ):
                 return candidate
     raise PolicyError(f"no archlint.toml or [tool.archlint] found from {start}")
 
 
-def load_policy(path: Path) -> tuple[Policy, Path]:
+def load_policy(fs: FileSystem, path: Path) -> tuple[Policy, Path]:
     """The parsed policy and the repository root (the folder holding the policy file)."""
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    data = tomllib.loads(fs.read_text(path))
     raw = data if path.name == "archlint.toml" else data.get("tool", {}).get("archlint")
     if raw is None:
         raise PolicyError(f"{path} has no [tool.archlint] table")

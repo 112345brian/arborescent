@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from archlint_helpers import mini_policy, write_files
 
-from archlint.adapters import FsScanner, SubprocessToolRunner
+from archlint.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from archlint.config import load_policy
 from archlint.engine import Options, Services, run_check, run_own
 from archlint.generate import generate
@@ -22,11 +22,11 @@ CHECKERS = list(all_checkers().values())
 
 
 def own_services(cache: Path | None = None) -> Services:
-    return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS)
+    return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem())
 
 
 def test_archlint_passes_its_own_policy_and_its_generated_files_are_current() -> None:
-    policy, root = load_policy(HERE / "pyproject.toml")
+    policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     report = run_check(policy, root, own_services(), Options(tools=False, use_baseline=False))
     assert report.violations == [], [v.render() for v in report.violations]
     assert report.drift == []
@@ -35,7 +35,7 @@ def test_archlint_passes_its_own_policy_and_its_generated_files_are_current() ->
 def test_warm_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> None:
     """Budget for the code we control: ~20 files, content-hash cache warm. Generous (CI machines are slow) but a real
     regression such as parsing twice or re-reading the tree per rule would blow through it."""
-    policy, root = load_policy(HERE / "pyproject.toml")
+    policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     svc = own_services(tmp_path / "cache")
     _ = run_own(policy, root, svc, practices=False)  # cold
     runs = []
@@ -48,7 +48,7 @@ def test_warm_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> N
 
 
 def test_cold_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> None:
-    policy, root = load_policy(HERE / "pyproject.toml")
+    policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     t0 = time.perf_counter()
     _, scan = run_own(policy, root, own_services(tmp_path / "cache"), practices=False)
     cold = time.perf_counter() - t0
@@ -61,7 +61,7 @@ def test_no_file_is_parsed_twice_in_one_run(repo: Path, monkeypatch: pytest.Monk
     seen: list[str] = []
     real = adapters.extract
     monkeypatch.setattr(adapters, "extract", lambda src, name="": (seen.append(name), real(src, name))[1])
-    _ = run_check(mini_policy(), repo, Services(FsScanner(), SubprocessToolRunner(), CHECKERS), Options(tools=False))
+    _ = run_check(mini_policy(), repo, Services(FsScanner(), SubprocessToolRunner(), CHECKERS, LocalFileSystem()), Options(tools=False))
     assert len(seen) == len(set(seen)) == 5
 
 

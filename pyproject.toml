@@ -67,15 +67,15 @@ external = ["@pure", "archlint"]
 
 [tool.archlint.ring.ports]
 may_import = ["domain"]
-external = ["@pure", "pathlib", "archlint"]
+external = ["@pure", "pathlib", "contextlib", "archlint"]
 
 [tool.archlint.ring.application]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "json", "tempfile", "shutil", "time", "concurrent", "archlint"]
+external = ["@pure", "pathlib", "json", "time", "concurrent", "archlint"]
 
 [tool.archlint.ring.adapters]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "json", "hashlib", "os", "shutil", "subprocess", "time", "archlint"]
+external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "archlint"]
 os_branching = true
 
 [tool.archlint.ring.composition]

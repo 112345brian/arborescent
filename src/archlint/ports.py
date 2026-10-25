@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Protocol
 
 from .domain import Policy, ToolResult
 from .facts import ModuleInfo
 
-__all__ = ["ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker"]
+__all__ = ["FileSystem", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker"]
 
 
 class ToolRunner(Protocol):
@@ -18,6 +19,39 @@ class ToolRunner(Protocol):
     def available(self, executable: str) -> bool: ...
 
     def run(self, argv: Sequence[str], cwd: Path, timeout: float = 600.0) -> ToolResult: ...
+
+
+class FileSystem(Protocol):
+    """Every file access the use cases make. Text is UTF-8 and newlines are kept exactly as stored (no translation);
+    writes never translate ``\n``. Errors are the ``OSError`` / ``UnicodeDecodeError`` the real file system raises."""
+
+    def read_text(self, path: Path) -> str: ...
+
+    def read_bytes(self, path: Path) -> bytes: ...
+
+    def write_text(self, path: Path, text: str) -> None: ...  # parent must exist; overwrites
+
+    def write_bytes(self, path: Path, data: bytes) -> None: ...  # parent must exist; overwrites
+
+    def exists(self, path: Path) -> bool: ...
+
+    def is_file(self, path: Path) -> bool: ...
+
+    def is_dir(self, path: Path) -> bool: ...
+
+    def glob(self, root: Path, pattern: str) -> list[Path]: ...  # sorted; ``**`` spans folders
+
+    def rglob(self, root: Path, pattern: str) -> list[Path]: ...  # sorted; files and folders at any depth
+
+    def mkdir(self, path: Path) -> None: ...  # with parents; existing is fine
+
+    def remove_file(self, path: Path) -> None: ...
+
+    def remove_tree(self, path: Path) -> None: ...  # a missing path is fine
+
+    def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = ()) -> None: ...  # ``ignore``: name globs to skip
+
+    def temporary_directory(self, prefix: str) -> AbstractContextManager[Path]: ...  # removed with its contents on exit
 
 
 class TypeChecker(Protocol):

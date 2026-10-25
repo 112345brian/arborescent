@@ -74,6 +74,8 @@ no stdlib module counts as I/O).
 - `ToolRunner` (`available`, `run`) -- how engines and git are executed; `archlint.testing.FakeToolRunner` fakes it.
 - `TypeChecker` (`render_config`, `command`, `passed`) -- pyright, basedpyright, ty and pyrefly adapters in
   `archlint.typecheckers`. Every strict-mode setting was verified by running the tool (see the module docstring).
+- `FileSystem` -- every file read, write, listing, copy and temporary folder the use cases need; `LocalFileSystem` is the
+  real one and `archlint.testing.FakeFileSystem` an in-memory twin (both run the same contract tests).
 - `ModuleScanner` -- finds modules and parses each file once; `FsScanner` adds a content-hash cache.
 
 ## What the policy compiles to

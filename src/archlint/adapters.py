@@ -8,8 +8,10 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,10 +19,58 @@ from typing import Any
 from .domain import Policy, ToolResult
 from .facts import ModuleInfo, RawImport, SourceFacts, extract
 
-__all__ = ["FsScanner", "ScanData", "SubprocessToolRunner"]
+__all__ = ["FsScanner", "LocalFileSystem", "ScanData", "SubprocessToolRunner"]
 
 _PRUNE = {"__pycache__", ".git", ".venv", "venv", "node_modules", ".archlint", ".mypy_cache", ".ruff_cache", ".tox"}
 _CACHE_VERSION = 2
+
+
+class LocalFileSystem:
+    """``FileSystem`` over ``pathlib``, ``shutil`` and ``tempfile``. Bytes in and out: no newline translation."""
+
+    def read_text(self, path: Path) -> str:
+        return path.read_bytes().decode("utf-8")
+
+    def read_bytes(self, path: Path) -> bytes:
+        return path.read_bytes()
+
+    def write_text(self, path: Path, text: str) -> None:
+        _ = path.write_bytes(text.encode("utf-8"))
+
+    def write_bytes(self, path: Path, data: bytes) -> None:
+        _ = path.write_bytes(data)
+
+    def exists(self, path: Path) -> bool:
+        return path.exists()
+
+    def is_file(self, path: Path) -> bool:
+        return path.is_file()
+
+    def is_dir(self, path: Path) -> bool:
+        return path.is_dir()
+
+    def glob(self, root: Path, pattern: str) -> list[Path]:
+        return sorted(root.glob(pattern))
+
+    def rglob(self, root: Path, pattern: str) -> list[Path]:
+        return sorted(root.rglob(pattern))
+
+    def mkdir(self, path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+
+    def remove_file(self, path: Path) -> None:
+        path.unlink()
+
+    def remove_tree(self, path: Path) -> None:
+        shutil.rmtree(path, ignore_errors=True)
+
+    def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = ()) -> None:
+        _ = shutil.copytree(src, dst, ignore=shutil.ignore_patterns(*ignore))
+
+    @contextmanager
+    def temporary_directory(self, prefix: str) -> Generator[Path]:
+        with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
+            yield Path(tmp)
 
 
 class SubprocessToolRunner:

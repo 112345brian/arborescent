@@ -12,7 +12,7 @@ from pathlib import Path
 from . import baseline as ratchet_mod
 from .domain import Policy, ToolResult, Violation
 from .generate import IMPORT_LINTER_FILE, generate
-from .ports import ModuleScanner, ScanResult, ToolRunner, TypeChecker
+from .ports import FileSystem, ModuleScanner, ScanResult, ToolRunner, TypeChecker
 from .practices import run_practices
 from .rules import check_modules
 
@@ -24,6 +24,7 @@ class Services:
     scanner: ModuleScanner
     runner: ToolRunner
     checkers: Sequence[TypeChecker]  # every known adapter; the policy / --type-checker picks which run
+    fs: FileSystem
 
 
 @dataclass(frozen=True)
@@ -73,17 +74,17 @@ def run_own(
     scan = services.scanner.scan(policy, root, only)
     found = check_modules(policy, scan.modules, scan.known, scan.entry_deps)
     if practices and only is None:
-        found += run_practices(policy, root, services.runner, scan.modules, scan.known)
+        found += run_practices(policy, root, services.runner, services.fs, scan.modules, scan.known)
     return found, scan
 
 
-def drift(policy: Policy, root: Path, names: Sequence[str], checkers: Sequence[TypeChecker]) -> list[str]:
+def drift(fs: FileSystem, policy: Policy, root: Path, names: Sequence[str], checkers: Sequence[TypeChecker]) -> list[str]:
     out: list[str] = []
     for rel, expected in sorted(generate(policy, names, checkers).items()):
         path = root / rel
-        if not path.is_file():
+        if not fs.is_file(path):
             out.append(f"{rel}: missing; run `archlint generate`")
-        elif path.read_bytes().decode("utf-8") != expected:
+        elif fs.read_text(path) != expected:
             out.append(f"{rel}: differs from the policy; run `archlint generate`")
     return out
 
@@ -120,9 +121,9 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
     found, scan = run_own(policy, root, services, only)
     report.engines.append(EngineRun("archlint", "ok", time.perf_counter() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
     report.parsed = scan.parsed
-    report.drift = drift(policy, root, sorted(scan.known), [c for c in services.checkers if c.name in {*policy.type_checkers, checker.name}])
+    report.drift = drift(services.fs, policy, root, sorted(scan.known), [c for c in services.checkers if c.name in {*policy.type_checkers, checker.name}])
     report.violations = found
-    base: set[str] = ratchet_mod.load(root / policy.baseline) if opts.use_baseline else set()
+    base: set[str] = ratchet_mod.load(services.fs, root / policy.baseline) if opts.use_baseline else set()
     report.ratchet = ratchet_mod.apply(found, base, complete=only is None)
     report.engines += [f.result() for f in futures]
     pool.shutdown()

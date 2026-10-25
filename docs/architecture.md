@@ -10,10 +10,16 @@ Five rings, innermost first. A ring may import itself and the rings it lists; no
 | ring | may import | external packages | role |
 |---|---|---|---|
 | domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the policy, violations, facts about a parsed module, presets |
-| ports | domain | `pathlib` | the protocols the world must satisfy |
-| application | domain, ports | `pathlib`, `json`, `tempfile`, `shutil`, `time`, `concurrent` | use cases: generate, check, baseline, selftest, practices |
-| adapters | domain, ports | `pathlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `time` | the real file system, subprocess and type-checker implementations |
+| ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
+| application | domain, ports | `pathlib`, `json`, `time`, `concurrent` | use cases: generate, check, baseline, selftest, practices |
+| adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time` | the real file system, subprocess and type-checker implementations |
 | composition | everything | `argparse`, `pathlib` | the command line: wires adapters to use cases |
+
+The application ring does no file I/O of its own: it reads, writes, lists, copies and creates temporary folders through
+the `FileSystem` port (`Services.fs`), which is why `shutil` and `tempfile` are not on its list. What remains there is
+computation, not I/O: `pathlib` for `Path` values (joining and `relative_to`; never `read_text`, `exists` and the like),
+`json` to encode the baseline, and `time` for the stopwatch (`engine`, `bench`). `tests/test_filesystem.py` scans
+`application` and `composition` for any file access that bypasses the port.
 
 Adapters do **not** import `application`. Use cases receive adapters through the ports (`Services` in `engine.py`), and
 only `cli.py` knows both sides. Only `adapters` may branch on the OS.
@@ -44,7 +50,7 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 ## Data flow of `archlint check`
 
 1. `cli` loads the policy (`config` -> `domain.Policy`, with its `presets.Preset`) and builds `Services`: a scanner, a tool
-   runner and the type-checker adapters.
+   runner, the type-checker adapters and the file system (`LocalFileSystem`; tests use `testing.FakeFileSystem`).
 2. `engine.run_check` starts import-linter, tach and the type checker in parallel. They run as subprocesses behind the
    `ToolRunner` port.
 3. Meanwhile the scanner finds every module and parses each file once (content-hash cached); `rules.check_modules` and

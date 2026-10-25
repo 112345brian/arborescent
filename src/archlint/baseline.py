@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .domain import Violation
+from .ports import FileSystem
 
 __all__ = ["Ratchet", "apply", "load", "save"]
 
@@ -24,16 +25,16 @@ class Ratchet:
         return not self.new and not self.stale
 
 
-def load(path: Path) -> set[str]:
-    if not path.is_file():
+def load(fs: FileSystem, path: Path) -> set[str]:
+    if not fs.is_file(path):
         return set()
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(fs.read_text(path))
     return {str(k) for k in data.get("violations", [])}
 
 
-def save(path: Path, violations: Iterable[Violation]) -> int:
+def save(fs: FileSystem, path: Path, violations: Iterable[Violation]) -> int:
     keys = sorted({v.key for v in violations})
-    _ = path.write_text(json.dumps({"version": 1, "violations": keys}, indent=2) + "\n", encoding="utf-8", newline="\n")
+    fs.write_text(path, json.dumps({"version": 1, "violations": keys}, indent=2) + "\n")
     return len(keys)
 
 

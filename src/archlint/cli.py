@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import baseline as ratchet_mod
-from .adapters import FsScanner, SubprocessToolRunner
+from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from .config import find_policy, load_policy
 from .domain import PolicyError
 from .engine import Options, Services, run_check, run_own
@@ -21,7 +21,7 @@ __all__ = ["default_services", "main"]
 
 def default_services(root: Path, cache: bool = True) -> Services:
     scanner = FsScanner(root / ".archlint" if cache else None)
-    return Services(scanner, SubprocessToolRunner(), list(all_checkers().values()))
+    return Services(scanner, SubprocessToolRunner(), list(all_checkers().values()), LocalFileSystem())
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -51,7 +51,8 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
 
         return run_bench(args.dirs, args.checkers, default_services)
     try:
-        policy, root = load_policy(args.config or find_policy(Path.cwd()))
+        fs = services.fs if services else LocalFileSystem()
+        policy, root = load_policy(fs, args.config or find_policy(fs, Path.cwd()))
     except PolicyError as exc:
         print(f"archlint: {exc}", file=sys.stderr)
         return 2
@@ -60,13 +61,13 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
         _, scan = run_own(policy, root, svc, practices=False)
         wanted = [c for c in svc.checkers if c.name in policy.type_checkers]
         for rel, text in generate(policy, sorted(scan.known), wanted).items():
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_text(text, encoding="utf-8", newline="\n")
+            svc.fs.mkdir((root / rel).parent)
+            svc.fs.write_text(root / rel, text)
             print(f"wrote {rel}")
         return 0
     if args.command == "baseline":
         found, _ = run_own(policy, root, svc)
-        print(f"baseline: recorded {ratchet_mod.save(root / policy.baseline, found)} violation(s) in {policy.baseline}")
+        print(f"baseline: recorded {ratchet_mod.save(svc.fs, root / policy.baseline, found)} violation(s) in {policy.baseline}")
         return 0
     if args.command == "selftest":
         rep = selftest(policy, root, svc)

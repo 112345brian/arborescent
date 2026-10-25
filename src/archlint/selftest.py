@@ -6,8 +6,6 @@ Ported from the throwaway mutation script behind DeepInterview's ``tests/test_ar
 
 from __future__ import annotations
 
-import shutil
-import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -16,7 +14,7 @@ from .engine import Services, run_own
 
 __all__ = ["Mutation", "SelfTestReport", "selftest"]
 
-_SKIP_COPY = shutil.ignore_patterns(".git", ".venv", "venv", "__pycache__", "node_modules", ".archlint", "*.pyc")
+_SKIP_COPY = (".git", ".venv", "venv", "__pycache__", "node_modules", ".archlint", "*.pyc")
 
 
 @dataclass(frozen=True)
@@ -82,23 +80,24 @@ def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     _, scan = run_own(policy, root, services, practices=False)
     mutations, skipped = plan(policy, dict(scan.paths), scan.known)
     report = SelfTestReport([], [], skipped)
-    with tempfile.TemporaryDirectory(prefix="archlint-selftest-") as tmp:
-        work = Path(tmp) / "copy"
-        shutil.copytree(root, work, ignore=_SKIP_COPY)
+    fs = services.fs
+    with fs.temporary_directory("archlint-selftest-") as tmp:
+        work = tmp / "copy"
+        fs.copy_tree(root, work, ignore=_SKIP_COPY)
         baseline = {v.key for v in run_own(policy, work, services, practices=False)[0]}
         for m in mutations:
             target = work / m.file
-            original = target.read_bytes() if target.exists() and not m.new_file else None
+            original = fs.read_bytes(target) if fs.exists(target) and not m.new_file else None
             if m.new_file:
-                target.write_text("X = 1\n", encoding="utf-8", newline="\n")
+                fs.write_text(target, "X = 1\n")
             else:
-                target.write_bytes((original or b"") + b"\n" + m.append.encode() + b"\n")
+                fs.write_bytes(target, (original or b"") + b"\n" + m.append.encode() + b"\n")
             try:
                 after = {v.key for v in run_own(policy, work, services, practices=False)[0] if v.rule == m.rule}
             finally:
                 if m.new_file:
-                    target.unlink()
+                    fs.remove_file(target)
                 else:
-                    target.write_bytes(original or b"")
+                    fs.write_bytes(target, original or b"")
             (report.killed if after - baseline else report.survived).append(f"[{m.rule}] {m.label}")
     return report
