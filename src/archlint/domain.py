@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
 from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
@@ -92,6 +92,20 @@ class Policy:
     preset: Preset = PRESETS[DEFAULT_PRESET]
     io_modules: frozenset[str] = IO_MODULES  # stdlib modules that mean "I/O, process or OS"
 
+    def __post_init__(self) -> None:
+        names = [r.name for r in self.rings]
+        if not names or len(set(names)) != len(names):
+            raise PolicyError("`rings` must list distinct ring names, innermost first")
+        for i, rule in enumerate(self.rings):
+            bad = rule.may_import - {ALL, *names[:i]}
+            if bad:
+                raise PolicyError(
+                    f"ring {rule.name!r} may only import inner rings {names[:i]}, not {sorted(bad)} (onion rule)"
+                )
+        for pattern, ring in self.classify:
+            if ring not in names:
+                raise PolicyError(f"classify {pattern!r} names unknown ring {ring!r}")
+
     def ring(self, name: str) -> RingRule:
         for r in self.rings:
             if r.name == name:
@@ -118,63 +132,3 @@ class Policy:
     def expressible_by_layers(self) -> bool:
         """True when every ring may import ALL inner rings, so tach's layers alone state the policy."""
         return all(self.allowed_rings(r.name) == frozenset(x.name for x in self.rings[: i + 1]) for i, r in enumerate(self.rings))
-
-    @staticmethod
-    def from_mapping(raw: Mapping[str, Any]) -> Policy:
-        groups: Mapping[str, Sequence[str]] = raw.get("groups", {})
-
-        def expand(items: Sequence[str]) -> frozenset[str]:
-            out: set[str] = set()
-            for item in items:
-                if item.startswith("@"):
-                    if item[1:] not in groups:
-                        raise PolicyError(f"unknown group {item!r}")
-                    out.update(groups[item[1:]])
-                else:
-                    out.add(item)
-            return frozenset(out)
-
-        names = list(raw.get("rings", []))
-        if not names or len(set(names)) != len(names):
-            raise PolicyError("`rings` must list distinct ring names, innermost first")
-        ring_tables: Mapping[str, Mapping[str, Any]] = raw.get("ring", {})
-        for unknown in set(ring_tables) - set(names):
-            raise PolicyError(f"[ring.{unknown}] is not in `rings`")
-        rings: list[RingRule] = []
-        for i, name in enumerate(names):
-            table = ring_tables.get(name, {})
-            may = expand(table.get("may_import", []))
-            bad = may - {ALL, *names[:i]}
-            if bad:
-                raise PolicyError(
-                    f"ring {name!r} may only import inner rings {names[:i]}, not {sorted(bad)} (onion rule)"
-                )
-            rings.append(RingRule(name, may, expand(table.get("external", [])), bool(table.get("os_branching", False))))
-        classify = tuple((str(k), str(v)) for k, v in raw.get("classify", {}).items())
-        for pattern, ring in classify:
-            if ring not in names:
-                raise PolicyError(f"classify {pattern!r} names unknown ring {ring!r}")
-        checkers = tuple(raw.get("type_checkers", ["pyright"]))
-        preset_name = raw.get("preset", DEFAULT_PRESET)
-        if not isinstance(preset_name, str) or preset_name not in PRESETS:
-            raise PolicyError(f"preset {preset_name!r} is unknown; choose one of {sorted(PRESETS)}")
-        io_modules: object = raw["io_modules"] if "io_modules" in raw else sorted(IO_MODULES)
-        if not isinstance(io_modules, list) or not all(isinstance(m, str) and m for m in cast("list[object]", io_modules)):
-            raise PolicyError("`io_modules` must be a list of non-empty module names")
-        return Policy(
-            rings=tuple(rings),
-            classify=classify,
-            sources=tuple(raw.get("sources", ["."])),
-            source_roots=tuple(raw.get("source_roots", ["."])),
-            exclude=tuple(raw.get("exclude", [])),
-            entry_scripts=tuple(raw.get("entry_scripts", [])),
-            dependencies=dict(raw.get("dependencies", {})),
-            forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
-            python=str(raw.get("python", "3.11")),
-            type_checkers=checkers,
-            output_dir=str(raw.get("output_dir", ".")),
-            baseline=str(raw.get("baseline", "archlint-baseline.json")),
-            practices=dict(raw.get("practices", {})),
-            preset=PRESETS[preset_name],
-            io_modules=frozenset(cast("list[str]", io_modules)),
-        )
