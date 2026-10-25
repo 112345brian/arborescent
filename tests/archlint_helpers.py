@@ -9,6 +9,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from archlint.config import policy_from_mapping
 from archlint.domain import Policy
 
 PURE = ["__future__", "dataclasses", "typing", "collections"]
@@ -47,7 +48,7 @@ MINI_FILES = {
 
 
 def mini_policy(**overrides: Any) -> Policy:
-    return Policy.from_mapping({**MINI, **overrides})
+    return policy_from_mapping({**MINI, **overrides})
 
 
 def ring_with(**changes: Any) -> dict[str, Any]:

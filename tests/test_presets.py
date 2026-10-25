@@ -9,7 +9,8 @@ import pytest
 from archlint_helpers import MINI, mini_policy, ring_with, write_files
 
 from archlint.adapters import FsScanner
-from archlint.domain import Policy, PolicyError
+from archlint.config import policy_from_mapping
+from archlint.domain import PolicyError
 from archlint.generate import generate
 from archlint.presets import IO_MODULES, PRESETS
 from archlint.rules import check_modules
@@ -130,4 +131,4 @@ def test_malformed_io_modules_is_an_error(bad: object) -> None:
 
 
 def test_policy_without_a_preset_key_still_loads() -> None:
-    assert Policy.from_mapping(MINI).preset.name == "strict"
+    assert policy_from_mapping(MINI).preset.name == "strict"

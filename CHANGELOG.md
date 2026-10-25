@@ -4,6 +4,13 @@
 
 ## Unreleased -- 0.1.0 (prototype)
 
+### Changed
+
+- The config file's shape no longer lives in the domain: `Policy.from_mapping` is now `config.policy_from_mapping`
+  (`@group` expansion, `preset`, `io_modules`, defaults). `Policy` checks its own invariants on construction (distinct
+  rings, onion rule, `classify` naming known rings), so a hand-built policy cannot be inconsistent. Messages and
+  `PolicyError` are unchanged.
+
 ### Added
 
 - Engine hardening: import-linter and tach are `Engine` adapters (`archlint.engines`) behind a new port, so `run_check`

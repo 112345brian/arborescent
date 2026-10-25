@@ -9,7 +9,7 @@ Five rings, innermost first. A ring may import itself and the rings it lists; no
 
 | ring | may import | external packages | role |
 |---|---|---|---|
-| domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the policy, violations, facts about a parsed module, presets |
+| domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types, violations, facts about a parsed module, presets |
 | ports | domain | `pathlib` | the protocols the world must satisfy |
 | application | domain, ports | `pathlib`, `json`, `tempfile`, `shutil`, `time`, `concurrent` | use cases: generate, check, baseline, selftest, practices |
 | adapters | domain, ports | `pathlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `time` | the real file system, subprocess and type-checker implementations |
@@ -45,7 +45,7 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 
 ## Data flow of `archlint check`
 
-1. `cli` loads the policy (`config` -> `domain.Policy`, with its `presets.Preset`) and builds `Services`: a scanner, a tool
+1. `cli` loads the policy (`config.policy_from_mapping` -> `domain.Policy`, which validates itself; with its `presets.Preset`) and builds `Services`: a scanner, a tool
    runner, the engine adapters (`engines`: import-linter, tach) and the type-checker adapters.
 2. `engine.run_check` starts every `Engine` in `Services` (import-linter, tach) and the chosen type checker in parallel. They run as
    subprocesses behind the `ToolRunner` port; a new engine is an adapter, not an edit to `run_check`. An unknown type
