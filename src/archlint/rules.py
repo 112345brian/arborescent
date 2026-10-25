@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 
 from .domain import ALL, Policy, Violation, dist_name
-from .facts import STDLIB, ModuleInfo, resolve_targets
+from .facts import ModuleInfo, resolve_targets
 
 __all__ = ["RULES", "check_modules"]
 
@@ -31,6 +31,7 @@ def check_modules(
     entry_deps: Mapping[str, tuple[str, ...] | None],
 ) -> list[Violation]:
     tops = {m.split(".")[0] for m in known}
+    stdlib = policy.stdlib
     out: list[Violation] = []
     third_party: dict[str, set[str]] = {}  # distribution -> importing modules
     for name, info in sorted(modules.items()):
@@ -56,7 +57,7 @@ def check_modules(
                         )
                     )
             for top in external:
-                is_stdlib = top in STDLIB
+                is_stdlib = top in stdlib
                 if not is_stdlib:
                     third_party.setdefault(dist_name(policy.dependencies.get(top, top)), set()).add(name)
                 if ALL not in rule.external and top not in rule.external and policy.restricts_external(top, is_stdlib):

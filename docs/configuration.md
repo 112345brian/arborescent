@@ -21,7 +21,7 @@ silently.
 | `forbid_everywhere` | `[]` | Packages no module may import, in any ring (one global import-linter contract). |
 | `entry_scripts` | `[]` | Dotted names of PEP 723 single-file scripts. Each must declare, in its `# /// script` block, every third-party distribution the project code imports. |
 | `type_checkers` | `["pyright"]` | `pyright`, `basedpyright`, `ty` and/or `pyrefly`. The first one runs by default; `check --type-checker` overrides it. A config file is generated for each one listed. |
-| `python` | `"3.11"` | Python version written into the type-checker configs. |
+| `python` | `"3.11"` | Target Python version: written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
 | `baseline` | `"archlint-baseline.json"` | The baseline file used by `archlint baseline` and `check`. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
