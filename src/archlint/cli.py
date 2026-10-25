@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import baseline as ratchet_mod
-from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
+from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner, SystemClock
 from .config import find_policy, load_policy
 from .domain import PolicyError
 from .engine import Options, Services, run_check, run_own
@@ -21,7 +21,7 @@ __all__ = ["default_services", "main"]
 
 def default_services(root: Path, cache: bool = True) -> Services:
     scanner = FsScanner(root / ".archlint" if cache else None)
-    return Services(scanner, SubprocessToolRunner(), list(all_checkers().values()), LocalFileSystem())
+    return Services(scanner, SubprocessToolRunner(), list(all_checkers().values()), LocalFileSystem(), SystemClock())
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -9,7 +9,7 @@
 - `FileSystem` port (`ports`), `LocalFileSystem` (`adapters`) and `FakeFileSystem` (`testing`). Baseline, config, the
   practices, drift, selftest and bench no longer touch the disk themselves; `Services` gains a required `fs` field and
   the functions take it as their first argument. The `application` ring's external list drops `shutil` and `tempfile`
-  (`json`, `pathlib` and `time` stay: they do no I/O), and a test fails if application code bypasses the port.
+  (`pathlib` stays for `Path` values only; JSON and timing go through `FileSystem.read_json`/`write_json` and a new `Clock` port, `Services.clock`), and a test fails if application code bypasses the port.
 - Documentation: `docs/configuration.md` (every key, rule and practice) and `docs/architecture.md` (ArchLint's rings
   and module table, kept in sync with the policy by `docs-sync`, which is now enabled for this repository).
 - Presets: `preset = "strict" | "standard" | "relaxed"` in `[tool.archlint]` (default `strict`, identical to the

@@ -3,7 +3,6 @@ longer occur must be deleted (``archlint baseline`` rewrites the file), so the d
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,13 +27,13 @@ class Ratchet:
 def load(fs: FileSystem, path: Path) -> set[str]:
     if not fs.is_file(path):
         return set()
-    data = json.loads(fs.read_text(path))
+    data = fs.read_json(path)
     return {str(k) for k in data.get("violations", [])}
 
 
 def save(fs: FileSystem, path: Path, violations: Iterable[Violation]) -> int:
     keys = sorted({v.key for v in violations})
-    fs.write_text(path, json.dumps({"version": 1, "violations": keys}, indent=2) + "\n")
+    fs.write_json(path, {"version": 1, "violations": keys})
     return len(keys)
 
 

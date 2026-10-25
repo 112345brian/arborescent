@@ -19,7 +19,7 @@ from typing import Any
 from .domain import Policy, ToolResult
 from .facts import ModuleInfo, RawImport, SourceFacts, extract
 
-__all__ = ["FsScanner", "LocalFileSystem", "ScanData", "SubprocessToolRunner"]
+__all__ = ["FsScanner", "LocalFileSystem", "ScanData", "SubprocessToolRunner", "SystemClock"]
 
 _PRUNE = {"__pycache__", ".git", ".venv", "venv", "node_modules", ".archlint", ".mypy_cache", ".ruff_cache", ".tox"}
 _CACHE_VERSION = 2
@@ -39,6 +39,12 @@ class LocalFileSystem:
 
     def write_bytes(self, path: Path, data: bytes) -> None:
         _ = path.write_bytes(data)
+
+    def read_json(self, path: Path) -> Any:
+        return json.loads(self.read_text(path))
+
+    def write_json(self, path: Path, data: Any) -> None:
+        self.write_text(path, json.dumps(data, indent=2) + "\n")
 
     def exists(self, path: Path) -> bool:
         return path.exists()
@@ -71,6 +77,13 @@ class LocalFileSystem:
     def temporary_directory(self, prefix: str) -> Generator[Path]:
         with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
             yield Path(tmp)
+
+
+class SystemClock:
+    """``Clock`` over ``time.perf_counter``."""
+
+    def now(self) -> float:
+        return time.perf_counter()
 
 
 class SubprocessToolRunner:

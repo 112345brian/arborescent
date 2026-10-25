@@ -71,7 +71,8 @@ external = ["@pure", "pathlib", "contextlib", "archlint"]
 
 [tool.archlint.ring.application]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "json", "time", "concurrent", "archlint"]
+# pathlib: Path values only (join, relative_to); every disk access goes through FileSystem (tests/test_filesystem.py)
+external = ["@pure", "pathlib", "concurrent", "archlint"]
 
 [tool.archlint.ring.adapters]
 may_import = ["domain", "ports"]

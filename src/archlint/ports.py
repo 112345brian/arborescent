@@ -5,12 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from .domain import Policy, ToolResult
 from .facts import ModuleInfo
 
-__all__ = ["FileSystem", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker"]
+__all__ = ["Clock", "FileSystem", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker"]
 
 
 class ToolRunner(Protocol):
@@ -19,6 +19,12 @@ class ToolRunner(Protocol):
     def available(self, executable: str) -> bool: ...
 
     def run(self, argv: Sequence[str], cwd: Path, timeout: float = 600.0) -> ToolResult: ...
+
+
+class Clock(Protocol):
+    """A monotonic stopwatch in seconds; only differences mean anything."""
+
+    def now(self) -> float: ...
 
 
 class FileSystem(Protocol):
@@ -32,6 +38,10 @@ class FileSystem(Protocol):
     def write_text(self, path: Path, text: str) -> None: ...  # parent must exist; overwrites
 
     def write_bytes(self, path: Path, data: bytes) -> None: ...  # parent must exist; overwrites
+
+    def read_json(self, path: Path) -> Any: ...  # ValueError on empty or malformed content
+
+    def write_json(self, path: Path, data: Any) -> None: ...  # indent 2, LF, trailing newline
 
     def exists(self, path: Path) -> bool: ...
 

@@ -139,3 +139,27 @@ def test_application_and_composition_code_touches_files_only_through_the_port() 
                 if not via_port:
                     bad.append(f"{path.name}:{node.lineno} .{node.func.attr}() bypasses the FileSystem port")
     assert not bad, bad
+
+
+def test_json_round_trip_and_errors(env: tuple[FileSystem, Path]) -> None:
+    fs, root = env
+    fs.write_json(root / "j.json", {"b": [1, 2], "a": "é"})
+    raw = fs.read_bytes(root / "j.json")
+    assert raw.startswith(b'{\n  "b": [') and raw.endswith(b"}\n") and b"\\u00e9" in raw  # indent 2, LF, ASCII-escaped
+    assert fs.read_json(root / "j.json") == {"b": [1, 2], "a": "é"}
+    fs.write_bytes(root / "empty.json", b"")
+    with pytest.raises(ValueError):
+        fs.read_json(root / "empty.json")
+    with pytest.raises(FileNotFoundError):
+        fs.read_json(root / "nope.json")
+
+
+def test_clocks_only_move_forward() -> None:
+    from archlint.adapters import SystemClock
+    from archlint.testing import FakeClock
+
+    for clock in (SystemClock(), FakeClock()):
+        a, b = clock.now(), clock.now()
+        assert b >= a
+    fake = FakeClock(step=2.0)
+    assert (fake.now(), fake.now()) == (2.0, 4.0)

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import dataclasses
 import sys
-import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -36,12 +35,12 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
     def twice(label: str, fn: Callable[[], str], reset: Callable[[], None] | None = None) -> None:
         if reset:
             reset()
-        t0 = time.perf_counter()
+        t0 = svc.clock.now()
         note = fn()
-        cold = time.perf_counter() - t0
-        t0 = time.perf_counter()
+        cold = svc.clock.now() - t0
+        t0 = svc.clock.now()
         fn()
-        warm = time.perf_counter() - t0
+        warm = svc.clock.now() - t0
         rows.append((label, f"{cold:.2f}", f"{warm:.2f}", note))
         print(f"  [{root.name}] {label}: cold {cold:.2f}s warm {warm:.2f}s {note}", file=sys.stderr, flush=True)
 

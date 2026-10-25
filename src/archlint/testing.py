@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .domain import ToolResult
 
-__all__ = ["FakeFileSystem", "FakeToolRunner"]
+__all__ = ["FakeClock", "FakeFileSystem", "FakeToolRunner"]
 
 
 @dataclass
@@ -29,6 +31,18 @@ class FakeToolRunner:
         if argv[0] not in self.installed:
             return ToolResult(None, "", f"{argv[0]}: not installed")
         return self.results.get(argv[0], ToolResult(0, "ok", ""))
+
+
+@dataclass
+class FakeClock:
+    """Every reading advances the time by ``step`` seconds, so durations are exact and repeatable."""
+
+    step: float = 0.5
+    t: float = 0.0
+
+    def now(self) -> float:
+        self.t += self.step
+        return self.t
 
 
 def _segments_match(pattern: Sequence[str], parts: Sequence[str]) -> bool:
@@ -96,6 +110,12 @@ class FakeFileSystem:
 
     def write_text(self, path: Path, text: str) -> None:
         self.write_bytes(path, text.encode("utf-8"))
+
+    def read_json(self, path: Path) -> Any:
+        return json.loads(self.read_text(path))
+
+    def write_json(self, path: Path, data: Any) -> None:
+        self.write_text(path, json.dumps(data, indent=2) + "\n")
 
     def exists(self, path: Path) -> bool:
         key = self._key(path)

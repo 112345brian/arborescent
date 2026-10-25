@@ -3,7 +3,6 @@ shared parse, then apply the baseline ratchet."""
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -12,7 +11,7 @@ from pathlib import Path
 from . import baseline as ratchet_mod
 from .domain import Policy, ToolResult, Violation
 from .generate import IMPORT_LINTER_FILE, generate
-from .ports import FileSystem, ModuleScanner, ScanResult, ToolRunner, TypeChecker
+from .ports import Clock, FileSystem, ModuleScanner, ScanResult, ToolRunner, TypeChecker
 from .practices import run_practices
 from .rules import check_modules
 
@@ -25,6 +24,7 @@ class Services:
     runner: ToolRunner
     checkers: Sequence[TypeChecker]  # every known adapter; the policy / --type-checker picks which run
     fs: FileSystem
+    clock: Clock
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,7 @@ def _tool(services: Services, name: str, argv: list[str], root: Path, opts: Opti
 
 def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
     opts = opts if opts is not None else Options()
-    started = time.perf_counter()
+    started = services.clock.now()
     report = CheckReport()
     only = changed_files(services.runner, root, opts.changed) if opts.changed else None
     report.partial = only is not None
@@ -117,9 +117,9 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
             pool.submit(_tool, services, "tach", ["tach", "check"], root, opts, lambda r: r.returncode == 0),
             pool.submit(_tool, services, checker.name, checker.command(files), root, opts, checker.passed),
         ]  # fmt: skip
-    t0 = time.perf_counter()
+    t0 = services.clock.now()
     found, scan = run_own(policy, root, services, only)
-    report.engines.append(EngineRun("archlint", "ok", time.perf_counter() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
+    report.engines.append(EngineRun("archlint", "ok", services.clock.now() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
     report.parsed = scan.parsed
     report.drift = drift(services.fs, policy, root, sorted(scan.known), [c for c in services.checkers if c.name in {*policy.type_checkers, checker.name}])
     report.violations = found
@@ -127,5 +127,5 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
     report.ratchet = ratchet_mod.apply(found, base, complete=only is None)
     report.engines += [f.result() for f in futures]
     pool.shutdown()
-    report.seconds = time.perf_counter() - started
+    report.seconds = services.clock.now() - started
     return report
