@@ -106,6 +106,7 @@ external = ["@pure", "argparse", "pathlib", "archlint"]
 crlf = ["*.sh", "*.bash"]
 undeclared-imports = true
 secrets-guard = "tests"
+docs-sync = "docs/architecture.md"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -51,6 +51,9 @@ archlint selftest     # mutation-test the rules: inject a forbidden import, requ
 archlint bench DIR…   # cold/warm timings of every engine on codebases you prepared
 ```
 
+Documentation: [configuration reference](docs/configuration.md) (every key, rule and practice) and
+[ArchLint's own architecture](docs/architecture.md).
+
 ## Presets
 
 `preset = "strict"` is the default. A preset only changes how much of the external-import and OS rules applies; ring

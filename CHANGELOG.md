@@ -6,6 +6,8 @@
 
 ### Added
 
+- Documentation: `docs/configuration.md` (every key, rule and practice) and `docs/architecture.md` (ArchLint's rings
+  and module table, kept in sync with the policy by `docs-sync`, which is now enabled for this repository).
 - Presets: `preset = "strict" | "standard" | "relaxed"` in `[tool.archlint]` (default `strict`, identical to the
   behaviour before presets). They set how much of the external-import allow-list applies (all imports / third-party plus
   I/O stdlib / third-party only) and whether OS branching is limited. Layering and classification are never relaxed.
