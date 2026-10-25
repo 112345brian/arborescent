@@ -11,9 +11,8 @@ from . import baseline as ratchet_mod
 from .adapters import FsScanner, SubprocessToolRunner
 from .config import find_policy, load_policy
 from .domain import Policy, PolicyError
-from .engine import Options, Services, pick_checker, run_check, run_own
+from .engine import Options, Services, pick_checker, run_check, run_own, write_generated
 from .engines import default_engines
-from .generate import generate
 from .selftest import selftest
 from .typecheckers import all_checkers
 
@@ -67,11 +66,7 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
 def _dispatch(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
     if args.command == "generate":
         _ = pick_checker(policy, svc)
-        _, scan = run_own(policy, root, svc, practices=False)
-        wanted = [c for c in svc.checkers if c.name in policy.type_checkers]
-        for rel, text in generate(policy, sorted(scan.known), wanted).items():
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_text(text, encoding="utf-8", newline="\n")
+        for rel in write_generated(policy, root, svc):
             print(f"wrote {rel}")
         return 0
     if args.command == "baseline":

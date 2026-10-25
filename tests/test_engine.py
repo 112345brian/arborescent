@@ -236,7 +236,7 @@ def test_no_caller_discards_the_result_of_a_check() -> None:
     """A call to run_check/run_own/check_modules/run_practices/drift/selftest as a bare statement would silently drop
     violations; scan the whole source tree for that."""
     src = Path(__file__).resolve().parents[1] / "src" / "archlint"
-    watched = {"run_check", "run_own", "check_modules", "run_practices", "drift", "selftest", "gitignore_shadow", "sibling_versions"}
+    watched = {"run_check", "run_own", "check_modules", "run_practices", "drift", "selftest", "gitignore_shadow", "sibling_versions", "write_generated"}
     bad: list[str] = []
     for path in src.glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

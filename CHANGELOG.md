@@ -10,6 +10,10 @@
   (`@group` expansion, `preset`, `io_modules`, defaults). `Policy` checks its own invariants on construction (distinct
   rings, onion rule, `classify` naming known rings), so a hand-built policy cannot be inconsistent. Messages and
   `PolicyError` are unchanged.
+- Rule ids live in one place, `archlint.domain.Rule` (a `StrEnum`; the string values, and so baseline keys, are
+  unchanged). `selftest.NO_MUTATION` records why a rule has no mutation. `engine.write_generated` now writes the
+  generated files (`cli` only prints), and `rules.check_modules` is split into one function per rule. The unused
+  `rules.RULES` tuple is gone.
 
 ### Added
 

@@ -16,7 +16,7 @@ from .ports import Engine, ModuleScanner, ScanResult, ToolRunner, TypeChecker
 from .practices import run_practices
 from .rules import check_modules
 
-__all__ = ["CheckReport", "EngineRun", "Options", "Services", "changed_files", "drift", "run_check", "run_own"]
+__all__ = ["CheckReport", "EngineRun", "Options", "Services", "changed_files", "drift", "run_check", "run_own", "write_generated"]
 
 
 @dataclass(frozen=True)
@@ -76,6 +76,18 @@ def run_own(
     if practices and only is None:
         found += run_practices(policy, root, services.runner, scan.modules, scan.known)
     return found, scan
+
+
+def write_generated(policy: Policy, root: Path, services: Services) -> list[str]:
+    """Write the tool configs compiled from the policy; return the written paths (relative, sorted)."""
+    _, scan = run_own(policy, root, services, practices=False)
+    wanted = [c for c in services.checkers if c.name in policy.type_checkers]
+    written: list[str] = []
+    for rel, text in sorted(generate(policy, sorted(scan.known), wanted).items()):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8", newline="\n")
+        written.append(rel)
+    return written
 
 
 def drift(policy: Policy, root: Path, names: Sequence[str], checkers: Sequence[TypeChecker]) -> list[str]:
