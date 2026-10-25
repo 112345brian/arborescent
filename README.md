@@ -51,6 +51,21 @@ archlint selftest     # mutation-test the rules: inject a forbidden import, requ
 archlint bench DIR…   # cold/warm timings of every engine on codebases you prepared
 ```
 
+## Presets
+
+`preset = "strict"` is the default. A preset only changes how much of the external-import and OS rules applies; ring
+layering, classification (every module needs a ring) and lazy-import detection are the same in all of them.
+
+| preset | imports that need a ring `external` entry | OS branching limited to named rings |
+|---|---|---|
+| `strict` (default) | every external import, stdlib included | yes |
+| `standard` | third-party packages and the I/O stdlib set; other stdlib is free | yes |
+| `relaxed` | third-party packages only | no |
+
+The I/O stdlib set (`os`, `subprocess`, `socket`, `sqlite3`, `pathlib`, ...: see `archlint.presets.IO_MODULES`) also drives
+the generated import-linter bans. Replace it per project with `io_modules = ["os", "subprocess", ...]` (an empty list means
+no stdlib module counts as I/O).
+
 ## Ports
 
 - `ToolRunner` (`available`, `run`) -- how engines and git are executed; `archlint.testing.FakeToolRunner` fakes it.

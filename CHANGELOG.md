@@ -6,6 +6,11 @@
 
 ### Added
 
+- Presets: `preset = "strict" | "standard" | "relaxed"` in `[tool.archlint]` (default `strict`, identical to the
+  behaviour before presets). They set how much of the external-import allow-list applies (all imports / third-party plus
+  I/O stdlib / third-party only) and whether OS branching is limited. Layering and classification are never relaxed.
+  `io_modules = [...]` replaces the stdlib set treated as I/O. The I/O set moved from `generate` into the new
+  `archlint.presets` (domain ring).
 - One `[tool.archlint]` policy (rings, glob classification, per-ring internal and external allow-lists, OS-branching
   rings, entry-script dependencies, practices) that `archlint generate` compiles into import-linter contracts,
   `tach.toml` and a strict config for pyright, basedpyright, ty or pyrefly. `check` diffs the generated files against

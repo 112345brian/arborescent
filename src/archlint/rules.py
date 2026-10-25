@@ -1,7 +1,8 @@
 """ArchLint's own checks, as pure functions over already-parsed modules.
 
-Rules: ``unclassified``, ``stale-classification``, ``internal-import``, ``external-import``, ``os-branching``,
-``bad-import`` and ``undeclared-entry-dependency``. Lazy (function-level) and ``TYPE_CHECKING`` imports count.
+Rules: ``unclassified``, ``internal-import``, ``external-import``, ``os-branching``, ``bad-import`` and
+``undeclared-entry-dependency``. Lazy (function-level) and ``TYPE_CHECKING`` imports count. How much of the external
+and OS-branching rules applies is the policy's preset; layering and classification are never relaxed.
 """
 
 from __future__ import annotations
@@ -55,9 +56,10 @@ def check_modules(
                         )
                     )
             for top in external:
-                if top not in STDLIB:
+                is_stdlib = top in STDLIB
+                if not is_stdlib:
                     third_party.setdefault(dist_name(policy.dependencies.get(top, top)), set()).add(name)
-                if ALL not in rule.external and top not in rule.external:
+                if ALL not in rule.external and top not in rule.external and policy.restricts_external(top, is_stdlib):
                     out.append(
                         Violation(
                             "external-import",
@@ -66,7 +68,7 @@ def check_modules(
                             imp.line,
                         )
                     )
-        if not rule.os_branching:
+        if policy.preset.os_branching and not rule.os_branching:
             out += [
                 Violation("os-branching", name, f"[{ring}] references {attr}; only permitted rings may branch on the OS", line)
                 for line, attr in info.facts.os_uses

@@ -6,7 +6,9 @@ import fnmatch
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
+
+from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
     "ALL",
@@ -87,6 +89,8 @@ class Policy:
     output_dir: str = "."
     baseline: str = "archlint-baseline.json"
     practices: Mapping[str, Any] = field(default_factory=lambda: {})
+    preset: Preset = PRESETS[DEFAULT_PRESET]
+    io_modules: frozenset[str] = IO_MODULES  # stdlib modules that mean "I/O, process or OS"
 
     def ring(self, name: str) -> RingRule:
         for r in self.rings:
@@ -106,6 +110,10 @@ class Policy:
         names = [r.name for r in self.rings]
         inner = names[: names.index(ring)]
         return frozenset({ring, *(inner if ALL in rule.may_import else rule.may_import & set(inner))})
+
+    def restricts_external(self, top: str, is_stdlib: bool) -> bool:
+        """Whether importing external package ``top`` needs an entry in the importing ring's allow-list."""
+        return self.preset.restricts(top, is_stdlib, self.io_modules)
 
     def expressible_by_layers(self) -> bool:
         """True when every ring may import ALL inner rings, so tach's layers alone state the policy."""
@@ -147,6 +155,12 @@ class Policy:
             if ring not in names:
                 raise PolicyError(f"classify {pattern!r} names unknown ring {ring!r}")
         checkers = tuple(raw.get("type_checkers", ["pyright"]))
+        preset_name = raw.get("preset", DEFAULT_PRESET)
+        if not isinstance(preset_name, str) or preset_name not in PRESETS:
+            raise PolicyError(f"preset {preset_name!r} is unknown; choose one of {sorted(PRESETS)}")
+        io_modules: object = raw["io_modules"] if "io_modules" in raw else sorted(IO_MODULES)
+        if not isinstance(io_modules, list) or not all(isinstance(m, str) and m for m in cast("list[object]", io_modules)):
+            raise PolicyError("`io_modules` must be a list of non-empty module names")
         return Policy(
             rings=tuple(rings),
             classify=classify,
@@ -161,4 +175,6 @@ class Policy:
             output_dir=str(raw.get("output_dir", ".")),
             baseline=str(raw.get("baseline", "archlint-baseline.json")),
             practices=dict(raw.get("practices", {})),
+            preset=PRESETS[preset_name],
+            io_modules=frozenset(cast("list[str]", io_modules)),
         )

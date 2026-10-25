@@ -61,7 +61,9 @@ def plan(policy: Policy, paths: dict[str, str], known: frozenset[str]) -> tuple[
             if "*" not in ring.external:
                 code = "import archlint_probe_pkg" if not lazy else "def _archlint_probe2() -> None:\n    import archlint_probe_pkg"
                 out.append(Mutation("external-import", f"{ring.name}: unlisted {how} external import", paths[host], code))
-        if not ring.os_branching:
+        if not policy.preset.os_branching:
+            skipped.append(f"ring {ring.name}: the {policy.preset.name} preset does not enforce OS branching")
+        elif not ring.os_branching:
             out.append(Mutation("os-branching", f"{ring.name}: OS branching", paths[host], "import os\n_archlint_probe = os.name"))
     anchor = next(iter(sorted(known)), None)
     if anchor:
