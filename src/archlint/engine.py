@@ -33,7 +33,7 @@ class Services:
     checkers: Sequence[TypeChecker]  # every known adapter; the policy / --type-checker picks which run
     fs: FileSystem
     clock: Clock
-    engines: Sequence[Engine] = ()  # run beside the chosen type checker (import-linter, tach); see archlint.engines
+    engines: Sequence[Engine]  # run beside the chosen type checker (import-linter, tach); see archlint.engines. No default: a forgotten list used to skip them silently
 
 
 @dataclass(frozen=True)

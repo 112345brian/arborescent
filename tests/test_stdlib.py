@@ -48,7 +48,7 @@ def test_version_dependent_membership(module: str, versions: set[str]) -> None:
     assert {v for v in SUPPORTED_PYTHONS if module in stdlib_for(v)} == versions
 
 
-@pytest.mark.parametrize("bad", ["3", "3.99", "abc", "", "3.10", "3.11.4", "python3.11"])
+@pytest.mark.parametrize("bad", ["3", "3.99", "abc", "", "3.10", "python3.11"])
 def test_unsupported_python_is_a_policy_error_listing_the_supported_versions(bad: str) -> None:
     with pytest.raises(PolicyError, match=r"3\.11.*3\.14"):
         _ = mini_policy(python=bad)

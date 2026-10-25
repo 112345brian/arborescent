@@ -41,3 +41,12 @@ def test_changed_mode_restricts_import_linter_to_changed_files() -> None:
     from archlint import engine
 
     assert "changed" in inspect.getsource(engine._tool)  # type: ignore[attr-defined]
+
+
+@pytest.mark.xfail(strict=True, reason="TODO: output_dir moves the generated configs, but the engine commands still look for them at the root")
+def test_engine_commands_follow_output_dir() -> None:
+    from archlint.engines import default_engines
+
+    files = generate(mini_policy(output_dir="cfg"), ["app.domain"], by_name(["pyright"]))
+    assert "cfg/archlint-importlinter.toml" in files
+    assert any("cfg/archlint-importlinter.toml" in " ".join(e.command([])) for e in default_engines())

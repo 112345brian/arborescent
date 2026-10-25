@@ -83,7 +83,7 @@ class FakeFileSystem:
 
     def _under(self, root: str) -> list[str]:
         prefix = root.rstrip("/") + "/"
-        return sorted(k for k in {*self.files, *self._all_dirs()} if k.startswith(prefix))
+        return sorted((k for k in {*self.files, *self._all_dirs()} if k.startswith(prefix)), key=lambda k: k.split("/"))
 
     def add(self, path: Path, text: str | bytes) -> None:
         """Test setup: create a file and its parent folders in one go."""

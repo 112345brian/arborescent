@@ -29,7 +29,9 @@ class Clock(Protocol):
 
 class FileSystem(Protocol):
     """Every file access the use cases make. Text is UTF-8 and newlines are kept exactly as stored (no translation);
-    writes never translate ``\n``. Errors are the ``OSError`` / ``UnicodeDecodeError`` the real file system raises."""
+    writes never translate ``\n``. Errors are the ``OSError`` / ``UnicodeDecodeError`` the real file system raises
+    (the fake raises the closest subclass, which can differ from the OS's, e.g. ``PermissionError`` for a folder on
+    Windows). Glob patterns follow the OS's case rules on the real file system; the fake is case-sensitive."""
 
     def read_text(self, path: Path) -> str: ...
 
@@ -79,23 +81,13 @@ class Engine(Protocol):
     def passed(self, result: ToolResult) -> bool: ...
 
 
-class TypeChecker(Protocol):
-    """A swappable type checker. The policy renders its strict configuration; ``command`` runs it."""
-
-    @property
-    def name(self) -> str: ...
-
-    @property
-    def executable(self) -> str: ...
+class TypeChecker(Engine, Protocol):
+    """A swappable type checker: an ``Engine`` whose strict configuration the policy renders."""
 
     @property
     def config_file(self) -> str: ...
 
     def render_config(self, policy: Policy, paths: Sequence[str]) -> str: ...
-
-    def command(self, files: Sequence[str]) -> list[str]: ...
-
-    def passed(self, result: ToolResult) -> bool: ...
 
 
 class ScanResult(Protocol):

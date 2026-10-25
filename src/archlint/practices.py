@@ -20,13 +20,13 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from .domain import Policy, Rule, Violation, dist_name
+from .domain import NOISE_DIRS, Policy, Rule, Violation, dist_name
 from .facts import ModuleInfo, resolve_targets
 from .ports import FileSystem, ToolRunner
 
 __all__ = ["PRACTICES", "run_practices"]
 
-_NOISE = {"__pycache__", ".venv", "venv", "node_modules", "build", "dist", ".tox", ".mypy_cache", ".ruff_cache", ".archlint"}
+_NOISE = NOISE_DIRS | {"build", "dist"}  # build output is noise for gitignore-shadow, but a package called `build` is source
 
 
 def gitignore_shadow(root: Path, runner: ToolRunner, allow: Sequence[str] = ()) -> list[Violation]:

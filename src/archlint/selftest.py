@@ -9,12 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .domain import Policy, Rule
+from .domain import NOISE_DIRS, Policy, Rule
 from .engine import Services, run_own
 
 __all__ = ["NO_MUTATION", "Mutation", "SelfTestReport", "selftest"]
 
-_SKIP_COPY = (".git", ".venv", "venv", "__pycache__", "node_modules", ".archlint", "*.pyc")
+_SKIP_COPY = (*sorted(NOISE_DIRS), "*.pyc")
 
 _PRACTICE = "repository practice: selftest mutates source files only and runs no practices"
 # Rules with no mutation, and why. A test fails when a rule is in neither this table nor ``plan``'s output.

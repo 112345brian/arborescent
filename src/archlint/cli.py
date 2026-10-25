@@ -46,18 +46,14 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None, services: Services | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.command == "bench":
-        from .bench import run_bench  # imported lazily: only this command needs it
-
-        return run_bench(args.dirs, args.checkers, default_services)
     try:
+        if args.command == "bench":
+            from .bench import run_bench  # imported lazily: only this command needs it
+
+            return run_bench(args.dirs, args.checkers, default_services)
         fs = services.fs if services else LocalFileSystem()
         policy, root = load_policy(fs, args.config or find_policy(fs, Path.cwd()))
-    except PolicyError as exc:
-        print(f"archlint: {exc}", file=sys.stderr)
-        return 2
-    svc = services or default_services(root, cache=not getattr(args, "no_cache", False))
-    try:
+        svc = services or default_services(root, cache=not getattr(args, "no_cache", False))
         return _dispatch(args, policy, root, svc)
     except PolicyError as exc:
         print(f"archlint: {exc}", file=sys.stderr)

@@ -222,7 +222,7 @@ def test_selftest_works_on_a_copy_and_leaves_the_repository_untouched(repo: Path
     (repo / ".git").mkdir()
     (repo / ".git" / "HEAD").write_text("ref", encoding="utf-8")
     before = tree(repo)
-    report = selftest(mini_policy(), repo, Services(FsScanner(), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock()))
+    report = selftest(mini_policy(), repo, Services(FsScanner(), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), []))
     assert report.ok
     assert tree(repo) == before
 
@@ -234,7 +234,7 @@ def test_bench_writes_the_generated_configs_and_clears_the_cache(tmp_path: Path)
     write_files(tmp_path, {"app/__init__.py": "", "app/domain.py": "X = 1\n", "archlint.toml": BENCH_TOML})
     (tmp_path / ".archlint").mkdir()
     (tmp_path / ".archlint" / "stale").write_text("x", encoding="utf-8")
-    lines = bench_one(tmp_path, ["pyright"], lambda r: Services(FsScanner(r / ".archlint"), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock()))
+    lines = bench_one(tmp_path, ["pyright"], lambda r: Services(FsScanner(r / ".archlint"), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), []))
     assert lines[0].startswith("### ") and any("archlint own checks" in ln for ln in lines)
     assert (tmp_path / "pyrightconfig.json").is_file() and (tmp_path / "archlint-importlinter.toml").is_file()
     assert not (tmp_path / ".archlint" / "stale").exists()

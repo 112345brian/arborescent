@@ -75,7 +75,7 @@ def test_glob_and_rglob_are_sorted_and_relative_to_the_root(env: tuple[FileSyste
     assert rel(fs.glob(root, "nothing/*")) == []
     assert rel(fs.rglob(root, "*.sh")) == ["p/y.sh", "x.sh"]
     everything = rel(fs.rglob(root, "*"))
-    assert "p/a" in everything and "p/a/n.txt" in everything and everything == sorted(everything)
+    assert "p/a" in everything and "p/a/n.txt" in everything and everything == sorted(everything, key=lambda p: p.split("/"))
 
 
 def test_remove_tree_and_missing_is_fine(env: tuple[FileSystem, Path]) -> None:

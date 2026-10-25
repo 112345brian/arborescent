@@ -14,6 +14,7 @@ from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 
 __all__ = [
     "ALL",
+    "NOISE_DIRS",
     "Policy",
     "PolicyError",
     "RingRule",
@@ -22,6 +23,9 @@ __all__ = [
     "Violation",
     "dist_name",
 ]
+
+NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".archlint", ".mypy_cache", ".ruff_cache", ".tox"})
+# Folders no walker (scanner, practices, selftest copy) looks into. Practices add build output on top of this.
 
 ALL = "*"  # in `may_import` or `external`: no restriction
 

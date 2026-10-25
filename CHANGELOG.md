@@ -6,6 +6,12 @@
 
 ### Changed
 
+- Fixes after merging the five cleanup branches: `python = "3.12.1"` is read as `3.12`; `type_checkers` must be a
+  non-empty list of names (an empty list used to crash `generate`); `archlint bench` reports a bad policy as exit 2
+  like every other command, applies `--checkers` to the policy and validates them before timing; `Services.engines` has
+  no default any more (a forgotten list used to skip import-linter and tach silently); `ports.TypeChecker` extends
+  `Engine`; the scanner, practices and selftest share `domain.NOISE_DIRS`; the in-memory file system sorts glob results
+  like the real one. Open: `output_dir` does not yet reach the engine commands (strict xfail in `tests/test_todo.py`).
 - The config file's shape no longer lives in the domain: `Policy.from_mapping` is now `config.policy_from_mapping`
   (`@group` expansion, `preset`, `io_modules`, defaults). `Policy` checks its own invariants on construction (distinct
   rings, onion rule, `classify` naming known rings), so a hand-built policy cannot be inconsistent. Messages and

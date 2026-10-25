@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -50,9 +51,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
                 out.add(item)
         return frozenset(out)
 
-    names = list(raw.get("rings", []))
-    if not names or len(set(names)) != len(names):
-        raise PolicyError("`rings` must list distinct ring names, innermost first")
+    names = list(raw.get("rings", []))  # distinct and non-empty: checked by Policy
     ring_tables: Mapping[str, Mapping[str, Any]] = raw.get("ring", {})
     for unknown in set(ring_tables) - set(names):
         raise PolicyError(f"[ring.{unknown}] is not in `rings`")
@@ -71,6 +70,11 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
     preset_name = raw.get("preset", DEFAULT_PRESET)
     if not isinstance(preset_name, str) or preset_name not in PRESETS:
         raise PolicyError(f"preset {preset_name!r} is unknown; choose one of {sorted(PRESETS)}")
+    python = str(raw.get("python", "3.11"))  # an unquoted TOML 3.12 is a float; str() reads it back (3.10 -> "3.1": unsupported)
+    minor = re.fullmatch(r"(\d+\.\d+)(?:\.\d+)*", python.strip())  # "3.12.1" -> "3.12"
+    checkers: object = raw.get("type_checkers", ["pyright"])
+    if not isinstance(checkers, list) or not checkers or not all(isinstance(c, str) and c for c in cast("list[object]", checkers)):
+        raise PolicyError("`type_checkers` must be a non-empty list of type checker names")
     io_modules: object = raw["io_modules"] if "io_modules" in raw else sorted(IO_MODULES)
     if not isinstance(io_modules, list) or not all(isinstance(m, str) and m for m in cast("list[object]", io_modules)):
         raise PolicyError("`io_modules` must be a list of non-empty module names")
@@ -82,8 +86,8 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
-        python=str(raw.get("python", "3.11")),
-        type_checkers=tuple(raw.get("type_checkers", ["pyright"])),
+        python=minor.group(1) if minor else python,
+        type_checkers=tuple(cast("list[str]", checkers)),
         output_dir=str(raw.get("output_dir", ".")),
         baseline=str(raw.get("baseline", "archlint-baseline.json")),
         practices=dict(raw.get("practices", {})),

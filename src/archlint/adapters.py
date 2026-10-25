@@ -16,12 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .domain import Policy, ToolResult
+from .domain import NOISE_DIRS, Policy, ToolResult
 from .facts import ModuleInfo, RawImport, SourceFacts, extract
 
 __all__ = ["FsScanner", "LocalFileSystem", "ScanData", "SubprocessToolRunner", "SystemClock"]
 
-_PRUNE = {"__pycache__", ".git", ".venv", "venv", "node_modules", ".archlint", ".mypy_cache", ".ruff_cache", ".tox"}
+_PRUNE = NOISE_DIRS
 _CACHE_VERSION = 2
 
 

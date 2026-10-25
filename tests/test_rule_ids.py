@@ -106,7 +106,7 @@ def test_check_modules_edge_inputs(repo: Path) -> None:
 
 def test_write_generated_writes_every_file_and_reports_them(repo: Path) -> None:
     policy = mini_policy()
-    services = Services(FsScanner(), FakeToolRunner(), [], LocalFileSystem(), SystemClock())
+    services = Services(FsScanner(), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), [])
     written = write_generated(policy, repo, services)
     assert written == sorted(written) and written
     for rel in written:
@@ -119,5 +119,5 @@ def test_write_generated_writes_every_file_and_reports_them(repo: Path) -> None:
 @pytest.mark.parametrize("ring_change", [{}, {"domain": {"external": ["sys"]}}])
 def test_write_generated_makes_missing_folders(repo: Path, ring_change: dict[str, Any]) -> None:
     policy = mini_policy(ring=ring_with(**ring_change))
-    written = write_generated(policy, repo, Services(FsScanner(), FakeToolRunner(), [], LocalFileSystem(), SystemClock()))
+    written = write_generated(policy, repo, Services(FsScanner(), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), []))
     assert all((repo / rel).is_file() for rel in written)

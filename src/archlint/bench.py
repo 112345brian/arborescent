@@ -8,12 +8,13 @@ the algorithms cost.
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .config import load_policy
-from .engine import Options, Services, pick_checker, run_check, run_own
+from .engine import Options, Services, pick_checker, run_check, run_own, write_generated
 from .generate import generate
 from .ports import FileSystem
 
@@ -28,7 +29,8 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
     svc = make(root)
     fs = svc.fs
     policy, _ = load_policy(fs, root / "archlint.toml")
-    _ = pick_checker(policy, svc)  # unknown checker names are a PolicyError, not a traceback
+    policy = dataclasses.replace(policy, type_checkers=tuple(names))
+    _ = pick_checker(policy, svc)  # an unknown checker name is a PolicyError before anything is timed
     rows: list[tuple[str, str, str, str]] = []  # engine, cold, warm, note
 
     def twice(label: str, fn: Callable[[], str], reset: Callable[[], None] | None = None) -> None:
@@ -54,8 +56,7 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
     twice("archlint own checks (parse+rules)", own, lambda: _clear(fs, root))
     chosen = [c for c in svc.checkers if c.name in names]
     twice("generate (in memory)", lambda: f"{len(generate(policy, sorted(scan.known), chosen))} files")
-    for rel, text in generate(policy, sorted(scan.known), chosen).items():
-        fs.write_text(root / rel, text)
+    _ = write_generated(policy, root, svc)
 
     def tool(argv: list[str]) -> Callable[[], str]:
         def go() -> str:
