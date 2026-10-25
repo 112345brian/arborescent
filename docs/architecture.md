@@ -9,9 +9,9 @@ Five rings, innermost first. A ring may import itself and the rings it lists; no
 
 | ring | may import | external packages | role |
 |---|---|---|---|
-| domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the policy, violations, facts about a parsed module, presets |
+| domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the policy, rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib` | the protocols the world must satisfy |
-| application | domain, ports | `pathlib`, `json`, `tempfile`, `shutil`, `time`, `concurrent` | use cases: generate, check, baseline, selftest, practices |
+| application | domain, ports | `pathlib`, `json`, `tempfile`, `shutil`, `time`, `concurrent` | use cases: generate (`write_generated`), check, baseline, selftest, practices |
 | adapters | domain, ports | `pathlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `time` | the real file system, subprocess and type-checker implementations |
 | composition | everything | `argparse`, `pathlib` | the command line: wires adapters to use cases |
 

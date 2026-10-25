@@ -6,6 +6,7 @@ import fnmatch
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, cast
 
 from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
@@ -15,12 +16,31 @@ __all__ = [
     "Policy",
     "PolicyError",
     "RingRule",
+    "Rule",
     "ToolResult",
     "Violation",
     "dist_name",
 ]
 
 ALL = "*"  # in `may_import` or `external`: no restriction
+
+
+class Rule(StrEnum):
+    """Every rule id, in one place. The values are stored in baseline files (``rule|subject|detail``): never rename one."""
+
+    UNCLASSIFIED = "unclassified"
+    INTERNAL_IMPORT = "internal-import"
+    EXTERNAL_IMPORT = "external-import"
+    OS_BRANCHING = "os-branching"
+    BAD_IMPORT = "bad-import"
+    UNDECLARED_ENTRY_DEPENDENCY = "undeclared-entry-dependency"
+    # repository practices (`[tool.archlint.practices]` keys use the same ids)
+    GITIGNORE_SHADOW = "gitignore-shadow"
+    SIBLING_VERSIONS = "sibling-versions"
+    SECRETS_GUARD = "secrets-guard"
+    DOCS_SYNC = "docs-sync"
+    CRLF = "crlf"
+    UNDECLARED_IMPORTS = "undeclared-imports"
 
 
 class PolicyError(ValueError):

@@ -52,6 +52,8 @@ detection and the entry-script check are the same in all of them.
 
 ## Rules ArchLint checks itself
 
+The ids below are `archlint.domain.Rule`. They appear in baseline entries (`rule|subject|detail`), so they never change.
+
 | rule | fires when |
 |---|---|
 | `unclassified` | a module matches no `classify` pattern |

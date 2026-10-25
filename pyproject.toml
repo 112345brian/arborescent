@@ -60,7 +60,7 @@ rings = ["domain", "ports", "application", "adapters", "composition"]
 type_checkers = ["pyright"]
 
 [tool.archlint.groups]
-pure = ["__future__", "collections", "dataclasses", "fnmatch", "re", "typing", "ast", "sys", "tomllib"]
+pure = ["__future__", "collections", "dataclasses", "enum", "fnmatch", "re", "typing", "ast", "sys", "tomllib"]
 
 [tool.archlint.ring.domain]
 external = ["@pure", "archlint"]

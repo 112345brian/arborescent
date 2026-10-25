@@ -4,6 +4,13 @@
 
 ## Unreleased -- 0.1.0 (prototype)
 
+### Changed
+
+- Rule ids live in one place, `archlint.domain.Rule` (a `StrEnum`; the string values, and so baseline keys, are
+  unchanged). `selftest.NO_MUTATION` records why a rule has no mutation. `engine.write_generated` now writes the
+  generated files (`cli` only prints), and `rules.check_modules` is split into one function per rule. The unused
+  `rules.RULES` tuple is gone.
+
 ### Added
 
 - Documentation: `docs/configuration.md` (every key, rule and practice) and `docs/architecture.md` (ArchLint's rings
