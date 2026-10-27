@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 import tomllib
 from argparse import Namespace
@@ -30,7 +31,10 @@ from arborescent.engines import default_engines
 from arborescent.install_tools import (
     TOOL_REQUIREMENTS,
 )
-from arborescent.installer_adapter import include_poetry_arborescent_group_in_dev
+from arborescent.installer_adapter import (
+    _shell_join,
+    include_poetry_arborescent_group_in_dev,
+)
 from arborescent.testing import FakeToolRunner
 from arborescent.typecheckers import all_checkers
 
@@ -55,6 +59,21 @@ def test_tool_requirements_are_real_pip_distributions() -> None:
         pytest.skip("pip or uv is required for the package metadata dry-run")
     result = runner.run(command, root)
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_windows_install_hint_is_invokable_from_powershell(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "arborescent.installer_adapter.os",
+        SimpleNamespace(name="nt"),
+    )
+    monkeypatch.setattr(
+        "arborescent.installer_adapter.sys",
+        SimpleNamespace(executable=r"C:\Program Files\Python\python.exe"),
+    )
+
+    command = _setup_install_command(mini_policy(), tmp_path, _services(FakeToolRunner()), None)
+
+    assert command == "& 'C:\\Program Files\\Python\\python.exe' -m pip install 'import-linter>=2.0' 'ruff>=0.16.3' 'tach>=0.30' 'ty>=0.0.50'"
 
 
 def test_script_resolution_prefers_the_active_interpreters_scripts_directory(tmp_path: Path) -> None:
@@ -335,7 +354,8 @@ def test_check_reports_install_tools_without_running_an_installer(repo: Path, ca
 
     output = capsys.readouterr().out
     assert "SETUP  missing checker(s):" in output
-    assert f"{sys.executable} -m pip install" in output
+    prefix = [sys.executable, "-m", "pip", "install"]
+    assert _shell_join(prefix, shlex.join(prefix), windows=os.name == "nt") in output
     assert "arborescent check --install-tools" in output
     assert not any(call[3:4] == ["install"] or call[:3] == ["uv", "pip", "install"] for call in runner.calls)
     if "--require-tools" in argv:
@@ -446,5 +466,6 @@ def test_check_setup_hint_contains_the_active_environment_install_command(tmp_pa
 
     command = _setup_install_command(mini_policy(), tmp_path, _services(runner), None)
 
-    assert command == f"{sys.executable} -m pip install 'import-linter>=2.0' 'ruff>=0.16.3' 'tach>=0.30' 'ty>=0.0.50'"
+    expected = [sys.executable, "-m", "pip", "install", "import-linter>=2.0", "ruff>=0.16.3", "tach>=0.30", "ty>=0.0.50"]
+    assert command == _shell_join(expected, shlex.join(expected), windows=os.name == "nt")
     assert runner.calls == [[sys.executable, "-m", "pip", "--version"]]

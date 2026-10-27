@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import tomllib
@@ -18,6 +19,20 @@ class InstallerCommands:
     install: list[str]
     check: list[str]
     name: str
+
+
+def _shell_join(command: Sequence[str], posix: str, *, windows: bool | None = None) -> str:
+    """Return a copyable command, using PowerShell invocation syntax on Windows."""
+    is_windows = os.name == "nt" if windows is None else windows
+    if not is_windows:
+        return posix
+    return "& " + " ".join(_powershell_quote(argument) for argument in command)
+
+
+def _powershell_quote(argument: str) -> str:
+    if argument and all(character.isalnum() or character in "_-./:\\" for character in argument):
+        return argument
+    return "'" + argument.replace("'", "''") + "'"
 
 
 def installer_commands(root: Path, fs: FileSystem, runner: ToolRunner, requirements: Sequence[str]) -> InstallerCommands | None:
