@@ -1,6 +1,6 @@
 # Ruff engine, ring-aware code rules, strict coverage and suggestions: design
 
-Status: draft for approval. Date: 2026-10-26.
+Status: approved design. Date: 2026-10-26.
 
 ## Intent
 
@@ -18,16 +18,17 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
 
 ## Goals
 
-1. Ruff becomes a fourth engine (next to import-linter, tach and the type checker), configured from the policy.
+1. Ruff becomes an engine (next to import-linter, tach and the type checker) that runs with the project's native config.
+   ArchLint can generate an optional opinionated preset and report drift from it, but does not require generated config.
 2. Ring-dependent bans are native ArchLint rules (ambient clock, env, uuid, random, sleep, threads, subprocess,
    `mock.patch`), generalising today's `os-branching`.
 3. Coverage is strict: every first-party module is classified; a catch-all ring or an uncovered source root is
    ratcheted baseline debt, never valid policy.
 4. A report-only "suggestions" tier for hints that sometimes have a good reason to be ignored (file size first).
-5. One baseline ratchet covers everything: ArchLint's own rules, ruff findings, and (separately) the suggestions never
-   fail the check.
-6. A repo-wide label (`standard rules` / `customised rules`): the shipped rule configuration untouched means
-   standard; any customised rule configuration means not. Informally the author calls this "certified".
+5. One shrink-only baseline ratchets ArchLint findings, Ruff findings, suppressions and deliberate `discard()` calls;
+   suggestions remain report-only.
+6. Certification means the source revision passes ArchLint's own checks and the minimum Ruff/Tach behavior profile.
+   It reports the profile and exact verified tool versions; it makes no claim that code is correct.
 
 ## Non-goals and anti-goals
 
@@ -36,7 +37,8 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
 - Not a hard file-length rule. A long file of CLI help or a table can be fine; a dense short one can be a mess.
 - Anti-goal: an escape hatch an agent can use silently (a wildcard ring, a folder named `vendor/`, a ruff `noqa`
   sprinkled until the check passes). Anything that loosens is visible and counted.
-- No certification machinery (hashes, signing, pinned versions) until something needs to read the label.
+- Generated configs are optional presets, not required sources of truth for Ruff, Tach or type checkers.
+- Drift from an optional generated preset is informational; a minimum-profile violation blocks certification.
 
 ## Approaches considered
 
@@ -52,26 +54,35 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
 
 ### 1. Ruff engine
 
-- `archlint generate` also writes `ruff.toml`; `drift` covers it like the other generated files. Select list
+- `archlint check` runs Ruff using Ruff's normal config discovery from the project root; it does not pass an ArchLint
+  config path. Project-owned `ruff.toml`, `.ruff.toml`, `pyproject.toml`, nested configs, CLI flags and per-file settings
+  remain authoritative for that invocation. Ruff findings still become ArchLint baseline violations.
+- `archlint generate` may create an optional opinionated `ruff.toml` preset when that path is missing. It never overwrites
+  an existing file. A generated marker lets `check` report drift from this preset as informational; drift alone
+  never fails the check or changes certification.
+- The preset select list
   (initial, to be tuned by running the tool on the author's four repos): `PLC0415` (function-level import), `BLE001` and
   `E722` (broad/bare except), `C901` and `PLR0912/0913/0915` (complexity, arguments, statements), `TID252` (relative
   imports), `PLW1514` (explicit encoding), `DTZ` (naive datetimes), `T20` (print), `F`, `B`.
   `per-file-ignores` are generated from the ring map where a rule is wrong for a ring (e.g. composition may print).
-- The engine runs through the existing `ToolRunner` port in parallel with the others, with `--output-format json`.
-- **No silent suppression (verified on ruff 0.16.3, 2026-10-26).** Ruff is run with `--ignore-noqa`. A test file
+- The engine runs through the existing `ToolRunner` port in parallel with the others, with `--ignore-noqa
+  --exit-zero --output-format json`; the tool's native config is discovered normally.
+- Certification v1 requires a named subset of Ruff rules and uses behavioral canary probes against the project's active
+  config. Probes use the same executable and config-discovery path as ordinary findings; a required rule that does not
+  fire, including because its source path is excluded or ignored, blocks certification. ArchLint does not infer rule
+  activation by parsing TOML.
+- **No silent suppression (verified on Ruff 0.17.2, 2026-10-26).** Ruff is run with `--ignore-noqa`. A test file
   with a blind `except Exception` under `# noqa: BLE001`, `# ruff: noqa: BLE001`, `# ruff: ignore[BLE001]`,
   `# ruff: file-ignore[BLE001]` and a `# ruff: disable[BLE001]` block reported nothing without the flag and all five
   findings with it; the `# flake8: noqa` alias (bare and `# flake8: noqa: BLE001`) behaved the same, so seven forms
   in all. Every inline and file-level suppression form tried is ignored and every finding reaches the
-  baseline. `--isolated` cannot be combined with `--config` (ruff errors), so the command uses `--config` alone
-  with the effective `ruff.toml`, and a stray `[tool.ruff]` table in a nested `pyproject.toml` was confirmed not to
-  change the rule set. Because a future ruff could add another suppression form, the builder turns this experiment
-  into a contract test (all seven forms above plus a stray config, asserting all findings appear) that runs in CI, and
-  the `ruff` extra's floor is the version it passes on. Config-level
-  ignores exist only as `[tool.archlint.ruff]` overrides, which print "customised rules". An intentional exception is
-  a baseline entry recorded with `--allow-growth --reason`, nothing else. ArchLint's own native rules ignore `noqa`
-  too.
-- **Install.** A new extra `ruff = ["ruff>=<floor verified by the spike>"]`, added to `all` and to `dev`.
+  baseline. Because future Ruff releases can change suppression behavior, the profile pins the tested Ruff version and
+  runs contract/canary tests against the active config. Config-level ignores remain project-owned; disabling a required
+  rule makes its profile canary fail, while unrelated config drift is informational. Suppression comments are inventoried
+  and ratcheted by module so the report exposes their growth. An intentional exception requires a baseline growth reason.
+- **Install.** A new extra `ruff = ["ruff>=<floor verified by the spike>"]`, added to `all` and to `dev`. The
+  certification profile records the exact Ruff and Tach versions it was verified against; upgrades require a deliberate
+  profile update.
   `--require-tools` fails if ruff is missing, as for the other engines; CI installs `.[dev]`, so it runs there. The
   README install section and the repo's own CI are updated in the same change.
 - **The `Engine` port must change.** Today `Engine.passed(result)` returns only a bool, and engine output never reaches
@@ -113,16 +124,25 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
 
 ### 5. Certification
 
-- `archlint check` prints `standard rules (baseline vN)` when the shipped rule configuration is untouched, else
-  `customised rules: ruff, ...` naming what differs (exact guarantee under "Settled after the builder check").
-  Customising is always allowed and never fails a check.
-- Each engine accepts its own config (ruff included). Ruff overrides compose over the generated base (see "Settled
-  after the builder check"); the label's exact guarantee and name are defined there too.
+- Certification is a result for the source revision actually checked, not proof of CI enforcement. ArchLint runs the
+  selected tools and collects their findings; a repository gets an ongoing CI signal by running
+  `archlint check --require-tools` as a required job.
+- Certification v1 requires ArchLint's strict native minimum: classified first-party coverage, no non-composition
+  wildcard rings, and no weakening of positional effect defaults. It also requires Ruff rules `BLE001`, `E722`,
+  `F401`, `B006`, `C901`, `PLR0912`, `PLR0913`, `PLR0915`, `TID252`, `PLW1514`, `DTZ001`, `T201` and `PLC0415`,
+  plus Tach's layer and external-dependency checks. Tighter project rules are welcome. Ruff and Tach use project-owned
+  native configs; ArchLint verifies the minimum through canary probes, not TOML parsing. A missing tool, unsupported
+  version, failed probe, weakened native minimum or new unbaselined finding blocks certification.
+- Optional generated configs report drift as informational. Drift is a difference from the suggested preset; a
+  certification failure means the minimum profile was not met. The two signals are reported separately.
+- The output names the exact claim and tool versions, for example `meets ArchLint minimum profile v1 (Ruff 0.17.2,
+  Tach 0.35.3)`. It does not claim that the code is correct.
 
 ## Decided by the author
 
-Ruff as a repo-wide-config engine, hybrid approach, strict coverage with debt ratchet, report-only suggestions measured
-in logical lines, certification as a repo-wide label, convention-plus-explicit vendored exclusion.
+Ruff as an integrated tool with project-owned config and an optional preset, hybrid approach, strict coverage with debt
+ratchet, report-only suggestions measured in logical lines, certification as a versioned minimum-profile result,
+convention-plus-explicit vendored exclusion.
 
 ## Left to the builder
 
@@ -189,11 +209,27 @@ Settled after the builder check (all my calls, not yet seen by the author):
   the baseline with `--allow-growth --reason "<text>"` (a legitimate vendor sync is exactly that deliberate act). This
   closes the hole where code dropped into a baselined `vendor/` folder escaped every check. A folder named `vendor`
   that holds first-party code is still excluded, but it is fingerprinted, so it cannot change unseen.
-- **Ruff configuration ownership.** Overrides compose with the generated policy and never replace it. The repo sets
-  keys under `[tool.archlint.ruff]` (extra select/ignore, per-file-ignores, thresholds); ArchLint merges them over the
-  ring-derived base and writes the *effective* `ruff.toml`, which `drift` always checks. There is no "hand-written
-  ruff.toml" mode in this version (an eject option can come later), so the effective configuration is always
-  reproducible from the policy.
+- **Tool configuration ownership.** Ruff, Tach and type-checker configuration remains project-owned in each tool's
+  native format. ArchLint runs those tools and reports findings. `archlint generate` is an explicit, optional way to
+  create recommended configs only at missing paths; existing configs are always left untouched. A
+  generated file's drift is advisory and never blocks `check` by itself. Certification instead uses canary probes to
+  verify minimum behavior under the active configs.
+- **Certification profile v1.** ArchLint requires its strict native minimum (classified first-party coverage, no
+  non-composition wildcard rings, positional effect defaults not weakened), Ruff's `BLE001`, `E722`, `F401`, `B006`,
+  `C901`, `PLR0912`, `PLR0913`, `PLR0915`, `TID252`, `PLW1514`, `DTZ001`, `T201` and `PLC0415`, and Tach's layer
+  and external-dependency checks. Tighter rules are allowed. Ruff canaries must trigger under the project's active
+  config, including nested config, `extend`, per-file ignores, excludes and invocation flags. Tach canaries must show
+  that an illegal layer edge and an undeclared external dependency are rejected under the active Tach config. The
+  verified versions are Ruff 0.17.2 and Tach 0.35.3. Updating either version or the required rule set requires a
+  deliberate profile version change and fresh canary verification.
+- **Suppression and discard ratchets.** `check` counts Ruff suppression comments and `# type: ignore` by module and
+  records them in the shrink-only baseline; blanket and rule-specific suppressions count. It reports
+  `discard(value, reason=...)` calls by module and ratchets their count. This is inventory and budget enforcement, not
+  proof that a value is or is not a `Result`; the failed Pyright overload spike is not used as a type filter. Assigning
+  a call to `_` is prohibited so it cannot silently bypass the discard inventory.
+- **Separate signals.** `preset drift` is informational. A minimum-profile failure is fatal to certification. The
+  output uses `meets ArchLint minimum profile vN (Ruff X, Tach Y)` only after native checks and behavioral probes pass;
+  it does not use the claim as a correctness guarantee.
 - **Effect detection scope.** Detected forms: `import x`, `import x as y`, `from x import f [as g]`, and attribute
   chains on those names (`x.f()`, `y.f()`, `g()`), resolved with a per-module alias table. Not detected, by design
   and documented as false negatives: calls through `getattr`, or stored in variables, and wrappers that hide the
@@ -216,8 +252,7 @@ Settled after the builder check (all my calls, not yet seen by the author):
   `sources`/`classify`/`exclude`, grouped by folder with counts and a suggested ring or exclude. After the author
   classifies or excludes what they choose, `archlint baseline --adopt coverage` records what is left as ratcheted
   `unclassified` debt, so there is no flood of new failures on day one and the debt can only shrink.
-- **Certification guarantee.** The label says "the shipped rule configuration is in force." It is customised when any
-  of these differ from the shipped baseline: ruff overrides, per-ring `forbid` overrides, thresholds, `preset`, or an
-  explicit `exclude`. It makes no claim about ring layout or classification (every project defines its own), but
-  coverage strictness (wildcard rings, uncovered files) is not configurable, so it is always on. The label is named
-  `standard rules (baseline vN)` / `customised rules: ...`, not "certified", in `check` output, to match that scope.
+- **Certification guarantee.** The output says that the checked revision meets ArchLint's named minimum profile at
+  the reported tool versions. Project-owned tool configs may differ from generated presets; behavioral canaries, not
+  config-file equality, determine whether the minimum is active. The claim is a result for that invocation, not a
+  correctness guarantee and not proof that CI requires the check.

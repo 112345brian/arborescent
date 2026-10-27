@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import threading
 import time
 from collections.abc import Sequence
@@ -13,15 +14,15 @@ from archlint_helpers import mini_policy, write_files
 
 from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
 from archlint.cli import main
-from archlint.domain import PolicyError, ToolResult
+from archlint.domain import PolicyError, ToolResult, Violation
 from archlint.engine import Options, Services, run_check
 from archlint.engines import ImportLinter, Tach, default_engines
-from archlint.generate import IMPORT_LINTER_FILE, generate
+from archlint.generate import generate
 from archlint.testing import FakeToolRunner
 from archlint.typecheckers import all_checkers, by_name
 
 CHECKERS = list(all_checkers().values())
-ALL_TOOLS = {"lint-imports", "tach", "pyright"}
+ALL_TOOLS = {"lint-imports", "tach", "pyright", "ruff"}
 
 
 def services(runner: FakeToolRunner | None = None, scanner: object | None = None, engines: Sequence[object] | None = None) -> Services:
@@ -31,7 +32,7 @@ def services(runner: FakeToolRunner | None = None, scanner: object | None = None
 def commit_generated(repo: Path) -> None:
     policy = mini_policy()
     scan = FsScanner().scan(policy, repo)
-    for rel, text in generate(policy, sorted(scan.known), by_name(["pyright"])).items():
+    for rel, text in generate(policy, sorted(scan.known), by_name(policy.type_checkers)).items():
         write_files(repo, {rel: text})
 
 
@@ -136,11 +137,12 @@ def test_a_raising_scanner_does_not_leak_the_pool_or_running_engines(repo: Path)
 # --- 3. import-linter and tach are Engine adapters ------------------------------------------------------------------
 
 
-def test_default_engines_are_import_linter_then_tach() -> None:
+def test_default_engines_include_graph_and_file_engines() -> None:
     engines = default_engines()
-    assert [e.name for e in engines] == ["import-linter", "tach"]
-    assert engines[0].command([]) == ["lint-imports", "--config", IMPORT_LINTER_FILE]
-    assert engines[1].command(["a.py"]) == ["tach", "check"]  # these two check the whole graph whatever changed
+    assert [e.name for e in engines] == ["import-linter", "tach", "tach-external", "ruff"]
+    assert engines[0].command([]) == ["lint-imports"]
+    assert engines[1].command(["a.py"]) == ["tach", "check", "--dependencies"]
+    assert engines[2].command([]) == ["tach", "check-external"]
 
 
 def test_engine_pass_criteria() -> None:
@@ -166,21 +168,143 @@ def test_run_check_runs_whatever_engines_the_services_carry(repo: Path) -> None:
     runner = FakeToolRunner({"extra-tool", "pyright"}, {"extra-tool": ToolResult(0, "meh", "")})
     report = run_check(mini_policy(), repo, services(runner, engines=[Extra()]), Options())
     by_name_ = {e.name: e.status for e in report.engines}
-    assert by_name_ == {"archlint": "ok", "extra": "fail", "pyright": "ok"} and not report.ok
+    assert by_name_ == {"archlint": "ok", "extra": "fail", "ty": "skipped"} and not report.ok
     assert ["extra-tool", "--files"] in runner.calls
+
+
+def test_optional_engine_violations_are_collected_into_the_report_and_baseline(repo: Path) -> None:
+    @dataclass(frozen=True)
+    class Findings:
+        name: str = "findings"
+        executable: str = "findings-tool"
+
+        def command(self, files: Sequence[str]) -> list[str]:
+            return ["findings-tool"]
+
+        def passed(self, result: ToolResult) -> bool:
+            return result.returncode == 0
+
+        def violations(self, result: ToolResult, root: Path, fs: object) -> list[Violation]:
+            return [Violation("ruff-E722", "app/domain.py", "bare except | abc123")]
+
+    commit_generated(repo)
+    runner = FakeToolRunner({"findings-tool", "pyright"})
+    report = run_check(mini_policy(), repo, services(runner, engines=[Findings()]), Options())
+
+    key = "ruff-E722|app/domain.py|bare except | abc123"
+    assert [v.key for v in report.violations] == [key]
+    assert report.ratchet is not None and [v.key for v in report.ratchet.new] == [key]
+    assert not report.ok
+
+
+def test_optional_engine_violations_can_be_empty_or_partial(repo: Path) -> None:
+    @dataclass(frozen=True)
+    class PartialFindings:
+        name: str = "partial"
+        executable: str = "partial-tool"
+
+        def command(self, files: Sequence[str]) -> list[str]:
+            return ["partial-tool"]
+
+        def passed(self, result: ToolResult) -> bool:
+            return True
+
+        def violations(self, result: ToolResult, root: Path, fs: object) -> list[Violation]:
+            if result.stdout == "empty":
+                return []
+            return [Violation("ruff-E722", "one.py", "one finding | one")]
+
+    commit_generated(repo)
+    empty_runner = FakeToolRunner({"partial-tool", "pyright"}, {"partial-tool": ToolResult(0, "empty", "")})
+    assert run_check(mini_policy(), repo, services(empty_runner, engines=[PartialFindings()]), Options()).violations == []
+
+    partial_runner = FakeToolRunner({"partial-tool", "pyright"}, {"partial-tool": ToolResult(0, "partial", "")})
+    report = run_check(mini_policy(), repo, services(partial_runner, engines=[PartialFindings()]), Options())
+    assert [v.subject for v in report.violations] == ["one.py"]
+
+
+def test_optional_engine_violations_failure_fails_closed(repo: Path) -> None:
+    @dataclass(frozen=True)
+    class BrokenFindings:
+        name: str = "broken-findings"
+        executable: str = "broken-findings-tool"
+
+        def command(self, files: Sequence[str]) -> list[str]:
+            return ["broken-findings-tool"]
+
+        def passed(self, result: ToolResult) -> bool:
+            return True
+
+        def violations(self, result: ToolResult, root: Path, fs: object) -> list[Violation]:
+            raise ValueError("second parse attempt failed")
+
+    commit_generated(repo)
+    runner = FakeToolRunner({"broken-findings-tool", "pyright"})
+    report = run_check(mini_policy(), repo, services(runner, engines=[BrokenFindings()]), Options())
+    engine = next(e for e in report.engines if e.name == "broken-findings")
+    assert engine.status == "fail" and "second parse attempt failed" in " ".join(engine.lines)
+    assert not report.ok
+
+
+def test_engine_violation_results_have_a_consuming_call_site() -> None:
+    from pathlib import Path
+
+    source_dir = Path(__file__).parents[1] / "src" / "archlint"
+    trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in source_dir.rglob("*.py")}
+    optional_method_lookups = [
+        node
+        for tree in trees.values()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) > 1
+        and isinstance(node.args[1], ast.Constant)
+        and node.args[1].value == "violations"
+    ]
+    assert len(optional_method_lookups) == 1, "all optional Engine.violations calls must flow through one collector"
+    direct_engine_calls = [
+        (path, node)
+        for path, tree in trees.items()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "violations"
+    ]
+    assert len(direct_engine_calls) == 1 and direct_engine_calls[0][0].name == "engine.py"
+    direct_call = direct_engine_calls[0][1]
+    assert direct_call.lineno > 0
+
+    engine_tree = trees[source_dir / "engine.py"]
+    violation_collector = next(n for n in ast.walk(engine_tree) if isinstance(n, ast.FunctionDef) and n.name == "_engine_violations")
+    assert direct_call in list(ast.walk(violation_collector)), "direct Engine.violations calls must stay in the collector"
+    tool = next(n for n in ast.walk(engine_tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "_tool")
+    assert any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "_engine_violations" for n in ast.walk(tool))
+    run_check_node = next(n for n in ast.walk(engine_tree) if isinstance(n, ast.FunctionDef) and n.name == "run_check")
+    report_assignment = next(
+        n
+        for n in ast.walk(run_check_node)
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Attribute) and t.attr == "violations" and isinstance(t.value, ast.Name) and t.value.id == "report" for t in n.targets)
+    )
+    assert any(
+        isinstance(n, ast.Attribute)
+        and n.attr == "violations"
+        and isinstance(n.value, ast.Name)
+        and n.value.id == "run"
+        for n in ast.walk(report_assignment.value)
+    ), "EngineRun violations must be added to the report's baseline input"
 
 
 def test_no_engines_means_only_the_type_checker_runs(repo: Path) -> None:
     commit_generated(repo)
-    runner = FakeToolRunner({"pyright"})
+    runner = FakeToolRunner({"ty"})
     report = run_check(mini_policy(), repo, services(runner, engines=[]), Options())
-    assert [e.name for e in report.engines] == ["archlint", "pyright"] and report.ok
+    assert [e.name for e in report.engines] == ["archlint", "ty"] and report.ok
 
 
 def test_engine_order_in_the_report_is_stable(repo: Path) -> None:
     commit_generated(repo)
     report = run_check(mini_policy(), repo, services(FakeToolRunner(set(ALL_TOOLS))), Options())
-    assert [e.name for e in report.engines] == ["archlint", "import-linter", "tach", "pyright"]
+    assert [e.name for e in report.engines] == ["archlint", "import-linter", "tach", "tach-external", "ruff", "ty"]
 
 
 def test_changed_files_reach_the_type_checker_only(repo: Path) -> None:
@@ -203,4 +327,4 @@ def test_changed_files_reach_the_type_checker_only(repo: Path) -> None:
 
     svc = Services(FsScanner(), Recording(), CHECKERS, LocalFileSystem(), SystemClock(), engines=default_engines())
     run_check(mini_policy(), repo, svc, Options(changed="HEAD"))
-    assert ["pyright", "app/domain.py"] in runner.calls and ["tach", "check"] in runner.calls
+    assert ["tach", "check"] not in runner.calls and ["tach", "check-external"] not in runner.calls and not any(call[0] == "lint-imports" for call in runner.calls) and any(call[0] == "ruff" for call in runner.calls)

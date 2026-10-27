@@ -27,11 +27,12 @@ dependencies = []
 importlinter = ["import-linter>=2.0"]
 tach = ["tach>=0.30"]
 pyright = ["pyright>=1.1.400"]
+ruff = ["ruff>=0.16.3"]
 basedpyright = ["basedpyright>=1.30"]
 ty = ["ty>=0.0.50"]
 pyrefly = ["pyrefly>=0.40"]
-all = ["import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400"]
-dev = ["pytest>=8", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "build"]
+all = ["import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "ty>=0.0.50"]
+dev = ["pytest>=8", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "build"]
 
 [project.urls]
 Homepage = "https://github.com/112345brian/archlint"
@@ -55,12 +56,13 @@ archlint = ["py.typed"]
 python = "3.11"
 sources = ["src/archlint"]
 source_roots = ["src"]
-exclude = ["__pycache__"]
+exclude = ["__pycache__", "tests", "tools"]
+forbid_circular_imports = true
 rings = ["domain", "ports", "application", "adapters", "composition"]
-type_checkers = ["pyright"]
+type_checkers = ["ty", "pyright"]
 
 [tool.archlint.groups]
-pure = ["__future__", "collections", "dataclasses", "enum", "fnmatch", "re", "typing", "ast", "sys", "tomllib"]
+pure = ["__future__", "collections", "dataclasses", "enum", "fnmatch", "re", "typing", "ast", "sys", "tomllib", "io", "tokenize", "posixpath", "json"]
 
 [tool.archlint.ring.domain]
 external = ["@pure", "archlint"]
@@ -73,15 +75,18 @@ external = ["@pure", "pathlib", "contextlib", "archlint"]
 may_import = ["domain", "ports"]
 # pathlib: Path values only (join, relative_to); every disk access goes through FileSystem (tests/test_filesystem.py)
 external = ["@pure", "pathlib", "concurrent", "archlint"]
+# The application coordinates parallel engines; all other effect categories keep the strict default.
+forbid = ["clock", "dynamic-import", "env", "identity", "patch", "process", "randomness", "sleep"]
 
 [tool.archlint.ring.adapters]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "archlint"]
+external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "archlint"]
 os_branching = true
+forbid = ["clock", "dynamic-import", "env", "identity", "patch", "randomness", "sleep", "threads"]
 
 [tool.archlint.ring.composition]
 may_import = ["*"]
-external = ["@pure", "argparse", "pathlib", "archlint"]
+external = ["@pure", "argparse", "pathlib", "os", "shlex", "archlint"]
 
 [tool.archlint.classify]
 "archlint" = "domain"
@@ -95,14 +100,24 @@ external = ["@pure", "argparse", "pathlib", "archlint"]
 "archlint.baseline" = "application"
 "archlint.config" = "application"
 "archlint.engine" = "application"
+"archlint.certification" = "application"
+"archlint.install_tools" = "application"
 "archlint.practices" = "application"
 "archlint.selftest" = "application"
+"archlint.suggestions" = "application"
 "archlint.bench" = "application"
 "archlint.adapters" = "adapters"
+"archlint.installer_adapter" = "adapters"
+"archlint.clock_adapter" = "adapters"
+"archlint.filesystem_adapter" = "adapters"
+"archlint.scanner" = "adapters"
+"archlint.tool_runner" = "adapters"
 "archlint.typecheckers" = "adapters"
 "archlint.engines" = "adapters"
 "archlint.testing" = "adapters"
 "archlint.cli" = "composition"
+"archlint.cli_install" = "composition"
+"archlint.cli_report" = "composition"
 "archlint.__main__" = "composition"
 
 [tool.archlint.practices]
@@ -110,6 +125,14 @@ crlf = ["*.sh", "*.bash"]
 undeclared-imports = true
 secrets-guard = "tests"
 docs-sync = "docs/architecture.md"
+
+[tool.archlint.ruff]
+# The subprocess adapter deliberately owns process execution and passes argument vectors with shell disabled.
+
+[tool.archlint.ruff.per-file-ignores]
+"src/archlint/tool_runner.py" = ["S404", "S603"]
+"src/archlint/cli_install.py" = ["T20"]
+"src/archlint/cli_report.py" = ["T20"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -127,12 +150,12 @@ name = "archlint core and ports must not import adapters, the engines or process
 type = "forbidden"
 source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.stdlib", "archlint.rules", "archlint.ports"]
 forbidden_modules = [
-    "archlint.adapters", "archlint.typecheckers", "archlint.engines", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
+    "archlint.adapters", "archlint.tool_runner", "archlint.typecheckers", "archlint.engines", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
     "socket", "urllib",
 ]
 allow_indirect_imports = true
 
 [tool.ruff.lint]
-# PIE807 asks for `field(default_factory=list)`, but pyright strict then reports the
-# field type as partially unknown; `lambda: []` keeps both tools quiet.
+# PIE807 asks for container factories, but Pyright strict reports the field type as
+# partially unknown; explicit lambdas keep its inferred type fully concrete.
 extend-ignore = ["PIE807"]

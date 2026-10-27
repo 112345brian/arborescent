@@ -1,12 +1,23 @@
 # archlint
 
-One architecture policy. It **generates** the configuration of [import-linter](https://import-linter.readthedocs.io),
-[tach](https://docs.gauge.sh) and a strict type checker (pyright, basedpyright, [ty](https://github.com/astral-sh/ty)
-or [pyrefly](https://pyrefly.org)), then **enforces more than any of them**: every module must be classified, each ring
+One architecture policy. It enforces architecture rules itself and runs [import-linter](https://import-linter.readthedocs.io),
+[tach](https://docs.gauge.sh), [Ruff](https://docs.astral.sh/ruff/) and a type checker ([ty](https://github.com/astral-sh/ty) by default, with pyright and basedpyright
+or [pyrefly](https://pyrefly.org)) using their native project configuration. `archlint generate` can scaffold optional preset files and never overwrites an existing file.
+ArchLint also enforces: every module must be classified, each ring
 has an allow-list of external packages, OS branching is limited to named rings, lazy imports count, entry scripts must
 declare what the code imports, and a set of repository-hygiene practices that each come from a bug that really happened.
 
-Prototype, 0.1.0. Core has no dependencies; the engines are extras run as subprocesses behind a port.
+ArchLint's core has no runtime dependencies; the engines are optional extras run as subprocesses.
+
+Install the checks you use with the package, or install every engine for development:
+
+```sh
+python -m pip install '.[all]'
+python -m pip install '.[dev]'  # tests and all checker adapters
+```
+
+Ruff is included in `all` and `dev`, and is also available as the `ruff` extra. Ty is the default type checker; list
+`type_checkers = ["ty", "pyright"]` to keep both configs generated and use `--type-checker pyright` when needed.
 
 ## Quickstart
 
@@ -16,7 +27,7 @@ Prototype, 0.1.0. Core has no dependencies; the engines are extras run as subpro
 sources = ["src/app"]
 source_roots = ["src"]
 rings = ["domain", "ports", "adapters", "composition"]      # innermost first
-type_checkers = ["pyright"]                                 # or ["ty"], ["pyrefly"], ["basedpyright"]
+type_checkers = ["ty", "pyright"]                          # first is the default; --type-checker pyright selects strict Pyright
 
 [tool.archlint.groups]
 pure = ["__future__", "dataclasses", "typing"]
@@ -43,16 +54,30 @@ external = ["@pure", "sys"]
 ```
 
 ```
-archlint generate     # writes archlint-importlinter.toml, tach.toml, pyrightconfig.json (commit them)
-archlint check        # drift diff, engines in parallel, own checks, baseline ratchet
+archlint generate     # optionally create missing recommended config files; existing files stay untouched
+archlint check        # engines in parallel, own checks, baseline ratchet; generated-preset drift is advisory
+archlint check --install-tools # prompt to install missing tools, then run the checks
+archlint install-tools # prompt to install missing tools without running checks
+archlint check --install-tools --yes # install without prompting, then check
+archlint check --require-tools --require-profile  # require profile v1 and its verified tool versions/rules
 archlint check --changed origin/main      # only files changed since a git ref
-archlint baseline     # record today's violations; check then fails only on NEW ones, and on entries that vanished
-archlint selftest     # mutation-test the rules: inject a forbidden import, require the check to fail
-archlint bench DIR…   # cold/warm timings of every engine on codebases you prepared
+archlint discover     # list Python files that still need ring classification
+archlint baseline     # record existing violations; future checks fail on new findings
+archlint selftest     # mutation-test native rules and fail if a rule stops firing
+archlint bench DIR…   # cold/warm timings of every engine on prepared codebases
 ```
 
-Documentation: [configuration reference](docs/configuration.md) (every key, rule and practice) and
+Documentation: [CLI commands, configuration and rules](docs/configuration.md) and
 [ArchLint's own architecture](docs/architecture.md).
+
+`check` never installs packages unless you pass `--install-tools`. By default, missing selected tools produce an exact
+install command and the usual skip/fail behavior. `check --install-tools` prints the command, prompts with No as the
+default, installs on confirmation, then runs checks; `--yes` skips the prompt. `archlint install-tools` uses the same
+setup flow without running checks. Installation targets the active Python environment (or uv targeting that
+interpreter when pip is unavailable). In Poetry projects it uses `poetry add` to place checkers in an `archlint` group
+included by `dev`, then verifies the lock. Set `disabled_tools = ["import-linter", "tach", "ruff"]` in
+`[tool.archlint]` (or the top-level `archlint.toml`) to deliberately omit those tools from checks and setup hints;
+minimum-profile certification still requires Ruff and Tach.
 
 ## Presets
 
@@ -80,10 +105,11 @@ no stdlib module counts as I/O).
 
 ## What the policy compiles to
 
-| engine | what is generated | what it cannot say (ArchLint's own check says it) |
+| engine | optional generated preset | what it cannot say (ArchLint's own check says it) |
 |---|---|---|
 | import-linter | one `forbidden` contract per ring for the rings it may not import, one per ring banning I/O stdlib and declared third-party packages the ring does not list, one global `forbid_everywhere` | an external allow-list (it only has deny-lists); single-file entry scripts (not packages) |
-| tach | `layers` (outermost first), one `[[modules]]` per module; `layers_explicit_depends_on` + per-module `depends_on` when a ring skips an inner ring | tach's circular-dependency check is switched off in that mode (same-ring peers must depend on each other) |
+| tach | `layers` (outermost first), one `[[modules]]` per module; `layers_explicit_depends_on` + per-module `depends_on` when a ring skips an inner ring | tach's circular-dependency check is switched off in that mode; ArchLint independently enforces circular-import checks across all first-party modules |
+| Ruff | recommended `ruff.toml`; violations join the baseline, and suppression comments are ignored | ring-dependent effects (ArchLint's native rules) |
 | pyright / basedpyright / ty / pyrefly | strict config, `# type: ignore` ignored, `match` exhaustiveness, no Unknown | -- |
 
 ## Practices (`[tool.archlint.practices]`)
@@ -97,11 +123,12 @@ the environment), `docs-sync` (the architecture doc's `| module | ring |` table 
 ## Speed
 
 Engines run concurrently; ArchLint parses each file once (AST), caches facts by content hash in `.archlint/`, and
-`--changed` limits its own checks and the type checker to changed files. import-linter and tach are graph-wide and
-still run in full. See the repository CHANGELOG for measured numbers; `archlint bench` reproduces them.
+`--changed` limits ArchLint, Ruff, and the type checker to changed files. import-linter, `tach check`, and `tach check-external`
+are graph-wide, so ArchLint skips them and reports that reason in the engine results. See the repository CHANGELOG for measured numbers; `archlint bench` reproduces them.
 
 ## Limits (honest)
 
-Windows only was exercised. Ring granularity only: a module cannot be given an exception finer than its ring
-(`tests/test_todo.py` lists this and the other open items as strict xfails). `os` aliases (`import os as o`) are not seen
-by the OS-branching rule.
+Effect checks detect direct imports, aliases and attribute chains. They intentionally do not catch calls routed through
+`getattr`, variables or wrapper functions. `module_forbid_imports` can add finer-grained internal-import restrictions
+for selected modules without changing their ring. CI is configured for Windows, macOS and Linux; the account's
+GitHub billing block has prevented hosted runs so far.

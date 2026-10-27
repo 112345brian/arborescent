@@ -18,11 +18,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install -e ".[dev]" "ruff==0.17.2" "tach==0.35.3"
       - run: python -m pytest
       - name: Architecture (import-linter contract)
         run: lint-imports
       - name: Architecture (archlint dogfood)
-        run: python -m archlint check
+        run: python -m archlint check --require-profile
       - name: Mutation self-test
         run: python -m archlint selftest

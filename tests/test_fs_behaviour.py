@@ -207,7 +207,7 @@ def test_drift_reports_missing_differing_and_crlf_files(env: Env) -> None:
     names = ["app", "app.domain", "app.ports", "app.adapters", "app.main"]
     checkers = by_name(["pyright"])
     expected = generate(policy, names, checkers)
-    assert len(drift(fs, policy, root, names, checkers)) == len(expected)  # all missing
+    assert drift(fs, policy, root, names, checkers) == []  # optional presets need not exist
     put(fs, root, dict(expected))
     assert drift(fs, policy, root, names, checkers) == []
     rel = next(iter(expected))

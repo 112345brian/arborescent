@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from archlint_helpers import mini_policy, write_files
 
+from archlint import scanner
 from archlint.adapters import (
     FsScanner,
     LocalFileSystem,
@@ -31,11 +32,11 @@ def own_services(cache: Path | None = None) -> Services:
     return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines())
 
 
-def test_archlint_passes_its_own_policy_and_its_generated_files_are_current() -> None:
+def test_archlint_passes_its_own_policy_and_reports_generated_preset_drift_advisorially() -> None:
     policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     report = run_check(policy, root, own_services(), Options(tools=False, use_baseline=False))
     assert report.violations == [], [v.render() for v in report.violations]
-    assert report.drift == []
+    assert report.ok  # existing generated files may drift; that signal is informational
 
 
 def test_warm_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> None:
@@ -62,11 +63,9 @@ def test_cold_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> N
 
 
 def test_no_file_is_parsed_twice_in_one_run(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from archlint import adapters
-
     seen: list[str] = []
-    real = adapters.extract
-    monkeypatch.setattr(adapters, "extract", lambda src, name="": (seen.append(name), real(src, name))[1])
+    real = scanner.extract
+    monkeypatch.setattr(scanner, "extract", lambda src, name="": (seen.append(name), real(src, name))[1])
     _ = run_check(mini_policy(), repo, Services(FsScanner(), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines()), Options(tools=False))
     assert len(seen) == len(set(seen)) == 5
 
