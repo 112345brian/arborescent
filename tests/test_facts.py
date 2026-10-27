@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from archlint_helpers import MINI_FILES, mini_policy, write_files
+from arborescent_helpers import MINI_FILES, mini_policy, write_files
 
-from archlint.adapters import FsScanner
-from archlint.facts import extract
+from arborescent.adapters import FsScanner
+from arborescent.facts import extract
 
 
 def test_effect_facts_resolve_module_and_from_import_aliases() -> None:

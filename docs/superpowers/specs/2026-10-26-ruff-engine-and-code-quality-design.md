@@ -4,14 +4,14 @@ Status: approved design. Date: 2026-10-26.
 
 ## Intent
 
-ArchLint is the opinionated starting point for the first-party code of a Python project, aimed at one reader above all:
+Arborescent is the opinionated starting point for the first-party code of a Python project, aimed at one reader above all:
 an LLM agent writing code. It should be impossible for that agent to quietly write code that is hard to migrate or hard
 to test. Every rule is mechanical (a tool fails), never advice in prose.
 
-Today ArchLint enforces *structure*: which ring imports which, which external packages each ring may import, OS
+Today Arborescent enforces *structure*: which ring imports which, which external packages each ring may import, OS
 branching, a few repository practices. It enforces nothing about the code inside a module. Three of the author's repos
 (`bripe-job-search`, `launch-runner`, `knowledge`) closed that gap with ~25 hand-written scanners and long prose in
-`AGENTS.md`. A fourth (`deepinterview`) never did, and shows the cost: archlint covers 1 of ~60 modules there, through a
+`AGENTS.md`. A fourth (`deepinterview`) never did, and shows the cost: arborescent covers 1 of ~60 modules there, through a
 ring with `external = ["*"]`; ruff is configured but selects nothing useful and is not in CI; and in `apps/agent/src`
 there are 1,115-line `worker.py` (one 277-line function), 69 broad `except`s, 102 function-level imports, clock/env/uuid/
 subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in tests.
@@ -19,15 +19,15 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
 ## Goals
 
 1. Ruff becomes an engine (next to import-linter, tach and the type checker) that runs with the project's native config.
-   ArchLint can generate an optional opinionated preset and report drift from it, but does not require generated config.
-2. Ring-dependent bans are native ArchLint rules (ambient clock, env, uuid, random, sleep, threads, subprocess,
+   Arborescent can generate an optional opinionated preset and report drift from it, but does not require generated config.
+2. Ring-dependent bans are native Arborescent rules (ambient clock, env, uuid, random, sleep, threads, subprocess,
    `mock.patch`), generalising today's `os-branching`.
 3. Coverage is strict: every first-party module is classified; a catch-all ring or an uncovered source root is
    ratcheted baseline debt, never valid policy.
 4. A report-only "suggestions" tier for hints that sometimes have a good reason to be ignored (file size first).
-5. One shrink-only baseline ratchets ArchLint findings, Ruff findings, suppressions and deliberate `discard()` calls;
+5. One shrink-only baseline ratchets Arborescent findings, Ruff findings, suppressions and deliberate `discard()` calls;
    suggestions remain report-only.
-6. Certification means the source revision passes ArchLint's own checks and the minimum Ruff/Tach behavior profile.
+6. Certification means the source revision passes Arborescent's own checks and the minimum Ruff/Tach behavior profile.
    It reports the profile and exact verified tool versions; it makes no claim that code is correct.
 
 ## Non-goals and anti-goals
@@ -45,7 +45,7 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
 - **A. Ruff does everything, one run per ring.** Rejected. Ruff's banned-API rule (`TID251`) takes one global list, and
   per-file-ignores switch whole rules off, so different rings cannot ban different APIs from one config. Per-ring runs
   would work but cost N subprocesses, and ruff cannot do the file-size suggestion.
-- **B. Native only, ruff stays generic.** Viable (ArchLint already parses every file and owns the ring map) but
+- **B. Native only, ruff stays generic.** Viable (Arborescent already parses every file and owns the ring map) but
   reinvents rules ruff does well (complexity, broad `except`, lazy imports, encoding).
 - **C. Hybrid. Chosen** (the author said "do whatever you recommend"). Ruff for the rules that are the same in every
   ring; native rules for everything that depends on the ring. Both feed one baseline.
@@ -54,10 +54,10 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
 
 ### 1. Ruff engine
 
-- `archlint check` runs Ruff using Ruff's normal config discovery from the project root; it does not pass an ArchLint
+- `arborescent check` runs Ruff using Ruff's normal config discovery from the project root; it does not pass an Arborescent
   config path. Project-owned `ruff.toml`, `.ruff.toml`, `pyproject.toml`, nested configs, CLI flags and per-file settings
-  remain authoritative for that invocation. Ruff findings still become ArchLint baseline violations.
-- `archlint generate` may create an optional opinionated `ruff.toml` preset when that path is missing. It never overwrites
+  remain authoritative for that invocation. Ruff findings still become Arborescent baseline violations.
+- `arborescent generate` may create an optional opinionated `ruff.toml` preset when that path is missing. It never overwrites
   an existing file. A generated marker lets `check` report drift from this preset as informational; drift alone
   never fails the check or changes certification.
 - The preset select list
@@ -69,7 +69,7 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
   --exit-zero --output-format json`; the tool's native config is discovered normally.
 - Certification v1 requires a named subset of Ruff rules and uses behavioral canary probes against the project's active
   config. Probes use the same executable and config-discovery path as ordinary findings; a required rule that does not
-  fire, including because its source path is excluded or ignored, blocks certification. ArchLint does not infer rule
+  fire, including because its source path is excluded or ignored, blocks certification. Arborescent does not infer rule
   activation by parsing TOML.
 - **No silent suppression (verified on Ruff 0.17.2, 2026-10-26).** Ruff is run with `--ignore-noqa`. A test file
   with a blind `except Exception` under `# noqa: BLE001`, `# ruff: noqa: BLE001`, `# ruff: ignore[BLE001]`,
@@ -124,18 +124,18 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
 
 ### 5. Certification
 
-- Certification is a result for the source revision actually checked, not proof of CI enforcement. ArchLint runs the
+- Certification is a result for the source revision actually checked, not proof of CI enforcement. Arborescent runs the
   selected tools and collects their findings; a repository gets an ongoing CI signal by running
-  `archlint check --require-tools` as a required job.
-- Certification v1 requires ArchLint's strict native minimum: classified first-party coverage, no non-composition
+  `arborescent check --require-tools` as a required job.
+- Certification v1 requires Arborescent's strict native minimum: classified first-party coverage, no non-composition
   wildcard rings, and no weakening of positional effect defaults. It also requires Ruff rules `BLE001`, `E722`,
   `F401`, `B006`, `C901`, `PLR0912`, `PLR0913`, `PLR0915`, `TID252`, `PLW1514`, `DTZ001`, `T201` and `PLC0415`,
   plus Tach's layer and external-dependency checks. Tighter project rules are welcome. Ruff and Tach use project-owned
-  native configs; ArchLint verifies the minimum through canary probes, not TOML parsing. A missing tool, unsupported
+  native configs; Arborescent verifies the minimum through canary probes, not TOML parsing. A missing tool, unsupported
   version, failed probe, weakened native minimum or new unbaselined finding blocks certification.
 - Optional generated configs report drift as informational. Drift is a difference from the suggested preset; a
   certification failure means the minimum profile was not met. The two signals are reported separately.
-- The output names the exact claim and tool versions, for example `meets ArchLint minimum profile v1 (Ruff 0.17.2,
+- The output names the exact claim and tool versions, for example `meets Arborescent minimum profile v1 (Ruff 0.17.2,
   Tach 0.35.3)`. It does not claim that the code is correct.
 
 ## Decided by the author
@@ -152,16 +152,16 @@ and ruff engine, effect rules, suggestions, certification label).
 
 ## Decided by the author, after the builder check
 
-- **The baseline is shrink-only.** `archlint baseline` creates the first baseline, or removes stale entries from an
+- **The baseline is shrink-only.** `arborescent baseline` creates the first baseline, or removes stale entries from an
   existing one; it refuses to add entries to an existing baseline. Adding entries takes an explicit extra flag (name
   left to the builder), so an agent cannot silence a failing check by re-running the command. Adopting a new rule
   family (ruff, effect rules) on a repo that already has a baseline is therefore one deliberate, visible step.
   (Author's words: "whatever you recommend"; my recommendation, the job-search repo's `--growth-against` model.)
-  Review follow-up on how adoption works, my design: `archlint baseline --adopt <family>` records the current
+  Review follow-up on how adoption works, my design: `arborescent baseline --adopt <family>` records the current
   findings of a rule family (`ruff`, `effects`, ...) only when the baseline has no entries for that family yet, and
   refuses otherwise. Any other growth needs `--allow-growth --reason "<text>"`; the reason and the entry count are
   written into the baseline file's `growth` log, so a reviewer sees them in the diff. Each log entry lists the exact
-  keys it added (`{reason, added: [keys]}`, not just a count). `archlint check --growth-against <git ref>` fails
+  keys it added (`{reason, added: [keys]}`, not just a count). `arborescent check --growth-against <git ref>` fails
   unless (baseline keys now) minus (baseline keys at that ref) equals the union of `added` over the log entries new
   since that ref, so every added key is accounted for by a reasoned entry. Limit, stated plainly: this is a
   consistency check, not proof the command produced the file; someone who edits the baseline and its log by hand
@@ -170,7 +170,7 @@ and ruff engine, effect rules, suggestions, certification label).
 
 ## My calls (check these)
 
-- Hybrid, not all-native, because ruff already does complexity/except/lazy-import well and ArchLint already owns the ring
+- Hybrid, not all-native, because ruff already does complexity/except/lazy-import well and Arborescent already owns the ring
   map for the rest.
 - Ruff findings go into the baseline; suggestions do not (the author said hints may have good reasons to be ignored).
 - `ruff-<CODE>` as the rule id family, and no line numbers in the baseline key.
@@ -185,7 +185,7 @@ Settled after the builder check (all my calls, not yet seen by the author):
   "fix one, add a different one" changes a fingerprint and fails as a new key. Identical lines are interchangeable, so
   only their count matters, and a new duplicate always adds a `#n` key that is not in the baseline. Fixing one of two
   removes a key, which the ratchet reports as stale.
-- **Only ArchLint's own rules and ruff feed the baseline.** import-linter, tach and the type checker keep the current
+- **Only Arborescent's own rules and ruff feed the baseline.** import-linter, tach and the type checker keep the current
   pass/fail on exit code (goal 5 means "one ratchet", not "every engine parsed"). The `Engine` port gains a second,
   optional method that returns violations; `passed` stays for the others.
 - **Ruff failure modes.** Ruff is run with `--exit-zero --output-format json`, so exit 0 means "ran to completion"
@@ -210,11 +210,11 @@ Settled after the builder check (all my calls, not yet seen by the author):
   closes the hole where code dropped into a baselined `vendor/` folder escaped every check. A folder named `vendor`
   that holds first-party code is still excluded, but it is fingerprinted, so it cannot change unseen.
 - **Tool configuration ownership.** Ruff, Tach and type-checker configuration remains project-owned in each tool's
-  native format. ArchLint runs those tools and reports findings. `archlint generate` is an explicit, optional way to
+  native format. Arborescent runs those tools and reports findings. `arborescent generate` is an explicit, optional way to
   create recommended configs only at missing paths; existing configs are always left untouched. A
   generated file's drift is advisory and never blocks `check` by itself. Certification instead uses canary probes to
   verify minimum behavior under the active configs.
-- **Certification profile v1.** ArchLint requires its strict native minimum (classified first-party coverage, no
+- **Certification profile v1.** Arborescent requires its strict native minimum (classified first-party coverage, no
   non-composition wildcard rings, positional effect defaults not weakened), Ruff's `BLE001`, `E722`, `F401`, `B006`,
   `C901`, `PLR0912`, `PLR0913`, `PLR0915`, `TID252`, `PLW1514`, `DTZ001`, `T201` and `PLC0415`, and Tach's layer
   and external-dependency checks. Tighter rules are allowed. Ruff canaries must trigger under the project's active
@@ -228,7 +228,7 @@ Settled after the builder check (all my calls, not yet seen by the author):
   proof that a value is or is not a `Result`; the failed Pyright overload spike is not used as a type filter. Assigning
   a call to `_` is prohibited so it cannot silently bypass the discard inventory.
 - **Separate signals.** `preset drift` is informational. A minimum-profile failure is fatal to certification. The
-  output uses `meets ArchLint minimum profile vN (Ruff X, Tach Y)` only after native checks and behavioral probes pass;
+  output uses `meets Arborescent minimum profile vN (Ruff X, Tach Y)` only after native checks and behavioral probes pass;
   it does not use the claim as a correctness guarantee.
 - **Effect detection scope.** Detected forms: `import x`, `import x as y`, `from x import f [as g]`, and attribute
   chains on those names (`x.f()`, `y.f()`, `g()`), resolved with a per-module alias table. Not detected, by design
@@ -248,11 +248,11 @@ Settled after the builder check (all my calls, not yet seen by the author):
   installed dependencies and tool state, not code you wrote. To stop them being a hiding place, a git-*tracked* `.py`
   file inside a noise directory is a ratcheted finding (`noise-dir-code|<path>|`), and a vendored folder inside a
   noise directory is not auto-excluded at all.
-- **Adopting strict coverage on an existing repo.** `archlint discover` lists every in-scope `.py` file outside
+- **Adopting strict coverage on an existing repo.** `arborescent discover` lists every in-scope `.py` file outside
   `sources`/`classify`/`exclude`, grouped by folder with counts and a suggested ring or exclude. After the author
-  classifies or excludes what they choose, `archlint baseline --adopt coverage` records what is left as ratcheted
+  classifies or excludes what they choose, `arborescent baseline --adopt coverage` records what is left as ratcheted
   `unclassified` debt, so there is no flood of new failures on day one and the debt can only shrink.
-- **Certification guarantee.** The output says that the checked revision meets ArchLint's named minimum profile at
+- **Certification guarantee.** The output says that the checked revision meets Arborescent's named minimum profile at
   the reported tool versions. Project-owned tool configs may differ from generated presets; behavioral canaries, not
   config-file equality, determine whether the minimum is active. The claim is a result for that invocation, not a
   correctness guarantee and not proof that CI requires the check.

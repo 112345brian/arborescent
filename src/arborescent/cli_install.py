@@ -53,7 +53,7 @@ def _confirm_install(yes: bool) -> bool:
     if yes:
         return True
     if not _interactive_install_allowed():
-        print("Not installing in a non-interactive session; rerun `archlint install-tools` in a terminal or pass --yes.")
+        print("Not installing in a non-interactive session; rerun `arborescent install-tools` in a terminal or pass --yes.")
         return False
     try:
         answer = input("Install these check tools into the active Python environment? [y/N] ")

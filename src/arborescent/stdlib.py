@@ -1,5 +1,5 @@
 """Top-level standard-library module names per Python minor version, so "is this import stdlib?" follows the policy's
-target ``python`` and not whichever interpreter happens to run archlint.
+target ``python`` and not whichever interpreter happens to run arborescent.
 
 Pure data: ``_BASE`` is ``sys.stdlib_module_names`` of the oldest supported version and each ``_CHANGES`` entry lists
 what the next version added and removed. ``docs/stdlib-table.md`` explains how to regenerate it.

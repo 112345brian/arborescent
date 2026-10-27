@@ -1,4 +1,4 @@
-"""Stdlib detection follows the policy's target Python, not the interpreter running archlint."""
+"""Stdlib detection follows the policy's target Python, not the interpreter running arborescent."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from archlint_helpers import mini_policy, write_files
+from arborescent_helpers import mini_policy, write_files
 
-from archlint.adapters import FsScanner, LocalFileSystem
-from archlint.domain import Policy, PolicyError
-from archlint.practices import undeclared_imports
-from archlint.rules import check_modules
-from archlint.stdlib import SUPPORTED_PYTHONS, stdlib_for
+from arborescent.adapters import FsScanner, LocalFileSystem
+from arborescent.domain import Policy, PolicyError
+from arborescent.practices import undeclared_imports
+from arborescent.rules import check_modules
+from arborescent.stdlib import SUPPORTED_PYTHONS, stdlib_for
 
 
 def test_supported_versions_are_listed_oldest_first() -> None:

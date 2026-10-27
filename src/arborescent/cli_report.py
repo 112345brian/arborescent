@@ -1,4 +1,4 @@
-"""Terminal presentation for ArchLint check reports."""
+"""Terminal presentation for Arborescent check reports."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
         print(f"PROFILE FAIL {failure}")
     _print_consistency(report)
     if report.profile is not None and report.ok:
-        print(f"CERTIFIED meets ArchLint minimum profile {report.profile} (Ruff 0.17.2, Tach 0.35.3)")
+        print(f"CERTIFIED meets Arborescent minimum profile {report.profile} (Ruff 0.17.2, Tach 0.35.3)")
     for line in report.drift:
         print(f"DRIFT  {line}")
     for suggestion in report.suggestions:
@@ -49,7 +49,7 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
         print(f"FAIL   {v.render()}")
     if report.ratchet:
         for key in report.ratchet.stale:
-            print(f"STALE  baseline entry no longer occurs (delete it: `archlint baseline`): {key}")
+            print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline`): {key}")
     for e in report.engines:
         print(f"{e.status.upper():7}{e.name} ({e.seconds:.2f}s) {' | '.join(e.lines[-1:]) if e.status != 'fail' else ''}")
         if e.status == "fail":
@@ -60,7 +60,7 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
 
 def _print_consistency(report: CheckReport) -> None:
     if report.configured_ok:
-        print("CONSISTENT configured ArchLint checks pass")
+        print("CONSISTENT configured Arborescent checks pass")
 
 
 def _print_inventories(report: CheckReport) -> None:
@@ -89,17 +89,17 @@ def _print_setup_hint(report: CheckReport, setup_command: str | None = None) -> 
         if run.status in {"skipped", "fail"} and any("is not installed" in line for line in run.lines)
     })
     if missing:
-        command = setup_command or "archlint install-tools"
+        command = setup_command or "arborescent install-tools"
         hint = f"SETUP  missing checker(s): {', '.join(missing)}; install with `{command}`"
         if setup_command is not None:
-            hint += " or run `archlint check --install-tools` for guided setup"
+            hint += " or run `arborescent check --install-tools` for guided setup"
         print(hint)
 
 
 def _print_summary(report: CheckReport) -> None:
     tolerated = report.ratchet.tolerated if report.ratchet else 0
     print(
-        f"archlint check: {'OK' if report.ok else 'FAILED'} in {report.seconds:.2f}s "
+        f"arborescent check: {'OK' if report.ok else 'FAILED'} in {report.seconds:.2f}s "
         f"({len(report.violations)} violation(s), {tolerated} baselined, {report.parsed} file(s) parsed"
         f"{', partial: --changed' if report.partial else ''})"
     )

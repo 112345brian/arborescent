@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
-from archlint_helpers import MINI_FILES, write_files
+from arborescent_helpers import MINI_FILES, write_files
 
 _SECRET_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
 

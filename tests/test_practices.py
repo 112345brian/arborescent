@@ -10,10 +10,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from archlint_helpers import mini_policy, write_files
+from arborescent_helpers import mini_policy, write_files
 
-from archlint.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
-from archlint.practices import (
+from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
+from arborescent.practices import (
     crlf,
     docs_sync,
     gitignore_shadow,

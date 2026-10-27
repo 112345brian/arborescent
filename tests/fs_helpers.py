@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from archlint.adapters import LocalFileSystem
-from archlint.ports import FileSystem
-from archlint.testing import FakeFileSystem
+from arborescent.adapters import LocalFileSystem
+from arborescent.ports import FileSystem
+from arborescent.testing import FakeFileSystem
 
 KINDS = ("local", "fake")
 

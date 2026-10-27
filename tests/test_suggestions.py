@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from archlint_helpers import MINI_FILES, mini_policy, write_files
+from arborescent_helpers import MINI_FILES, mini_policy, write_files
 
-from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
-from archlint.engine import Options, Services, run_check, write_generated
-from archlint.engines import default_engines
-from archlint.suggestions import file_size_suggestions, logical_code_lines
-from archlint.testing import FakeToolRunner
-from archlint.typecheckers import all_checkers
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.engine import Options, Services, run_check, write_generated
+from arborescent.engines import default_engines
+from arborescent.suggestions import file_size_suggestions, logical_code_lines
+from arborescent.testing import FakeToolRunner
+from arborescent.typecheckers import all_checkers
 
 
 def test_logical_lines_ignore_comments_docstrings_and_blank_lines() -> None:

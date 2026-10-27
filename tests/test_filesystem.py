@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fs_helpers import KINDS, make_fs, put
 
-from archlint.ports import FileSystem
+from arborescent.ports import FileSystem
 
 
 @pytest.fixture(params=KINDS)
@@ -104,11 +104,11 @@ def test_copy_tree_copies_bytes_and_skips_ignored_names_with_their_contents(env:
 
 def test_temporary_directory_is_empty_usable_and_removed_even_after_an_error(env: tuple[FileSystem, Path]) -> None:
     fs, _ = env
-    with fs.temporary_directory("archlint-test-") as tmp:
-        assert fs.is_dir(tmp) and tmp.name.startswith("archlint-test-") and fs.rglob(tmp, "*") == []
+    with fs.temporary_directory("arborescent-test-") as tmp:
+        assert fs.is_dir(tmp) and tmp.name.startswith("arborescent-test-") and fs.rglob(tmp, "*") == []
         fs.write_text(tmp / "f", "x")
     assert not fs.exists(tmp)
-    with pytest.raises(RuntimeError), fs.temporary_directory("archlint-test-") as boom:
+    with pytest.raises(RuntimeError), fs.temporary_directory("arborescent-test-") as boom:
         fs.write_text(boom / "f", "x")
         raise RuntimeError
     assert not fs.exists(boom)
@@ -118,8 +118,8 @@ def test_application_and_composition_code_touches_files_only_through_the_port() 
     """The ring's import list no longer allows shutil/tempfile, but ``Path.read_text()`` needs no import: scan the calls."""
     import ast
 
-    from archlint.adapters import LocalFileSystem
-    from archlint.config import load_policy
+    from arborescent.adapters import LocalFileSystem
+    from arborescent.config import load_policy
 
     io_methods = {
         "read_text", "read_bytes", "write_text", "write_bytes", "open", "mkdir", "unlink", "rmdir", "rename",
@@ -128,8 +128,8 @@ def test_application_and_composition_code_touches_files_only_through_the_port() 
     repo = Path(__file__).resolve().parents[1]
     policy, _ = load_policy(LocalFileSystem(), repo / "pyproject.toml")
     bad: list[str] = []
-    for path in sorted((repo / "src" / "archlint").glob("*.py")):
-        module = "archlint" if path.stem == "__init__" else f"archlint.{path.stem}"
+    for path in sorted((repo / "src" / "arborescent").glob("*.py")):
+        module = "arborescent" if path.stem == "__init__" else f"arborescent.{path.stem}"
         if policy.ring_of(module) not in {"application", "composition"}:
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -155,8 +155,8 @@ def test_json_round_trip_and_errors(env: tuple[FileSystem, Path]) -> None:
 
 
 def test_clocks_only_move_forward() -> None:
-    from archlint.adapters import SystemClock
-    from archlint.testing import FakeClock
+    from arborescent.adapters import SystemClock
+    from arborescent.testing import FakeClock
 
     for clock in (SystemClock(), FakeClock()):
         a, b = clock.now(), clock.now()

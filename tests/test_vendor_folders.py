@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from archlint_helpers import mini_policy, write_files
+from arborescent_helpers import mini_policy, write_files
 
-from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
-from archlint.cli import main
-from archlint.domain import ToolResult
-from archlint.engine import Services, run_own
-from archlint.engines import default_engines
-from archlint.testing import FakeToolRunner
-from archlint.typecheckers import all_checkers
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.cli import main
+from arborescent.domain import ToolResult
+from arborescent.engine import Services, run_own
+from arborescent.engines import default_engines
+from arborescent.testing import FakeToolRunner
+from arborescent.typecheckers import all_checkers
 
 
 class GitFiles(FakeToolRunner):
@@ -88,7 +88,7 @@ def test_each_vendor_convention_name_is_fingerprinted(repo: Path) -> None:
 
 def test_check_lists_auto_excluded_vendor_folders(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     write_files(repo, {"vendor/pkg.py": "VALUE = 1\n"})
-    config = repo / "archlint.toml"
+    config = repo / "arborescent.toml"
     config.write_text(
         'sources = ["app"]\nrings = ["domain", "composition"]\n'
         '[ring.domain]\nexternal = []\n[ring.composition]\nmay_import = ["*"]\nexternal = ["*"]\n'

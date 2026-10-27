@@ -1,8 +1,8 @@
-"""Build read-only COPIES of real codebases for ``archlint bench`` (the originals are never touched).
+"""Build read-only COPIES of real codebases for ``arborescent bench`` (the originals are never touched).
 
     python tools/make_bench_corpus.py OUT_DIR NAME=SRC_DIR [NAME=SRC_DIR ...]
 
-Only ``*.py`` files are copied. Each copy gets a permissive single-ring ``archlint.toml``: the bench measures how long
+Only ``*.py`` files are copied. Each copy gets a permissive single-ring ``arborescent.toml``: the bench measures how long
 the engines take on that much code, not whether the code obeys a policy (a real policy is a human decision).
 """
 
@@ -51,8 +51,8 @@ def main(argv: list[str]) -> int:
         shutil.rmtree(dst, ignore_errors=True)
         dst.mkdir(parents=True)
         n = copy_py(Path(src), dst)
-        if not (dst / "archlint.toml").exists():
-            _ = (dst / "archlint.toml").write_text(POLICY, encoding="utf-8", newline="\n")
+        if not (dst / "arborescent.toml").exists():
+            _ = (dst / "arborescent.toml").write_text(POLICY, encoding="utf-8", newline="\n")
         print(f"{name}: copied {n} python files from {src}")
     return 0
 

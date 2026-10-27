@@ -1,12 +1,12 @@
 {
   "version": 2,
   "violations": [
-    "ruff-BLE001|src/archlint/engine.py|Do not catch blind exception: `Exception`|dfa3edc4",
-    "ruff-C901|src/archlint/baseline.py|`record` is too complex (12 > 10)|190df293",
-    "ruff-C901|src/archlint/bench.py|`bench_one` is too complex (11 > 10)|3a8325de",
-    "ruff-C901|src/archlint/engines.py|`violations` is too complex (12 > 10)|84e4f820",
-    "ruff-C901|src/archlint/facts.py|`_effect_uses` is too complex (13 > 10)|41cab7e0",
-    "ruff-C901|src/archlint/scanner.py|`_discover` is too complex (30 > 10)|ce912fe9",
+    "ruff-BLE001|src/arborescent/engine.py|Do not catch blind exception: `Exception`|dfa3edc4",
+    "ruff-C901|src/arborescent/baseline.py|`record` is too complex (12 > 10)|190df293",
+    "ruff-C901|src/arborescent/bench.py|`bench_one` is too complex (11 > 10)|3a8325de",
+    "ruff-C901|src/arborescent/engines.py|`violations` is too complex (12 > 10)|84e4f820",
+    "ruff-C901|src/arborescent/facts.py|`_effect_uses` is too complex (13 > 10)|41cab7e0",
+    "ruff-C901|src/arborescent/scanner.py|`_discover` is too complex (30 > 10)|ce912fe9",
     "ruff-PLC0415|tests/test_engine_ports.py|`import` should be at the top-level of a file|1c4f29e8",
     "ruff-PLC0415|tests/test_engine_ports.py|`import` should be at the top-level of a file|77c5b6e9",
     "ruff-PLC0415|tests/test_engine_ports.py|`import` should be at the top-level of a file|797d891e",
@@ -19,24 +19,24 @@
     "ruff-PLC0415|tests/test_todo.py|`import` should be at the top-level of a file|a7b6a0ca",
     "ruff-PLC0415|tests/test_todo.py|`import` should be at the top-level of a file|c6fd2aaf",
     "ruff-PLC0415|tests/test_todo.py|`import` should be at the top-level of a file|d0e45089",
-    "ruff-PLR0912|src/archlint/scanner.py|Too many branches (17 > 12)|ce912fe9",
-    "ruff-PLR0913|src/archlint/baseline.py|Too many arguments in function definition (6 > 5)|190df293",
-    "ruff-PLR0913|src/archlint/practices.py|Too many arguments in function definition (6 > 5)|0c5f9ebe",
-    "ruff-PLR0913|src/archlint/practices.py|Too many arguments in function definition (6 > 5)|9fe46330",
-    "ruff-PLR0913|src/archlint/rules.py|Too many arguments in function definition (7 > 5)|38b06e2a",
-    "ruff-PLR0915|src/archlint/scanner.py|Too many statements (81 > 50)|ce912fe9",
-    "ruff-T201|src/archlint/bench.py|`print` found|298e02da",
-    "ruff-T201|src/archlint/bench.py|`print` found|8fd5b0f8",
+    "ruff-PLR0912|src/arborescent/scanner.py|Too many branches (17 > 12)|ce912fe9",
+    "ruff-PLR0913|src/arborescent/baseline.py|Too many arguments in function definition (6 > 5)|190df293",
+    "ruff-PLR0913|src/arborescent/practices.py|Too many arguments in function definition (6 > 5)|0c5f9ebe",
+    "ruff-PLR0913|src/arborescent/practices.py|Too many arguments in function definition (6 > 5)|9fe46330",
+    "ruff-PLR0913|src/arborescent/rules.py|Too many arguments in function definition (7 > 5)|38b06e2a",
+    "ruff-PLR0915|src/arborescent/scanner.py|Too many statements (81 > 50)|ce912fe9",
+    "ruff-T201|src/arborescent/bench.py|`print` found|298e02da",
+    "ruff-T201|src/arborescent/bench.py|`print` found|8fd5b0f8",
     "ruff-T201|tools/make_bench_corpus.py|`print` found|8f91e001"
   ],
   "growth": [
     {
       "reason": "Move the scanner implementation into its responsibility-specific module.",
       "added": [
-        "ruff-C901|src/archlint/scanner.py|`_discover` is too complex (30 > 10)|ce912fe9",
+        "ruff-C901|src/arborescent/scanner.py|`_discover` is too complex (30 > 10)|ce912fe9",
         "ruff-I001|tests/test_dogfood_and_speed.py|Import block is un-sorted or un-formatted|8ab6a64f",
-        "ruff-PLR0912|src/archlint/scanner.py|Too many branches (17 > 12)|ce912fe9",
-        "ruff-PLR0915|src/archlint/scanner.py|Too many statements (81 > 50)|ce912fe9"
+        "ruff-PLR0912|src/arborescent/scanner.py|Too many branches (17 > 12)|ce912fe9",
+        "ruff-PLR0915|src/arborescent/scanner.py|Too many statements (81 > 50)|ce912fe9"
       ]
     }
   ]

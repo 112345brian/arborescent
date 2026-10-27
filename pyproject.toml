@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "archlint"
+name = "arborescent"
 version = "0.1.0"
 description = "One architecture policy that generates import-linter, tach and type-checker configs, then enforces more."
 readme = "README.md"
@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = []
 
-# The engines are extras: ArchLint runs them as subprocesses and skips (or, with --require-tools, fails) when absent.
+# The engines are extras: Arborescent runs them as subprocesses and skips (or, with --require-tools, fails) when absent.
 [project.optional-dependencies]
 importlinter = ["import-linter>=2.0"]
 tach = ["tach>=0.30"]
@@ -35,104 +35,104 @@ all = ["import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "
 dev = ["pytest>=8", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "build"]
 
 [project.urls]
-Homepage = "https://github.com/112345brian/archlint"
-Repository = "https://github.com/112345brian/archlint"
-Changelog = "https://github.com/112345brian/archlint/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/112345brian/arborescent"
+Repository = "https://github.com/112345brian/arborescent"
+Changelog = "https://github.com/112345brian/arborescent/blob/main/CHANGELOG.md"
 
 [project.scripts]
-archlint = "archlint.cli:main"
+arborescent = "arborescent.cli:main"
 
 [tool.setuptools]
-packages = ["archlint"]
+packages = ["arborescent"]
 
 [tool.setuptools.package-dir]
 "" = "src"
 
 [tool.setuptools.package-data]
-archlint = ["py.typed"]
+arborescent = ["py.typed"]
 
-# ArchLint's own architecture, checked by ArchLint (`archlint check` in this folder).
-[tool.archlint]
+# Arborescent's own architecture, checked by Arborescent (`arborescent check` in this folder).
+[tool.arborescent]
 python = "3.11"
-sources = ["src/archlint"]
+sources = ["src/arborescent"]
 source_roots = ["src"]
 exclude = ["__pycache__", "tests", "tools"]
 forbid_circular_imports = true
 rings = ["domain", "ports", "application", "adapters", "composition"]
 type_checkers = ["ty", "pyright"]
 
-[tool.archlint.groups]
+[tool.arborescent.groups]
 pure = ["__future__", "collections", "dataclasses", "enum", "fnmatch", "re", "typing", "ast", "sys", "tomllib", "io", "tokenize", "posixpath", "json"]
 
-[tool.archlint.ring.domain]
-external = ["@pure", "archlint"]
+[tool.arborescent.ring.domain]
+external = ["@pure", "arborescent"]
 
-[tool.archlint.ring.ports]
+[tool.arborescent.ring.ports]
 may_import = ["domain"]
-external = ["@pure", "pathlib", "contextlib", "archlint"]
+external = ["@pure", "pathlib", "contextlib", "arborescent"]
 
-[tool.archlint.ring.application]
+[tool.arborescent.ring.application]
 may_import = ["domain", "ports"]
 # pathlib: Path values only (join, relative_to); every disk access goes through FileSystem (tests/test_filesystem.py)
-external = ["@pure", "pathlib", "concurrent", "archlint"]
+external = ["@pure", "pathlib", "concurrent", "arborescent"]
 # The application coordinates parallel engines; all other effect categories keep the strict default.
 forbid = ["clock", "dynamic-import", "env", "identity", "patch", "process", "randomness", "sleep"]
 
-[tool.archlint.ring.adapters]
+[tool.arborescent.ring.adapters]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "archlint"]
+external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "arborescent"]
 os_branching = true
 forbid = ["clock", "dynamic-import", "env", "identity", "patch", "randomness", "sleep", "threads"]
 
-[tool.archlint.ring.composition]
+[tool.arborescent.ring.composition]
 may_import = ["*"]
-external = ["@pure", "argparse", "pathlib", "os", "shlex", "archlint"]
+external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 
-[tool.archlint.classify]
-"archlint" = "domain"
-"archlint.domain" = "domain"
-"archlint.facts" = "domain"
-"archlint.rules" = "domain"
-"archlint.presets" = "domain"
-"archlint.stdlib" = "domain"
-"archlint.ports" = "ports"
-"archlint.generate" = "application"
-"archlint.baseline" = "application"
-"archlint.config" = "application"
-"archlint.engine" = "application"
-"archlint.certification" = "application"
-"archlint.install_tools" = "application"
-"archlint.practices" = "application"
-"archlint.selftest" = "application"
-"archlint.suggestions" = "application"
-"archlint.bench" = "application"
-"archlint.adapters" = "adapters"
-"archlint.installer_adapter" = "adapters"
-"archlint.clock_adapter" = "adapters"
-"archlint.filesystem_adapter" = "adapters"
-"archlint.scanner" = "adapters"
-"archlint.tool_runner" = "adapters"
-"archlint.typecheckers" = "adapters"
-"archlint.engines" = "adapters"
-"archlint.testing" = "adapters"
-"archlint.cli" = "composition"
-"archlint.cli_install" = "composition"
-"archlint.cli_report" = "composition"
-"archlint.__main__" = "composition"
+[tool.arborescent.classify]
+"arborescent" = "domain"
+"arborescent.domain" = "domain"
+"arborescent.facts" = "domain"
+"arborescent.rules" = "domain"
+"arborescent.presets" = "domain"
+"arborescent.stdlib" = "domain"
+"arborescent.ports" = "ports"
+"arborescent.generate" = "application"
+"arborescent.baseline" = "application"
+"arborescent.config" = "application"
+"arborescent.engine" = "application"
+"arborescent.certification" = "application"
+"arborescent.install_tools" = "application"
+"arborescent.practices" = "application"
+"arborescent.selftest" = "application"
+"arborescent.suggestions" = "application"
+"arborescent.bench" = "application"
+"arborescent.adapters" = "adapters"
+"arborescent.installer_adapter" = "adapters"
+"arborescent.clock_adapter" = "adapters"
+"arborescent.filesystem_adapter" = "adapters"
+"arborescent.scanner" = "adapters"
+"arborescent.tool_runner" = "adapters"
+"arborescent.typecheckers" = "adapters"
+"arborescent.engines" = "adapters"
+"arborescent.testing" = "adapters"
+"arborescent.cli" = "composition"
+"arborescent.cli_install" = "composition"
+"arborescent.cli_report" = "composition"
+"arborescent.__main__" = "composition"
 
-[tool.archlint.practices]
+[tool.arborescent.practices]
 crlf = ["*.sh", "*.bash"]
 undeclared-imports = true
 secrets-guard = "tests"
 docs-sync = "docs/architecture.md"
 
-[tool.archlint.ruff]
+[tool.arborescent.ruff]
 # The subprocess adapter deliberately owns process execution and passes argument vectors with shell disabled.
 
-[tool.archlint.ruff.per-file-ignores]
-"src/archlint/tool_runner.py" = ["S404", "S603"]
-"src/archlint/cli_install.py" = ["T20"]
-"src/archlint/cli_report.py" = ["T20"]
+[tool.arborescent.ruff.per-file-ignores]
+"src/arborescent/tool_runner.py" = ["S404", "S603"]
+"src/arborescent/cli_install.py" = ["T20"]
+"src/arborescent/cli_report.py" = ["T20"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -140,17 +140,17 @@ pythonpath = ["src", "tests"]
 addopts = "-q"
 
 # Contract that lived in the launch-runner root pyproject: the core and the ports stay free of process/file/network modules.
-# (`lint-imports` reads this table; the generated archlint-importlinter.toml is checked by `archlint check`.)
+# (`lint-imports` reads this table; the generated arborescent-importlinter.toml is checked by `arborescent check`.)
 [tool.importlinter]
-root_packages = ["archlint"]
+root_packages = ["arborescent"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "archlint core and ports must not import adapters, the engines or process/file/network modules"
+name = "arborescent core and ports must not import adapters, the engines or process/file/network modules"
 type = "forbidden"
-source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.stdlib", "archlint.rules", "archlint.ports"]
+source_modules = ["arborescent.domain", "arborescent.facts", "arborescent.presets", "arborescent.stdlib", "arborescent.rules", "arborescent.ports"]
 forbidden_modules = [
-    "archlint.adapters", "archlint.tool_runner", "archlint.typecheckers", "archlint.engines", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
+    "arborescent.adapters", "arborescent.tool_runner", "arborescent.typecheckers", "arborescent.engines", "arborescent.engine", "arborescent.cli", "subprocess", "shutil", "tempfile",
     "socket", "urllib",
 ]
 allow_indirect_imports = true

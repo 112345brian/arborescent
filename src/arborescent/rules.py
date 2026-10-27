@@ -1,4 +1,4 @@
-"""ArchLint's own checks, as pure functions over already-parsed modules.
+"""Arborescent's own checks, as pure functions over already-parsed modules.
 
 Rules (ids in ``domain.Rule``): ``unclassified``, ``internal-import``, ``external-import``, ``os-branching``,
 ``bad-import`` and ``undeclared-entry-dependency``. Lazy (function-level) and ``TYPE_CHECKING`` imports count. How much of the external

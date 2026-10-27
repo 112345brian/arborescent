@@ -1,4 +1,4 @@
-"""Presets: named bundles of how much ArchLint enforces. ``strict`` is the default and the reference; the others only
+"""Presets: named bundles of how much Arborescent enforces. ``strict`` is the default and the reference; the others only
 relax it. Pure data; ``Policy`` holds the chosen preset and the rules and generators ask it, so no check hard-codes
 how strict it is."""
 

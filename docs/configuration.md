@@ -1,7 +1,7 @@
 # Configuration reference
 
-The policy lives in `[tool.archlint]` in `pyproject.toml`, or as top-level keys in an `archlint.toml`. ArchLint searches
-upwards from the current folder (or use `archlint --config PATH ...`); the folder holding the policy file is the
+The policy lives in `[tool.arborescent]` in `pyproject.toml`, or as top-level keys in an `arborescent.toml`. Arborescent searches
+upwards from the current folder (or use `arborescent --config PATH ...`); the folder holding the policy file is the
 repository root. A malformed or self-contradicting policy exits with code 2 and a one-line reason; nothing is repaired
 silently.
 
@@ -20,13 +20,13 @@ silently.
 | `groups` | `{}` | Named lists, used as `"@name"` inside any `may_import` or `external` list. |
 | `dependencies` | `{}` | Import name -> distribution name, where they differ (`yaml = "pyyaml"`). Used for entry-script and manifest checks. |
 | `forbid_everywhere` | `[]` | Packages no module may import, in any ring (one global import-linter contract). |
-| `forbid_circular_imports` | `true` | Rejects cycles in the first-party module import graph, including lazy and `TYPE_CHECKING` imports. Set to `false` only to opt out; the ArchLint minimum profile requires `true`. |
+| `forbid_circular_imports` | `true` | Rejects cycles in the first-party module import graph, including lazy and `TYPE_CHECKING` imports. Set to `false` only to opt out; the Arborescent minimum profile requires `true`. |
 | `entry_scripts` | `[]` | Dotted names of PEP 723 single-file scripts. Each must declare, in its `# /// script` block, every third-party distribution the project code imports. |
 | `type_checkers` | `["ty"]` | `pyright`, `basedpyright`, `ty` and/or `pyrefly`. The first one runs by default; `check --type-checker` overrides it. A config file is generated for each one listed. |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
-| `baseline` | `"archlint-baseline.json"` | The baseline file used by `archlint baseline` and `check`. |
+| `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
 
@@ -39,9 +39,9 @@ There is no per-file suppression. Function size and complexity remain Ruff rules
 `"bootstrap.adapters" = ["bootstrap.launcher"]` blocks that package and its descendants only in the named adapter
 module (or matching module glob).
 
-Tool configs remain project-owned and are discovered natively by their tools. `archlint generate` creates missing optional presets
-and skips every existing file. Drift is shown only for files still marked as ArchLint-generated,
-and is informational. `check --require-tools --require-profile` requires ArchLint minimum profile v1 (Ruff 0.17.2,
+Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
+and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
+and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (Ruff 0.17.2,
 Tach 0.35.3) and behaviorally probes the required Ruff rules.
 
 Use `disabled_tools` for tools this project deliberately does not use, so their absence does not keep appearing as a
@@ -53,7 +53,7 @@ configured type checker active.
 skipped checks do not receive this label. `CERTIFIED` is printed only when the minimum profile also passes. A project
 can therefore be consistent with its own policy while remaining uncertified because it disabled required profile tools.
 
-`[tool.archlint.ruff]` composes overrides over the optional generated Ruff preset; it never replaces that preset. It accepts
+`[tool.arborescent.ruff]` composes overrides over the optional generated Ruff preset; it never replaces that preset. It accepts
 `extend-select`, `ignore`, `per-file-ignores`, `max-complexity`, `max-args`, `max-branches`, and `max-statements`.
 The base includes correctness, typing, security, modernization, path, and performance rule families in addition to
 complexity and architecture-aware rules. Ruff's broad test-assertion and subprocess-wrapper warnings are scoped so
@@ -61,7 +61,7 @@ tests remain idiomatic and real process adapters can declare their deliberate su
 because it conflicts with strict type inference for container factories. `check` prints `standard rules (baseline vN)` when no rule
 customization is active, or `customised rules: ...` with the changes that apply.
 
-## Rings: `[tool.archlint.ring.<name>]`
+## Rings: `[tool.arborescent.ring.<name>]`
 
 | key | default | meaning |
 |---|---|---|
@@ -92,9 +92,9 @@ and `relaxed` forbids none. The innermost and outermost positional defaults appl
 `io_modules` also drives the generated import-linter contracts, which ban the I/O modules a ring does not list. Under
 `relaxed` the contracts ban only declared third-party packages.
 
-## Rules ArchLint checks itself
+## Rules Arborescent checks itself
 
-The ids below are `archlint.domain.Rule`. They appear in baseline entries (`rule|subject|detail`), so they never change.
+The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`rule|subject|detail`), so they never change.
 
 | rule | fires when |
 |---|---|
@@ -126,7 +126,7 @@ the first argument is a static project-package string or attribute under the con
 `noqa` comments do not suppress native effect findings. Suppression and reasoned `discard()` counts are always reported;
 increases need `baseline --allow-growth --reason` (or one-time family adoption), while removals can shrink the baseline.
 
-## Practices: `[tool.archlint.practices]`
+## Practices: `[tool.arborescent.practices]`
 
 Each practice is off until it has a value.
 
@@ -141,76 +141,76 @@ Each practice is off until it has a value.
 
 ## Baseline ratchet
 
-`archlint baseline` creates a baseline the first time. On later runs it removes stale entries, but refuses to add new
-ones. To adopt one previously unrecorded rule family, use `archlint baseline --adopt FAMILY`; adoption is allowed only
+`arborescent baseline` creates a baseline the first time. On later runs it removes stale entries, but refuses to add new
+ones. To adopt one previously unrecorded rule family, use `arborescent baseline --adopt FAMILY`; adoption is allowed only
 when that family has no existing baseline entries. Other growth requires
-`archlint baseline --allow-growth --reason "why this debt is accepted"`. The version-2 JSON baseline records each
+`arborescent baseline --allow-growth --reason "why this debt is accepted"`. The version-2 JSON baseline records each
 growth reason and the exact keys it added; version-1 baselines still load and are upgraded when written.
 
-`archlint check --growth-against REF` compares the baseline at `REF` with the working baseline and requires every new
+`arborescent check --growth-against REF` compares the baseline at `REF` with the working baseline and requires every new
 key to match the keys in growth-log entries appended since that ref. This checks consistency; it does not prove the
 command wrote the file. A person could edit both the baseline and its log by hand, so review of baseline changes
 remains part of the protection (for example, require review through `CODEOWNERS`).
 
 ## Commands and exit codes
 
-All seven commands are documented here. Run `archlint COMMAND --help` for the concise option list.
+All seven commands are documented here. Run `arborescent COMMAND --help` for the concise option list.
 
-### `archlint generate`
+### `arborescent generate`
 
 Create missing optional presets for import-linter, Tach and configured type checkers. Existing files are left untouched;
 generation is optional, and drift from generated presets is informational.
 
-### `archlint check`
+### `arborescent check`
 
-Run ArchLint's native checks and the configured external engines, report generated-preset drift and ratchet findings
+Run Arborescent's native checks and the configured external engines, report generated-preset drift and ratchet findings
 against the baseline. Options:
 
-- `--changed REF`: limit ArchLint, Ruff and the selected type checker to files changed since a Git ref. Graph-wide
+- `--changed REF`: limit Arborescent, Ruff and the selected type checker to files changed since a Git ref. Graph-wide
   engines are skipped because they cannot check a partial module graph.
 - `--type-checker NAME`: override the first checker listed in `type_checkers` (`basedpyright`, `pyrefly`, `pyright`
   or `ty`).
 - `--no-tools`: skip import-linter, Tach and the type checker.
 - `--require-tools`: fail when a configured checker is missing instead of skipping it.
-- `--require-profile`: require the versioned ArchLint minimum profile; this also requires its tools.
+- `--require-profile`: require the versioned Arborescent minimum profile; this also requires its tools.
 - `--install-tools`: offer to install missing configured tools before checking. The prompt defaults to No.
 - `--yes`: install without prompting; valid with `--install-tools`.
 - `--no-baseline`: report every finding without applying the baseline.
 - `--growth-against REF`: verify baseline growth entries against the baseline at a Git ref.
-- `--no-cache`: bypass the ArchLint AST fact cache for this run.
+- `--no-cache`: bypass the Arborescent AST fact cache for this run.
 
 By default, `check` is read-only with respect to the environment and prints install instructions for missing tools.
-Installation targets the active interpreter (or uses uv when pip is unavailable); Poetry projects use the `archlint`
+Installation targets the active interpreter (or uses uv when pip is unavailable); Poetry projects use the `arborescent`
 dependency group and update the lockfile. See the installation behavior above for details.
 
-### `archlint install-tools`
+### `arborescent install-tools`
 
 Install missing check tools without running checks. `--type-checker NAME` selects a checker other than the policy's
 default, and `--yes` skips the default-No confirmation. This command changes the project environment and, in Poetry
 projects, its dependency group and lockfile.
 
-### `archlint baseline`
+### `arborescent baseline`
 
 Create the initial baseline or shrink it by removing findings that no longer occur. New findings are rejected by
 default. `--adopt FAMILY` adopts a previously unrecorded family once; `--allow-growth --reason TEXT` records other
 intentional baseline growth and its reason.
 
-### `archlint discover`
+### `arborescent discover`
 
 List in-scope Python files that still lack a ring classification, grouped by folder with the outermost ring suggested.
 Add matching `classify` patterns or explicitly exclude files that should not be scanned. Git-tracked Python files under
 noise directories are reported separately by `check`.
 
-### `archlint selftest`
+### `arborescent selftest`
 
-Mutation-test ArchLint's native rules by adding forbidden constructs to a temporary copy and checking that each
+Mutation-test Arborescent's native rules by adding forbidden constructs to a temporary copy and checking that each
 mutation produces a finding. A surviving mutation fails the command; rules that cannot be exercised for the current
 policy are reported as skipped.
 
-### `archlint bench DIR...`
+### `arborescent bench DIR...`
 
 Measure cold and warm timings for native checks, each available engine and the whole check on prepared projects. Each
-directory must contain an `archlint.toml`. `--checkers NAME...` chooses which type checkers to benchmark.
+directory must contain an `arborescent.toml`. `--checkers NAME...` chooses which type checkers to benchmark.
 
 ### Exit codes
 
@@ -220,9 +220,9 @@ baseline change exits 2. `discover` exits 0 whether or not it finds unclassified
 ## Releasing to PyPI
 
 Releases use the `Publish to PyPI` GitHub Actions workflow, triggered when a GitHub Release is published. Before the
-first release, configure a **pending trusted publisher** in PyPI for owner `112345brian`, repository `archlint`, workflow
+first release, configure a **pending trusted publisher** in PyPI for owner `112345brian`, repository `arborescent`, workflow
 `publish.yml`, and GitHub environment `pypi`. The workflow reruns the full test matrix, builds the wheel and source
 distribution, then publishes through PyPI Trusted Publishing; no long-lived PyPI token is stored in GitHub. Create a
 GitHub Release for the matching version tag (for example, `v0.1.0`) only after the release commit is on `main`.
 
-When `type_checkers` is omitted, ArchLint uses Ty. Set `type_checkers = ["pyright"]` to select Pyright explicitly. During `--changed`, graph-wide import-linter and Tach checks are skipped; Ruff and the selected type checker receive only changed files.
+When `type_checkers` is omitted, Arborescent uses Ty. Set `type_checkers = ["pyright"]` to select Pyright explicitly. During `--changed`, graph-wide import-linter and Tach checks are skipped; Ruff and the selected type checker receive only changed files.

@@ -4,12 +4,12 @@ import shutil
 from pathlib import Path
 
 import pytest
-from archlint_helpers import MINI_FILES, mini_policy, write_files
+from arborescent_helpers import MINI_FILES, mini_policy, write_files
 
-from archlint.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
-from archlint.certification import _native_minimum, _tach_probes
-from archlint.generate import tach
-from archlint.installer_adapter import _toml_array_close
+from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
+from arborescent.certification import _native_minimum, _tach_probes
+from arborescent.generate import tach
+from arborescent.installer_adapter import _toml_array_close
 
 
 def test_toml_array_scanner_skips_brackets_inside_strings_and_comments() -> None:
@@ -48,7 +48,7 @@ def test_tach_canaries_accept_enforced_profile_and_catch_disabled_checks(tmp_pat
         weakened = weakened.replace(f'layer = "{layer}"', 'layer = "domain"')
     (tmp_path / "tach.toml").write_text(
         weakened.replace("forbid_circular_dependencies = true", "forbid_circular_dependencies = false")
-        .replace("exclude = []", 'exclude = ["__archlint_profile_missing_external_7f0f6c19__"]'),
+        .replace("exclude = []", 'exclude = ["__arborescent_profile_missing_external_7f0f6c19__"]'),
         encoding="utf-8",
     )
     failures = _tach_probes(tmp_path, policy, scan, runner, fs)

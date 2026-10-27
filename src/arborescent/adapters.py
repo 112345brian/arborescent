@@ -1,4 +1,4 @@
-"""Compatibility exports for ArchLint's runtime adapters.
+"""Compatibility exports for Arborescent's runtime adapters.
 
 New code should import adapters from their responsibility-specific modules.
 """

@@ -1,12 +1,12 @@
-# DeepInterview ArchLint dogfood, 2026-10-26
+# DeepInterview Arborescent dogfood, 2026-10-26
 
 Read-only scan of `/Users/bri/programming/deepinterview/apps/agent/pyproject.toml` at DeepInterview revision
-`b10e636`. The scan used the ArchLint checkout in this worktree and did not write into DeepInterview.
+`b10e636`. The scan used the Arborescent checkout in this worktree and did not write into DeepInterview.
 
 Command:
 
 ```sh
-uv run python -m archlint \
+uv run python -m arborescent \
   --config /Users/bri/programming/deepinterview/apps/agent/pyproject.toml \
   check --require-tools --no-cache
 ```
@@ -24,6 +24,6 @@ coverage findings were:
 - import-linter could not read a configuration for this invocation.
 - The existing `vendor/` tree was excluded and fingerprinted (25 files).
 
-The ArchLint CLI itself passed. Generated import-linter and Tach presets differed from the checked-in files; drift was
+The Arborescent CLI itself passed. Generated import-linter and Tach presets differed from the checked-in files; drift was
 informational. These counts describe only revision `b10e636` and should be refreshed before using them as an adoption
 baseline.

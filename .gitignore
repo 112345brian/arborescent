@@ -1,4 +1,6 @@
+# Retain ignored cache data from the previous package name.
 .archlint/
+.arborescent/
 __pycache__/
 *.pyc
 .venv/

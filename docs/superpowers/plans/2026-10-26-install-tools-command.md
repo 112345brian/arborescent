@@ -1,7 +1,7 @@
 # Missing checker setup implementation plan
 
-**Goal:** Keep `archlint check` non-mutating by default while making missing checker setup discoverable and safe through
-explicit `--install-tools` and `archlint install-tools` commands.
+**Goal:** Keep `arborescent check` non-mutating by default while making missing checker setup discoverable and safe through
+explicit `--install-tools` and `arborescent install-tools` commands.
 
 **Design:** `docs/superpowers/specs/2026-10-26-missing-tool-install-prompt-design.md` (approved).
 
@@ -20,7 +20,7 @@ explicit `--install-tools` and `archlint install-tools` commands.
    - [x] Use `sys.executable -m pip` when available; otherwise use `uv pip` targeting `sys.executable` when available.
    - [x] Never pass `--upgrade`; run `pip check` or `uv pip check` and re-resolve tools after installation.
    - [x] In non-interactive mode without `--yes`, print the command and make no changes.
-   - [x] For Poetry projects, add a dedicated `archlint` checker group, include it in `dev`, update the lock, and
+   - [x] For Poetry projects, add a dedicated `arborescent` checker group, include it in `dev`, update the lock, and
      validate with `poetry check --lock`.
    - [x] Resolve executables from the Poetry environment for checks and refresh that path after installation.
    - [x] Cover accepted, declined, non-interactive, installer unavailable, install failure, dependency-check failure, and
@@ -35,8 +35,8 @@ explicit `--install-tools` and `archlint install-tools` commands.
 
 4. **Docs and verification**
    - [x] Document `install-tools`, active interpreter resolution, uv fallback, and non-interactive behavior.
-   - [x] Run the targeted tests, full suite, ArchLint checks, and `git diff --check`.
+   - [x] Run the targeted tests, full suite, Arborescent checks, and `git diff --check`.
 
 Pip and uv do not edit a project manifest. Poetry updates `pyproject.toml` and `poetry.lock` through its CLI, plus a
-targeted TOML group-inclusion edit so ArchLint's checker group remains part of development dependencies. No commit or
+targeted TOML group-inclusion edit so Arborescent's checker group remains part of development dependencies. No commit or
 push is in scope.

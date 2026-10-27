@@ -22,7 +22,7 @@ jobs:
       - run: python -m pytest
       - name: Architecture (import-linter contract)
         run: lint-imports
-      - name: Architecture (archlint dogfood)
-        run: python -m archlint check --require-profile
+      - name: Architecture (arborescent dogfood)
+        run: python -m arborescent check --require-profile
       - name: Mutation self-test
-        run: python -m archlint selftest
+        run: python -m arborescent selftest

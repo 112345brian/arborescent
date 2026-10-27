@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from archlint_helpers import mini_policy
+from arborescent_helpers import mini_policy
 
-from archlint.generate import generate
-from archlint.typecheckers import by_name
+from arborescent.generate import generate
+from arborescent.typecheckers import by_name
 
 
 def _files() -> dict[str, str]:
@@ -29,16 +29,16 @@ def test_policy_supports_per_module_import_overrides() -> None:
 def test_changed_mode_restricts_import_linter_to_changed_files() -> None:
     import inspect
 
-    from archlint import engine
+    from arborescent import engine
 
     assert "supports_changed" in inspect.getsource(engine.run_check)  # type: ignore[attr-defined]
 
 
 def test_engine_commands_use_native_config_discovery_independent_of_output_dir() -> None:
-    from archlint.engines import default_engines
+    from arborescent.engines import default_engines
 
     files = generate(mini_policy(output_dir="cfg"), ["app.domain"], by_name(["pyright"]))
-    assert "cfg/archlint-importlinter.toml" in files
+    assert "cfg/arborescent-importlinter.toml" in files
     assert [e.command([]) for e in default_engines("cfg")] == [
         ["lint-imports"], ["tach", "check", "--dependencies"], ["tach", "check-external"],
         ["ruff", "check", "--ignore-noqa", "--exit-zero", "--output-format", "json"],
