@@ -217,4 +217,12 @@ directory must contain an `archlint.toml`. `--checkers NAME...` chooses which ty
 Commands succeed with exit code 0. A failed `check`, `selftest` or installation exits 1. A malformed policy or refused
 baseline change exits 2. `discover` exits 0 whether or not it finds unclassified files.
 
+## Releasing to PyPI
+
+Releases use the `Publish to PyPI` GitHub Actions workflow, triggered when a GitHub Release is published. Before the
+first release, configure a **pending trusted publisher** in PyPI for owner `112345brian`, repository `archlint`, workflow
+`publish.yml`, and GitHub environment `pypi`. The workflow reruns the full test matrix, builds the wheel and source
+distribution, then publishes through PyPI Trusted Publishing; no long-lived PyPI token is stored in GitHub. Create a
+GitHub Release for the matching version tag (for example, `v0.1.0`) only after the release commit is on `main`.
+
 When `type_checkers` is omitted, ArchLint uses Ty. Set `type_checkers = ["pyright"]` to select Pyright explicitly. During `--changed`, graph-wide import-linter and Tach checks are skipped; Ruff and the selected type checker receive only changed files.
