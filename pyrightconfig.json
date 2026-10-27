@@ -21,7 +21,7 @@
   "strictSetInference": true,
   "pythonVersion": "3.11",
   "include": [
-    "src/archlint"
+    "src/arborescent"
   ],
   "exclude": [
     "**/__pycache__",

@@ -1,4 +1,4 @@
-"""The ArchLint vocabulary: the policy, a violation, and what a tool run returned. Pure; no I/O."""
+"""The Arborescent vocabulary: the policy, a violation, and what a tool run returned. Pure; no I/O."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ __all__ = [
     "dist_name",
 ]
 
-NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".archlint", ".mypy_cache", ".ruff_cache", ".tox"})
+NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".arborescent", ".mypy_cache", ".ruff_cache", ".tox"})
 DISABLED_TOOL_NAMES = frozenset({"import-linter", "tach", "ruff", "pyright", "basedpyright", "ty", "pyrefly"})
 # Folders no walker (scanner, practices, selftest copy) looks into. Practices add build output on top of this.
 
@@ -56,7 +56,7 @@ class Rule(StrEnum):
     OS_BRANCHING = "os-branching"
     BAD_IMPORT = "bad-import"
     UNDECLARED_ENTRY_DEPENDENCY = "undeclared-entry-dependency"
-    # repository practices (`[tool.archlint.practices]` keys use the same ids)
+    # repository practices (`[tool.arborescent.practices]` keys use the same ids)
     GITIGNORE_SHADOW = "gitignore-shadow"
     SIBLING_VERSIONS = "sibling-versions"
     SECRETS_GUARD = "secrets-guard"
@@ -138,7 +138,7 @@ class RingRule:
 
 @dataclass(frozen=True)
 class Policy:
-    """The single source of truth that the three tool configs and ArchLint's own checks derive from."""
+    """The single source of truth that the three tool configs and Arborescent's own checks derive from."""
 
     rings: tuple[RingRule, ...]  # innermost first
     classify: tuple[tuple[str, str], ...]  # (glob on dotted module name, ring); first match wins
@@ -153,7 +153,7 @@ class Policy:
     python: str = "3.11"
     type_checkers: tuple[str, ...] = ("ty",)
     output_dir: str = "."
-    baseline: str = "archlint-baseline.json"
+    baseline: str = "arborescent-baseline.json"
     suggestion_threshold: int = 300
     ruff_overrides: Mapping[str, Any] = field(default_factory=lambda: {})
     customization_labels: tuple[str, ...] = ()
@@ -187,7 +187,7 @@ class Policy:
 
     @property
     def stdlib(self) -> frozenset[str]:
-        """Top-level stdlib module names of the policy's target Python, not of the interpreter running archlint."""
+        """Top-level stdlib module names of the policy's target Python, not of the interpreter running arborescent."""
         return stdlib_for(self.python)
 
     def ring(self, name: str) -> RingRule:

@@ -1,7 +1,7 @@
-"""``archlint bench``: measure, don't assert. Cold and warm wall-clock for every engine and for the whole ``check``
-on codebases you prepared (each directory holds an ``archlint.toml``). Prints a markdown table.
+"""``arborescent bench``: measure, don't assert. Cold and warm wall-clock for every engine and for the whole ``check``
+on codebases you prepared (each directory holds an ``arborescent.toml``). Prints a markdown table.
 
-"cold" = no ArchLint cache (and the first run of an external tool); "warm" = the immediately following run.
+"cold" = no Arborescent cache (and the first run of an external tool); "warm" = the immediately following run.
 External tools keep their own caches or the OS file cache; the numbers say what a developer would see, not what
 the algorithms cost.
 """
@@ -22,13 +22,13 @@ __all__ = ["run_bench"]
 
 
 def _clear(fs: FileSystem, root: Path) -> None:
-    fs.remove_tree(root / ".archlint")
+    fs.remove_tree(root / ".arborescent")
 
 
 def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]) -> list[str]:
     svc = make(root)
     fs = svc.fs
-    policy, _ = load_policy(fs, root / "archlint.toml")
+    policy, _ = load_policy(fs, root / "arborescent.toml")
     policy = dataclasses.replace(policy, type_checkers=tuple(names))
     _ = pick_checker(policy, svc)  # an unknown checker name is a PolicyError before anything is timed
     rows: list[tuple[str, str, str, str]] = []  # engine, cold, warm, note
@@ -53,7 +53,7 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
         found, s = run_own(policy, root, svc, practices=False)
         return f"{len(found)} violations, {s.parsed} parsed"
 
-    twice("archlint own checks (parse+rules)", own, lambda: _clear(fs, root))
+    twice("arborescent own checks (parse+rules)", own, lambda: _clear(fs, root))
     chosen = [c for c in svc.checkers if c.name in names]
     twice("generate (in memory)", lambda: f"{len(generate(policy, sorted(scan.known), chosen))} files")
     _ = write_generated(policy, root, svc)

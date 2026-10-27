@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from archlint_helpers import mini_policy, write_files
+from arborescent_helpers import mini_policy, write_files
 
-from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
-from archlint.baseline import save
-from archlint.cli import main
-from archlint.domain import ToolResult
-from archlint.engine import Services, run_own
-from archlint.engines import default_engines
-from archlint.testing import FakeToolRunner
-from archlint.typecheckers import all_checkers
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.baseline import save
+from arborescent.cli import main
+from arborescent.domain import ToolResult
+from arborescent.engine import Services, run_own
+from arborescent.engines import default_engines
+from arborescent.testing import FakeToolRunner
+from arborescent.typecheckers import all_checkers
 
 
 class GitFiles(FakeToolRunner):
@@ -75,7 +75,7 @@ def test_no_git_falls_back_to_a_noise_pruned_walk(repo: Path) -> None:
 def test_discover_groups_unclassified_files_and_suggests_outer_ring(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     write_files(repo, {"scripts/one.py": "VALUE = 1\n", "scripts/two.py": "VALUE = 2\n"})
     runner = GitFiles(["app/__init__.py", "app/domain.py", "scripts/one.py", "scripts/two.py"])
-    config = repo / "archlint.toml"
+    config = repo / "arborescent.toml"
     config.write_text(
         'sources = ["app"]\nrings = ["domain", "composition"]\n'
         '[ring.domain]\nexternal = []\n[ring.composition]\nmay_import = ["*"]\nexternal = ["*"]\n'
@@ -95,7 +95,7 @@ def test_discover_groups_unclassified_files_and_suggests_outer_ring(repo: Path, 
 def test_check_prints_excluded_file_counts(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     write_files(repo, {"vendor/copied.py": "VALUE = 1\n", "generated/skip.py": "VALUE = 2\n"})
     runner = GitFiles(["app/__init__.py", "app/domain.py", "vendor/copied.py", "generated/skip.py"])
-    config = repo / "archlint.toml"
+    config = repo / "arborescent.toml"
     config.write_text(
         'sources = ["app"]\nexclude = ["generated", "vendor"]\nrings = ["domain"]\n'
         '[ring.domain]\nexternal = []\n[classify]\n"app" = "domain"\n',
@@ -114,7 +114,7 @@ def test_check_prints_excluded_file_counts(repo: Path, capsys) -> None:  # type:
 def test_coverage_debt_can_be_adopted_as_a_family(repo: Path) -> None:
     write_files(repo, {"scripts/extra.py": "VALUE = 1\n"})
     runner = GitFiles(["app/__init__.py", "app/domain.py", "scripts/extra.py"])
-    config = repo / "archlint.toml"
+    config = repo / "arborescent.toml"
     config.write_text(
         'sources = ["app"]\nrings = ["domain"]\n[ring.domain]\nexternal = ["__future__"]\n'
         '[classify]\n"app" = "domain"\n"app.*" = "domain"\n',
@@ -122,8 +122,8 @@ def test_coverage_debt_can_be_adopted_as_a_family(repo: Path) -> None:
     )
     fs = LocalFileSystem()
     services = Services(FsScanner(runner=runner), runner, list(all_checkers().values()), fs, SystemClock(), default_engines())
-    save(fs, repo / "archlint-baseline.json", [])
+    save(fs, repo / "arborescent-baseline.json", [])
 
     assert main(["--config", str(config), "baseline", "--adopt", "coverage"], services) == 0
 
-    assert "unclassified|scripts.extra|" in fs.read_text(repo / "archlint-baseline.json")
+    assert "unclassified|scripts.extra|" in fs.read_text(repo / "arborescent-baseline.json")

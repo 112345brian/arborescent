@@ -1,4 +1,4 @@
-"""Behavioral checks for the versioned ArchLint minimum profile."""
+"""Behavioral checks for the versioned Arborescent minimum profile."""
 
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def _ruff_probes(root: Path, sources: tuple[str, ...], runner: ToolRunner, fs: F
     failures: list[str] = []
     source_root = next((root / source for source in sources if fs.is_dir(root / source)), root)
     try:
-        with fs.temporary_directory("archlint-profile-", source_root) as temp:
+        with fs.temporary_directory("arborescent-profile-", source_root) as temp:
             package = temp / "probe_package"
             nested = package / "nested"
             fs.mkdir(nested)
@@ -133,7 +133,7 @@ def _tach_probes(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunne
     if source_module is None or not outer_modules:
         return ["Tach profile canaries need at least one classified innermost and outermost module"]
     try:
-        with fs.temporary_directory("archlint-tach-profile-") as temp:
+        with fs.temporary_directory("arborescent-tach-profile-") as temp:
             _copy_tach_project(root, policy.source_roots, temp, fs)
             source_path = temp / source_module.path
             if not fs.is_file(source_path):
@@ -178,7 +178,7 @@ def _tach_layer_probe(
 
 def _tach_external_probe(temp: Path, source_path: Path, runner: ToolRunner, fs: FileSystem) -> bool:
     original = fs.read_bytes(source_path)
-    _append_import(fs, source_path, original, "__archlint_profile_missing_external_7f0f6c19__")
+    _append_import(fs, source_path, original, "__arborescent_profile_missing_external_7f0f6c19__")
     result = runner.run(["tach", "check-external"], temp)
     fs.write_bytes(source_path, original)
     return result.returncode != 0

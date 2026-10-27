@@ -76,7 +76,7 @@ def plan(policy: Policy, paths: dict[str, str], known: frozenset[str]) -> tuple[
     if policy.entry_scripts:
         entry_host = next((m for m in sorted(known) if policy.ring_of(m) is not None and m not in policy.entry_scripts), None)
         if entry_host is not None:
-            out.append(Mutation(Rule.UNDECLARED_ENTRY_DEPENDENCY, "a project module imports a package the scripts don't declare", paths[entry_host], "import archlint_probe_dist"))
+            out.append(Mutation(Rule.UNDECLARED_ENTRY_DEPENDENCY, "a project module imports a package the scripts don't declare", paths[entry_host], "import arborescent_probe_dist"))
     return out, sorted(set(skipped))
 
 
@@ -98,25 +98,25 @@ def _ring_mutations(
     if not policy.preset.os_branching:
         skipped.append(f"ring {name}: the {policy.preset.name} preset does not enforce OS branching")
     elif not policy.ring(name).os_branching:
-        out.append(Mutation(Rule.OS_BRANCHING, f"{name}: OS branching", paths[host], "import os\n_archlint_probe = os.name"))
+        out.append(Mutation(Rule.OS_BRANCHING, f"{name}: OS branching", paths[host], "import os\n_arborescent_probe = os.name"))
     out.extend(_effect_mutations(policy, name, paths[host]))
     return out, skipped
 
 
 def _import_mutations(name: str, host: str, target: str | None, external: frozenset[str], lazy: bool) -> list[Mutation]:
     how = "lazy" if lazy else "top-level"
-    indent = "def _archlint_probe() -> None:\n    " if lazy else ""
+    indent = "def _arborescent_probe() -> None:\n    " if lazy else ""
     out: list[Mutation] = []
     if target is not None:
         out.append(Mutation(Rule.INTERNAL_IMPORT, f"{name}: forbidden {how} internal import of {target}", host, f"{indent}import {target}"))
     if "*" not in external:
-        out.append(Mutation(Rule.EXTERNAL_IMPORT, f"{name}: unlisted {how} external import", host, f"{indent}import archlint_probe_pkg"))
+        out.append(Mutation(Rule.EXTERNAL_IMPORT, f"{name}: unlisted {how} external import", host, f"{indent}import arborescent_probe_pkg"))
     return out
 
 
 def _anchor_mutations(anchor: str, host: str, forbid_circular_imports: bool) -> list[Mutation]:
     base = host.rsplit("/", 1)[0] if "/" in host else ""
-    new = (base + "/" if base else "") + "archlint_probe_unclassified.py"
+    new = (base + "/" if base else "") + "arborescent_probe_unclassified.py"
     out = [Mutation(Rule.UNCLASSIFIED, "a new module matching no pattern", new, "", new_file=True)]
     if forbid_circular_imports:
         out.append(Mutation(Rule.CIRCULAR_IMPORT, "a module importing itself", host, f"import {anchor}"))
@@ -135,7 +135,7 @@ def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
             Rule.EFFECT_CLOCK,
             f"{ring}: ambient clock use",
             host,
-            "import time\n_archlint_probe = time.time()",
+            "import time\n_arborescent_probe = time.time()",
         )
     ]
 
@@ -146,7 +146,7 @@ def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     mutations, skipped = plan(policy, dict(scan.paths), scan.known)
     report = SelfTestReport([], [], skipped)
     fs = services.fs
-    with fs.temporary_directory("archlint-selftest-") as tmp:
+    with fs.temporary_directory("arborescent-selftest-") as tmp:
         work = tmp / "copy"
         fs.copy_tree(root, work, ignore=_SKIP_COPY)
         baseline = {v.key for v in run_own(policy, work, services, practices=False)[0]}

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import pytest
-from archlint_helpers import MINI, mini_policy, ring_with
+from arborescent_helpers import MINI, mini_policy, ring_with
 
-from archlint.config import policy_from_mapping
-from archlint.domain import ALL, Policy, PolicyError, RingRule
+from arborescent.config import policy_from_mapping
+from arborescent.domain import ALL, Policy, PolicyError, RingRule
 
 
 def test_allowed_rings_are_self_plus_declared_inner_rings() -> None:
@@ -73,7 +73,7 @@ def test_groups_expand_and_defaults_apply() -> None:
     assert p.ring("domain").external == frozenset(["__future__", "dataclasses", "typing", "collections"])
     assert p.ring("composition").may_import == {ALL}
     assert p.ring("adapters").os_branching and not p.ring("domain").os_branching
-    assert (p.python, p.type_checkers, p.baseline, p.output_dir) == ("3.11", ("ty",), "archlint-baseline.json", ".")
+    assert (p.python, p.type_checkers, p.baseline, p.output_dir) == ("3.11", ("ty",), "arborescent-baseline.json", ".")
     assert p.forbid_circular_imports is True
 
 

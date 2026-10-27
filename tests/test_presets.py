@@ -1,4 +1,4 @@
-"""Presets: ``strict`` is the default and is exactly the behaviour ArchLint had before presets existed."""
+"""Presets: ``strict`` is the default and is exactly the behaviour Arborescent had before presets existed."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from archlint_helpers import MINI, mini_policy, ring_with, write_files
+from arborescent_helpers import MINI, mini_policy, ring_with, write_files
 
-from archlint.adapters import FsScanner
-from archlint.config import policy_from_mapping
-from archlint.domain import PolicyError
-from archlint.generate import generate
-from archlint.presets import IO_MODULES, PRESETS
-from archlint.rules import check_modules
+from arborescent.adapters import FsScanner
+from arborescent.config import policy_from_mapping
+from arborescent.domain import PolicyError
+from arborescent.generate import generate
+from arborescent.presets import IO_MODULES, PRESETS
+from arborescent.rules import check_modules
 
 NAMES = ["app", "app.domain", "app.ports", "app.adapters", "app.main"]
 
@@ -25,7 +25,7 @@ def found_rules(root: Path, **overrides: Any) -> set[tuple[str, str]]:
 
 
 def linter_text(**overrides: Any) -> str:
-    return generate(mini_policy(**overrides), NAMES, [])["archlint-importlinter.toml"]
+    return generate(mini_policy(**overrides), NAMES, [])["arborescent-importlinter.toml"]
 
 
 # --- the default is strict, and strict is the old behaviour -------------------------------------------------------

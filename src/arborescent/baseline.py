@@ -1,5 +1,5 @@
 """The shrink-only ratchet: a baseline file records today's violations; only NEW ones fail, and entries that no
-longer occur must be deleted (``archlint baseline`` rewrites the file), so the debt can only go down."""
+longer occur must be deleted (``arborescent baseline`` rewrites the file), so the debt can only go down."""
 
 from __future__ import annotations
 

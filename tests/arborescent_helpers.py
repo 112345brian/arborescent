@@ -9,8 +9,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from archlint.config import policy_from_mapping
-from archlint.domain import Policy
+from arborescent.config import policy_from_mapping
+from arborescent.domain import Policy
 
 PURE = ["__future__", "dataclasses", "typing", "collections"]
 

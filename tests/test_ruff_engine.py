@@ -7,13 +7,13 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from archlint_helpers import mini_policy, write_files
+from arborescent_helpers import mini_policy, write_files
 
-from archlint.adapters import LocalFileSystem, SubprocessToolRunner
-from archlint.domain import ToolResult
-from archlint.engines import Ruff, TachExternal, default_engines
-from archlint.generate import generate
-from archlint.typecheckers import by_name
+from arborescent.adapters import LocalFileSystem, SubprocessToolRunner
+from arborescent.domain import ToolResult
+from arborescent.engines import Ruff, TachExternal, default_engines
+from arborescent.generate import generate
+from arborescent.typecheckers import by_name
 
 
 def test_generate_writes_a_ring_aware_ruff_config_and_excludes_vendor_trees() -> None:

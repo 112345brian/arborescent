@@ -7,15 +7,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from archlint_helpers import CLASSIFY, mini_policy, ring_with, write_files
+from arborescent_helpers import CLASSIFY, mini_policy, ring_with, write_files
 
-from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
-from archlint.config import load_policy
-from archlint.domain import Rule, Violation
-from archlint.engine import Services, write_generated
-from archlint.rules import check_modules
-from archlint.selftest import NO_MUTATION, plan
-from archlint.testing import FakeToolRunner
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.config import load_policy
+from arborescent.domain import Rule, Violation
+from arborescent.engine import Services, write_generated
+from arborescent.rules import check_modules
+from arborescent.selftest import NO_MUTATION, plan
+from arborescent.testing import FakeToolRunner
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY: dict[str, Any] = {"sources": ["app", "run.py"], "entry_scripts": ["run"], "classify": {**CLASSIFY, "run": "composition"}}
@@ -67,7 +67,7 @@ def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     policy, root = load_policy(LocalFileSystem(), ROOT / "pyproject.toml")
     scan = FsScanner().scan(policy, root)
     mutated = {m.rule for m in plan(policy, dict(scan.paths), scan.known)[0]}
-    # the archlint repo has no entry scripts; that rule's mutation is covered by the next test
+    # the arborescent repo has no entry scripts; that rule's mutation is covered by the next test
     assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
@@ -93,7 +93,7 @@ def _table_ids(text: str, heading: str) -> set[str]:
 
 def test_configuration_doc_lists_exactly_the_rules_that_exist() -> None:
     text = (ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
-    documented = _table_ids(text, "## Rules ArchLint checks itself") | _table_ids(text, "## Practices:")
+    documented = _table_ids(text, "## Rules Arborescent checks itself") | _table_ids(text, "## Practices:")
     assert documented == {r.value for r in Rule}
 
 

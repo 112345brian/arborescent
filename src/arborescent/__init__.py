@@ -1,4 +1,4 @@
-"""ArchLint: one architecture policy that compiles to import-linter, tach and a type checker, and enforces more.
+"""Arborescent: one architecture policy that compiles to import-linter, tach and a type checker, and enforces more.
 
 - ``domain`` / ``facts`` / ``rules`` -- the policy, one-pass AST facts, and the pure checks (no I/O).
 - ``ports`` -- ``ToolRunner``, ``TypeChecker``, ``ModuleScanner``.

@@ -7,19 +7,19 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from archlint_helpers import MINI, write_files
+from arborescent_helpers import MINI, write_files
 from test_engine import services
 
-from archlint import practices, selftest
-from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
-from archlint.bench import bench_one
-from archlint.cli import main
-from archlint.config import policy_from_mapping
-from archlint.domain import NOISE_DIRS, PolicyError
-from archlint.engine import Services
-from archlint.ports import Engine, TypeChecker
-from archlint.scanner import _PRUNE
-from archlint.testing import FakeToolRunner
+from arborescent import practices, selftest
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.bench import bench_one
+from arborescent.cli import main
+from arborescent.config import policy_from_mapping
+from arborescent.domain import NOISE_DIRS, PolicyError
+from arborescent.engine import Services
+from arborescent.ports import Engine, TypeChecker
+from arborescent.scanner import _PRUNE
+from arborescent.testing import FakeToolRunner
 
 TOML = 'sources = ["app"]\nrings = ["domain"]\n[ring.domain]\nexternal = []\n[classify]\n"app" = "domain"\n'
 
@@ -57,21 +57,21 @@ def test_type_checkers_must_be_a_non_empty_list_of_names(bad: object) -> None:
 
 
 def test_generate_with_an_empty_type_checkers_list_is_a_policy_error_not_a_crash(tmp_path: Path) -> None:
-    write_files(tmp_path, {"archlint.toml": "type_checkers = []\n" + TOML, "app/__init__.py": ""})
-    assert main(["--config", str(tmp_path / "archlint.toml"), "generate"], services()) == 2
+    write_files(tmp_path, {"arborescent.toml": "type_checkers = []\n" + TOML, "app/__init__.py": ""})
+    assert main(["--config", str(tmp_path / "arborescent.toml"), "generate"], services()) == 2
 
 
 # --- bench ---------------------------------------------------------------------------------------------------------
 
 
 def test_the_bench_command_reports_a_bad_policy_instead_of_a_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    write_files(tmp_path, {"archlint.toml": 'python = "2.7"\n' + TOML, "app/__init__.py": ""})
+    write_files(tmp_path, {"arborescent.toml": 'python = "2.7"\n' + TOML, "app/__init__.py": ""})
     assert main(["bench", str(tmp_path)]) == 2
     assert "2.7" in capsys.readouterr().err
 
 
 def test_bench_checkers_are_validated_before_anything_is_timed(tmp_path: Path) -> None:
-    write_files(tmp_path, {"archlint.toml": TOML, "app/__init__.py": ""})  # the policy itself lists only pyright
+    write_files(tmp_path, {"arborescent.toml": TOML, "app/__init__.py": ""})  # the policy itself lists only pyright
     timed: list[str] = []
 
     class Spy(FakeToolRunner):
@@ -80,7 +80,7 @@ def test_bench_checkers_are_validated_before_anything_is_timed(tmp_path: Path) -
             return super().run(*args, **kwargs)
 
     with pytest.raises(PolicyError, match="pyrite"):
-        _ = bench_one(tmp_path, ["pyrite"], lambda root: dataclasses.replace(services(Spy()), scanner=FsScanner(root / ".archlint")))
+        _ = bench_one(tmp_path, ["pyrite"], lambda root: dataclasses.replace(services(Spy()), scanner=FsScanner(root / ".arborescent")))
     assert timed == []
 
 
@@ -104,7 +104,7 @@ def test_a_type_checker_is_an_engine_that_also_renders_its_config() -> None:
 
 
 def test_walkers_share_one_core_set_of_ignored_folders() -> None:
-    assert {"__pycache__", ".git", ".venv", "venv", "node_modules", ".archlint"} <= NOISE_DIRS
+    assert {"__pycache__", ".git", ".venv", "venv", "node_modules", ".arborescent"} <= NOISE_DIRS
     assert NOISE_DIRS <= _PRUNE
     assert NOISE_DIRS <= practices._NOISE  # type: ignore[attr-defined]
     assert set(selftest._SKIP_COPY) >= NOISE_DIRS  # type: ignore[attr-defined]

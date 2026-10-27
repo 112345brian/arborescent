@@ -1,4 +1,4 @@
-"""What ArchLint needs from the world. Adapters implement these; tests substitute fakes (``archlint.testing``)."""
+"""What Arborescent needs from the world. Adapters implement these; tests substitute fakes (``arborescent.testing``)."""
 
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ class Engine(Protocol):
 
 
 class ViolationEngine(Protocol):
-    """Optional extension implemented by engines whose diagnostics feed ArchLint's violation baseline.
+    """Optional extension implemented by engines whose diagnostics feed Arborescent's violation baseline.
 
     It is separate from ``Engine`` so existing adapters and user-supplied engines remain source-compatible.
     """

@@ -2,6 +2,13 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## 0.2.0 — 2026-10-26
+
+### Changed
+
+- Renamed the distribution, CLI, Python import package, policy table, generated baseline and configuration files, and GitHub repository from ArchLint to Arborescent.
+- Windows install hints now use valid PowerShell quoting, including interpreter paths with spaces.
+
 ## 0.1.0 — 2026-10-26
 
 ### Changed

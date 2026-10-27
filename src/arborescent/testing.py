@@ -1,4 +1,4 @@
-"""In-memory fakes for the ports, so tests (and your own tests of an ArchLint integration) need no subprocess or disk."""
+"""In-memory fakes for the ports, so tests (and your own tests of an Arborescent integration) need no subprocess or disk."""
 
 from __future__ import annotations
 
@@ -175,7 +175,7 @@ class FakeFileSystem:
     @contextmanager
     def temporary_directory(self, prefix: str, parent: Path | None = None) -> Generator[Path]:
         self._temp_count += 1
-        tmp = (parent or Path("/archlint-test-temp")) / f"{prefix}{self._temp_count}"
+        tmp = (parent or Path("/arborescent-test-temp")) / f"{prefix}{self._temp_count}"
         self.mkdir(tmp)
         try:
             yield tmp

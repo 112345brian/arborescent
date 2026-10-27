@@ -5,12 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from archlint_helpers import CLASSIFY, mini_policy, ring_with, write_files
+from arborescent_helpers import CLASSIFY, mini_policy, ring_with, write_files
 
-from archlint import baseline
-from archlint.adapters import FsScanner
-from archlint.domain import Violation
-from archlint.rules import check_modules
+from arborescent import baseline
+from arborescent.adapters import FsScanner
+from arborescent.domain import Violation
+from arborescent.rules import check_modules
 
 
 def run(root: Path, **overrides: Any) -> list[Violation]:
@@ -182,7 +182,7 @@ def test_entry_script_without_metadata_block_fails(repo: Path) -> None:
 
 
 def test_entry_script_metadata_is_read_from_a_file_with_crlf_line_endings(repo: Path) -> None:
-    """Found by running ArchLint on DeepInterview: the scripts there are CRLF and the PEP 723 regex missed the block."""
+    """Found by running Arborescent on DeepInterview: the scripts there are CRLF and the PEP 723 regex missed the block."""
     script = b'# /// script\r\n# dependencies = ["psutil"]\r\n# ///\r\nimport sys\r\n'
     (repo / "run.py").write_bytes(script)
     scan = FsScanner().scan(mini_policy(**ENTRY), repo)

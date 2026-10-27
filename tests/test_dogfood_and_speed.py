@@ -1,6 +1,6 @@
-"""ArchLint checks itself, the generated configs are accepted by the real engines (when installed), and the part of the
-speed budget ArchLint controls (its own checks on a small repo, warm) is asserted. Everything else is measured by
-``archlint bench`` and reported, never asserted: external engines' speed is not ours."""
+"""Arborescent checks itself, the generated configs are accepted by the real engines (when installed), and the part of the
+speed budget Arborescent controls (its own checks on a small repo, warm) is asserted. Everything else is measured by
+``arborescent bench`` and reported, never asserted: external engines' speed is not ours."""
 
 from __future__ import annotations
 
@@ -9,20 +9,20 @@ import time
 from pathlib import Path
 
 import pytest
-from archlint_helpers import mini_policy, write_files
+from arborescent_helpers import mini_policy, write_files
 
-from archlint import scanner
-from archlint.adapters import (
+from arborescent import scanner
+from arborescent.adapters import (
     FsScanner,
     LocalFileSystem,
     SubprocessToolRunner,
     SystemClock,
 )
-from archlint.config import load_policy
-from archlint.engine import Options, Services, run_check, run_own
-from archlint.engines import default_engines
-from archlint.generate import generate
-from archlint.typecheckers import all_checkers
+from arborescent.config import load_policy
+from arborescent.engine import Options, Services, run_check, run_own
+from arborescent.engines import default_engines
+from arborescent.generate import generate
+from arborescent.typecheckers import all_checkers
 
 HERE = Path(__file__).resolve().parents[1]
 CHECKERS = list(all_checkers().values())
@@ -32,7 +32,7 @@ def own_services(cache: Path | None = None) -> Services:
     return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines())
 
 
-def test_archlint_passes_its_own_policy_and_reports_generated_preset_drift_advisorially() -> None:
+def test_arborescent_passes_its_own_policy_and_reports_generated_preset_drift_advisorially() -> None:
     policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     report = run_check(policy, root, own_services(), Options(tools=False, use_baseline=False))
     assert report.violations == [], [v.render() for v in report.violations]
@@ -70,7 +70,7 @@ def test_no_file_is_parsed_twice_in_one_run(repo: Path, monkeypatch: pytest.Monk
     assert len(seen) == len(set(seen)) == 5
 
 
-# --- the real engines accept what ArchLint generates --------------------------------------------------------------
+# --- the real engines accept what Arborescent generates --------------------------------------------------------------
 
 
 def _write_generated(repo: Path, checker_names: list[str]) -> None:
@@ -85,10 +85,10 @@ def _write_generated(repo: Path, checker_names: list[str]) -> None:
 def test_import_linter_accepts_the_generated_contracts_and_catches_a_violation(repo: Path) -> None:
     _write_generated(repo, ["pyright"])
     runner = SubprocessToolRunner()
-    ok = runner.run(["lint-imports", "--config", "archlint-importlinter.toml"], repo)
+    ok = runner.run(["lint-imports", "--config", "arborescent-importlinter.toml"], repo)
     assert ok.returncode == 0, ok.stdout + ok.stderr
     write_files(repo, {"app/domain.py": "from . import adapters\n"})
-    broken = runner.run(["lint-imports", "--config", "archlint-importlinter.toml"], repo)
+    broken = runner.run(["lint-imports", "--config", "arborescent-importlinter.toml"], repo)
     assert broken.returncode != 0 and "BROKEN" in broken.stdout
 
 

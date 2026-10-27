@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 import tomllib
 from argparse import Namespace
@@ -8,31 +9,34 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from archlint_helpers import mini_policy
+from arborescent_helpers import mini_policy
 
-from archlint.adapters import (
+from arborescent.adapters import (
     FsScanner,
     LocalFileSystem,
     SubprocessToolRunner,
     SystemClock,
     resolve_executable,
 )
-from archlint.cli import (
+from arborescent.cli import (
     _check,
     _install_tools,
     _parser,
     _setup_install_command,
     main,
 )
-from archlint.domain import ToolResult
-from archlint.engine import Services
-from archlint.engines import default_engines
-from archlint.install_tools import (
+from arborescent.domain import ToolResult
+from arborescent.engine import Services
+from arborescent.engines import default_engines
+from arborescent.install_tools import (
     TOOL_REQUIREMENTS,
 )
-from archlint.installer_adapter import include_poetry_archlint_group_in_dev
-from archlint.testing import FakeToolRunner
-from archlint.typecheckers import all_checkers
+from arborescent.installer_adapter import (
+    _shell_join,
+    include_poetry_arborescent_group_in_dev,
+)
+from arborescent.testing import FakeToolRunner
+from arborescent.typecheckers import all_checkers
 
 
 def test_tool_requirements_match_declared_optional_dependencies() -> None:
@@ -55,6 +59,21 @@ def test_tool_requirements_are_real_pip_distributions() -> None:
         pytest.skip("pip or uv is required for the package metadata dry-run")
     result = runner.run(command, root)
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_windows_install_hint_is_invokable_from_powershell(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "arborescent.installer_adapter.os",
+        SimpleNamespace(name="nt"),
+    )
+    monkeypatch.setattr(
+        "arborescent.installer_adapter.sys",
+        SimpleNamespace(executable=r"C:\Program Files\Python\python.exe"),
+    )
+
+    command = _setup_install_command(mini_policy(), tmp_path, _services(FakeToolRunner()), None)
+
+    assert command == "& 'C:\\Program Files\\Python\\python.exe' -m pip install 'import-linter>=2.0' 'ruff>=0.16.3' 'tach>=0.30' 'ty>=0.0.50'"
 
 
 def test_script_resolution_prefers_the_active_interpreters_scripts_directory(tmp_path: Path) -> None:
@@ -101,8 +120,8 @@ def test_subprocess_runner_discovers_tools_in_the_poetry_environment(tmp_path: P
         calls.append(list(argv))
         return SimpleNamespace(returncode=0, stdout=f"{scripts / ('python.exe' if os.name == 'nt' else 'python')}\n")
 
-    monkeypatch.setattr("archlint.tool_runner.shutil.which", lambda name: "/usr/bin/poetry" if name == "poetry" else None)
-    monkeypatch.setattr("archlint.tool_runner.subprocess.run", run)
+    monkeypatch.setattr("arborescent.tool_runner.shutil.which", lambda name: "/usr/bin/poetry" if name == "poetry" else None)
+    monkeypatch.setattr("arborescent.tool_runner.subprocess.run", run)
 
     runner = SubprocessToolRunner(tmp_path)
 
@@ -152,7 +171,7 @@ def test_install_tools_installs_only_missing_selected_packages_and_checks_enviro
 def test_install_tools_decline_leaves_environment_unchanged(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     runner = PipRunner()
     services = _services(runner)
-    monkeypatch.setattr("archlint.cli_install._interactive_install_allowed", lambda: True)
+    monkeypatch.setattr("arborescent.cli_install._interactive_install_allowed", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "n")
 
     result = _install_tools(Namespace(type_checker=None, yes=False), mini_policy(), tmp_path, services)
@@ -193,7 +212,7 @@ def test_install_tools_uses_uv_for_the_active_interpreter_without_pip(tmp_path: 
     assert ["uv", "pip", "check", "--python", sys.executable] in runner.executed
 
 
-def test_install_tools_adds_poetry_checkers_to_a_dev_included_archlint_group(tmp_path: Path) -> None:
+def test_install_tools_adds_poetry_checkers_to_a_dev_included_arborescent_group(tmp_path: Path) -> None:
     project = tmp_path / "pyproject.toml"
     project.write_text(
         '[tool.poetry]\nname = "sample"\nversion = "0.1.0"\n\n'
@@ -222,15 +241,15 @@ def test_install_tools_adds_poetry_checkers_to_a_dev_included_archlint_group(tmp
     result = _install_tools(Namespace(type_checker=None, yes=True), mini_policy(), tmp_path, _services(runner))
 
     assert result == 0
-    assert ["poetry", "add", "--group", "archlint", "import-linter>=2.0", "ruff>=0.16.3", "tach>=0.30", "ty>=0.0.50"] in runner.calls
+    assert ["poetry", "add", "--group", "arborescent", "import-linter>=2.0", "ruff>=0.16.3", "tach>=0.30", "ty>=0.0.50"] in runner.calls
     assert ["poetry", "check", "--lock"] in runner.calls
     configured = tomllib.loads(project.read_text(encoding="utf-8"))
-    assert configured["tool"]["poetry"]["group"]["dev"]["include-groups"] == ["docs", "archlint"]
+    assert configured["tool"]["poetry"]["group"]["dev"]["include-groups"] == ["docs", "arborescent"]
     assert "# keep the existing group" in project.read_text(encoding="utf-8")
-    assert configured["tool"]["poetry"]["group"]["archlint"]["optional"] is True
+    assert configured["tool"]["poetry"]["group"]["arborescent"]["optional"] is True
 
 
-def test_poetry_pep735_dev_group_includes_archlint_without_replacing_other_dependencies(tmp_path: Path) -> None:
+def test_poetry_pep735_dev_group_includes_arborescent_without_replacing_other_dependencies(tmp_path: Path) -> None:
     project = tmp_path / "pyproject.toml"
     project.write_text(
         '[tool.poetry]\nname = "sample"\nversion = "0.1.0"\n\n'
@@ -239,11 +258,11 @@ def test_poetry_pep735_dev_group_includes_archlint_without_replacing_other_depen
     )
     (tmp_path / "poetry.lock").write_text("", encoding="utf-8")
 
-    include_poetry_archlint_group_in_dev(tmp_path, LocalFileSystem())
+    include_poetry_arborescent_group_in_dev(tmp_path, LocalFileSystem())
 
     configured = tomllib.loads(project.read_text(encoding="utf-8"))
     assert configured["dependency-groups"]["dev"] == [
-        {"include-group": "archlint"},
+        {"include-group": "arborescent"},
         "pytest>=8",
     ]
     assert "# keep this comment" in project.read_text(encoding="utf-8")
@@ -320,7 +339,7 @@ def test_poetry_project_without_poetry_prints_the_group_install_command(tmp_path
 
     output = capsys.readouterr().out
     assert result == 1
-    assert "poetry add --group archlint" in output
+    assert "poetry add --group arborescent" in output
     assert "No supported installer found" in output
 
 
@@ -335,8 +354,9 @@ def test_check_reports_install_tools_without_running_an_installer(repo: Path, ca
 
     output = capsys.readouterr().out
     assert "SETUP  missing checker(s):" in output
-    assert f"{sys.executable} -m pip install" in output
-    assert "archlint check --install-tools" in output
+    prefix = [sys.executable, "-m", "pip", "install"]
+    assert _shell_join(prefix, shlex.join(prefix), windows=os.name == "nt") in output
+    assert "arborescent check --install-tools" in output
     assert not any(call[3:4] == ["install"] or call[:3] == ["uv", "pip", "install"] for call in runner.calls)
     if "--require-tools" in argv:
         assert result == 1
@@ -357,7 +377,7 @@ def test_check_install_tools_without_yes_uses_default_no_prompt(repo: Path, monk
     args = _parser().parse_args(["check", "--install-tools"])
     runner = PipRunner()
     prompts: list[str] = []
-    monkeypatch.setattr("archlint.cli_install._interactive_install_allowed", lambda: True)
+    monkeypatch.setattr("arborescent.cli_install._interactive_install_allowed", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "")
 
     _check(args, mini_policy(), repo, _services(runner))
@@ -393,7 +413,7 @@ def test_policy_disabled_tools_do_not_trigger_install_or_setup_hint(repo: Path, 
 
     output = capsys.readouterr().out
     assert result == 0
-    assert "CONSISTENT configured ArchLint checks pass" in output
+    assert "CONSISTENT configured Arborescent checks pass" in output
     assert "no check tools selected" in output
     assert "SETUP" not in output
     assert runner.executed == []
@@ -407,7 +427,7 @@ def test_profile_failure_can_still_report_consistency_with_disabled_tools(repo: 
 
     output = capsys.readouterr().out
     assert result == 1
-    assert "CONSISTENT configured ArchLint checks pass" in output
+    assert "CONSISTENT configured Arborescent checks pass" in output
     assert "PROFILE FAIL required profile tool ruff is disabled by policy" in output
     assert "PROFILE FAIL required profile tool tach is disabled by policy" in output
     assert "CERTIFIED" not in output
@@ -417,7 +437,7 @@ def test_disabled_checker_is_omitted_from_install_prompt_and_command(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:  # type: ignore[no-untyped-def]
     runner = PipRunner()
-    monkeypatch.setattr("archlint.cli_install._interactive_install_allowed", lambda: True)
+    monkeypatch.setattr("arborescent.cli_install._interactive_install_allowed", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "n")
 
     result = _install_tools(
@@ -446,5 +466,6 @@ def test_check_setup_hint_contains_the_active_environment_install_command(tmp_pa
 
     command = _setup_install_command(mini_policy(), tmp_path, _services(runner), None)
 
-    assert command == f"{sys.executable} -m pip install 'import-linter>=2.0' 'ruff>=0.16.3' 'tach>=0.30' 'ty>=0.0.50'"
+    expected = [sys.executable, "-m", "pip", "install", "import-linter>=2.0", "ruff>=0.16.3", "tach>=0.30", "ty>=0.0.50"]
+    assert command == _shell_join(expected, shlex.join(expected), windows=os.name == "nt")
     assert runner.calls == [[sys.executable, "-m", "pip", "--version"]]

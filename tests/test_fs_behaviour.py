@@ -10,28 +10,28 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from archlint_helpers import MINI_FILES, mini_policy, write_files
+from arborescent_helpers import MINI_FILES, mini_policy, write_files
 from fs_helpers import KINDS, make_fs, put
 
-from archlint import baseline
-from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
-from archlint.bench import bench_one
-from archlint.config import find_policy, load_policy
-from archlint.domain import PolicyError, Violation
-from archlint.engine import Services, drift
-from archlint.facts import ModuleInfo, extract
-from archlint.generate import generate
-from archlint.ports import FileSystem
-from archlint.practices import (
+from arborescent import baseline
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.bench import bench_one
+from arborescent.config import find_policy, load_policy
+from arborescent.domain import PolicyError, Violation
+from arborescent.engine import Services, drift
+from arborescent.facts import ModuleInfo, extract
+from arborescent.generate import generate
+from arborescent.ports import FileSystem
+from arborescent.practices import (
     crlf,
     docs_sync,
     secrets_guard,
     sibling_versions,
     undeclared_imports,
 )
-from archlint.selftest import selftest
-from archlint.testing import FakeToolRunner
-from archlint.typecheckers import all_checkers, by_name
+from arborescent.selftest import selftest
+from arborescent.testing import FakeToolRunner
+from arborescent.typecheckers import all_checkers, by_name
 
 CHECKERS = list(all_checkers().values())
 V = Violation("internal-import", "a.b", "msg")
@@ -93,7 +93,7 @@ def test_baseline_save_does_not_create_missing_parents(env: Env) -> None:
 
 # --- config ----------------------------------------------------------------------------------------------------
 
-TOOL = '[tool.archlint]\nsources = ["app"]\nrings = ["domain"]\n[tool.archlint.ring.domain]\nexternal = []\n[tool.archlint.classify]\n"app" = "domain"\n'
+TOOL = '[tool.arborescent]\nsources = ["app"]\nrings = ["domain"]\n[tool.arborescent.ring.domain]\nexternal = []\n[tool.arborescent.classify]\n"app" = "domain"\n'
 FLAT = 'sources = ["app"]\nrings = ["domain"]\n[ring.domain]\nexternal = []\n[classify]\n"app" = "domain"\n'
 
 
@@ -104,8 +104,8 @@ def test_find_policy_prefers_the_nearest_folder_and_skips_a_pyproject_without_th
     put(fs, root, {"pyproject.toml": '[project]\nname = "x"\n'})
     with pytest.raises(PolicyError):
         find_policy(fs, deep)
-    put(fs, root, {"a/pyproject.toml": TOOL, "archlint.toml": ""})
-    assert find_policy(fs, deep) == root / "a" / "pyproject.toml"  # a nearer folder wins over an outer archlint.toml
+    put(fs, root, {"a/pyproject.toml": TOOL, "arborescent.toml": ""})
+    assert find_policy(fs, deep) == root / "a" / "pyproject.toml"  # a nearer folder wins over an outer arborescent.toml
 
 
 def test_find_policy_raises_on_invalid_toml_and_non_utf8(env: Env) -> None:
@@ -118,12 +118,12 @@ def test_find_policy_raises_on_invalid_toml_and_non_utf8(env: Env) -> None:
         find_policy(fs, root)
 
 
-def test_load_policy_reads_pyproject_archlint_toml_and_crlf(env: Env) -> None:
+def test_load_policy_reads_pyproject_arborescent_toml_and_crlf(env: Env) -> None:
     fs, root = env
-    put(fs, root, {"pyproject.toml": TOOL.replace("\n", "\r\n"), "archlint.toml": FLAT})
+    put(fs, root, {"pyproject.toml": TOOL.replace("\n", "\r\n"), "arborescent.toml": FLAT})
     policy, found_root = load_policy(fs, root / "pyproject.toml")
     assert found_root == root and policy.sources == ("app",)
-    assert load_policy(fs, root / "archlint.toml")[0].sources == ("app",)
+    assert load_policy(fs, root / "arborescent.toml")[0].sources == ("app",)
 
 
 def test_load_policy_edge_inputs(env: Env) -> None:
@@ -231,13 +231,13 @@ BENCH_TOML = 'type_checkers = ["pyright"]\n' + FLAT.replace('"app" = "domain"\n'
 
 
 def test_bench_writes_the_generated_configs_and_clears_the_cache(tmp_path: Path) -> None:
-    write_files(tmp_path, {"app/__init__.py": "", "app/domain.py": "X = 1\n", "archlint.toml": BENCH_TOML})
-    (tmp_path / ".archlint").mkdir()
-    (tmp_path / ".archlint" / "stale").write_text("x", encoding="utf-8")
-    lines = bench_one(tmp_path, ["pyright"], lambda r: Services(FsScanner(r / ".archlint"), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), []))
-    assert lines[0].startswith("### ") and any("archlint own checks" in ln for ln in lines)
-    assert (tmp_path / "pyrightconfig.json").is_file() and (tmp_path / "archlint-importlinter.toml").is_file()
-    assert not (tmp_path / ".archlint" / "stale").exists()
+    write_files(tmp_path, {"app/__init__.py": "", "app/domain.py": "X = 1\n", "arborescent.toml": BENCH_TOML})
+    (tmp_path / ".arborescent").mkdir()
+    (tmp_path / ".arborescent" / "stale").write_text("x", encoding="utf-8")
+    lines = bench_one(tmp_path, ["pyright"], lambda r: Services(FsScanner(r / ".arborescent"), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), []))
+    assert lines[0].startswith("### ") and any("arborescent own checks" in ln for ln in lines)
+    assert (tmp_path / "pyrightconfig.json").is_file() and (tmp_path / "arborescent-importlinter.toml").is_file()
+    assert not (tmp_path / ".arborescent" / "stale").exists()
 
 
 def test_the_mini_repo_fixture_is_what_these_tests_assume() -> None:

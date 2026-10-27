@@ -18,7 +18,7 @@ __all__ = ["ImportLinter", "Ruff", "Tach", "TachExternal", "default_engines"]
 class ImportLinter:
     name: str = "import-linter"
     executable: str = "lint-imports"
-    config_file: str = "archlint-importlinter.toml"  # retained for optional preset generation
+    config_file: str = "arborescent-importlinter.toml"  # retained for optional preset generation
     supports_changed: bool = False
 
     def command(self, files: Sequence[str]) -> list[str]:

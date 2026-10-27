@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import tomllib
 
-from archlint_helpers import MINI
+from arborescent_helpers import MINI
 
-from archlint.cli import _print_rule_label
-from archlint.config import policy_from_mapping
-from archlint.generate import ruff
+from arborescent.cli import _print_rule_label
+from arborescent.config import policy_from_mapping
+from arborescent.generate import ruff
 
 
 def test_ruff_overrides_compose_with_generated_rules() -> None:

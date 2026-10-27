@@ -1,6 +1,6 @@
-# ArchLint's architecture
+# Arborescent's architecture
 
-ArchLint is checked by ArchLint: the policy is the `[tool.archlint]` table in `pyproject.toml`, and `archlint check`
+Arborescent is checked by Arborescent: the policy is the `[tool.arborescent]` table in `pyproject.toml`, and `arborescent check`
 fails when this document's module table disagrees with it (practice `docs-sync`).
 
 ## Rings
@@ -31,38 +31,38 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 
 | module | ring |
 |---|---|
-| `archlint` | domain |
-| `archlint.domain` | domain |
-| `archlint.facts` | domain |
-| `archlint.stdlib` | domain |
-| `archlint.presets` | domain |
-| `archlint.rules` | domain |
-| `archlint.ports` | ports |
-| `archlint.baseline` | application |
-| `archlint.bench` | application |
-| `archlint.config` | application |
-| `archlint.certification` | application |
-| `archlint.install_tools` | application |
-| `archlint.engine` | application |
-| `archlint.generate` | application |
-| `archlint.practices` | application |
-| `archlint.selftest` | application |
-| `archlint.suggestions` | application |
-| `archlint.adapters` | adapters |
-| `archlint.installer_adapter` | adapters |
-| `archlint.clock_adapter` | adapters |
-| `archlint.filesystem_adapter` | adapters |
-| `archlint.scanner` | adapters |
-| `archlint.tool_runner` | adapters |
-| `archlint.engines` | adapters |
-| `archlint.testing` | adapters |
-| `archlint.typecheckers` | adapters |
-| `archlint.__main__` | composition |
-| `archlint.cli` | composition |
-| `archlint.cli_install` | composition |
-| `archlint.cli_report` | composition |
+| `arborescent` | domain |
+| `arborescent.domain` | domain |
+| `arborescent.facts` | domain |
+| `arborescent.stdlib` | domain |
+| `arborescent.presets` | domain |
+| `arborescent.rules` | domain |
+| `arborescent.ports` | ports |
+| `arborescent.baseline` | application |
+| `arborescent.bench` | application |
+| `arborescent.config` | application |
+| `arborescent.certification` | application |
+| `arborescent.install_tools` | application |
+| `arborescent.engine` | application |
+| `arborescent.generate` | application |
+| `arborescent.practices` | application |
+| `arborescent.selftest` | application |
+| `arborescent.suggestions` | application |
+| `arborescent.adapters` | adapters |
+| `arborescent.installer_adapter` | adapters |
+| `arborescent.clock_adapter` | adapters |
+| `arborescent.filesystem_adapter` | adapters |
+| `arborescent.scanner` | adapters |
+| `arborescent.tool_runner` | adapters |
+| `arborescent.engines` | adapters |
+| `arborescent.testing` | adapters |
+| `arborescent.typecheckers` | adapters |
+| `arborescent.__main__` | composition |
+| `arborescent.cli` | composition |
+| `arborescent.cli_install` | composition |
+| `arborescent.cli_report` | composition |
 
-## Data flow of `archlint check`
+## Data flow of `arborescent check`
 
 1. `cli` loads the policy (`config.policy_from_mapping` -> `domain.Policy`, which validates itself; with its `presets.Preset`) and builds `Services`: a scanner, a tool
    runner, the file system (`LocalFileSystem`; tests use `testing.FakeFileSystem`), a clock, the engine adapters (`engines`: import-linter, tach) and the type-checker adapters.
@@ -80,9 +80,9 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
   check that does not depend on the generated configs.
 - A new behaviour switch goes into the policy (a preset field or a key), never into a check as a constant, so
   `generate`, `rules` and `selftest` agree on it.
-- Every rule has a mutation in `selftest`: if a rule stops biting, `archlint selftest` fails.
-- Any additional clean-architecture constraint must be added to ArchLint's policy and enforced by a self-test mutation;
-  keep ArchLint's own minimum-profile certification passing with `archlint check --require-profile`. Update the
+- Every rule has a mutation in `selftest`: if a rule stops biting, `arborescent selftest` fails.
+- Any additional clean-architecture constraint must be added to Arborescent's policy and enforced by a self-test mutation;
+  keep Arborescent's own minimum-profile certification passing with `arborescent check --require-profile`. Update the
   standard/customized certification label when the added constraint changes whether the policy is standard.
-- The policy defaults `forbid_circular_imports` to true. ArchLint's minimum profile requires it, and `selftest` injects
+- The policy defaults `forbid_circular_imports` to true. Arborescent's minimum profile requires it, and `selftest` injects
   a self-import to prove that the cycle rule remains active.

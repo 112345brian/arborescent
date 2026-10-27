@@ -1,8 +1,8 @@
 # Stdlib table
 
-`archlint.stdlib` holds the top-level standard-library module names per Python minor version (`3.11` to `3.14`). The
+`arborescent.stdlib` holds the top-level standard-library module names per Python minor version (`3.11` to `3.14`). The
 policy's `python` key picks the row, so a module counts as stdlib when the *target* version ships it, whatever
-interpreter runs ArchLint (`distutils` is stdlib for `python = "3.11"` and third-party for `"3.12"`). A `python` value
+interpreter runs Arborescent (`distutils` is stdlib for `python = "3.11"` and third-party for `"3.12"`). A `python` value
 outside the table is a `PolicyError` that lists the supported versions.
 
 The table is data: `_BASE` is `sys.stdlib_module_names` of 3.11, and `_CHANGES` lists what each later minor added and

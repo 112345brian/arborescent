@@ -1,4 +1,4 @@
-"""The composition root: wires the adapters to the use cases. ``archlint generate | check | baseline | selftest | bench``."""
+"""The composition root: wires the adapters to the use cases. ``arborescent generate | check | baseline | selftest | bench``."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ __all__ = ["default_services", "main"]
 
 def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> Services:
     runner = SubprocessToolRunner(root)
-    scanner = FsScanner(root / ".archlint" if cache else None, runner)
+    scanner = FsScanner(root / ".arborescent" if cache else None, runner)
     return Services(
         scanner,
         runner,
@@ -44,8 +44,8 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
     )
 
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="archlint", description="One architecture policy -> import-linter, tach, a type checker.")
-    p.add_argument("--config", type=Path, help="archlint.toml or pyproject.toml (default: search upwards)")
+    p = argparse.ArgumentParser(prog="arborescent", description="One architecture policy -> import-linter, tach, a type checker.")
+    p.add_argument("--config", type=Path, help="arborescent.toml or pyproject.toml (default: search upwards)")
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("generate", help="create missing optional tool config presets")
     install = sub.add_parser("install-tools", help="install missing check tools into the active Python environment")
@@ -58,7 +58,7 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--require-tools", action="store_true", help="a missing engine fails instead of skipping")
     c.add_argument("--install-tools", action="store_true", help="prompt to install missing check tools before checking")
     c.add_argument("--yes", action="store_true", help="install missing check tools without prompting (requires --install-tools)")
-    c.add_argument("--require-profile", action="store_true", help="require ArchLint minimum profile v1")
+    c.add_argument("--require-profile", action="store_true", help="require Arborescent minimum profile v1")
     c.add_argument("--no-baseline", action="store_true", help="ignore the baseline: report every violation")
     c.add_argument("--growth-against", metavar="REF", help="verify baseline growth entries against a git ref")
     c.add_argument("--no-cache", action="store_true")
@@ -69,7 +69,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("discover", help="list in-scope Python files that still need a ring classification")
     sub.add_parser("selftest", help="mutation-test the rules")
     b = sub.add_parser("bench", help="time every engine, cold and warm, on prepared codebases")
-    b.add_argument("dirs", nargs="+", type=Path, help="directories that each contain an archlint.toml")
+    b.add_argument("dirs", nargs="+", type=Path, help="directories that each contain an arborescent.toml")
     b.add_argument("--checkers", nargs="*", choices=sorted(all_checkers()), default=sorted(all_checkers()))
     return p
 
@@ -86,7 +86,7 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
         svc = services or default_services(root, cache=not getattr(args, "no_cache", False), output_dir=policy.output_dir)
         return _dispatch(args, policy, root, svc)
     except PolicyError as exc:
-        print(f"archlint: {exc}", file=sys.stderr)
+        print(f"arborescent: {exc}", file=sys.stderr)
         return 2
 
 def _dispatch(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
@@ -190,7 +190,7 @@ def _growth_check(ref: str, policy: Policy, root: Path, svc: Services) -> Engine
         return EngineRun("baseline growth log", "fail", svc.clock.now() - started, lines)
     try:
         current = ratchet_mod.document(svc.fs, root / policy.baseline)
-        with svc.fs.temporary_directory("archlint-growth-") as temp:
+        with svc.fs.temporary_directory("arborescent-growth-") as temp:
             baseline_at_ref = temp / "baseline.json"
             svc.fs.write_text(baseline_at_ref, git.stdout)
             at_ref = svc.fs.read_json(baseline_at_ref)

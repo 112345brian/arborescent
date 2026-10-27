@@ -4,12 +4,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from archlint_helpers import CLASSIFY, mini_policy, ring_with, write_files
+from arborescent_helpers import CLASSIFY, mini_policy, ring_with, write_files
 
-from archlint.adapters import FsScanner
-from archlint.config import policy_from_mapping
-from archlint.domain import PolicyError
-from archlint.rules import check_modules
+from arborescent.adapters import FsScanner
+from arborescent.config import policy_from_mapping
+from arborescent.domain import PolicyError
+from arborescent.rules import check_modules
 
 
 def run(root: Path, **overrides: Any) -> list[Any]:

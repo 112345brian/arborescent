@@ -5,16 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from archlint_helpers import mini_policy, write_files
+from arborescent_helpers import mini_policy, write_files
 
-from archlint import baseline
-from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
-from archlint.cli import main
-from archlint.domain import ToolResult, Violation
-from archlint.engine import Options, Services, run_check
-from archlint.engines import default_engines
-from archlint.testing import FakeFileSystem, FakeToolRunner
-from archlint.typecheckers import all_checkers
+from arborescent import baseline
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.cli import main
+from arborescent.domain import ToolResult, Violation
+from arborescent.engine import Options, Services, run_check
+from arborescent.engines import default_engines
+from arborescent.testing import FakeFileSystem, FakeToolRunner
+from arborescent.typecheckers import all_checkers
 
 
 def v(rule: str, subject: str) -> Violation:
@@ -32,7 +32,7 @@ def write_policy(repo: Path) -> Path:
     write_files(
         repo,
         {
-            "archlint.toml": (
+            "arborescent.toml": (
                 'sources = ["app"]\nrings = ["domain", "ports", "adapters", "composition"]\n'
                 '[groups]\npure = ["__future__"]\n[ring.domain]\nexternal = ["@pure"]\n'
                 '[ring.ports]\nmay_import = ["domain"]\nexternal = ["@pure"]\n'
@@ -43,7 +43,7 @@ def write_policy(repo: Path) -> Path:
             ),
         },
     )
-    return repo / "archlint.toml"
+    return repo / "arborescent.toml"
 
 
 def test_existing_baseline_refuses_growth_without_writing() -> None:
@@ -154,14 +154,14 @@ def test_check_growth_against_reads_the_baseline_from_git(repo: Path) -> None:
     config = write_policy(repo)
     fs = LocalFileSystem()
     key = "rule|new|detail"
-    fs.write_json(repo / "archlint-baseline.json", {"version": 2, "violations": [key], "growth": [{"reason": "approved", "added": [key]}]})
+    fs.write_json(repo / "arborescent-baseline.json", {"version": 2, "violations": [key], "growth": [{"reason": "approved", "added": [key]}]})
     runner = FakeToolRunner({"git"}, {"git": ToolResult(0, '{"version":1,"violations":[]}', "")})
     svc = Services(FsScanner(), runner, list(all_checkers().values()), fs, SystemClock(), default_engines())
     assert main(["--config", str(config), "generate"], svc) == 0
 
     args = ["--config", str(config), "check", "--no-tools", "--no-baseline", "--growth-against", "base"]
     assert main(args, svc) == 0
-    fs.write_json(repo / "archlint-baseline.json", {"version": 2, "violations": [key], "growth": []})
+    fs.write_json(repo / "arborescent-baseline.json", {"version": 2, "violations": [key], "growth": []})
     assert main(args, svc) == 1
 
 
@@ -171,7 +171,7 @@ def test_baseline_command_refuses_growth_then_accepts_a_reason(repo: Path) -> No
     svc = Services(FsScanner(), FakeToolRunner(), list(all_checkers().values()), fs, SystemClock(), default_engines())
     args = ["--config", str(config), "baseline"]
     assert main(args, svc) == 0
-    baseline_path = repo / "archlint-baseline.json"
+    baseline_path = repo / "arborescent-baseline.json"
     before = fs.read_text(baseline_path)
 
     write_files(repo, {"app/domain.py": "from . import adapters\n"})
@@ -194,9 +194,9 @@ def test_baseline_adopt_runs_requested_findings_engine(repo: Path) -> None:
     assert main(["--config", str(config), "baseline", "--adopt", "ruff"], svc) == 0
 
     assert any(call[0] == "ruff" for call in runner.calls)
-    assert "ruff-BLE001|app/domain.py|blind exception|" in fs.read_text(repo / "archlint-baseline.json")
+    assert "ruff-BLE001|app/domain.py|blind exception|" in fs.read_text(repo / "arborescent-baseline.json")
     assert main(["--config", str(config), "baseline"], svc) == 0
-    assert "ruff-BLE001|app/domain.py|blind exception|" in fs.read_text(repo / "archlint-baseline.json")
+    assert "ruff-BLE001|app/domain.py|blind exception|" in fs.read_text(repo / "arborescent-baseline.json")
 
 
 def test_suppression_and_discard_counts_are_reported_and_ratcheted(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]

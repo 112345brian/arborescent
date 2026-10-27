@@ -1,4 +1,4 @@
-"""Locate and load the policy: ``archlint.toml`` (top-level keys) or ``[tool.archlint]`` in ``pyproject.toml``."""
+"""Locate and load the policy: ``arborescent.toml`` (top-level keys) or ``[tool.arborescent]`` in ``pyproject.toml``."""
 
 from __future__ import annotations
 
@@ -18,21 +18,21 @@ __all__ = ["find_policy", "load_policy", "policy_from_mapping"]
 
 def find_policy(fs: FileSystem, start: Path) -> Path:
     for folder in (start, *start.parents):
-        for name in ("archlint.toml", "pyproject.toml"):
+        for name in ("arborescent.toml", "pyproject.toml"):
             candidate = folder / name
             if fs.is_file(candidate) and (
-                name == "archlint.toml" or "archlint" in tomllib.loads(fs.read_text(candidate)).get("tool", {})
+                name == "arborescent.toml" or "arborescent" in tomllib.loads(fs.read_text(candidate)).get("tool", {})
             ):
                 return candidate
-    raise PolicyError(f"no archlint.toml or [tool.archlint] found from {start}")
+    raise PolicyError(f"no arborescent.toml or [tool.arborescent] found from {start}")
 
 
 def load_policy(fs: FileSystem, path: Path) -> tuple[Policy, Path]:
     """The parsed policy and the repository root (the folder holding the policy file)."""
     data = tomllib.loads(fs.read_text(path))
-    raw = data if path.name == "archlint.toml" else data.get("tool", {}).get("archlint")
+    raw = data if path.name == "arborescent.toml" else data.get("tool", {}).get("arborescent")
     if raw is None:
-        raise PolicyError(f"{path} has no [tool.archlint] table")
+        raise PolicyError(f"{path} has no [tool.arborescent] table")
     return policy_from_mapping(raw), path.parent
 
 
@@ -59,7 +59,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         type_checkers=tuple(cast("list[str]", checkers)),
         disabled_tools=disabled_tools,
         output_dir=str(raw.get("output_dir", ".")),
-        baseline=str(raw.get("baseline", "archlint-baseline.json")),
+        baseline=str(raw.get("baseline", "arborescent-baseline.json")),
         suggestion_threshold=suggestion_threshold,
         ruff_overrides=ruff_overrides,
         customization_labels=customizations,
@@ -166,21 +166,21 @@ def _ruff_overrides(raw: object) -> dict[str, Any]:
     allowed = {"extend-select", "ignore", "per-file-ignores", "max-complexity", "max-args", "max-branches", "max-statements"}
     unknown = set(raw) - allowed
     if unknown:
-        raise PolicyError(f"unknown `[tool.archlint.ruff]` setting(s): {sorted(unknown)}")
+        raise PolicyError(f"unknown `[tool.arborescent.ruff]` setting(s): {sorted(unknown)}")
     for key in ("extend-select", "ignore"):
         value = raw.get(key, [])
         if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
-            raise PolicyError(f"`{key}` in `[tool.archlint.ruff]` must be a list of non-empty rule names")
+            raise PolicyError(f"`{key}` in `[tool.arborescent.ruff]` must be a list of non-empty rule names")
     per_file = raw.get("per-file-ignores", {})
     if not isinstance(per_file, Mapping) or any(
         not isinstance(pattern, str) or not pattern or not isinstance(codes, list)
         or not all(isinstance(code, str) and code for code in codes)
         for pattern, codes in per_file.items()
     ):
-        raise PolicyError("`per-file-ignores` in `[tool.archlint.ruff]` must map file globs to rule lists")
+        raise PolicyError("`per-file-ignores` in `[tool.arborescent.ruff]` must map file globs to rule lists")
     for key in ("max-complexity", "max-args", "max-branches", "max-statements"):
         if key in raw and (not isinstance(raw[key], int) or isinstance(raw[key], bool) or raw[key] < 1):
-            raise PolicyError(f"`{key}` in `[tool.archlint.ruff]` must be a positive integer")
+            raise PolicyError(f"`{key}` in `[tool.arborescent.ruff]` must be a positive integer")
     return dict(raw)
 
 

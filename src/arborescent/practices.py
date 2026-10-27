@@ -1,7 +1,7 @@
 """Repository-hygiene practices: small rules seeded with problems that really happened.
 
 Each practice has a reproduction test in ``tests/test_practices.py`` that builds the broken repository in a temp
-directory. Enable them under ``[tool.archlint.practices]``.
+directory. Enable them under ``[tool.arborescent.practices]``.
 
 ``gitignore-shadow``    an unanchored ignore pattern hid a package directory (empty wheel, files never committed)
 ``sibling-versions``    a monorepo meta-package pinned ``==0.1.1`` while the component was ``0.2.0``

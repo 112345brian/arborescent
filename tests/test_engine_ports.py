@@ -10,16 +10,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from archlint_helpers import mini_policy, write_files
+from arborescent_helpers import mini_policy, write_files
 
-from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
-from archlint.cli import main
-from archlint.domain import PolicyError, ToolResult, Violation
-from archlint.engine import Options, Services, run_check
-from archlint.engines import ImportLinter, Tach, default_engines
-from archlint.generate import generate
-from archlint.testing import FakeToolRunner
-from archlint.typecheckers import all_checkers, by_name
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.cli import main
+from arborescent.domain import PolicyError, ToolResult, Violation
+from arborescent.engine import Options, Services, run_check
+from arborescent.engines import ImportLinter, Tach, default_engines
+from arborescent.generate import generate
+from arborescent.testing import FakeToolRunner
+from arborescent.typecheckers import all_checkers, by_name
 
 CHECKERS = list(all_checkers().values())
 ALL_TOOLS = {"lint-imports", "tach", "pyright", "ruff"}
@@ -63,8 +63,8 @@ def test_cli_reports_an_unknown_policy_checker_with_exit_code_2(repo: Path, caps
         '[ring.composition]\nmay_import = ["*"]\nexternal = ["sys"]\n'
         '[classify]\n"app" = "domain"\n"app.domain" = "domain"\n"app.ports" = "ports"\n"app.adapters" = "adapters"\n"app.main" = "composition"\n'
     )
-    write_files(repo, {"archlint.toml": policy_text})
-    cfg = str(repo / "archlint.toml")
+    write_files(repo, {"arborescent.toml": policy_text})
+    cfg = str(repo / "arborescent.toml")
     assert main(["--config", cfg, "check", "--no-tools"], services()) == 2
     assert "pyrite" in capsys.readouterr().err
     assert main(["--config", cfg, "generate"], services()) == 2
@@ -79,9 +79,9 @@ def test_cli_rejects_an_unknown_type_checker_flag_and_bench_checkers() -> None:
 
 
 def test_bench_with_an_unknown_checker_is_a_policy_error(tmp_path: Path) -> None:
-    from archlint.bench import bench_one
+    from arborescent.bench import bench_one
 
-    write_files(tmp_path, {"archlint.toml": 'sources = ["app"]\nrings = ["domain"]\n[ring.domain]\nexternal = []\n[classify]\n"app" = "domain"\n'})
+    write_files(tmp_path, {"arborescent.toml": 'sources = ["app"]\nrings = ["domain"]\n[ring.domain]\nexternal = []\n[classify]\n"app" = "domain"\n'})
     write_files(tmp_path, {"app/__init__.py": ""})
     with pytest.raises(PolicyError, match="pyrite"):
         bench_one(tmp_path, ["pyrite"], lambda root: services())
@@ -168,7 +168,7 @@ def test_run_check_runs_whatever_engines_the_services_carry(repo: Path) -> None:
     runner = FakeToolRunner({"extra-tool", "pyright"}, {"extra-tool": ToolResult(0, "meh", "")})
     report = run_check(mini_policy(), repo, services(runner, engines=[Extra()]), Options())
     by_name_ = {e.name: e.status for e in report.engines}
-    assert by_name_ == {"archlint": "ok", "extra": "fail", "ty": "skipped"} and not report.ok
+    assert by_name_ == {"arborescent": "ok", "extra": "fail", "ty": "skipped"} and not report.ok
     assert ["extra-tool", "--files"] in runner.calls
 
 
@@ -249,7 +249,7 @@ def test_optional_engine_violations_failure_fails_closed(repo: Path) -> None:
 def test_engine_violation_results_have_a_consuming_call_site() -> None:
     from pathlib import Path
 
-    source_dir = Path(__file__).parents[1] / "src" / "archlint"
+    source_dir = Path(__file__).parents[1] / "src" / "arborescent"
     trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in source_dir.rglob("*.py")}
     optional_method_lookups = [
         node
@@ -298,13 +298,13 @@ def test_no_engines_means_only_the_type_checker_runs(repo: Path) -> None:
     commit_generated(repo)
     runner = FakeToolRunner({"ty"})
     report = run_check(mini_policy(), repo, services(runner, engines=[]), Options())
-    assert [e.name for e in report.engines] == ["archlint", "ty"] and report.ok
+    assert [e.name for e in report.engines] == ["arborescent", "ty"] and report.ok
 
 
 def test_engine_order_in_the_report_is_stable(repo: Path) -> None:
     commit_generated(repo)
     report = run_check(mini_policy(), repo, services(FakeToolRunner(set(ALL_TOOLS))), Options())
-    assert [e.name for e in report.engines] == ["archlint", "import-linter", "tach", "tach-external", "ruff", "ty"]
+    assert [e.name for e in report.engines] == ["arborescent", "import-linter", "tach", "tach-external", "ruff", "ty"]
 
 
 def test_changed_files_reach_the_type_checker_only(repo: Path) -> None:
@@ -314,7 +314,7 @@ def test_changed_files_reach_the_type_checker_only(repo: Path) -> None:
         subprocess.run(["git", *cmd], cwd=repo, check=True)
     write_files(repo, {"app/domain.py": "from __future__ import annotations\n\nVALUE: int = 2\n"})
     runner = FakeToolRunner(set(ALL_TOOLS))
-    from archlint.adapters import SubprocessToolRunner
+    from arborescent.adapters import SubprocessToolRunner
 
     class Recording(SubprocessToolRunner):
         def available(self, executable: str) -> bool:

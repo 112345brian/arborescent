@@ -14,6 +14,7 @@ from .engine import Services, pick_checker, tool_is_disabled
 from .install_tools import missing_tool_requirements
 from .installer_adapter import (
     InstallerCommands,
+    _shell_join,
     configure_after_install,
     installer_commands,
     manual_install_command,
@@ -41,10 +42,10 @@ def _install_tools(args: argparse.Namespace, policy: Policy, root: Path, svc: Se
         print(f"missing: {executable} ({requirement})")
     if installer is None:
         fallback = manual_install_command(root, svc.fs, requirements)
-        print(f"manual install command: {shlex.join(fallback)}")
+        print(f"manual install command: {_shell_join(fallback, shlex.join(fallback))}")
         print("No supported installer found. Install the listed packages into the active Python environment.")
         return 1
-    print(f"install command: {shlex.join(installer.install)}")
+    print(f"install command: {_shell_join(installer.install, shlex.join(installer.install))}")
     if not _confirm_install(args.yes):
         return 0 if getattr(args, "continue_on_decline", False) else 1
     return _run_tool_install(svc, root, installer, missing)
@@ -53,7 +54,7 @@ def _confirm_install(yes: bool) -> bool:
     if yes:
         return True
     if not _interactive_install_allowed():
-        print("Not installing in a non-interactive session; rerun `archlint install-tools` in a terminal or pass --yes.")
+        print("Not installing in a non-interactive session; rerun `arborescent install-tools` in a terminal or pass --yes.")
         return False
     try:
         answer = input("Install these check tools into the active Python environment? [y/N] ")
@@ -115,4 +116,4 @@ def _setup_install_command(policy: Policy, root: Path, svc: Services, type_check
     requirements = [requirement for _, requirement in missing]
     installer = installer_commands(root, svc.fs, svc.runner, requirements)
     command = installer.install if installer is not None else manual_install_command(root, svc.fs, requirements)
-    return shlex.join(command)
+    return _shell_join(command, shlex.join(command))
