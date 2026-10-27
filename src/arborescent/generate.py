@@ -116,7 +116,7 @@ def tach(policy: Policy, names: Sequence[str]) -> str:
         lines.append("layers_explicit_depends_on = true")
     lines.append("")
     renames = [f"{module}:{distribution}" for module, distribution in sorted(policy.dependencies.items())]
-    lines += ["[external]", "exclude = []", f"rename = {_list(renames)}", ""]
+    lines += ["[external]", f"exclude = {_list(sorted(policy.optional_imports))}", f"rename = {_list(renames)}", ""]
     classified = [(n, policy.ring_of(n)) for n in leaves(names)]
     for name, ring in classified:
         if ring is None:

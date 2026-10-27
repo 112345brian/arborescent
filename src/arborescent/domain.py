@@ -149,6 +149,7 @@ class Policy:
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
     forbid_everywhere: tuple[str, ...] = ()
+    optional_imports: tuple[str, ...] = ()  # import names of optional extras; written to tach `[external] exclude`
     forbid_circular_imports: bool = True
     python: str = "3.11"
     type_checkers: tuple[str, ...] = ("ty",)
