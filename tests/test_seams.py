@@ -11,7 +11,12 @@ from archlint_helpers import MINI, write_files
 from test_engine import services
 
 from archlint import practices, selftest
-from archlint.adapters import _PRUNE, FsScanner, LocalFileSystem, SystemClock  # type: ignore[attr-defined]
+from archlint.adapters import (  # type: ignore[attr-defined]
+    _PRUNE,
+    FsScanner,
+    LocalFileSystem,
+    SystemClock,
+)
 from archlint.bench import bench_one
 from archlint.cli import main
 from archlint.config import policy_from_mapping
@@ -36,13 +41,13 @@ def test_a_patch_version_is_read_as_its_minor_version() -> None:
 
 def test_an_unquoted_toml_3_10_is_an_error_not_a_silent_3_1() -> None:
     """TOML reads ``python = 3.10`` as the float 3.1."""
-    with pytest.raises(PolicyError, match="'3.1'"):
+    with pytest.raises(PolicyError, match=r"'3\.1'"):
         _ = policy_from_mapping(mapping(python=3.10))
 
 
 @pytest.mark.parametrize("version", ["3.10", "3.15", "abc", ""])
 def test_an_unsupported_version_is_a_policy_error_naming_the_supported_ones(version: str) -> None:
-    with pytest.raises(PolicyError, match="3.11"):
+    with pytest.raises(PolicyError, match=r"3\.11"):
         _ = policy_from_mapping(mapping(python=version))
 
 
@@ -106,6 +111,6 @@ def test_walkers_share_one_core_set_of_ignored_folders() -> None:
     assert {"__pycache__", ".git", ".venv", "venv", "node_modules", ".archlint"} <= NOISE_DIRS
     assert NOISE_DIRS <= _PRUNE
     assert NOISE_DIRS <= practices._NOISE  # type: ignore[attr-defined]
-    assert NOISE_DIRS <= set(selftest._SKIP_COPY)  # type: ignore[attr-defined]
+    assert set(selftest._SKIP_COPY) >= NOISE_DIRS  # type: ignore[attr-defined]
     assert {"build", "dist"} <= practices._NOISE  # type: ignore[attr-defined]
     assert "build" not in _PRUNE  # a package named `build` is source, not noise

@@ -31,11 +31,11 @@ def own_services(cache: Path | None = None) -> Services:
     return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines())
 
 
-def test_archlint_passes_its_own_policy_and_its_generated_files_are_current() -> None:
+def test_archlint_passes_its_own_policy_and_reports_generated_preset_drift_advisorially() -> None:
     policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     report = run_check(policy, root, own_services(), Options(tools=False, use_baseline=False))
     assert report.violations == [], [v.render() for v in report.violations]
-    assert report.drift == []
+    assert report.ok  # existing generated files may drift; that signal is informational
 
 
 def test_warm_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> None:

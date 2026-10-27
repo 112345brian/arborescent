@@ -25,8 +25,33 @@ def test_rule_id_strings_never_change() -> None:
     """Baseline keys are ``rule|subject|detail`` in users' files: renaming an id orphans every recorded entry."""
     assert sorted(Rule) == sorted(
         [
-            "unclassified", "internal-import", "external-import", "os-branching", "bad-import", "undeclared-entry-dependency",
-            "gitignore-shadow", "sibling-versions", "secrets-guard", "docs-sync", "crlf", "undeclared-imports",
+            "unclassified",
+            "noise-dir-code",
+            "vendor-folder",
+            "wildcard-ring",
+            "suppression",
+            "discard",
+            "effect-clock",
+            "effect-env",
+            "effect-identity",
+            "effect-randomness",
+            "effect-sleep",
+            "effect-threads",
+            "effect-process",
+            "effect-dynamic-import",
+            "effect-patch",
+            "internal-import",
+            "circular-import",
+            "external-import",
+            "os-branching",
+            "bad-import",
+            "undeclared-entry-dependency",
+            "gitignore-shadow",
+            "sibling-versions",
+            "secrets-guard",
+            "docs-sync",
+            "crlf",
+            "undeclared-imports",
         ]
     )
 
@@ -53,6 +78,12 @@ def test_entry_dependency_rule_has_a_mutation(repo: Path) -> None:
     policy = mini_policy(**ENTRY)
     scan = FsScanner().scan(policy, repo)
     assert Rule.UNDECLARED_ENTRY_DEPENDENCY in {m.rule for m in plan(policy, dict(scan.paths), scan.known)[0]}
+
+
+def test_circular_import_rule_has_a_selftest_mutation(repo: Path) -> None:
+    policy = mini_policy()
+    scan = FsScanner().scan(policy, repo)
+    assert Rule.CIRCULAR_IMPORT in {m.rule for m in plan(policy, dict(scan.paths), scan.known)[0]}
 
 
 def _table_ids(text: str, heading: str) -> set[str]:
@@ -88,6 +119,7 @@ def test_check_modules_orders_violations_by_module_then_import_then_os_then_entr
         ("external-import", "app.ports"),
         ("os-branching", "app.ports"),
         ("unclassified", "app.zzz"),
+        ("circular-import", "app.adapters, app.main"),
         ("undeclared-entry-dependency", "run"),
         ("undeclared-entry-dependency", "run"),
     ]
@@ -112,8 +144,8 @@ def test_write_generated_writes_every_file_and_reports_them(repo: Path) -> None:
     for rel in written:
         assert b"\r\n" not in (repo / rel).read_bytes()
     (repo / written[0]).write_text("stale", encoding="utf-8")
-    assert write_generated(policy, repo, services) == written  # idempotent: overwrites
-    assert (repo / written[0]).read_text(encoding="utf-8") != "stale"
+    assert write_generated(policy, repo, services) == []  # existing presets are left untouched
+    assert (repo / written[0]).read_text(encoding="utf-8") == "stale"
 
 
 @pytest.mark.parametrize("ring_change", [{}, {"domain": {"external": ["sys"]}}])

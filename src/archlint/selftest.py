@@ -24,6 +24,17 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.SIBLING_VERSIONS: _PRACTICE,
     Rule.SECRETS_GUARD: _PRACTICE,
     Rule.DOCS_SYNC: _PRACTICE,
+    Rule.NOISE_DIR_CODE: "requires a Git-tracked Python file under a noise directory; selftest works on a temporary non-Git copy",
+    Rule.VENDOR_FOLDER: "tracks whole-tree fingerprints; focused tests cover file additions, edits and removals",
+    Rule.WILDCARD_RING: "a policy-level rule; selftest mutations only edit copied source files",
+    Rule.EFFECT_ENV: "effect-env is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_IDENTITY: "effect-identity is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_RANDOMNESS: "effect-randomness is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_SLEEP: "effect-sleep is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_THREADS: "effect-threads is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_PROCESS: "effect-process is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_DYNAMIC_IMPORT: "effect-dynamic-import is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_PATCH: "effect-patch requires a configured tests folder and project-package target; covered by focused rule tests",
     Rule.CRLF: _PRACTICE,
     Rule.UNDECLARED_IMPORTS: _PRACTICE,
 }
@@ -54,37 +65,79 @@ def plan(policy: Policy, paths: dict[str, str], known: frozenset[str]) -> tuple[
     out: list[Mutation] = []
     skipped: list[str] = []
     for ring in policy.rings:
-        mine = sorted(m for m in known if policy.ring_of(m) == ring.name and not paths[m].endswith("__init__.py"))
-        if not mine:
-            skipped.append(f"ring {ring.name}: no module to mutate")
-            continue
-        host = mine[0]
-        allowed = policy.allowed_rings(ring.name)
-        target = next((m for m in sorted(known) if (r := policy.ring_of(m)) is not None and r not in allowed), None)
-        for lazy in (False, True):
-            how = "lazy" if lazy else "top-level"
-            if target:
-                code = f"import {target}" if not lazy else f"def _archlint_probe() -> None:\n    import {target}"
-                out.append(Mutation(Rule.INTERNAL_IMPORT, f"{ring.name}: forbidden {how} internal import of {target}", paths[host], code))
-            else:
-                skipped.append(f"ring {ring.name}: allowed to import every ring, no forbidden internal import to inject")
-            if "*" not in ring.external:
-                code = "import archlint_probe_pkg" if not lazy else "def _archlint_probe2() -> None:\n    import archlint_probe_pkg"
-                out.append(Mutation(Rule.EXTERNAL_IMPORT, f"{ring.name}: unlisted {how} external import", paths[host], code))
-        if not policy.preset.os_branching:
-            skipped.append(f"ring {ring.name}: the {policy.preset.name} preset does not enforce OS branching")
-        elif not ring.os_branching:
-            out.append(Mutation(Rule.OS_BRANCHING, f"{ring.name}: OS branching", paths[host], "import os\n_archlint_probe = os.name"))
+        ring_mutations, ring_skipped = _ring_mutations(policy, ring.name, ring.external, paths, known)
+        out.extend(ring_mutations)
+        skipped.extend(ring_skipped)
     anchor = next(iter(sorted(known)), None)
-    if anchor:
-        base = paths[anchor].rsplit("/", 1)[0] if "/" in paths[anchor] else ""
-        new = (base + "/" if base else "") + "archlint_probe_unclassified.py"
-        out.append(Mutation(Rule.UNCLASSIFIED, "a new module matching no pattern", new, "", new_file=True))
+    if not policy.forbid_circular_imports:
+        skipped.append("circular-import: disabled by policy")
+    if anchor is not None:
+        out.extend(_anchor_mutations(anchor, paths[anchor], policy.forbid_circular_imports))
     if policy.entry_scripts:
-        entry_host = next((m for m in sorted(known) if policy.ring_of(m) and m not in policy.entry_scripts), None)
-        if entry_host:
+        entry_host = next((m for m in sorted(known) if policy.ring_of(m) is not None and m not in policy.entry_scripts), None)
+        if entry_host is not None:
             out.append(Mutation(Rule.UNDECLARED_ENTRY_DEPENDENCY, "a project module imports a package the scripts don't declare", paths[entry_host], "import archlint_probe_dist"))
     return out, sorted(set(skipped))
+
+
+def _ring_mutations(
+    policy: Policy, name: str, external: frozenset[str], paths: dict[str, str], known: frozenset[str]
+) -> tuple[list[Mutation], list[str]]:
+    mine = sorted(module for module in known if policy.ring_of(module) == name and not paths[module].endswith("__init__.py"))
+    if not mine:
+        return [], [f"ring {name}: no module to mutate"]
+    host = mine[0]
+    allowed = policy.allowed_rings(name)
+    target = next((module for module in sorted(known) if (ring := policy.ring_of(module)) is not None and ring not in allowed), None)
+    out: list[Mutation] = []
+    skipped: list[str] = []
+    for lazy in (False, True):
+        out.extend(_import_mutations(name, paths[host], target, external, lazy))
+        if target is None:
+            skipped.append(f"ring {name}: allowed to import every ring, no forbidden internal import to inject")
+    if not policy.preset.os_branching:
+        skipped.append(f"ring {name}: the {policy.preset.name} preset does not enforce OS branching")
+    elif not policy.ring(name).os_branching:
+        out.append(Mutation(Rule.OS_BRANCHING, f"{name}: OS branching", paths[host], "import os\n_archlint_probe = os.name"))
+    out.extend(_effect_mutations(policy, name, paths[host]))
+    return out, skipped
+
+
+def _import_mutations(name: str, host: str, target: str | None, external: frozenset[str], lazy: bool) -> list[Mutation]:
+    how = "lazy" if lazy else "top-level"
+    indent = "def _archlint_probe() -> None:\n    " if lazy else ""
+    out: list[Mutation] = []
+    if target is not None:
+        out.append(Mutation(Rule.INTERNAL_IMPORT, f"{name}: forbidden {how} internal import of {target}", host, f"{indent}import {target}"))
+    if "*" not in external:
+        out.append(Mutation(Rule.EXTERNAL_IMPORT, f"{name}: unlisted {how} external import", host, f"{indent}import archlint_probe_pkg"))
+    return out
+
+
+def _anchor_mutations(anchor: str, host: str, forbid_circular_imports: bool) -> list[Mutation]:
+    base = host.rsplit("/", 1)[0] if "/" in host else ""
+    new = (base + "/" if base else "") + "archlint_probe_unclassified.py"
+    out = [Mutation(Rule.UNCLASSIFIED, "a new module matching no pattern", new, "", new_file=True)]
+    if forbid_circular_imports:
+        out.append(Mutation(Rule.CIRCULAR_IMPORT, "a module importing itself", host, f"import {anchor}"))
+    out.extend((
+        Mutation(Rule.SUPPRESSION, "a new noqa suppression directive", host, "# noqa"),
+        Mutation(Rule.DISCARD, "a new reasoned discard call", host, 'discard(None, reason="selftest")'),
+    ))
+    return out
+
+
+def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
+    if "clock" not in policy.forbidden_effects(ring):
+        return []
+    return [
+        Mutation(
+            Rule.EFFECT_CLOCK,
+            f"{ring}: ambient clock use",
+            host,
+            "import time\n_archlint_probe = time.time()",
+        )
+    ]
 
 
 def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:

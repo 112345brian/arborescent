@@ -7,10 +7,14 @@ root_module = "ignore"
 forbid_circular_dependencies = false  # per-module depends_on lists make same-ring peers mutually dependent
 layers_explicit_depends_on = true
 
+[external]
+exclude = []
+rename = []
+
 [[modules]]
 path = "archlint.__main__"
 layer = "composition"
-depends_on = [{ path = "archlint.adapters" }, { path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.cli" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.engines" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.testing" }, { path = "archlint.typecheckers" }]
+depends_on = [{ path = "archlint.adapters" }, { path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.cli" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.engines" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.suggestions" }, { path = "archlint.testing" }, { path = "archlint.typecheckers" }]
 
 [[modules]]
 path = "archlint.adapters"
@@ -20,22 +24,22 @@ depends_on = [{ path = "archlint.domain" }, { path = "archlint.engines" }, { pat
 [[modules]]
 path = "archlint.baseline"
 layer = "application"
-depends_on = [{ path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }]
+depends_on = [{ path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.suggestions" }]
 
 [[modules]]
 path = "archlint.bench"
 layer = "application"
-depends_on = [{ path = "archlint.baseline" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }]
+depends_on = [{ path = "archlint.baseline" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.suggestions" }]
 
 [[modules]]
 path = "archlint.cli"
 layer = "composition"
-depends_on = [{ path = "archlint.__main__" }, { path = "archlint.adapters" }, { path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.engines" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.testing" }, { path = "archlint.typecheckers" }]
+depends_on = [{ path = "archlint.__main__" }, { path = "archlint.adapters" }, { path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.engines" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.suggestions" }, { path = "archlint.testing" }, { path = "archlint.typecheckers" }]
 
 [[modules]]
 path = "archlint.config"
 layer = "application"
-depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }]
+depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.suggestions" }]
 
 [[modules]]
 path = "archlint.domain"
@@ -45,7 +49,7 @@ depends_on = [{ path = "archlint.facts" }, { path = "archlint.presets" }, { path
 [[modules]]
 path = "archlint.engine"
 layer = "application"
-depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }]
+depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.suggestions" }]
 
 [[modules]]
 path = "archlint.engines"
@@ -60,7 +64,7 @@ depends_on = [{ path = "archlint.domain" }, { path = "archlint.presets" }, { pat
 [[modules]]
 path = "archlint.generate"
 layer = "application"
-depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }]
+depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.suggestions" }]
 
 [[modules]]
 path = "archlint.ports"
@@ -70,7 +74,7 @@ depends_on = [{ path = "archlint.domain" }, { path = "archlint.facts" }, { path 
 [[modules]]
 path = "archlint.practices"
 layer = "application"
-depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }]
+depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }, { path = "archlint.suggestions" }]
 
 [[modules]]
 path = "archlint.presets"
@@ -85,12 +89,17 @@ depends_on = [{ path = "archlint.domain" }, { path = "archlint.facts" }, { path 
 [[modules]]
 path = "archlint.selftest"
 layer = "application"
-depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.stdlib" }]
+depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.stdlib" }, { path = "archlint.suggestions" }]
 
 [[modules]]
 path = "archlint.stdlib"
 layer = "domain"
 depends_on = [{ path = "archlint.domain" }, { path = "archlint.facts" }, { path = "archlint.presets" }, { path = "archlint.rules" }]
+
+[[modules]]
+path = "archlint.suggestions"
+layer = "application"
+depends_on = [{ path = "archlint.baseline" }, { path = "archlint.bench" }, { path = "archlint.config" }, { path = "archlint.domain" }, { path = "archlint.engine" }, { path = "archlint.facts" }, { path = "archlint.generate" }, { path = "archlint.ports" }, { path = "archlint.practices" }, { path = "archlint.presets" }, { path = "archlint.rules" }, { path = "archlint.selftest" }, { path = "archlint.stdlib" }]
 
 [[modules]]
 path = "archlint.testing"

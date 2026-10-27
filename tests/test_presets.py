@@ -76,7 +76,11 @@ def test_os_branching_enforcement_per_preset(repo: Path, preset: str) -> None:
 @pytest.mark.parametrize("preset", sorted(PRESETS))
 def test_layering_is_enforced_by_every_preset(repo: Path, preset: str) -> None:
     write_files(repo, {"app/domain.py": "from . import adapters\n", "app/newcomer.py": "X = 1\n"})
-    assert found_rules(repo, preset=preset) == {("app.domain", "internal-import"), ("app.newcomer", "unclassified")}
+    assert found_rules(repo, preset=preset) == {
+        ("app.domain", "internal-import"),
+        ("app.newcomer", "unclassified"),
+        ("app.adapters, app.domain, app.ports", "circular-import"),
+    }
 
 
 def test_relaxed_import_linter_bans_only_declared_third_party() -> None:

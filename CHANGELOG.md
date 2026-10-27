@@ -2,16 +2,16 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
-## Unreleased -- 0.1.0 (prototype)
+## 0.1.0 — 2026-10-26
 
 ### Changed
 
-- Fixes after merging the five cleanup branches: `python = "3.12.1"` is read as `3.12`; `type_checkers` must be a
+- Fixes after merging the cleanup branches: `python = "3.12.1"` is read as `3.12`; `type_checkers` must be a
   non-empty list of names (an empty list used to crash `generate`); `archlint bench` reports a bad policy as exit 2
   like every other command, applies `--checkers` to the policy and validates them before timing; `Services.engines` has
   no default any more (a forgotten list used to skip import-linter and tach silently); `ports.TypeChecker` extends
   `Engine`; the scanner, practices and selftest share `domain.NOISE_DIRS`; the in-memory file system sorts glob results
-  like the real one. Open: `output_dir` does not yet reach the engine commands (strict xfail in `tests/test_todo.py`).
+  like the real one.
 - The config file's shape no longer lives in the domain: `Policy.from_mapping` is now `config.policy_from_mapping`
   (`@group` expansion, `preset`, `io_modules`, defaults). `Policy` checks its own invariants on construction (distinct
   rings, onion rule, `classify` naming known rings), so a hand-built policy cannot be inconsistent. Messages and
@@ -41,10 +41,25 @@
   `io_modules = [...]` replaces the stdlib set treated as I/O. The I/O set moved from `generate` into the new
   `archlint.presets` (domain ring).
 - One `[tool.archlint]` policy (rings, glob classification, per-ring internal and external allow-lists, OS-branching
-  rings, entry-script dependencies, practices) that `archlint generate` compiles into import-linter contracts,
-  `tach.toml` and a strict config for pyright, basedpyright, ty or pyrefly. `check` diffs the generated files against
-  the committed ones, runs the engines in parallel, runs its own one-pass AST checks, and applies a shrink-only baseline
-  (`archlint baseline`). `selftest` mutation-tests the rules; `bench` times every engine.
+  rings, entry-script dependencies, practices and circular-import enforcement) used by ArchLint's native checks.
+  `archlint generate` optionally scaffolds import-linter, Tach, Ruff and type-checker presets without overwriting
+  existing files. `check` reports preset drift as informational, runs the selected tools in parallel, runs one-pass AST
+  checks and applies the shrink-only baseline (`archlint baseline`). `selftest` mutation-tests the rules; `bench` times
+  every engine.
+- Ruff integration as a first-class engine using project-owned Ruff configuration, optional preset generation and
+  minimum-profile canaries. Profile v1 pins Ruff and Tach versions and verifies that required Ruff rules are effective.
+- Optional ArchLint minimum-profile certification. Certification requires the minimum native architecture policy and
+  verified Ruff and Tach checks; users can keep a project consistent with a weaker custom policy without receiving
+  certification. `forbid_circular_imports` defaults to true and is required by the minimum profile.
+- Effect facts and per-ring effect rules for ambient clock, environment, identities, randomness, sleeping, threads,
+  processes, dynamic imports and test patching. Alias-aware AST findings remain scoped to the ring policy.
+- Strict first-party coverage and a `discover` command for unclassified files, noise-directory checks, fingerprinted
+  vendor-folder exclusions, ratcheted wildcard-ring findings and shrink-only baselines with explicit adoption or
+  reasoned growth logs.
+- Report-only logical-line size suggestions, plus inventories that ratchet suppression directives and reasoned
+  `discard()` calls.
+- `install-tools` and `check --install-tools` for explicit missing-checker setup, including interpreter-aware installs,
+  version-constrained requirements and Poetry's `archlint` development dependency group.
   Repository practices: gitignore-shadow, sibling-versions, secrets-guard, docs-sync, crlf, undeclared-imports.
 - Measured on Windows (cold/warm seconds; small = 13 modules, medium = 314, large = 1344; type errors are inflated
   because the copies have no virtualenv): ArchLint own checks 0.02/0.01, 0.80/0.10, 2.69/0.35; import-linter

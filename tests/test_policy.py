@@ -41,6 +41,24 @@ def test_first_matching_pattern_wins_and_globs_cross_dots() -> None:
     assert p.ring_of("other") is None
 
 
+def test_module_forbid_imports_are_parsed_and_accumulate_for_matching_globs() -> None:
+    policy = mini_policy(module_forbid_imports={"app.adapters*": ["app.launcher"]})
+    assert policy.forbids_module_import("app.adapters.bootstrap", "app.launcher.cli") == "app.launcher"
+
+
+def test_custom_rule_configuration_is_named_for_the_check_label() -> None:
+    policy = policy_from_mapping({
+        **MINI,
+        "ring": ring_with(domain={"external": ["@pure"], "forbid": ["clock"]}),
+        "preset": "relaxed",
+        "exclude": ["generated/**"],
+        "suggestion_threshold": 450,
+        "ruff": {"extend-select": ["UP"], "max-complexity": 12},
+        "module_forbid_imports": {"app.adapters": ["app.launcher"]},
+    })
+    assert policy.customization_labels == ("ruff", "forbid", "thresholds", "preset", "exclude", "module import restrictions")
+
+
 def test_layers_alone_express_a_policy_where_every_ring_may_import_all_inner_rings() -> None:
     assert mini_policy().expressible_by_layers()
     skipping = mini_policy(ring=ring_with(adapters={"may_import": ["domain"]}))  # adapters may not import ports
@@ -55,7 +73,17 @@ def test_groups_expand_and_defaults_apply() -> None:
     assert p.ring("domain").external == frozenset(["__future__", "dataclasses", "typing", "collections"])
     assert p.ring("composition").may_import == {ALL}
     assert p.ring("adapters").os_branching and not p.ring("domain").os_branching
-    assert (p.python, p.type_checkers, p.baseline, p.output_dir) == ("3.11", ("pyright",), "archlint-baseline.json", ".")
+    assert (p.python, p.type_checkers, p.baseline, p.output_dir) == ("3.11", ("ty",), "archlint-baseline.json", ".")
+    assert p.forbid_circular_imports is True
+
+
+def test_circular_import_policy_can_be_disabled_but_is_not_defaulted_off() -> None:
+    assert mini_policy(forbid_circular_imports=False).forbid_circular_imports is False
+
+
+def test_circular_import_policy_requires_a_boolean() -> None:
+    with pytest.raises(PolicyError, match=r"forbid_circular_imports.*boolean"):
+        _ = mini_policy(forbid_circular_imports="false")
 
 
 @pytest.mark.parametrize("rings", [[], ["a", "a"]])
@@ -106,6 +134,22 @@ def test_a_directly_built_policy_needs_distinct_rings_and_known_classify_targets
         _ = Policy(rings=(_rule("a"), _rule("a")), classify=())
     with pytest.raises(PolicyError, match="unknown ring"):
         _ = Policy(rings=(_rule("a"),), classify=(("x", "nowhere"),))
+
+
+def test_direct_policy_construction_uses_the_ty_default() -> None:
+    assert Policy(rings=(_rule("a"),), classify=()).type_checkers == ("ty",)
+
+
+def test_disabled_tools_are_parsed_as_an_intentional_opt_out() -> None:
+    policy = policy_from_mapping({**MINI, "disabled_tools": ["ruff", "tach"]})
+
+    assert policy.disabled_tools == ("ruff", "tach")
+
+
+@pytest.mark.parametrize("disabled", ["ruff", [""], ["pytest"], [1]])
+def test_disabled_tools_must_be_known_tool_names(disabled: object) -> None:
+    with pytest.raises(PolicyError, match="disabled_tools"):
+        _ = policy_from_mapping({**MINI, "disabled_tools": disabled})
 
 
 def test_domain_does_not_know_the_config_shape() -> None:

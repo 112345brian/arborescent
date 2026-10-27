@@ -5,12 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
-from .domain import Policy, ToolResult
+from .domain import Policy, ToolResult, Violation
 from .facts import ModuleInfo
 
-__all__ = ["Clock", "Engine", "FileSystem", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker"]
+__all__ = ["Clock", "Engine", "FileSystem", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker", "ViolationEngine"]
 
 
 class ToolRunner(Protocol):
@@ -41,9 +41,9 @@ class FileSystem(Protocol):
 
     def write_bytes(self, path: Path, data: bytes) -> None: ...  # parent must exist; overwrites
 
-    def read_json(self, path: Path) -> Any: ...  # ValueError on empty or malformed content
+    def read_json(self, path: Path) -> object: ...  # ValueError on empty or malformed content
 
-    def write_json(self, path: Path, data: Any) -> None: ...  # indent 2, LF, trailing newline
+    def write_json(self, path: Path, data: object) -> None: ...  # indent 2, LF, trailing newline
 
     def exists(self, path: Path) -> bool: ...
 
@@ -63,7 +63,7 @@ class FileSystem(Protocol):
 
     def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = ()) -> None: ...  # ``ignore``: name globs to skip
 
-    def temporary_directory(self, prefix: str) -> AbstractContextManager[Path]: ...  # removed with its contents on exit
+    def temporary_directory(self, prefix: str, parent: Path | None = None) -> AbstractContextManager[Path]: ...  # removed with its contents on exit
 
 
 class Engine(Protocol):
@@ -81,6 +81,15 @@ class Engine(Protocol):
     def passed(self, result: ToolResult) -> bool: ...
 
 
+class ViolationEngine(Protocol):
+    """Optional extension implemented by engines whose diagnostics feed ArchLint's violation baseline.
+
+    It is separate from ``Engine`` so existing adapters and user-supplied engines remain source-compatible.
+    """
+
+    def violations(self, result: ToolResult, root: Path, fs: FileSystem) -> Sequence[Violation]: ...
+
+
 class TypeChecker(Engine, Protocol):
     """A swappable type checker: an ``Engine`` whose strict configuration the policy renders."""
 
@@ -92,7 +101,7 @@ class TypeChecker(Engine, Protocol):
 
 class ScanResult(Protocol):
     @property
-    def known(self) -> frozenset[str]: ...  # every module name under the policy's sources
+    def known(self) -> frozenset[str]: ...  # every first-party module name in the repository
 
     @property
     def modules(self) -> Mapping[str, ModuleInfo]: ...  # the ones parsed (all, or only the changed ones)
@@ -105,6 +114,18 @@ class ScanResult(Protocol):
 
     @property
     def parsed(self) -> int: ...  # files parsed this run (cache misses)
+
+    @property
+    def excluded(self) -> Mapping[str, int]: ...  # excluded folder -> number of Python files
+
+    @property
+    def noise_files(self) -> Sequence[str]: ...  # tracked Python files found below NOISE_DIRS
+
+    @property
+    def unclassified(self) -> Sequence[tuple[str, str]]: ...  # (module name, repository-relative path)
+
+    @property
+    def vendor_folders(self) -> Sequence[tuple[str, str]]: ...  # (auto-excluded folder, content fingerprint)
 
 
 class ModuleScanner(Protocol):

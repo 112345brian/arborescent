@@ -8,7 +8,11 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
-__all__ = ["DEFAULT_PRESET", "IO_MODULES", "PRESETS", "Preset", "Scope"]
+__all__ = ["DEFAULT_PRESET", "EFFECT_CATEGORIES", "PRESETS", "Preset", "Scope"]
+
+EFFECT_CATEGORIES: frozenset[str] = frozenset(
+    {"clock", "env", "identity", "randomness", "sleep", "threads", "process", "dynamic-import", "patch"}
+)
 
 # Which imports outside the project need an entry in the importing ring's ``external`` allow-list.
 #   "all"          every one, stdlib included
@@ -33,6 +37,7 @@ class Preset:
     description: str
     external_scope: Scope
     os_branching: bool  # True: only rings marked ``os_branching`` may read os.name / sys.platform
+    middle_forbid: frozenset[str]
 
     @property
     def bans_io(self) -> bool:
@@ -51,9 +56,9 @@ class Preset:
 PRESETS: dict[str, Preset] = {
     p.name: p
     for p in (
-        Preset("strict", "every external import, stdlib included, must be allow-listed per ring; OS branching limited", "all", True),
-        Preset("standard", "third-party and I/O stdlib must be allow-listed; other stdlib is free; OS branching limited", "io", True),
-        Preset("relaxed", "only third-party packages are allow-listed; layering and classification still enforced", "third-party", False),
+        Preset("strict", "every external import, stdlib included, must be allow-listed per ring; OS branching limited", "all", True, EFFECT_CATEGORIES),
+        Preset("standard", "third-party and I/O stdlib must be allow-listed; other stdlib is free; OS branching limited", "io", True, frozenset({"env", "sleep", "threads", "process"})),
+        Preset("relaxed", "only third-party packages are allow-listed; layering and classification still enforced", "third-party", False, frozenset()),
     )
 }
 DEFAULT_PRESET = "strict"

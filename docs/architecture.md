@@ -11,14 +11,16 @@ Five rings, innermost first. A ring may import itself and the rings it lists; no
 |---|---|---|---|
 | domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types, rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
-| application | domain, ports | `pathlib`, `concurrent` | use cases: generate, check, baseline, selftest, practices |
-| adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time` | the real file system, subprocess and type-checker implementations |
+| application | domain, ports | `pathlib`, `concurrent` | use cases: generate, check, baseline, selftest, suggestions, practices |
+| adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `posixpath`, `shutil`, `subprocess`, `tempfile`, `time` | the real file system, subprocess and type-checker implementations |
 | composition | everything | `argparse`, `pathlib` | the command line: wires adapters to use cases |
 
 The application ring does no file I/O of its own: it reads, writes, lists, copies and creates temporary folders through
 the `FileSystem` port (`Services.fs`), which is why `shutil` and `tempfile` are not on its list. What remains there is
 computation, not I/O: `pathlib` for `Path` values (joining and `relative_to`; never `read_text`, `exists` and the like).
 JSON goes through `FileSystem.read_json`/`write_json` and the stopwatch through the `Clock` port (`Services.clock`).
+The application explicitly allows the `threads` effect because `engine.run_check` runs independent engines in a thread
+pool; it still forbids every other effect category under the strict preset.
 `tests/test_filesystem.py` scans
 `application` and `composition` for any file access that bypasses the port.
 
@@ -39,10 +41,13 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `archlint.baseline` | application |
 | `archlint.bench` | application |
 | `archlint.config` | application |
+| `archlint.certification` | application |
+| `archlint.install_tools` | application |
 | `archlint.engine` | application |
 | `archlint.generate` | application |
 | `archlint.practices` | application |
 | `archlint.selftest` | application |
+| `archlint.suggestions` | application |
 | `archlint.adapters` | adapters |
 | `archlint.engines` | adapters |
 | `archlint.testing` | adapters |
@@ -57,8 +62,8 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 2. `engine.run_check` starts every `Engine` in `Services` (import-linter, tach) and the chosen type checker in parallel. They run as
    subprocesses behind the `ToolRunner` port; a new engine is an adapter, not an edit to `run_check`. An unknown type
    checker name is a `PolicyError`, and the worker pool is always shut down.
-3. Meanwhile the scanner finds every module and parses each file once (content-hash cached); `rules.check_modules` and
-   the practices run over that one parse.
+3. Meanwhile the scanner finds every module and parses each file once (content-hash cached); `rules.check_modules`,
+   suppression and `discard()` inventories, and the practices run over that one parse.
 4. `generate.generate` renders the expected tool configs in memory; `engine.drift` diffs them against the committed files.
 5. `baseline.apply` compares the violations with the baseline: new ones fail, entries that vanished are reported stale.
 
@@ -69,3 +74,8 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 - A new behaviour switch goes into the policy (a preset field or a key), never into a check as a constant, so
   `generate`, `rules` and `selftest` agree on it.
 - Every rule has a mutation in `selftest`: if a rule stops biting, `archlint selftest` fails.
+- Any additional clean-architecture constraint must be added to ArchLint's policy and enforced by a self-test mutation;
+  keep ArchLint's own minimum-profile certification passing with `archlint check --require-profile`. Update the
+  standard/customized certification label when the added constraint changes whether the policy is standard.
+- The policy defaults `forbid_circular_imports` to true. ArchLint's minimum profile requires it, and `selftest` injects
+  a self-import to prove that the cycle rule remains active.

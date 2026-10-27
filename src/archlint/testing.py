@@ -8,7 +8,6 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from .domain import ToolResult
 
@@ -111,10 +110,10 @@ class FakeFileSystem:
     def write_text(self, path: Path, text: str) -> None:
         self.write_bytes(path, text.encode("utf-8"))
 
-    def read_json(self, path: Path) -> Any:
+    def read_json(self, path: Path) -> object:
         return json.loads(self.read_text(path))
 
-    def write_json(self, path: Path, data: Any) -> None:
+    def write_json(self, path: Path, data: object) -> None:
         self.write_text(path, json.dumps(data, indent=2) + "\n")
 
     def exists(self, path: Path) -> bool:
@@ -174,9 +173,9 @@ class FakeFileSystem:
                 self.dirs.add(target)
 
     @contextmanager
-    def temporary_directory(self, prefix: str) -> Generator[Path]:
+    def temporary_directory(self, prefix: str, parent: Path | None = None) -> Generator[Path]:
         self._temp_count += 1
-        tmp = Path(f"/tmp/{prefix}{self._temp_count}")
+        tmp = (parent or Path("/archlint-test-temp")) / f"{prefix}{self._temp_count}"
         self.mkdir(tmp)
         try:
             yield tmp
