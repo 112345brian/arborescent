@@ -12,8 +12,8 @@ Five rings, innermost first. A ring may import itself and the rings it lists; no
 | domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types, rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
 | application | domain, ports | `pathlib`, `concurrent` | use cases: generate, check, baseline, selftest, suggestions, practices |
-| adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `posixpath`, `shutil`, `subprocess`, `tempfile`, `time` | the real file system, subprocess and type-checker implementations |
-| composition | everything | `argparse`, `pathlib` | the command line: wires adapters to use cases |
+| adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time`, `sysconfig`, `tomllib` | focused file-system, scanner, clock, subprocess, engine and type-checker adapters |
+| composition | everything | `argparse`, `pathlib`, `os`, `shlex` | the command line: wires adapters to use cases and presents reports |
 
 The application ring does no file I/O of its own: it reads, writes, lists, copies and creates temporary folders through
 the `FileSystem` port (`Services.fs`), which is why `shutil` and `tempfile` are not on its list. What remains there is
@@ -49,11 +49,18 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `archlint.selftest` | application |
 | `archlint.suggestions` | application |
 | `archlint.adapters` | adapters |
+| `archlint.installer_adapter` | adapters |
+| `archlint.clock_adapter` | adapters |
+| `archlint.filesystem_adapter` | adapters |
+| `archlint.scanner` | adapters |
+| `archlint.tool_runner` | adapters |
 | `archlint.engines` | adapters |
 | `archlint.testing` | adapters |
 | `archlint.typecheckers` | adapters |
 | `archlint.__main__` | composition |
 | `archlint.cli` | composition |
+| `archlint.cli_install` | composition |
+| `archlint.cli_report` | composition |
 
 ## Data flow of `archlint check`
 

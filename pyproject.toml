@@ -80,7 +80,7 @@ forbid = ["clock", "dynamic-import", "env", "identity", "patch", "process", "ran
 
 [tool.archlint.ring.adapters]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "archlint"]
+external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "archlint"]
 os_branching = true
 forbid = ["clock", "dynamic-import", "env", "identity", "patch", "randomness", "sleep", "threads"]
 
@@ -107,10 +107,17 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "archlint"]
 "archlint.suggestions" = "application"
 "archlint.bench" = "application"
 "archlint.adapters" = "adapters"
+"archlint.installer_adapter" = "adapters"
+"archlint.clock_adapter" = "adapters"
+"archlint.filesystem_adapter" = "adapters"
+"archlint.scanner" = "adapters"
+"archlint.tool_runner" = "adapters"
 "archlint.typecheckers" = "adapters"
 "archlint.engines" = "adapters"
 "archlint.testing" = "adapters"
 "archlint.cli" = "composition"
+"archlint.cli_install" = "composition"
+"archlint.cli_report" = "composition"
 "archlint.__main__" = "composition"
 
 [tool.archlint.practices]
@@ -121,7 +128,11 @@ docs-sync = "docs/architecture.md"
 
 [tool.archlint.ruff]
 # The subprocess adapter deliberately owns process execution and passes argument vectors with shell disabled.
-per-file-ignores = { "src/archlint/adapters.py" = ["S404", "S603"] }
+
+[tool.archlint.ruff.per-file-ignores]
+"src/archlint/tool_runner.py" = ["S404", "S603"]
+"src/archlint/cli_install.py" = ["T20"]
+"src/archlint/cli_report.py" = ["T20"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -139,7 +150,7 @@ name = "archlint core and ports must not import adapters, the engines or process
 type = "forbidden"
 source_modules = ["archlint.domain", "archlint.facts", "archlint.presets", "archlint.stdlib", "archlint.rules", "archlint.ports"]
 forbidden_modules = [
-    "archlint.adapters", "archlint.typecheckers", "archlint.engines", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
+    "archlint.adapters", "archlint.tool_runner", "archlint.typecheckers", "archlint.engines", "archlint.engine", "archlint.cli", "subprocess", "shutil", "tempfile",
     "socket", "urllib",
 ]
 allow_indirect_imports = true

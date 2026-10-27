@@ -11,18 +11,14 @@ from archlint_helpers import MINI, write_files
 from test_engine import services
 
 from archlint import practices, selftest
-from archlint.adapters import (  # type: ignore[attr-defined]
-    _PRUNE,
-    FsScanner,
-    LocalFileSystem,
-    SystemClock,
-)
+from archlint.adapters import FsScanner, LocalFileSystem, SystemClock
 from archlint.bench import bench_one
 from archlint.cli import main
 from archlint.config import policy_from_mapping
 from archlint.domain import NOISE_DIRS, PolicyError
 from archlint.engine import Services
 from archlint.ports import Engine, TypeChecker
+from archlint.scanner import _PRUNE
 from archlint.testing import FakeToolRunner
 
 TOML = 'sources = ["app"]\nrings = ["domain"]\n[ring.domain]\nexternal = []\n[classify]\n"app" = "domain"\n'

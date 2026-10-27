@@ -9,7 +9,7 @@ from archlint_helpers import MINI_FILES, mini_policy, write_files
 from archlint.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from archlint.certification import _native_minimum, _tach_probes
 from archlint.generate import tach
-from archlint.install_tools import _toml_array_close
+from archlint.installer_adapter import _toml_array_close
 
 
 def test_toml_array_scanner_skips_brackets_inside_strings_and_comments() -> None:

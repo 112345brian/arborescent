@@ -29,8 +29,8 @@ from archlint.engine import Services
 from archlint.engines import default_engines
 from archlint.install_tools import (
     TOOL_REQUIREMENTS,
-    include_poetry_archlint_group_in_dev,
 )
+from archlint.installer_adapter import include_poetry_archlint_group_in_dev
 from archlint.testing import FakeToolRunner
 from archlint.typecheckers import all_checkers
 
@@ -101,8 +101,8 @@ def test_subprocess_runner_discovers_tools_in_the_poetry_environment(tmp_path: P
         calls.append(list(argv))
         return SimpleNamespace(returncode=0, stdout=f"{scripts / ('python.exe' if os.name == 'nt' else 'python')}\n")
 
-    monkeypatch.setattr("archlint.adapters.shutil.which", lambda name: "/usr/bin/poetry" if name == "poetry" else None)
-    monkeypatch.setattr("archlint.adapters.subprocess.run", run)
+    monkeypatch.setattr("archlint.tool_runner.shutil.which", lambda name: "/usr/bin/poetry" if name == "poetry" else None)
+    monkeypatch.setattr("archlint.tool_runner.subprocess.run", run)
 
     runner = SubprocessToolRunner(tmp_path)
 
@@ -152,7 +152,7 @@ def test_install_tools_installs_only_missing_selected_packages_and_checks_enviro
 def test_install_tools_decline_leaves_environment_unchanged(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     runner = PipRunner()
     services = _services(runner)
-    monkeypatch.setattr("archlint.cli._interactive_install_allowed", lambda: True)
+    monkeypatch.setattr("archlint.cli_install._interactive_install_allowed", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "n")
 
     result = _install_tools(Namespace(type_checker=None, yes=False), mini_policy(), tmp_path, services)
@@ -357,7 +357,7 @@ def test_check_install_tools_without_yes_uses_default_no_prompt(repo: Path, monk
     args = _parser().parse_args(["check", "--install-tools"])
     runner = PipRunner()
     prompts: list[str] = []
-    monkeypatch.setattr("archlint.cli._interactive_install_allowed", lambda: True)
+    monkeypatch.setattr("archlint.cli_install._interactive_install_allowed", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "")
 
     _check(args, mini_policy(), repo, _services(runner))
@@ -417,7 +417,7 @@ def test_disabled_checker_is_omitted_from_install_prompt_and_command(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:  # type: ignore[no-untyped-def]
     runner = PipRunner()
-    monkeypatch.setattr("archlint.cli._interactive_install_allowed", lambda: True)
+    monkeypatch.setattr("archlint.cli_install._interactive_install_allowed", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "n")
 
     result = _install_tools(

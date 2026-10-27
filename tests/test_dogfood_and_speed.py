@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from archlint_helpers import mini_policy, write_files
 
+from archlint import scanner
 from archlint.adapters import (
     FsScanner,
     LocalFileSystem,
@@ -62,11 +63,9 @@ def test_cold_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> N
 
 
 def test_no_file_is_parsed_twice_in_one_run(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from archlint import adapters
-
     seen: list[str] = []
-    real = adapters.extract
-    monkeypatch.setattr(adapters, "extract", lambda src, name="": (seen.append(name), real(src, name))[1])
+    real = scanner.extract
+    monkeypatch.setattr(scanner, "extract", lambda src, name="": (seen.append(name), real(src, name))[1])
     _ = run_check(mini_policy(), repo, Services(FsScanner(), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines()), Options(tools=False))
     assert len(seen) == len(set(seen)) == 5
 
