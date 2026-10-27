@@ -221,7 +221,7 @@ def tach(
         lines.append("layers_explicit_depends_on = true")
     lines.append("")
     renames = [f"{module}:{distribution}" for module, distribution in sorted(policy.dependencies.items())]
-    lines += ["[external]", f"exclude = {_list(sorted(policy.optional_imports))}", f"rename = {_list(renames)}", ""]
+    lines += ["[external]", f"exclude = {_list(sorted(policy.tach_external_exclude))}", f"rename = {_list(renames)}", ""]
     classified = [(n, policy.resolve_ring(arbor_index, n)) for n in leaves(names)]
     for name, ring in classified:
         if ring is None:

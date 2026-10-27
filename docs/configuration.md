@@ -26,7 +26,7 @@ settings. The two forms cannot be mixed.
 | `io_modules` | built-in set | Stdlib modules that count as I/O, process or OS. Replaces the default set; `[]` means none. |
 | `groups` | `{}` | Named lists, used as `"@name"` inside any `may_import` or `external` list. |
 | `dependencies` | `{}` | Import name -> distribution name, where they differ (`yaml = "pyyaml"`). Used for entry-script and manifest checks. |
-| `optional_imports` | `[]` | Import names of optional extras (declared under `[project.optional-dependencies]`) that the code imports lazily. Written to the generated Tach `[external] exclude`, since Tach reads only the base dependencies. |
+| `tach_external_exclude` | `[]` | Package names written to the generated Tach `[external] exclude`: optional extras imported lazily, or transitive dependencies the project does not declare. Tach reads only the base dependencies and matches distribution names where they differ from import names (`google-genai`, `pyyaml`). |
 | `forbid_everywhere` | `[]` | Packages no module may import, in any ring (one global import-linter contract). |
 | `forbid_circular_imports` | `true` | Rejects cycles in the first-party module import graph, including lazy and `TYPE_CHECKING` imports. Set to `false` only to opt out; the Arborescent minimum profile requires `true`. |
 | `entry_scripts` | `[]` | Dotted names of PEP 723 single-file scripts. Each must declare, in its `# /// script` block, every third-party distribution the project code imports. |

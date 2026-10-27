@@ -138,7 +138,7 @@ def test_policy_without_a_preset_key_still_loads() -> None:
     assert policy_from_mapping(MINI).preset.name == "strict"
 
 
-def test_optional_imports_land_in_the_tach_external_exclude() -> None:
-    files = generate(mini_policy(optional_imports=["livekit", "sentry_sdk"]), NAMES, [])
+def test_tach_external_exclude_land_in_the_tach_external_exclude() -> None:
+    files = generate(mini_policy(tach_external_exclude=["livekit", "sentry_sdk"]), NAMES, [])
     assert 'exclude = ["livekit", "sentry_sdk"]' in files["tach.toml"]
     assert "exclude = []" in generate(mini_policy(), NAMES, [])["tach.toml"]

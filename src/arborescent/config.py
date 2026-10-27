@@ -84,7 +84,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
-        optional_imports=tuple(raw.get("optional_imports", [])),
+        tach_external_exclude=tuple(raw.get("tach_external_exclude", [])),
         forbid_circular_imports=forbid_circular_imports,
         python=minor.group(1) if minor else python,
         type_checkers=tuple(cast("list[str]", checkers)),
