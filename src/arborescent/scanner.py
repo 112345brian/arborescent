@@ -6,6 +6,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -297,7 +298,8 @@ class FsScanner:
         unclassified: list[tuple[str, str]] = []
         vendors: dict[str, list[str]] = {}
         all_paths, tracked = _listed_paths(root, self._runner)
-        excluded_paths = (*policy.exclude, *(child.path for child in policy.children))
+        excluded_children = _child_policy_paths(root, policy)
+        excluded_paths = (*policy.exclude, *excluded_children)
         for rel in all_paths:
             if _excluded_by_policy(rel, excluded_paths):
                 if rel.endswith(".py"):
@@ -309,14 +311,18 @@ class FsScanner:
                     noise_files.append(rel)
                 continue
             vendor = _vendor_parent(rel)
-            if vendor is not None:
+            if vendor is not None and not policy.scan_vendors:
                 vendors.setdefault(vendor, []).append(rel)
 
         vendor_folders = _fingerprint_vendors(vendors, root, excluded)
 
         py_paths = [rel for rel in all_paths if rel.endswith(".py")]
         for rel in py_paths:
-            if _excluded_by_policy(rel, excluded_paths) or _noise_parent(rel, tracked) or _vendor_parent(rel) is not None:
+            if (
+                _excluded_by_policy(rel, excluded_paths)
+                or _noise_parent(rel, tracked)
+                or (_vendor_parent(rel) is not None and not policy.scan_vendors)
+            ):
                 continue
             _add_discovered(found, policy, rel)
             module = next((name for name, _, path in found.values() if path == rel), None)
@@ -330,3 +336,25 @@ class FsScanner:
             tuple(sorted(unclassified)),
             tuple(vendor_folders),
         )
+
+
+def _child_policy_paths(root: Path, policy: Policy) -> tuple[str, ...]:
+    if policy.child_policy_mode == "parent":
+        return ()
+    paths: list[str] = []
+    for child in policy.children:
+        child_root = root / child.path
+        if (child_root / "arborescent.toml").is_file():
+            paths.append(child.path)
+            continue
+        pyproject = child_root / "pyproject.toml"
+        if not pyproject.is_file():
+            continue
+        try:
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            paths.append(child.path)  # the child check reports its malformed config
+        else:
+            if isinstance(data.get("tool"), dict) and "arborescent" in data["tool"]:
+                paths.append(child.path)
+    return tuple(paths)

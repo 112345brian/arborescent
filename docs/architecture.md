@@ -79,9 +79,11 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 4. `generate.generate` renders the expected tool configs in memory; `engine.drift` diffs them against the committed files.
 5. `baseline.apply` compares the violations with the baseline: new ones fail, entries that vanished are reported stale.
 
-The parent scanner excludes only explicitly declared child roots. All other packages remain assigned to the parent's
-single policy or named scopes. A declared child owns its config and baseline; parent certification recursively requires
-every child to pass its requested check profile.
+The parent scanner excludes explicitly listed child roots only when they have a direct policy and
+`child_policy_mode = "certify"`. Paths without their own policy remain assigned to the parent's single policy or named
+scopes. `child_policy_mode = "parent"` overrides listed child policies and keeps those roots in the parent scan.
+`scan_vendors` configures whether convention-named vendor folders participate in that scan. Parent certification
+recursively requires each independently governed child to pass its requested check profile.
 
 ## Rules of the house
 

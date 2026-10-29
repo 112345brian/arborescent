@@ -18,7 +18,9 @@ settings. The two forms cannot be mixed.
 | `sources` | `["."]` | Folders or single files to scan. A single `.py` file is an entry script, not a package. |
 | `source_roots` | `["."]` | Folders that module names are relative to (`src` for a `src/app` layout). Also handed to tach. |
 | `exclude` | `[]` | Globs matched against a path or a file/folder name to skip while scanning. Excluded Python files are counted by folder on every `check`. |
-| `children` | `[]` | Explicit nested package roots with their own direct Arborescent policy. Parent scanning skips these roots; `check` runs each child recursively. Unlisted packages remain in the parent's policy. |
+| `children` | `[]` | Explicit nested package roots to inspect for a direct Arborescent policy. In `certify` mode, roots with their own policy are checked recursively; roots without one remain in the parent scan. |
+| `child_policy_mode` | `"certify"` | `"certify"` respects direct child policies and includes their results in parent certification. `"parent"` overrides child policies: listed roots stay in the parent scan and are not checked separately. |
+| `scan_vendors` | `false` | Include convention-named `vendor`, `vendored`, `third_party` and `site-packages` folders in the parent scan. This lets parent rules govern vendored code; declared child roots with their own policy are still separated in `certify` mode. |
 | `module_forbid_imports` | `{}` | Module glob -> internal module/package names this module may not import, in addition to ring rules. |
 | `preset` | `"strict"` | How much of the external and OS rules applies: `strict`, `standard` or `relaxed` (see below). |
 | `io_modules` | built-in set | Stdlib modules that count as I/O, process or OS. Replaces the default set; `[]` means none. |
@@ -60,25 +62,32 @@ acyclic.
 
 ## Nested package arbors
 
-Use `children` when a package inside the repository owns a separate architecture policy. Each path is relative to the
-parent policy root, must be unique and non-overlapping, and must contain its own `arborescent.toml` or a
-`pyproject.toml` with `[tool.arborescent]` directly at that child root. Arborescent never searches upward for a child
-policy, so a missing child config cannot silently inherit the parent's rules.
+Use `children` to configure package roots that may have their own architecture policy. Each path is relative to the
+parent policy root, unique and non-overlapping. In the default `child_policy_mode = "certify"`, a direct child
+`arborescent.toml` or `pyproject.toml` with `[tool.arborescent]` gives that package its own policy; Arborescent checks
+it recursively and excludes its source from the parent scan. If no direct policy is declared, the package remains
+part of the parent scan. Arborescent never searches upward for a child policy.
 
 ```toml
 [tool.arborescent]
 children = ["packages/collection_core"]
+child_policy_mode = "certify"
 ```
 
-The parent scan excludes files under declared child roots. Other packages and source directories stay under the
-parent's own integrated policy unless explicitly declared as children. `arborescent check` invokes each child from its
-own root, so the child uses its own rings, baseline, and native tool configs; nested children are checked recursively.
+To apply the parent policy to a listed package even when it has its own config, set `child_policy_mode = "parent"`.
+The parent then scans the entire configured source tree, and no child checks run. To include convention-named vendor
+directories in that scan, set `scan_vendors = true`; normal `exclude` rules still apply.
+
+With `child_policy_mode = "certify"`, other packages and source directories stay under the parent's own integrated
+policy unless they have their own direct policy and are listed as children. `arborescent check` invokes each such child
+from its own root, so it uses its own rings, baseline, and native tool configs; nested children are checked recursively.
 The parent's `CONSISTENT` status requires its configured checks and every child's configured checks to pass. With
 `--require-profile`, the parent passes that requirement to every child and prints `CERTIFIED` only when the parent and
-all children meet the minimum profile. A missing or failing child makes the parent check fail.
+all children meet the minimum profile. A declared path without its own policy remains parent-owned; a discovered child
+with an invalid or failing policy makes the parent check fail.
 
 Arborescent does not rewrite project-owned Tach, Ruff, or type-checker configuration. When those parent tools should
-only govern parent source, exclude each child path in their native config as well. The child invocation runs those tools
+only govern parent source, exclude each independently certified child path in their native config as well. The child invocation runs those tools
 from the child root with the child's native configuration.
 
 For example, libraries with different core layers can share one repository-owned binary parser:

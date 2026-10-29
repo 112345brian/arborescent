@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import MINI, mini_policy, write_files
+from arborescent_helpers import CLASSIFY, MINI, mini_policy, write_files
 
 from arborescent.config import policy_from_mapping
 from arborescent.domain import Policy, PolicyError
@@ -217,6 +217,7 @@ def test_partial_scope_indexes_match_full_scan(tmp_path: Path) -> None:
 def test_parent_scan_excludes_declared_child_arbor_source(tmp_path: Path) -> None:
     write_files(tmp_path, {
         "app/domain.py": "VALUE = 1\n",
+        "packages/collection_core/arborescent.toml": 'rings = ["domain"]\nsources = ["src"]\n',
         "packages/collection_core/core.py": "VALUE = 2\n",
         "packages/integrated/part.py": '__arbor__ = {"ring": "domain"}\nVALUE = 3\n',
     })
@@ -227,3 +228,48 @@ def test_parent_scan_excludes_declared_child_arbor_source(tmp_path: Path) -> Non
     assert set(scan.modules) == {"app.domain", "packages.integrated.part"}
     assert scan.unclassified == ()
     assert scan.excluded["packages/collection_core"] == 1
+
+
+def test_child_without_policy_stays_in_parent_scan(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "app/domain.py": "VALUE = 1\n",
+        "packages/integrated/core.py": '__arbor__ = {"ring": "domain"}\nVALUE = 2\n',
+    })
+    policy = policy_from_mapping({**MINI, "children": ["packages/integrated"]})
+
+    scan = FsScanner().scan(policy, tmp_path)
+
+    assert "packages.integrated.core" in scan.modules
+    assert "packages/integrated" not in scan.excluded
+
+
+def test_parent_mode_overrides_a_declared_child_policy(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "app/domain.py": "VALUE = 1\n",
+        "packages/collection_core/arborescent.toml": 'rings = ["domain"]\nsources = ["src"]\n',
+        "packages/collection_core/core.py": '__arbor__ = {"ring": "domain"}\nVALUE = 2\n',
+    })
+    policy = policy_from_mapping({
+        **MINI,
+        "sources": ["."],
+        "classify": {**CLASSIFY, "packages.*": "domain"},
+        "children": ["packages/collection_core"],
+        "child_policy_mode": "parent",
+    })
+
+    scan = FsScanner().scan(policy, tmp_path)
+
+    assert "packages.collection_core.core" in scan.modules
+    assert "packages/collection_core" not in scan.excluded
+
+
+def test_vendor_scan_is_configurable(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "app/domain.py": "VALUE = 1\n",
+        "vendor/shared/core.py": '__arbor__ = {"ring": "domain"}\nVALUE = 2\n',
+    })
+    default = FsScanner().scan(policy_from_mapping(MINI), tmp_path)
+    inclusive = FsScanner().scan(policy_from_mapping({**MINI, "scan_vendors": True}), tmp_path)
+
+    assert "vendor.shared.core" not in default.known
+    assert "vendor.shared.core" in inclusive.modules

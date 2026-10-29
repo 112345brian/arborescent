@@ -251,6 +251,8 @@ def _child_arbor_command(config_path: Path, opts: Options) -> list[str]:
 
 
 def _child_arbor_runs(policy: Policy, root: Path, services: Services, opts: Options) -> list[EngineRun]:
+    if policy.child_policy_mode == "parent":
+        return []
     runs: list[EngineRun] = []
     for child in policy.children:
         name = f"child arbor {child.path}"
@@ -259,6 +261,8 @@ def _child_arbor_runs(policy: Policy, root: Path, services: Services, opts: Opti
             config_path = find_child_policy(services.fs, root, child.path)
         except PolicyError as exc:
             runs.append(EngineRun(name, "fail", 0.0, [str(exc)]))
+            continue
+        if config_path is None:
             continue
         if not services.runner.available(sys.executable):
             runs.append(EngineRun(name, "fail", 0.0, [f"{sys.executable} is not available to run the child policy"]))

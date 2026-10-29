@@ -36,8 +36,8 @@ def load_policy(fs: FileSystem, path: Path) -> tuple[Policy, Path]:
     return policy_from_mapping(raw), path.parent
 
 
-def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Path:
-    """Find a policy directly inside a declared child root; never inherit an ancestor policy."""
+def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Path | None:
+    """Find a direct child policy, or None so the parent keeps governing that directory."""
     child_root = parent_root / child_path
     if not fs.is_dir(child_root):
         raise PolicyError(f"child arbor {child_path!r} is not a directory")
@@ -59,9 +59,7 @@ def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Pat
             raise PolicyError(f"child arbor {child_path!r} has an invalid pyproject.toml: {exc}") from exc
         if isinstance(data.get("tool"), Mapping) and "arborescent" in data["tool"]:
             return pyproject
-    raise PolicyError(
-        f"child arbor {child_path!r} must declare its own arborescent.toml or [tool.arborescent] in pyproject.toml"
-    )
+    return None
 
 
 def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
@@ -80,6 +78,8 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         sources=tuple(raw.get("sources", ["."])),
         source_roots=tuple(raw.get("source_roots", ["."])),
         exclude=tuple(raw.get("exclude", [])),
+        scan_vendors=_boolean_option(raw, "scan_vendors", False),
+        child_policy_mode=_child_policy_mode(raw),
         module_forbid_imports=tuple((pattern, tuple(targets)) for pattern, targets in raw_module_forbids.items()),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
@@ -102,6 +102,8 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
 
 _SCOPED_ROOT_GLOBALS = frozenset({
     "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
+    "scan_vendors",
+    "child_policy_mode",
     "ruff", "practices", "exclude",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
@@ -153,6 +155,8 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
         dependencies={},
         forbid_everywhere=(),
         children=_child_arbors(raw),
+        scan_vendors=_boolean_option(raw, "scan_vendors", False),
+        child_policy_mode=_child_policy_mode(raw),
         scopes=tuple(scopes),
     )
 
@@ -171,6 +175,13 @@ def _child_arbors(raw: Mapping[str, Any]) -> tuple[ChildArbor, ...]:
     if not isinstance(value, list) or not all(isinstance(path, str) and path for path in value):
         raise PolicyError("`children` must be a list of non-empty relative package paths")
     return tuple(ChildArbor(path) for path in value)
+
+
+def _child_policy_mode(raw: Mapping[str, Any]) -> str:
+    value = raw.get("child_policy_mode", "certify")
+    if not isinstance(value, str) or value not in {"certify", "parent"}:
+        raise PolicyError("`child_policy_mode` must be 'certify' or 'parent'")
+    return value
 
 
 def _core_policy(raw: Mapping[str, Any]) -> tuple[Policy, Mapping[str, Mapping[str, Any]]]:
@@ -252,6 +263,10 @@ def _customization_labels(
         customizations.append("exclude")
     if raw_module_forbids:
         customizations.append("module import restrictions")
+    if raw.get("children") or raw.get("child_policy_mode", "certify") != "certify":
+        customizations.append("nested arbors")
+    if raw.get("scan_vendors", False):
+        customizations.append("vendor scanning")
     if not raw.get("forbid_circular_imports", True):
         customizations.append("circular imports")
     return tuple(customizations)

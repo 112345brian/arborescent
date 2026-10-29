@@ -318,8 +318,7 @@ def test_child_arbor_requires_a_direct_policy_file(tmp_path) -> None:  # type: i
     (tmp_path / "child").mkdir()
     (tmp_path / "arborescent.toml").write_text('rings = ["domain"]\n', encoding="utf-8")
 
-    with pytest.raises(PolicyError, match=r"child.*own"):
-        find_child_policy(LocalFileSystem(), tmp_path, "child")
+    assert find_child_policy(LocalFileSystem(), tmp_path, "child") is None
 
     (tmp_path / "child" / "arborescent.toml").write_text('rings = ["domain"]\n', encoding="utf-8")
     assert find_child_policy(LocalFileSystem(), tmp_path, "child") == tmp_path / "child" / "arborescent.toml"
@@ -327,6 +326,15 @@ def test_child_arbor_requires_a_direct_policy_file(tmp_path) -> None:  # type: i
     (tmp_path / "child" / "arborescent.toml").unlink()
     (tmp_path / "child" / "pyproject.toml").write_text('[tool.arborescent]\nrings = ["domain"]\n', encoding="utf-8")
     assert find_child_policy(LocalFileSystem(), tmp_path, "child") == tmp_path / "child" / "pyproject.toml"
+    (tmp_path / "child" / "pyproject.toml").write_text('[project]\nname = "no-policy"\n', encoding="utf-8")
+    assert find_child_policy(LocalFileSystem(), tmp_path, "child") is None
+
+
+def test_child_policy_mode_is_configurable() -> None:
+    assert policy_from_mapping(MINI).child_policy_mode == "certify"
+    assert policy_from_mapping({**MINI, "child_policy_mode": "parent"}).child_policy_mode == "parent"
+    with pytest.raises(PolicyError, match="child_policy_mode"):
+        policy_from_mapping({**MINI, "child_policy_mode": "ignore"})
 
 
 def test_child_arbor_cannot_resolve_through_a_symlink_outside_parent(tmp_path) -> None:  # type: ignore[no-untyped-def]

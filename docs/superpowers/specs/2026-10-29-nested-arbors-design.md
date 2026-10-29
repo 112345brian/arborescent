@@ -2,15 +2,15 @@
 
 ## Intent
 
-Let a vendored package keep its own Arborescent policy while making the parent repository's certification include that package. This preserves package ownership: child source is governed by the child's rings, config, and baseline, and the parent cannot claim certification while a declared child fails.
+Let a vendored package keep its own Arborescent policy when the parent chooses, while also supporting a parent that deliberately overrides child policies and governs an inclusive source tree.
 
 ## Goals
 
-- A parent policy explicitly declares nested package roots.
-- Each child root has its own direct `arborescent.toml` or `pyproject.toml` policy.
-- Parent Arborescent scanning excludes child source from the parent's own policy.
-- Unlisted packages and source directories remain integrated into the parent's existing single policy or named scopes.
-- `check` recursively checks each child and aggregates its result. `CERTIFIED` requires the parent's minimum profile and every child to certify.
+- A parent policy explicitly lists candidate nested package roots.
+- `child_policy_mode` lets the parent either certify direct child policies or override them with the parent policy.
+- A listed root without its own direct Arborescent policy remains integrated into the parent scan.
+- `scan_vendors` lets the parent include convention-named vendored folders in its own scan.
+- `check` recursively checks each independently governed child and aggregates its result.
 - Children may declare their own children; the tree is finite and paths cannot escape the parent root.
 
 ## Non-goals
@@ -24,13 +24,13 @@ Let a vendored package keep its own Arborescent policy while making the parent r
 
 1. **Merge child policies into parent scopes.** Rejected because children would lose their independent config and baseline.
 2. **Automatically discover every nested Git repository or `arborescent.toml`.** Rejected because discovery makes certification depend on incidental directory contents and can include unrelated fixtures.
-3. **Explicit child roots with direct policies and recursive checks.** Selected. The parent declares its architectural children; each child remains the owner of its policy and recursively reports its own result.
+3. **Explicit child roots with configurable ownership.** Selected. The parent lists candidate roots, then configures whether direct child policies are independently certified or overridden by the parent.
 
 ## Architecture
 
-`Policy` contains immutable child-root values. Configuration validates that each path is relative, unique, and non-overlapping. At runtime, Arborescent verifies that each child directory has a policy file directly inside it; it must not fall back to the parent's policy. The parent scanner skips declared child paths. The check use case invokes the same Arborescent installation from each child root, passes through tool and profile requirements, and records a child result alongside the parent's engines. Child baselines and generated configs remain rooted at the child.
+`Policy` contains immutable child-root values, a child policy mode, and a vendor scanning flag. Configuration validates that each child path is relative, unique, and non-overlapping. In `certify` mode, a direct child policy makes that package independent: the parent scanner skips it and the check use case invokes Arborescent from that child root, passing tool and profile requirements. A path without a direct policy remains parent-owned. In `parent` mode, the parent scans listed roots even when they have their own config. Vendored-folder scanning is configurable. Child baselines and generated configs remain rooted at independently certified children.
 
-A parent `CONSISTENT` result requires the parent's configured checks and all child checks to pass. A parent `CERTIFIED` result additionally requires the parent and all children to pass the requested minimum profile. A missing or malformed child policy is a failing child result.
+A parent `CONSISTENT` result requires the parent's configured checks and all independently certified child checks to pass. A parent `CERTIFIED` result additionally requires the parent and those children to pass the requested minimum profile. A listed root without a child policy is governed by the parent.
 
 ## Constraints
 

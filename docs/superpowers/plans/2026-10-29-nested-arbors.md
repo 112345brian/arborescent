@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Allow a parent Arborescent policy to certify explicitly declared child packages under their own configs.
+**Goal:** Let a parent Arborescent policy certify child-owned packages, override their policies, or integrate policy-less and vendored source into the parent tree.
 
-**Architecture:** Add immutable child-root metadata to `Policy`, exclude those roots from the parent's source scan, and recursively invoke the same CLI for each child's direct policy. Aggregate child statuses as check engines so a failed child blocks parent consistency and certification.
+**Architecture:** Add immutable child-root metadata and configurable ownership/vendor-scan settings to `Policy`. Respect direct child policies by default, allow the parent to override them, integrate policy-less roots into the parent scan, and recursively invoke the same CLI for independently governed children.
 
 **Tech Stack:** Python 3.11+, dataclasses, `tomllib`, existing `ToolRunner` and scanner ports, pytest.
 
@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- Child source is checked only under its own policy and baseline.
-- No nested child is auto-discovered.
-- A missing or invalid child policy fails closed.
+- `child_policy_mode = "certify"` respects direct child policies; `"parent"` overrides them.
+- A listed root without a direct policy remains in the parent scan.
+- Vendored folders remain excluded unless `scan_vendors = true`.
 - Legacy and multi-scope policies retain existing behavior when `children` is absent.
 - Parent native tool configs must exclude child source when they should not govern it.
 
@@ -35,9 +35,9 @@
 - Modify `src/arborescent/config.py` to parse `children` in single and multi-scope forms, validate relative normalized paths, and resolve direct child config files.
 - Test `tests/test_policy.py`.
 
-- [ ] Add tests for accepted child list, duplicate/overlapping paths, absolute and parent-traversing paths, and direct-only child config resolution.
+- [x] Add tests for accepted child list, duplicate/overlapping paths, absolute and parent-traversing paths, and direct-only child config resolution.
 - [ ] Run those focused tests and observe expected failures.
-- [ ] Implement immutable child metadata and validation.
+- [x] Implement immutable child metadata and validation.
 - [ ] Run `uv run pytest -p no:tach tests/test_policy.py -q`.
 
 ### Task 2: Parent scan ownership
@@ -46,9 +46,9 @@
 - Modify `src/arborescent/scanner.py` to exclude declared child roots from parent discovery.
 - Test `tests/test_scanner.py`.
 
-- [ ] Add a fixture with parent and child Python modules; assert parent scan sees only its source and counts child files as excluded.
+- [x] Add fixtures for independent child ownership, policy-less parent integration, and explicit parent override.
 - [ ] Run the test and observe expected failure.
-- [ ] Implement child exclusion without changing vendor fingerprinting or legacy scans.
+- [x] Implement conditional child exclusion and configurable vendor scanning.
 - [ ] Run `uv run pytest -p no:tach tests/test_scanner.py -q`.
 
 ### Task 3: Recursive child checks and aggregation
@@ -58,9 +58,9 @@
 - Modify `src/arborescent/cli_report.py` only if child summaries need a distinct presentation.
 - Test `tests/test_engine.py` and CLI output coverage.
 
-- [ ] Add tests that child checks run from their own root/config, ordinary child failure fails the parent, and `--require-profile` propagates to children.
+- [x] Add tests that child checks run from their own root/config, ordinary child failure fails the parent, and `--require-profile` propagates to children.
 - [ ] Run the focused tests and observe expected failures.
-- [ ] Implement recursive child invocation and aggregate exit status without sharing baselines.
+- [x] Implement recursive child invocation and aggregate exit status without sharing baselines.
 - [ ] Run `uv run pytest -p no:tach tests/test_engine.py -q`.
 
 ### Task 4: Documentation and end-to-end verification
@@ -69,7 +69,7 @@
 - Modify `docs/configuration.md` and `docs/architecture.md`.
 - Modify `tests/test_policy.py`, `tests/test_scanner.py`, and `tests/test_engine.py` as needed.
 
-- [ ] Document direct child config files, recursive certification semantics, own baselines, and native-tool exclusions.
+- [x] Document configurable ownership, recursive certification semantics, own baselines, and native-tool exclusions.
 - [ ] Add an end-to-end fixture with a parent and a separately configured child, showing parent failure when child fails and parent certification when both certify.
 - [ ] Run the full test suite and the repository's architecture self-check.
-- [ ] Review diff for unchanged behavior when no `children` key is configured.
+- [x] Review diff for unchanged behavior when no `children` key is configured.

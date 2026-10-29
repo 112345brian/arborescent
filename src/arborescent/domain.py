@@ -167,6 +167,8 @@ class Policy:
     sources: tuple[str, ...] = (".",)
     source_roots: tuple[str, ...] = (".",)
     exclude: tuple[str, ...] = ()
+    scan_vendors: bool = False
+    child_policy_mode: str = "certify"  # "certify" keeps child-owned policy; "parent" overrides it
     module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
@@ -193,6 +195,8 @@ class Policy:
                 raise PolicyError("`module_forbid_imports` needs non-empty module patterns and target lists")
         _validate_disabled_tools(self.disabled_tools)
         _validate_child_arbors(self.children)
+        if self.child_policy_mode not in {"certify", "parent"}:
+            raise PolicyError("`child_policy_mode` must be 'certify' or 'parent'")
         if self.python not in SUPPORTED_PYTHONS:
             raise PolicyError(f"`python` {self.python!r} is not supported; choose one of {list(SUPPORTED_PYTHONS)}")
         _validate_suggestion_threshold(self.suggestion_threshold)

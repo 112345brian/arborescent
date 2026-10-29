@@ -521,6 +521,19 @@ def test_child_arbor_receives_parent_profile_requirement(repo: Path) -> None:
     assert command[command.index("--config") + 1] == str(child / "arborescent.toml")
 
 
+def test_parent_child_policy_mode_skips_nested_checks(repo: Path) -> None:
+    child = repo / "packages" / "core"
+    child.mkdir(parents=True)
+    (child / "arborescent.toml").write_text('rings = ["domain"]\nsources = ["src"]\n', encoding="utf-8")
+    runner = FakeToolRunner({sys.executable})
+    policy = policy_from_mapping({**MINI, "children": ["packages/core"], "child_policy_mode": "parent"})
+
+    report = run_check(policy, repo, services(runner), Options(tools=False))
+
+    assert not any(engine.name == "child arbor packages/core" for engine in report.engines)
+    assert not any(call[0] == sys.executable for call in runner.calls)
+
+
 def test_nested_child_arbor_failure_fails_parent_recursively(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write_files(repo, {"app/domain.py": "VALUE = 1\n"})
     write_files(repo, {
