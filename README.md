@@ -63,6 +63,8 @@ __arbor__ = {"ring": "adapters"}
 A valid module-level `__arbor__` takes precedence over `classify`; the ring must be declared in the policy.
 An absent annotation uses the first matching `classify` glob. In a multi-scope config, the ring must belong to the module's owning scope. A malformed annotation or unknown ring reports
 `invalid-arbor-annotation` and falls back to `classify`, so an already-classified module keeps all its ring checks.
+Annotations are module-level only: package and distribution boundaries (what survives extraction into a standalone
+package) are not covered.
 Without a fallback match it also reports `unclassified`. These annotations classify individual modules only.
 
 ### Independently governed libraries

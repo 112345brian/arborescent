@@ -167,6 +167,13 @@ Annotations apply to individual Python modules. An annotation in `__init__.py` a
 ring; it does not assign rings to its descendants. Scope boundaries are configured separately through `sources`,
 `public` and `depends_on`; package extraction and per-library config relocation remain optional future work.
 
+### What annotations do not cover
+
+`__arbor__` is a module-level, in-repository declaration. It does not describe a package or distribution boundary:
+there are no `package` or `prepackage` fields, and nothing here makes a ring assignment, a public surface or an
+ownership claim survive extracting code into a standalone published package. Package and distribution boundaries
+would need a separate design and are not implemented.
+
 ## Rings: `[tool.arborescent.ring.<name>]` or `[tool.arborescent.scopes.<scope>.ring.<name>]`
 
 | key | default | meaning |

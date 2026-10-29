@@ -199,6 +199,22 @@ def test_scope_annotation_ring_is_validated_locally(tmp_path: Path) -> None:
     assert policy.resolve_scope_ring("alpha", scan.arbor_index, "core") == "domain"
 
 
+def test_scope_annotation_overrides_classify_only_with_rings_from_its_own_scope(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": '__arbor__ = {"ring": "adapters"}\n',
+        "libs/shared/src/parser.py": '__arbor__ = {"ring": "adapters"}\n',
+    })
+    policy = _scoped_policy()
+
+    scan = FsScanner().scan(policy, tmp_path)
+
+    assert policy.resolve_scope_ring("alpha", scan.arbor_index, "core") == "adapters"
+    assert policy.scope_annotation_violation("alpha", scan.arbor_index, "core") is None
+    # "adapters" exists in alpha but not in shared, so shared falls back to classify and still reports it.
+    assert policy.resolve_scope_ring("shared", scan.arbor_index, "parser") == "domain"
+    assert policy.scope_annotation_violation("shared", scan.arbor_index, "parser") is not None
+
+
 def test_partial_scope_indexes_match_full_scan(tmp_path: Path) -> None:
     write_files(tmp_path, {
         "libs/alpha/src/core.py": "VALUE = 1\n",
