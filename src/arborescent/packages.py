@@ -267,9 +267,16 @@ class PackageCatalog:
                 if not self._is_generated(source, nested)
             ]
             for nested in nested_paths:
-                nested_resolved = self.fs.resolve(nested)
-                if nested_resolved != nested or not nested_resolved.is_relative_to(
-                    self.root
+                try:
+                    nested_resolved = self.fs.resolve(nested)
+                except (
+                    OSError
+                ):  # e.g. a dangling link: Windows raises instead of returning the path
+                    nested_resolved = None
+                if (
+                    nested_resolved is None
+                    or nested_resolved != nested
+                    or not nested_resolved.is_relative_to(self.root)
                 ):
                     raise CatalogError(
                         f"package extraction does not copy symlinks: {nested}"

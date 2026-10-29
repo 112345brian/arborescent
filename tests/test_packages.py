@@ -143,9 +143,12 @@ def test_extraction_omits_generated_artifacts_and_keeps_declared_content(
         if path.is_file()
     }
     assert extracted == {*kept, ".arborescent-package.toml"}
-    assert tomllib.loads(
-        (destination / ".arborescent-package.toml").read_text(encoding="utf-8")
-    )["package"]["id"] == "collection-core"
+    assert (
+        tomllib.loads(
+            (destination / ".arborescent-package.toml").read_text(encoding="utf-8")
+        )["package"]["id"]
+        == "collection-core"
+    )
 
 
 def test_extraction_skips_symlinks_inside_generated_directories(
@@ -155,7 +158,7 @@ def test_extraction_skips_symlinks_inside_generated_directories(
     _write(tmp_path / "src/core", {"__init__.py": "VALUE = 1\n"})
     venv_bin = tmp_path / "src/core/.venv/bin"
     venv_bin.mkdir(parents=True)
-    (venv_bin / "python").symlink_to(Path("/usr/bin/env"))
+    (venv_bin / "python").symlink_to(tmp_path / "missing-interpreter")
     catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
 
     destination = catalog.extract("collection-core", tmp_path / "out/core")
@@ -168,7 +171,20 @@ def test_extraction_still_rejects_symlinks_outside_generated_directories(
     tmp_path: Path,
 ) -> None:
     _write(tmp_path / "src/core", {"__init__.py": "VALUE = 1\n"})
-    (tmp_path / "src/core/escape").symlink_to(Path("/usr/bin/env"))
+    (tmp_path / "outside.txt").write_text("outside\n", encoding="utf-8")
+    (tmp_path / "src/core/escape").symlink_to(tmp_path / "outside.txt")
+    catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
+
+    with pytest.raises(CatalogError, match="does not copy symlinks"):
+        catalog.extract("collection-core", tmp_path / "out/core")
+
+
+def test_extraction_rejects_a_dangling_symlink_with_a_catalog_error(
+    tmp_path: Path,
+) -> None:
+    """Windows raises FileNotFoundError when resolving a dangling link; that must not escape as a crash."""
+    _write(tmp_path / "src/core", {"__init__.py": "VALUE = 1\n"})
+    (tmp_path / "src/core/dangling").symlink_to(tmp_path / "does-not-exist")
     catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
 
     with pytest.raises(CatalogError, match="does not copy symlinks"):
