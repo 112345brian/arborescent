@@ -179,6 +179,8 @@ def _scope_imports(context: RuleContext, source: str, line: int, targets: Collec
             continue
         target_scope = context.policy.scope(target_scope_name)
         reasons = []
+        if (forbidden := source_scope.policy.forbids_module_import(source, target)) is not None:
+            reasons.append(f"module {source!r} forbids importing {target!r} (matches {forbidden!r})")
         if target_scope_name not in source_scope.depends_on:
             reasons.append(f"scope {source_scope_name!r} does not declare dependency on {target_scope_name!r}")
         if not any(fnmatch.fnmatchcase(target, pattern) for pattern in target_scope.public):

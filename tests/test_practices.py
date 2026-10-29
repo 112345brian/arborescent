@@ -113,7 +113,10 @@ def test_docs_sync_uses_each_scope_ring(tmp_path: Path) -> None:
     write_files(tmp_path, {
         "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
         "libs/beta/src/beta/api.py": "VALUE = 2\n",
-        "architecture.md": "| `alpha.core` | `domain` |\n| `beta.api` | `adapters` |\n",
+        "architecture.md": (
+            "| module | scope | ring |\n|---|---|---|\n"
+            "| `alpha.core` | `alpha` | `domain` |\n| `beta.api` | `beta` | `adapters` |\n"
+        ),
     })
     policy = policy_from_mapping({
         "practices": {"docs-sync": "architecture.md"},
@@ -133,6 +136,30 @@ def test_docs_sync_uses_each_scope_ring(tmp_path: Path) -> None:
     found = docs_sync(FS, tmp_path, "architecture.md", policy, scan)
 
     assert [(item.subject, item.rule) for item in found] == [("beta.api", "docs-sync")]
+
+
+def test_docs_sync_checks_scope_ownership_when_documented(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+        "architecture.md": "| `alpha.core` | `beta` | `domain` |\n",
+    })
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "classify": {"alpha.core": "domain"},
+            },
+            "beta": {
+                "sources": ["libs/beta/src/beta"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain"], "classify": {"beta.api": "domain"},
+            },
+        },
+    })
+    scan = FsScanner().scan(policy, tmp_path)
+
+    found = docs_sync(FS, tmp_path, "architecture.md", policy, scan)
+
+    assert "scope 'beta'" in found[0].detail
 
 
 def test_docs_that_drift_from_the_policy_are_caught(repo: Path) -> None:
@@ -193,5 +220,22 @@ def test_imports_of_undeclared_dependencies_are_caught(repo: Path) -> None:
 def test_import_name_to_distribution_mapping_is_honoured(repo: Path) -> None:
     write_files(repo, {"app/adapters.py": "import yaml\n", "pyproject.toml": _dist("app", "1", ["PyYAML"])})
     policy = mini_policy(dependencies={"yaml": "pyyaml"})
+    scan = FsScanner().scan(policy, repo)
+    assert undeclared_imports(FS, repo, policy, scan.modules, scan.known, "pyproject.toml") == []
+
+
+def test_scope_import_name_to_distribution_mapping_is_honoured(repo: Path) -> None:
+    write_files(repo, {
+        "libs/alpha/src/alpha/core.py": "import yaml\n",
+        "pyproject.toml": _dist("app", "1", ["PyYAML"]),
+    })
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "dependencies": {"yaml": "pyyaml"},
+            },
+        },
+    })
     scan = FsScanner().scan(policy, repo)
     assert undeclared_imports(FS, repo, policy, scan.modules, scan.known, "pyproject.toml") == []

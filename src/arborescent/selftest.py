@@ -94,11 +94,21 @@ def plan(
                     local_paths[entry_host], "import arborescent_probe_dist",
                 ))
     anchor = next(iter(sorted(known)), None)
-    forbid_circular = any(local_policy.forbid_circular_imports for _, local_policy, _ in local_policies)
-    if not forbid_circular:
+    circular_anchor = next((
+        name
+        for _, local_policy, local_known in local_policies
+        if local_policy.forbid_circular_imports
+        for name in sorted(local_known)
+        if name in paths
+    ), None)
+    if circular_anchor is None:
         skipped.append("circular-import: disabled by policy")
     if anchor is not None:
-        out.extend(_anchor_mutations(anchor, paths[anchor], forbid_circular))
+        out.extend(_anchor_mutations(anchor, paths[anchor]))
+    if circular_anchor is not None:
+        out.append(Mutation(
+            Rule.CIRCULAR_IMPORT, "a module importing itself", paths[circular_anchor], f"import {circular_anchor}",
+        ))
     if policy.scopes:
         out.extend(_scope_boundary_mutations(policy, paths, known, owners))
     return out, sorted(set(skipped))
@@ -162,12 +172,10 @@ def _import_mutations(name: str, host: str, target: str | None, external: frozen
     return out
 
 
-def _anchor_mutations(anchor: str, host: str, forbid_circular_imports: bool) -> list[Mutation]:
+def _anchor_mutations(anchor: str, host: str) -> list[Mutation]:
     base = host.rsplit("/", 1)[0] if "/" in host else ""
     new = (base + "/" if base else "") + "arborescent_probe_unclassified.py"
     out = [Mutation(Rule.UNCLASSIFIED, "a new module matching no pattern", new, "", new_file=True)]
-    if forbid_circular_imports:
-        out.append(Mutation(Rule.CIRCULAR_IMPORT, "a module importing itself", host, f"import {anchor}"))
     out.extend((
         Mutation(Rule.SUPPRESSION, "a new noqa suppression directive", host, "# noqa"),
         Mutation(Rule.DISCARD, "a new reasoned discard call", host, 'discard(None, reason="selftest")'),

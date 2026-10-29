@@ -3,9 +3,13 @@
 Arborescent is checked by Arborescent: the policy is the `[tool.arborescent]` table in `pyproject.toml`, and `arborescent check`
 fails when this document's module table disagrees with it (practice `docs-sync`).
 
+This project is one library, so its existing root-level policy is the implicit single scope. The module inventory includes
+a scope column; repositories with multiple libraries use the same `module | scope | ring` shape to document ownership.
+
 ## Rings
 
-Five rings, innermost first. A ring may import itself and the rings it lists; nothing may import an outer ring.
+Five rings, innermost first. A ring may import itself and the rings it lists; nothing may import an outer ring. The domain
+uses `pathlib.PurePosixPath` only for lexical path validation; it does not access the filesystem.
 
 | ring | may import | external packages | role |
 |---|---|---|---|
@@ -29,38 +33,38 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 
 ## Modules
 
-| module | ring |
-|---|---|
-| `arborescent` | domain |
-| `arborescent.domain` | domain |
-| `arborescent.facts` | domain |
-| `arborescent.stdlib` | domain |
-| `arborescent.presets` | domain |
-| `arborescent.rules` | domain |
-| `arborescent.ports` | ports |
-| `arborescent.baseline` | application |
-| `arborescent.bench` | application |
-| `arborescent.config` | application |
-| `arborescent.certification` | application |
-| `arborescent.install_tools` | application |
-| `arborescent.engine` | application |
-| `arborescent.generate` | application |
-| `arborescent.practices` | application |
-| `arborescent.selftest` | application |
-| `arborescent.suggestions` | application |
-| `arborescent.adapters` | adapters |
-| `arborescent.installer_adapter` | adapters |
-| `arborescent.clock_adapter` | adapters |
-| `arborescent.filesystem_adapter` | adapters |
-| `arborescent.scanner` | adapters |
-| `arborescent.tool_runner` | adapters |
-| `arborescent.engines` | adapters |
-| `arborescent.testing` | adapters |
-| `arborescent.typecheckers` | adapters |
-| `arborescent.__main__` | composition |
-| `arborescent.cli` | composition |
-| `arborescent.cli_install` | composition |
-| `arborescent.cli_report` | composition |
+| module | scope | ring |
+|---|---|---|
+| `arborescent` | `single` | domain |
+| `arborescent.domain` | `single` | domain |
+| `arborescent.facts` | `single` | domain |
+| `arborescent.stdlib` | `single` | domain |
+| `arborescent.presets` | `single` | domain |
+| `arborescent.rules` | `single` | domain |
+| `arborescent.ports` | `single` | ports |
+| `arborescent.baseline` | `single` | application |
+| `arborescent.bench` | `single` | application |
+| `arborescent.config` | `single` | application |
+| `arborescent.certification` | `single` | application |
+| `arborescent.install_tools` | `single` | application |
+| `arborescent.engine` | `single` | application |
+| `arborescent.generate` | `single` | application |
+| `arborescent.practices` | `single` | application |
+| `arborescent.selftest` | `single` | application |
+| `arborescent.suggestions` | `single` | application |
+| `arborescent.adapters` | `single` | adapters |
+| `arborescent.installer_adapter` | `single` | adapters |
+| `arborescent.clock_adapter` | `single` | adapters |
+| `arborescent.filesystem_adapter` | `single` | adapters |
+| `arborescent.scanner` | `single` | adapters |
+| `arborescent.tool_runner` | `single` | adapters |
+| `arborescent.engines` | `single` | adapters |
+| `arborescent.testing` | `single` | adapters |
+| `arborescent.typecheckers` | `single` | adapters |
+| `arborescent.__main__` | `single` | composition |
+| `arborescent.cli` | `single` | composition |
+| `arborescent.cli_install` | `single` | composition |
+| `arborescent.cli_report` | `single` | composition |
 
 ## Data flow of `arborescent check`
 
@@ -80,7 +84,7 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
   check that does not depend on the generated configs.
 - A new behaviour switch goes into the policy (a preset field or a key), never into a check as a constant, so
   `generate`, `rules` and `selftest` agree on it.
-- Every rule has a mutation in `selftest`: if a rule stops biting, `arborescent selftest` fails.
+- Every applicable native rule has a mutation in `selftest`; `scope-import` is probed when the policy has multiple scopes.
 - Any additional clean-architecture constraint must be added to Arborescent's policy and enforced by a self-test mutation;
   keep Arborescent's own minimum-profile certification passing with `arborescent check --require-profile`. Update the
   standard/customized certification label when the added constraint changes whether the policy is standard.

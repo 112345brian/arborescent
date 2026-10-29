@@ -5,7 +5,11 @@ upwards from the current folder (or use `arborescent --config PATH ...`); the fo
 repository root. A malformed or self-contradicting policy exits with code 2 and a one-line reason; nothing is repaired
 silently.
 
-## Top-level keys
+## Single-scope top-level keys
+
+The keys below define the legacy single-scope form. It remains supported as written. For a repository with independently
+governed libraries, use `[tool.arborescent.scopes.<name>]` instead; the root retains only shared tool and repository
+settings. The two forms cannot be mixed.
 
 | key | default | meaning |
 |---|---|---|
@@ -29,6 +33,73 @@ silently.
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
+
+## Multi-scope configuration
+
+In `[tool.arborescent]` or `arborescent.toml`, add a `[scopes.<name>]` table for each application, library or shared
+repository component. Each scope requires non-empty `sources`, `source_roots` and `rings`.
+
+| scope key | default | meaning |
+|---|---|---|
+| `sources` | required | Literal repository-relative source paths owned by this scope. Source paths cannot overlap. Each Python file has one owner. |
+| `source_roots` | required | Paths used to derive dotted module names for this scope. Two scopes may use the same local ring names and module names, but duplicate derived module names are an error. |
+| `rings` | required | This scope's distinct rings, innermost first. |
+| `classify` | `{}` | This scope's module glob -> local ring table. |
+| `ring` | `{}` | Per-ring `may_import`, `external`, `os_branching` and `forbid` tables, local to this scope. |
+| `public` | `[]` | Dotted module patterns consumers may import from this scope. |
+| `depends_on` | `[]` | Scope names this scope may import. Each cross-scope import must target a declared dependency and match its `public` patterns. |
+| `preset`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
+| `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbid_circular_imports` | existing defaults | Existing architecture settings, evaluated within this scope. |
+
+Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
+`ruff`, `practices` and `exclude` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
+`source_roots`, `classify`, `ring`, `preset`, `io_modules`, `groups` and the other architecture settings) are rejected
+when `scopes` is present. Scope names and dependencies must be unique and known, and the dependency graph must be
+acyclic.
+
+For example, libraries with different core layers can share one repository-owned binary parser:
+
+```toml
+[tool.arborescent]
+python = "3.12"
+
+[tool.arborescent.scopes.packet_archive]
+sources = ["packages/packet-archive/src/packet_archive"]
+source_roots = ["packages/packet-archive/src"]
+rings = ["domain", "adapters"]
+public = ["packet_archive.api*"]
+depends_on = ["binary_parser"]
+
+[tool.arborescent.scopes.packet_archive.classify]
+"packet_archive.domain*" = "domain"
+"packet_archive.adapters*" = "adapters"
+
+[tool.arborescent.scopes.catalog]
+sources = ["packages/catalog/src/catalog"]
+source_roots = ["packages/catalog/src"]
+rings = ["core", "use_cases", "adapters"]
+public = ["catalog.api*"]
+depends_on = ["binary_parser"]
+
+[tool.arborescent.scopes.catalog.classify]
+"catalog.core*" = "core"
+"catalog.use_cases*" = "use_cases"
+"catalog.adapters*" = "adapters"
+
+[tool.arborescent.scopes.binary_parser]
+sources = ["packages/binary-parser/src/binary_parser"]
+source_roots = ["packages/binary-parser/src"]
+rings = ["domain", "adapters"]
+public = ["binary_parser.reader"]
+
+[tool.arborescent.scopes.binary_parser.classify]
+"binary_parser*" = "domain"
+```
+
+`binary_parser.reader` has one source owner and one local policy; both libraries can import it because they declare the
+dependency and the module is public. The libraries keep their independent ring hierarchies. A shared helper is never
+duplicated to satisfy scope ownership. Scope metadata stays centralized in the root config; extracting a library later
+is optional and is not performed by Arborescent.
 
 `suggestion_threshold` controls a report-only hint for large files. The metric counts lines containing code tokens and
 ignores blank lines, comments, module/class/function docstrings, and multi-line literal-only data tables. Suggestions
@@ -73,7 +144,8 @@ A module can declare its own ring with a module-level assignment to a literal di
 __arbor__ = {"ring": "domain"}
 ```
 
-The `ring` value must be a string naming one of the policy's configured `rings`. Arborescent reads the assignment
+The `ring` value must be a string naming one of the policy's configured `rings` (the owning scope's rings in
+multi-scope mode). Arborescent reads the assignment
 statically, without importing or executing the module. Only direct module-level assignments count; assignments
 inside functions, classes or conditionals do not. If there are multiple direct assignments, the last one wins.
 
@@ -88,14 +160,14 @@ Ring resolution follows this order while annotations are enabled (the default):
 For example, if `"app.domain" = "domain"` appears in `classify`, adding `__arbor__ = {"ring": 42}` to that module
 reports `invalid-arbor-annotation`. Its imports, effects and OS branching are still checked under the `domain` ring;
 the invalid annotation does not create a gap in those checks. A valid `__arbor__ = {"ring": "adapters"}` instead
-assigns that module to `adapters`, regardless of the glob.
+assigns that module to `adapters`, regardless of the glob. Ring annotations are validated against the owning scope,
+so scopes may reuse ring names without sharing a hierarchy.
 
 Annotations apply to individual Python modules. An annotation in `__init__.py` assigns the package module's own
-ring; it does not assign rings to its descendants. Package/distribution-level boundaries and package extraction
-support are **not supported yet**. `package` and `prepackage` declarations do not establish such boundaries;
-that capability belongs to a separate future proposal.
+ring; it does not assign rings to its descendants. Scope boundaries are configured separately through `sources`,
+`public` and `depends_on`; package extraction and per-library config relocation remain optional future work.
 
-## Rings: `[tool.arborescent.ring.<name>]`
+## Rings: `[tool.arborescent.ring.<name>]` or `[tool.arborescent.scopes.<scope>.ring.<name>]`
 
 | key | default | meaning |
 |---|---|---|
@@ -148,6 +220,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-dynamic-import` | a ring that forbids any effect uses `importlib` or `__import__` |
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
+| `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
 | `circular-import` | when `forbid_circular_imports` is enabled, first-party modules form a circular import dependency, including cycles made only of lazy or `TYPE_CHECKING` imports |
 | `external-import` | a ring imports an external package missing from its `external` list (scope set by the preset) |
 | `os-branching` | a ring not marked `os_branching` reads `os.name` or `sys.platform` |
@@ -232,7 +305,7 @@ intentional baseline growth and its reason.
 
 ### `arborescent discover`
 
-List in-scope Python files that still lack a ring classification, grouped by folder with the outermost ring suggested.
+List Python files that still lack a ring classification, grouped by scope and folder with that scope's outermost ring suggested.
 Add valid `__arbor__` ring annotations, matching `classify` patterns, or explicitly exclude files that should not be
 scanned. Git-tracked Python files under noise directories are reported separately by `check`.
 

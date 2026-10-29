@@ -10,8 +10,12 @@
   annotations and unknown rings report `invalid-arbor-annotation` while falling back to `classify` for enforcement;
   modules without a fallback ring also report `unclassified`.
 - `disabled_tools = ["arbor-annotations"]` ignores annotations and their validation findings, uses `classify` alone,
-  and prevents minimum-profile certification. Package/distribution boundaries and package extraction support are
-  not supported yet.
+  and prevents minimum-profile certification. `__arbor__` remains a module-level declaration; `package` and
+  `prepackage` declarations do not establish scope ownership.
+- Named architecture scopes let one root policy govern independently structured libraries and application cores.
+  Each scope has its own sources, roots, rings, classifications and public import patterns; cross-scope imports require
+  an explicit dependency and a public target. Shared repository code has one source owner, and single-scope policies
+  keep their existing meaning.
 
 ## 0.2.0 — 2026-10-26
 

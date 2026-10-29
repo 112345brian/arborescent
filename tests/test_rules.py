@@ -262,7 +262,9 @@ def test_patch_target_uses_annotation_in_changed_scan(repo: Path) -> None:
     assert "[domain]" in found[0].detail
 
 
-def _scope_boundary_policy(*, alpha_depends: list[str] | None = None) -> Policy:
+def _scope_boundary_policy(
+    *, alpha_depends: list[str] | None = None, alpha_forbid: dict[str, list[str]] | None = None,
+) -> Policy:
     return policy_from_mapping({
         "scopes": {
             "alpha": {
@@ -270,6 +272,7 @@ def _scope_boundary_policy(*, alpha_depends: list[str] | None = None) -> Policy:
                 "rings": ["domain", "adapters"],
                 "classify": {"core": "domain", "adapter": "adapters"},
                 "public": ["core"], "depends_on": alpha_depends or [],
+                "module_forbid_imports": alpha_forbid or {},
             },
             "beta": {
                 "sources": ["libs/beta/src"], "source_roots": ["libs/beta/src"],
@@ -321,6 +324,22 @@ def test_public_cross_scope_import_is_allowed(tmp_path: Path) -> None:
     found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
 
     assert not [item for item in found if item.rule == Rule.SCOPE_IMPORT]
+
+
+def test_cross_scope_import_honours_module_forbid_patterns(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import api.deep\n",
+        "libs/beta/src/api/__init__.py": "",
+        "libs/beta/src/api/deep.py": "VALUE = 1\n",
+    })
+
+    found = _scope_findings(
+        _scope_boundary_policy(alpha_depends=["beta"], alpha_forbid={"core": ["api.*"]}), tmp_path,
+    )
+
+    scope_findings = [item for item in found if item.rule == Rule.SCOPE_IMPORT]
+    assert [(item.subject, item.rule) for item in scope_findings] == [("core", "scope-import")]
+    assert "matches 'api.*'" in scope_findings[0].detail
 
 
 def test_same_scope_rings_are_independent(tmp_path: Path) -> None:

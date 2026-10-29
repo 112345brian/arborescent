@@ -86,3 +86,31 @@ def test_selftest_covers_cross_scope_boundary(tmp_path: Path) -> None:
 
     assert report.survived == []
     assert any(line.startswith("[scope-import]") for line in report.killed)
+
+
+def test_circular_import_probe_uses_a_scope_that_enforces_cycles(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/alpha/a.py": "VALUE = 1\n",
+        "libs/beta/src/beta/b.py": "VALUE = 2\n",
+    })
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "classify": {"alpha.a": "domain"},
+                "forbid_circular_imports": False,
+            },
+            "beta": {
+                "sources": ["libs/beta/src/beta"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain"], "classify": {"beta.b": "domain"},
+                "forbid_circular_imports": True,
+            },
+        },
+    })
+    scan = FsScanner().scan(policy, tmp_path)
+
+    mutations, _ = plan(policy, dict(scan.paths), scan.known, scan.arbor_index, scan.scope_by_module)
+
+    circular = [mutation for mutation in mutations if mutation.rule == Rule.CIRCULAR_IMPORT]
+    assert len(circular) == 1
+    assert circular[0].file == "libs/beta/src/beta/b.py"
