@@ -85,6 +85,114 @@ destination = "tests"
     assert metadata["paths"][0]["metadata"]["arborescent_config"] == "arborescent.toml"
 
 
+_ARTIFACT_PACKAGE = """
+[[packages]]
+id = "collection-core"
+name = "Collection Core"
+kind = "shared-core"
+repository = "org/repo"
+root = "src/core"
+summary = "Domain-neutral source lifecycle."
+
+[[packages.paths]]
+path = "src/core"
+role = "source"
+"""
+
+
+def _write(root: Path, files: dict[str, str]) -> None:
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+def test_extraction_omits_generated_artifacts_and_keeps_declared_content(
+    tmp_path: Path,
+) -> None:
+    kept = {
+        "__init__.py": "VALUE = 1\n",
+        "pkg/module.py": "VALUE = 2\n",
+        "tests/test_core.py": "def test_value(): pass\n",
+        "docs/guide.md": "# Guide\n",
+        "arborescent.toml": "preset = 'strict'\n",
+        "pyproject.toml": "[project]\nname = 'core'\n",
+        "pkg/data/dist-info.txt": "not a dist directory\n",
+        "pkg/build.py": "VALUE = 3\n",
+    }
+    generated = {
+        "__pycache__/mod.cpython-312.pyc": "x",
+        "pkg/__pycache__/module.cpython-312.pyc": "x",
+        "pkg/stray.pyc": "x",
+        ".venv/lib/site.py": "x",
+        ".ruff_cache/CACHEDIR.TAG": "x",
+        ".mypy_cache/meta.json": "x",
+        ".tox/py/log.txt": "x",
+        "build/lib/pkg.py": "x",
+        "dist/pkg-1.0.tar.gz": "x",
+        "pkg/build/inner.py": "x",
+    }
+    _write(tmp_path / "src/core", {**kept, **generated})
+    catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
+
+    destination = catalog.extract("collection-core", tmp_path / "out/core")
+
+    extracted = {
+        path.relative_to(destination).as_posix()
+        for path in destination.rglob("*")
+        if path.is_file()
+    }
+    assert extracted == {*kept, ".arborescent-package.toml"}
+    assert tomllib.loads(
+        (destination / ".arborescent-package.toml").read_text(encoding="utf-8")
+    )["package"]["id"] == "collection-core"
+
+
+def test_extraction_skips_symlinks_inside_generated_directories(
+    tmp_path: Path,
+) -> None:
+    """A virtualenv is full of symlinks; skipping it must not trip the symlink guard."""
+    _write(tmp_path / "src/core", {"__init__.py": "VALUE = 1\n"})
+    venv_bin = tmp_path / "src/core/.venv/bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "python").symlink_to(Path("/usr/bin/env"))
+    catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
+
+    destination = catalog.extract("collection-core", tmp_path / "out/core")
+
+    assert (destination / "__init__.py").is_file()
+    assert not (destination / ".venv").exists()
+
+
+def test_extraction_still_rejects_symlinks_outside_generated_directories(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path / "src/core", {"__init__.py": "VALUE = 1\n"})
+    (tmp_path / "src/core/escape").symlink_to(Path("/usr/bin/env"))
+    catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
+
+    with pytest.raises(CatalogError, match="does not copy symlinks"):
+        catalog.extract("collection-core", tmp_path / "out/core")
+
+
+def test_extraction_copies_an_explicitly_declared_path_named_build(
+    tmp_path: Path,
+) -> None:
+    """Only nested artifacts are filtered: a declared path (or a package called `build`) is source."""
+    _write(tmp_path / "src/build", {"__init__.py": "VALUE = 1\n", "dist/old.txt": "x"})
+    catalog = _catalog(
+        tmp_path,
+        _ARTIFACT_PACKAGE.replace('root = "src/core"', 'root = "src/build"').replace(
+            'path = "src/core"', 'path = "src/build"'
+        ),
+    )
+
+    destination = catalog.extract("collection-core", tmp_path / "out/core")
+
+    assert (destination / "__init__.py").is_file()
+    assert not (destination / "dist").exists()
+
+
 def test_catalog_rejects_path_overlap_between_packages(tmp_path: Path) -> None:
     (tmp_path / "src/shared").mkdir(parents=True)
     with pytest.raises(CatalogError, match="more than one package"):

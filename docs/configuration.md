@@ -170,6 +170,11 @@ new destination and writes `.arborescent-package.toml` with the package ID and p
 direct Arborescent policy is copied with that policy when it is listed as a configuration path; the child policy remains
 independently usable after extraction.
 
+Generated local output below a declared path is not copied: `__pycache__`, `*.pyc`, `.venv`, `venv`, `node_modules`,
+`.git`, `.arborescent`, `.mypy_cache`, `.ruff_cache`, `.tox`, `build` and `dist` directories (the noise directories
+Arborescent already ignores, plus build output). A declared path itself is always copied, even when it is named
+`build`, and symlinks inside skipped directories do not abort extraction.
+
 ```sh
 arborescent packages validate
 arborescent packages list
