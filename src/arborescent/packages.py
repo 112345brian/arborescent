@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import tomllib
@@ -10,10 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .domain import PolicyError
+from .domain import NOISE_DIRS, PolicyError
 from .ports import FileSystem
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+# Directories and files below a declared package path that are local build output, not distributable source.
+_GENERATED_DIRS = NOISE_DIRS | {"build", "dist"}
+_GENERATED_FILES = ("*.pyc",)
 
 
 class CatalogError(PolicyError):
@@ -257,11 +261,22 @@ class PackageCatalog:
                 f"package extraction does not copy symlinks or escaped paths: {source}"
             )
         if self.fs.is_dir(source):
-            nested_paths = self.fs.rglob(source, "*")
+            nested_paths = [
+                nested
+                for nested in self.fs.rglob(source, "*")
+                if not self._is_generated(source, nested)
+            ]
             for nested in nested_paths:
-                nested_resolved = self.fs.resolve(nested)
-                if nested_resolved != nested or not nested_resolved.is_relative_to(
-                    self.root
+                try:
+                    nested_resolved = self.fs.resolve(nested)
+                except (
+                    OSError
+                ):  # e.g. a dangling link: Windows raises instead of returning the path
+                    nested_resolved = None
+                if (
+                    nested_resolved is None
+                    or nested_resolved != nested
+                    or not nested_resolved.is_relative_to(self.root)
                 ):
                     raise CatalogError(
                         f"package extraction does not copy symlinks: {nested}"
@@ -285,6 +300,16 @@ class PackageCatalog:
                 )
             self.fs.mkdir(target.parent)
             self.fs.write_bytes(target, self.fs.read_bytes(source))
+
+    def _is_generated(self, root: Path, path: Path) -> bool:
+        """Whether ``path`` is generated output below the declared ``root`` (the root itself is always copied)."""
+        parts = path.relative_to(root).parts
+        if _GENERATED_DIRS.intersection(parts[:-1]):
+            return True
+        name = parts[-1]
+        if any(fnmatch.fnmatchcase(name, pattern) for pattern in _GENERATED_FILES):
+            return True
+        return name in _GENERATED_DIRS and self.fs.is_dir(path)
 
     def _extraction_target(
         self, package: PackageDescriptor, item: PackagePath
