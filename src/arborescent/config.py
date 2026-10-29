@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
-from .domain import Policy, PolicyError, RingRule
+from .domain import ArchitectureScope, Policy, PolicyError, RingRule
 from .ports import FileSystem
 from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS
 
@@ -38,6 +38,8 @@ def load_policy(fs: FileSystem, path: Path) -> tuple[Policy, Path]:
 
 def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
     """Translate the raw TOML table (``@group`` references, ``preset``, ``io_modules``, defaults) into a ``Policy``."""
+    if "scopes" in raw:
+        return _scoped_policy(raw)
     core, ring_tables = _core_policy(raw)
     preset_name, python, checkers, io_modules, disabled_tools, suggestion_threshold = _tool_options(raw)
     forbid_circular_imports = _boolean_option(raw, "forbid_circular_imports", True)
@@ -67,6 +69,69 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         preset=PRESETS[preset_name],
         io_modules=frozenset(io_modules),
     )
+
+
+_SCOPED_ROOT_GLOBALS = frozenset({
+    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold",
+    "ruff", "practices", "exclude",
+})
+_LEGACY_ARCHITECTURE_KEYS = frozenset({
+    "sources", "source_roots", "rings", "classify", "ring", "preset", "io_modules", "groups",
+    "module_forbid_imports", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+})
+_SCOPE_ARCHITECTURE_KEYS = _LEGACY_ARCHITECTURE_KEYS - {"sources"}
+
+
+def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
+    legacy = _LEGACY_ARCHITECTURE_KEYS & raw.keys()
+    if legacy:
+        raise PolicyError(f"root-level architecture keys cannot be combined with `scopes`: {sorted(legacy)}")
+    raw_scopes = raw.get("scopes")
+    if not isinstance(raw_scopes, Mapping) or not raw_scopes:
+        raise PolicyError("`scopes` must map non-empty scope names to tables")
+    scopes: list[ArchitectureScope] = []
+    for name, raw_scope in raw_scopes.items():
+        if not isinstance(name, str) or not name:
+            raise PolicyError("scope names must be non-empty strings")
+        if not isinstance(raw_scope, Mapping):
+            raise PolicyError(f"scope {name!r} must be a table")
+        missing = {"sources", "source_roots", "rings"} - raw_scope.keys()
+        if missing:
+            raise PolicyError(f"scope {name!r} requires {sorted(missing)}")
+        public = _scope_strings(raw_scope, "public")
+        depends_on = _scope_strings(raw_scope, "depends_on")
+        child_raw = {key: value for key, value in raw.items() if key in _SCOPED_ROOT_GLOBALS}
+        child_raw.update({key: value for key, value in raw_scope.items() if key in _SCOPE_ARCHITECTURE_KEYS})
+        child_raw["sources"] = raw_scope["sources"]
+        child_raw["source_roots"] = raw_scope["source_roots"]
+        policy = policy_from_mapping(child_raw)
+        for key, value in (("sources", raw_scope["sources"]), ("source_roots", raw_scope["source_roots"])):
+            if not isinstance(value, list) or not all(isinstance(path, str) and path for path in value):
+                raise PolicyError(f"scope {name!r} `{key}` must be a list of non-empty paths")
+        scopes.append(ArchitectureScope(name, policy, public, depends_on))
+
+    first = scopes[0].policy
+    return replace(
+        first,
+        rings=(),
+        classify=(),
+        sources=tuple(path for scope in scopes for path in scope.policy.sources),
+        source_roots=tuple(path for scope in scopes for path in scope.policy.source_roots),
+        module_forbid_imports=(),
+        entry_scripts=tuple(script for scope in scopes for script in scope.policy.entry_scripts),
+        dependencies={},
+        forbid_everywhere=(),
+        scopes=tuple(scopes),
+    )
+
+
+def _scope_strings(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = raw.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+        raise PolicyError(f"scope `{key}` must be a list of non-empty strings")
+    if len(value) != len(set(value)):
+        raise PolicyError(f"scope `{key}` must not contain duplicates")
+    return tuple(cast("list[str]", value))
 
 
 def _core_policy(raw: Mapping[str, Any]) -> tuple[Policy, Mapping[str, Mapping[str, Any]]]:

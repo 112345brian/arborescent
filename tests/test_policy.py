@@ -197,3 +197,87 @@ def test_disabling_arbor_annotations_ignores_annotation_resolution_and_violation
 
 def test_domain_does_not_know_the_config_shape() -> None:
     assert not hasattr(Policy, "from_mapping")
+
+
+def _scoped_raw(**scopes: object) -> dict[str, object]:
+    return {
+        "python": "3.12",
+        "disabled_tools": ["ruff"],
+        "scopes": scopes or {
+            "alpha": {
+                "sources": ["libs/alpha/src"],
+                "source_roots": ["libs/alpha/src"],
+                "rings": ["domain", "adapters"],
+                "classify": {"alpha.core": "domain"},
+                "public": ["alpha.api*"],
+            },
+            "shared": {
+                "sources": ["libs/shared/src"],
+                "source_roots": ["libs/shared/src"],
+                "rings": ["domain"],
+                "classify": {"shared.parser": "domain"},
+            },
+        },
+    }
+
+
+def test_scope_policy_parses_local_rings_and_public_boundary() -> None:
+    policy = policy_from_mapping(_scoped_raw())
+
+    alpha = policy.scope("alpha")
+    shared = policy.scope("shared")
+    assert alpha.policy.ring_of("alpha.core") == "domain"
+    assert alpha.public == ("alpha.api*",)
+    assert alpha.depends_on == ()
+    assert shared.policy.rings[0].name == "domain"
+    assert policy.python == alpha.policy.python == "3.12"
+    assert policy.disabled_tools == alpha.policy.disabled_tools == ("ruff",)
+    assert policy.scope_for_path("libs/alpha/src/internal/service.py") == alpha
+    assert policy.scope_for_path("libs/other/src/file.py") is None
+
+
+def test_scopes_can_reuse_ring_names() -> None:
+    policy = policy_from_mapping(_scoped_raw())
+
+    assert policy.scope("alpha").policy.rings[0].name == "domain"
+    assert policy.scope("shared").policy.rings[0].name == "domain"
+
+
+def test_scope_config_rejects_legacy_architecture_keys() -> None:
+    with pytest.raises(PolicyError, match="cannot be combined with `scopes`"):
+        _ = policy_from_mapping({**_scoped_raw(), "rings": ["domain"]})
+
+
+def test_scope_config_rejects_overlapping_sources() -> None:
+    raw = _scoped_raw()
+    scopes = raw["scopes"]
+    assert isinstance(scopes, dict)
+    scopes["shared"] = {**scopes["shared"], "sources": ["libs/alpha/src/shared"]}
+
+    with pytest.raises(PolicyError, match="source paths overlap"):
+        _ = policy_from_mapping(raw)
+
+
+def test_scope_config_rejects_unknown_or_cyclic_dependencies() -> None:
+    unknown = _scoped_raw()
+    scopes = unknown["scopes"]
+    assert isinstance(scopes, dict)
+    scopes["alpha"] = {**scopes["alpha"], "depends_on": ["missing"]}
+    with pytest.raises(PolicyError, match="unknown scope"):
+        _ = policy_from_mapping(unknown)
+
+    cyclic = _scoped_raw()
+    scopes = cyclic["scopes"]
+    assert isinstance(scopes, dict)
+    scopes["alpha"] = {**scopes["alpha"], "depends_on": ["shared"]}
+    scopes["shared"] = {**scopes["shared"], "depends_on": ["alpha"]}
+    with pytest.raises(PolicyError, match="dependency cycle"):
+        _ = policy_from_mapping(cyclic)
+
+
+def test_legacy_policy_parses_unchanged() -> None:
+    policy = policy_from_mapping(MINI)
+
+    assert policy.scopes == ()
+    assert policy.rings == tuple(policy_from_mapping(MINI).rings)
+    assert policy.sources == ("app",)

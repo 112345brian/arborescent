@@ -7,6 +7,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Any
 
 from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Preset
@@ -16,6 +17,7 @@ __all__ = [
     "ALL",
     "EFFECT_RULES",
     "NOISE_DIRS",
+    "ArchitectureScope",
     "Policy",
     "PolicyError",
     "RingRule",
@@ -138,6 +140,16 @@ class RingRule:
 
 
 @dataclass(frozen=True)
+class ArchitectureScope:
+    """One independently governed source tree and its import boundary."""
+
+    name: str
+    policy: Policy
+    public: tuple[str, ...] = ()
+    depends_on: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Policy:
     """The single source of truth that the three tool configs and Arborescent's own checks derive from."""
 
@@ -162,22 +174,10 @@ class Policy:
     preset: Preset = PRESETS[DEFAULT_PRESET]
     io_modules: frozenset[str] = IO_MODULES  # stdlib modules that mean "I/O, process or OS"
     disabled_tools: tuple[str, ...] = ()
+    scopes: tuple[ArchitectureScope, ...] = ()
 
     def __post_init__(self) -> None:
-        names = [r.name for r in self.rings]
-        if not names or len(set(names)) != len(names):
-            raise PolicyError("`rings` must list distinct ring names, innermost first")
-        for i, rule in enumerate(self.rings):
-            bad = rule.may_import - {ALL, *names[:i]}
-            if bad:
-                raise PolicyError(
-                    f"ring {rule.name!r} may only import inner rings {names[:i]}, not {sorted(bad)} (onion rule)"
-                )
-            if rule.forbid is not None and (unknown := rule.forbid - EFFECT_CATEGORIES):
-                raise PolicyError(f"ring {rule.name!r} forbids unknown effect categories {sorted(unknown)}")
-        for pattern, ring in self.classify:
-            if ring not in names:
-                raise PolicyError(f"classify {pattern!r} names unknown ring {ring!r}")
+        _validate_rings(self.rings, self.classify, bool(self.scopes))
         for pattern, targets in self.module_forbid_imports:
             if not pattern or not targets:
                 raise PolicyError("`module_forbid_imports` needs non-empty module patterns and target lists")
@@ -185,6 +185,8 @@ class Policy:
         if self.python not in SUPPORTED_PYTHONS:
             raise PolicyError(f"`python` {self.python!r} is not supported; choose one of {list(SUPPORTED_PYTHONS)}")
         _validate_suggestion_threshold(self.suggestion_threshold)
+        if self.scopes:
+            _validate_scopes(self.scopes)
 
     @property
     def stdlib(self) -> frozenset[str]:
@@ -196,6 +198,21 @@ class Policy:
             if r.name == name:
                 return r
         raise PolicyError(f"unknown ring {name!r}")
+
+    def scope(self, name: str) -> ArchitectureScope:
+        """Return a named scope or fail with a policy error."""
+        for scope in self.scopes:
+            if scope.name == name:
+                return scope
+        raise PolicyError(f"unknown scope {name!r}")
+
+    def scope_for_path(self, path: str) -> ArchitectureScope | None:
+        """Find the scope whose source path owns a repository-relative file path."""
+        normalized = _normalized_source_path(path)
+        for scope in self.scopes:
+            if any(_path_contains(source, normalized) for source in scope.policy.sources):
+                return scope
+        return None
 
     def ring_of(self, module: str) -> str | None:
         for pattern, ring in self.classify:
@@ -271,3 +288,88 @@ class Policy:
 def _validate_suggestion_threshold(value: int) -> None:
     if value < 1:
         raise PolicyError("`suggestion_threshold` must be a positive number of logical code lines")
+
+
+def _validate_rings(rings: tuple[RingRule, ...], classify: tuple[tuple[str, str], ...], has_scopes: bool) -> None:
+    names = [rule.name for rule in rings]
+    if (not names and not has_scopes) or len(set(names)) != len(names):
+        raise PolicyError("`rings` must list distinct ring names, innermost first")
+    for index, rule in enumerate(rings):
+        invalid = rule.may_import - {ALL, *names[:index]}
+        if invalid:
+            raise PolicyError(
+                f"ring {rule.name!r} may only import inner rings {names[:index]}, not {sorted(invalid)} (onion rule)"
+            )
+        if rule.forbid is not None and (unknown := rule.forbid - EFFECT_CATEGORIES):
+            raise PolicyError(f"ring {rule.name!r} forbids unknown effect categories {sorted(unknown)}")
+    for pattern, ring in classify:
+        if ring not in names:
+            raise PolicyError(f"classify {pattern!r} names unknown ring {ring!r}")
+
+
+def _normalized_source_path(value: str) -> str:
+    path = PurePosixPath(value)
+    return path.as_posix().removeprefix("./").rstrip("/") or "."
+
+
+def _path_contains(source: str, path: str) -> bool:
+    source = _normalized_source_path(source)
+    return source == "." or path == source or path.startswith(source + "/")
+
+
+def _validate_scopes(scopes: tuple[ArchitectureScope, ...]) -> None:
+    names = [scope.name for scope in scopes]
+    if any(not name for name in names) or len(names) != len(set(names)):
+        raise PolicyError("scope names must be non-empty and unique")
+    _validate_scope_dependencies(scopes, set(names))
+    _validate_scope_source_paths(scopes)
+    _validate_scope_acyclic(scopes, names)
+
+
+def _validate_scope_dependencies(scopes: tuple[ArchitectureScope, ...], known: set[str]) -> None:
+    for scope in scopes:
+        if len(scope.depends_on) != len(set(scope.depends_on)):
+            raise PolicyError(f"scope {scope.name!r} has duplicate dependencies")
+        for dependency in scope.depends_on:
+            if dependency not in known:
+                raise PolicyError(f"scope {scope.name!r} depends on unknown scope {dependency!r}")
+            if dependency == scope.name:
+                raise PolicyError(f"scope {scope.name!r} cannot depend on itself")
+
+
+def _validate_scope_source_paths(scopes: tuple[ArchitectureScope, ...]) -> None:
+    owned: list[tuple[str, str]] = []
+    for scope in scopes:
+        if not scope.policy.sources or not scope.policy.source_roots:
+            raise PolicyError(f"scope {scope.name!r} requires non-empty `sources` and `source_roots`")
+        for source in scope.policy.sources:
+            if any(char in source for char in "*?["):
+                raise PolicyError(f"scope source paths must be literal paths, got {source!r}")
+            normalized = _normalized_source_path(source)
+            for other_name, other_path in owned:
+                if _path_contains(normalized, other_path) or _path_contains(other_path, normalized):
+                    raise PolicyError(
+                        f"scope source paths overlap: {other_name!r} owns {other_path!r} and "
+                        f"{scope.name!r} owns {normalized!r}"
+                    )
+            owned.append((scope.name, normalized))
+
+
+def _validate_scope_acyclic(scopes: tuple[ArchitectureScope, ...], names: list[str]) -> None:
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    by_name = {scope.name: scope for scope in scopes}
+
+    def visit(name: str) -> None:
+        if name in visiting:
+            raise PolicyError(f"scope dependency cycle includes {name!r}")
+        if name in visited:
+            return
+        visiting.add(name)
+        for dependency in by_name[name].depends_on:
+            visit(dependency)
+        visiting.remove(name)
+        visited.add(name)
+
+    for name in names:
+        visit(name)
