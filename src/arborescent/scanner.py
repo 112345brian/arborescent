@@ -17,7 +17,7 @@ from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 4
+_CACHE_VERSION = 5
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
@@ -41,20 +41,27 @@ class ScanData:
     noise_files: tuple[str, ...] = ()
     unclassified: tuple[tuple[str, str], ...] = ()  # (module, path)
     vendor_folders: tuple[tuple[str, str], ...] = ()  # (folder, content fingerprint)
+    arbor_index: dict[str, tuple[str | None, str | None]] = field(default_factory=lambda: {})
 
 
 def _facts_to_json(f: SourceFacts) -> list[Any]:
     imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only] for i in f.imports]
     effects = [[u.line, u.category, u.target] for u in f.effect_uses]
     suppressions = [[line, kind] for line, kind in f.suppressions]
-    return [imports, effects, None if f.script_deps is None else list(f.script_deps), suppressions, list(f.discard_calls)]
+    return [
+        imports, effects, None if f.script_deps is None else list(f.script_deps),
+        suppressions, list(f.discard_calls), f.arbor_ring, f.arbor_error,
+    ]
 
 
 def _facts_from_json(raw: list[Any]) -> SourceFacts:
     imports = tuple(RawImport(i[0], i[1], tuple(i[2]), i[3], i[4], i[5]) for i in raw[0])
     effects = tuple(EffectUse(u[0], u[1], u[2]) for u in raw[1])
     suppressions = tuple((item[0], item[1]) for item in raw[3])
-    return SourceFacts(imports, effects, None if raw[2] is None else tuple(raw[2]), suppressions, tuple(raw[4]))
+    return SourceFacts(
+        imports, effects, None if raw[2] is None else tuple(raw[2]),
+        suppressions, tuple(raw[4]), raw[5], raw[6],
+    )
 
 
 class FsScanner:
@@ -79,6 +86,9 @@ class FsScanner:
                 cache = {}
         files, excluded, noise_files, unclassified, vendor_folders = self._discover(policy, root)
         known = frozenset(m for m, _, _ in files)
+        annotations_enabled = "arbor-annotations" not in policy.disabled_tools
+        arbor_index: dict[str, tuple[str | None, str | None]] = {}
+        ring_names: set[str] = {ring.name for ring in policy.rings} if annotations_enabled else set()
         wanted = {
             m
             for m, _, rel in files
@@ -92,7 +102,7 @@ class FsScanner:
         fresh: dict[str, list[Any]] = {}
         for module, is_pkg, rel in files:
             paths[module] = rel
-            if module not in wanted:
+            if not annotations_enabled and module not in wanted:
                 continue
             data = (root / rel).read_bytes()
             digest = hashlib.blake2b(data, digest_size=16).hexdigest()
@@ -110,11 +120,28 @@ class FsScanner:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             merged = fresh if only is None else {**cache, **fresh}
             _ = cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "files": merged}), encoding="utf-8")
+        if annotations_enabled:
+            # This pass covers every discovered file, including unchanged import
+            # targets and modules outside both classify and sources.
+            arbor_index = {
+                module: (info.facts.arbor_ring, info.facts.arbor_error)
+                for module, info in modules.items()
+            }
+            wanted.update(
+                module for module, _, rel in files
+                if arbor_index[module][0] in ring_names and arbor_index[module][1] is None
+                and (only is None or rel in only or module in policy.entry_scripts)
+            )
+            modules = {module: info for module, info in modules.items() if module in wanted}
+            unclassified = tuple(
+                item for item in unclassified
+                if arbor_index[item[0]][0] not in ring_names or arbor_index[item[0]][1] is not None
+            )
         entry = {s: modules[s].facts.script_deps for s in policy.entry_scripts if s in modules}
         if only is not None:
             unclassified = tuple(item for item in unclassified if item[1] in only or item[0] in only)
             noise_files = tuple(path for path in noise_files if path in only)
-        return ScanData(known, modules, entry, paths, parsed, excluded, noise_files, unclassified, vendor_folders)
+        return ScanData(known, modules, entry, paths, parsed, excluded, noise_files, unclassified, vendor_folders, arbor_index)
 
     def _discover(
         self, policy: Policy, root: Path

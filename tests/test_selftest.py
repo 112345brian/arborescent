@@ -1,0 +1,60 @@
+"""Mutation probes select hosts and targets using effective annotated rings."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from arborescent_helpers import mini_policy, write_files
+
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.domain import Rule
+from arborescent.engine import Services
+from arborescent.selftest import plan, selftest
+from arborescent.testing import FakeToolRunner
+
+
+@pytest.mark.parametrize("annotated", [False, True])
+def test_probe_hosts_and_forbidden_targets_follow_effective_rings(tmp_path: Path, annotated: bool) -> None:
+    # Annotations reverse the classify assignments; both rings must still get probes.
+    write_files(tmp_path, {
+        "app/first.py": '__arbor__ = {"ring": "ports"}\n' if annotated else "",
+        "app/second.py": '__arbor__ = {"ring": "domain"}\n' if annotated else "",
+    })
+    policy = mini_policy(classify={"app.first": "domain", "app.second": "ports"})
+    scan = FsScanner().scan(policy, tmp_path)
+    mutations, _ = plan(policy, dict(scan.paths), scan.known, scan.arbor_index)
+    domain_file = "app/second.py" if annotated else "app/first.py"
+    ports_file = "app/first.py" if annotated else "app/second.py"
+    forbidden_target = "app.first" if annotated else "app.second"
+    assert [(m.file, m.append) for m in mutations if m.rule == Rule.INTERNAL_IMPORT] == [
+        (domain_file, f"import {forbidden_target}"),
+        (domain_file, f"def _arborescent_probe() -> None:\n    import {forbidden_target}"),
+    ]
+    assert [m.file for m in mutations if m.rule == Rule.EXTERNAL_IMPORT] == [
+        domain_file, domain_file, ports_file, ports_file,
+    ]
+
+
+def test_entry_probe_host_can_be_classified_only_by_annotation(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "app/first.py": "",
+        "app/second.py": '__arbor__ = {"ring": "domain"}\n',
+        "run.py": "# /// script\n# dependencies = []\n# ///\n",
+    })
+    policy = mini_policy(sources=["app", "run.py"], entry_scripts=["run"], classify={"run": "composition"})
+    scan = FsScanner().scan(policy, tmp_path)
+    mutations, _ = plan(policy, dict(scan.paths), scan.known, scan.arbor_index)
+    assert [m.file for m in mutations if m.rule == Rule.UNDECLARED_ENTRY_DEPENDENCY] == ["app/second.py"]
+
+
+def test_selftest_uses_full_scan_annotations_for_mutation_planning(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "app/first.py": '__arbor__ = {"ring": "ports"}\n',
+        "app/second.py": '__arbor__ = {"ring": "domain"}\n',
+    })
+    policy = mini_policy(classify={"app.first": "domain", "app.second": "ports"})
+    services = Services(FsScanner(tmp_path / "cache.json"), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), [])
+    report = selftest(policy, tmp_path, services)
+    assert report.survived == []
+    assert any("domain: forbidden top-level internal import of app.first" in label for label in report.killed)

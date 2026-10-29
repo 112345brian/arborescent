@@ -62,6 +62,8 @@ class SourceFacts:
     script_deps: tuple[str, ...] | None  # PEP 723 `dependencies`, None when the file has no block
     suppressions: tuple[tuple[int, str], ...] = ()  # (line, kind); comments only, not strings
     discard_calls: tuple[int, ...] = ()  # `discard(value, reason=...)`; no type-aware Result claim
+    arbor_ring: str | None = None
+    arbor_error: str | None = None
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -218,6 +220,35 @@ def _discard_call_lines(tree: ast.AST) -> tuple[int, ...]:
     return tuple(sorted(lines))
 
 
+def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None]:
+    value: ast.expr | None = None
+    found = False
+    for stmt in tree.body:
+        is_assignment = isinstance(stmt, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "__arbor__" for target in stmt.targets
+        )
+        is_annotated_assignment = (
+            isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "__arbor__"
+        )
+        if is_assignment or is_annotated_assignment:
+            value = stmt.value
+            found = True
+    if not found:
+        return None, None
+    try:
+        annotation = ast.literal_eval(value) if value is not None else None
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return None, "__arbor__ must be a literal dictionary"
+    if not isinstance(annotation, dict):
+        return None, "__arbor__ must be a dictionary"
+    if "ring" not in annotation:
+        return None, '__arbor__ dictionary is missing "ring"'
+    ring = annotation["ring"]
+    if not isinstance(ring, str):
+        return None, '__arbor__."ring" must be a string'
+    return ring, None
+
+
 def _script_deps(source: str) -> tuple[str, ...] | None:
     if "# /// script" not in source:
         return None
@@ -238,7 +269,16 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     imports: list[RawImport] = []
     _walk(tree, False, False, imports)
-    return SourceFacts(tuple(imports), _effect_uses(tree), _script_deps(source), _suppression_comments(source), _discard_call_lines(tree))
+    arbor_ring, arbor_error = _arbor_ring(tree)
+    return SourceFacts(
+        tuple(imports),
+        _effect_uses(tree),
+        _script_deps(source),
+        _suppression_comments(source),
+        _discard_call_lines(tree),
+        arbor_ring,
+        arbor_error,
+    )
 
 
 def resolve_targets(

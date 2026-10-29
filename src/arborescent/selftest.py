@@ -6,6 +6,7 @@ Ported from the throwaway mutation script behind DeepInterview's ``tests/test_ar
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -37,6 +38,7 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.EFFECT_PATCH: "effect-patch requires a configured tests folder and project-package target; covered by focused rule tests",
     Rule.CRLF: _PRACTICE,
     Rule.UNDECLARED_IMPORTS: _PRACTICE,
+    Rule.INVALID_ARBOR_ANNOTATION: "annotation validity depends on the whole-package syntax index",
 }
 
 
@@ -60,12 +62,14 @@ class SelfTestReport:
         return not self.survived
 
 
-def plan(policy: Policy, paths: dict[str, str], known: frozenset[str]) -> tuple[list[Mutation], list[str]]:
+def plan(
+    policy: Policy, paths: dict[str, str], known: frozenset[str], arbor_index: Mapping[str, tuple[str | None, str | None]]
+) -> tuple[list[Mutation], list[str]]:
     """The mutations for this policy, plus the ones that cannot be built (and why)."""
     out: list[Mutation] = []
     skipped: list[str] = []
     for ring in policy.rings:
-        ring_mutations, ring_skipped = _ring_mutations(policy, ring.name, ring.external, paths, known)
+        ring_mutations, ring_skipped = _ring_mutations(policy, ring.name, paths, known, arbor_index)
         out.extend(ring_mutations)
         skipped.extend(ring_skipped)
     anchor = next(iter(sorted(known)), None)
@@ -74,25 +78,26 @@ def plan(policy: Policy, paths: dict[str, str], known: frozenset[str]) -> tuple[
     if anchor is not None:
         out.extend(_anchor_mutations(anchor, paths[anchor], policy.forbid_circular_imports))
     if policy.entry_scripts:
-        entry_host = next((m for m in sorted(known) if policy.ring_of(m) is not None and m not in policy.entry_scripts), None)
+        entry_host = next((m for m in sorted(known) if policy.resolve_ring(arbor_index, m) is not None and m not in policy.entry_scripts), None)
         if entry_host is not None:
             out.append(Mutation(Rule.UNDECLARED_ENTRY_DEPENDENCY, "a project module imports a package the scripts don't declare", paths[entry_host], "import arborescent_probe_dist"))
     return out, sorted(set(skipped))
 
 
 def _ring_mutations(
-    policy: Policy, name: str, external: frozenset[str], paths: dict[str, str], known: frozenset[str]
+    policy: Policy, name: str, paths: dict[str, str], known: frozenset[str],
+    arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> tuple[list[Mutation], list[str]]:
-    mine = sorted(module for module in known if policy.ring_of(module) == name and not paths[module].endswith("__init__.py"))
+    mine = sorted(module for module in known if policy.resolve_ring(arbor_index, module) == name and not paths[module].endswith("__init__.py"))
     if not mine:
         return [], [f"ring {name}: no module to mutate"]
     host = mine[0]
     allowed = policy.allowed_rings(name)
-    target = next((module for module in sorted(known) if (ring := policy.ring_of(module)) is not None and ring not in allowed), None)
+    target = next((module for module in sorted(known) if (ring := policy.resolve_ring(arbor_index, module)) is not None and ring not in allowed), None)
     out: list[Mutation] = []
     skipped: list[str] = []
     for lazy in (False, True):
-        out.extend(_import_mutations(name, paths[host], target, external, lazy))
+        out.extend(_import_mutations(name, paths[host], target, policy.ring(name).external, lazy))
         if target is None:
             skipped.append(f"ring {name}: allowed to import every ring, no forbidden internal import to inject")
     if not policy.preset.os_branching:
@@ -143,7 +148,7 @@ def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
 def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     services = replace(services, scanner=services.scanner.uncached())  # mutated copies must not touch the real cache
     _, scan = run_own(policy, root, services, practices=False)
-    mutations, skipped = plan(policy, dict(scan.paths), scan.known)
+    mutations, skipped = plan(policy, dict(scan.paths), scan.known, scan.arbor_index)
     report = SelfTestReport([], [], skipped)
     fs = services.fs
     with fs.temporary_directory("arborescent-selftest-") as tmp:

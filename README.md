@@ -45,13 +45,26 @@ os_branching = true                                         # only these rings m
 may_import = ["*"]
 external = ["@pure", "sys"]
 
-[tool.arborescent.classify]                                    # first matching glob wins; every module needs one
+[tool.arborescent.classify]                                    # fallback for modules without a valid __arbor__; first glob wins
 "app" = "domain"
 "app.domain" = "domain"
 "app.ports" = "ports"
 "app.adapters" = "adapters"
 "app.main" = "composition"
 ```
+
+Alternatively, a module can declare its ring in Python:
+
+```python
+# src/app/adapters.py
+__arbor__ = {"ring": "adapters"}
+```
+
+A valid module-level `__arbor__` takes precedence over `classify`; the ring must be declared in the policy.
+An absent annotation uses the first matching `classify` glob. A malformed annotation or unknown ring reports
+`invalid-arbor-annotation` and falls back to `classify`, so an already-classified module keeps all its ring checks.
+Without a fallback match it also reports `unclassified`. These annotations classify individual modules only;
+package/distribution boundaries and extraction support are not supported yet.
 
 ```
 arborescent generate     # optionally create missing recommended config files; existing files stay untouched
@@ -78,6 +91,8 @@ interpreter when pip is unavailable). In Poetry projects it uses `poetry add` to
 included by `dev`, then verifies the lock. Set `disabled_tools = ["import-linter", "tach", "ruff"]` in
 `[tool.arborescent]` (or the top-level `arborescent.toml`) to deliberately omit those tools from checks and setup hints;
 minimum-profile certification still requires Ruff and Tach.
+The same setting accepts `"arbor-annotations"`: `disabled_tools = ["arbor-annotations"]` ignores `__arbor__`
+annotations and their validation findings, uses `classify` alone, and prevents minimum-profile certification.
 
 ## Presets
 

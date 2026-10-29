@@ -104,6 +104,9 @@ class ScanResult(Protocol):
     def known(self) -> frozenset[str]: ...  # every first-party module name in the repository
 
     @property
+    def arbor_index(self) -> Mapping[str, tuple[str | None, str | None]]: ...  # module -> ring annotation / error
+
+    @property
     def modules(self) -> Mapping[str, ModuleInfo]: ...  # the ones parsed (all, or only the changed ones)
 
     @property

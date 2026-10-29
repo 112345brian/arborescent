@@ -146,10 +146,53 @@ def test_disabled_tools_are_parsed_as_an_intentional_opt_out() -> None:
     assert policy.disabled_tools == ("ruff", "tach")
 
 
+def test_arbor_annotations_is_accepted_as_a_disabled_tool() -> None:
+    policy = policy_from_mapping({**MINI, "disabled_tools": ["arbor-annotations"]})
+
+    assert policy.disabled_tools == ("arbor-annotations",)
+
+
 @pytest.mark.parametrize("disabled", ["ruff", [""], ["pytest"], [1]])
 def test_disabled_tools_must_be_known_tool_names(disabled: object) -> None:
     with pytest.raises(PolicyError, match="disabled_tools"):
         _ = policy_from_mapping({**MINI, "disabled_tools": disabled})
+
+
+def test_resolve_ring_uses_valid_annotations_and_falls_back_for_invalid_ones() -> None:
+    policy = mini_policy(classify={"app.*": "domain"})
+    index = {
+        "app.annotated": ("composition", None),
+        "app.malformed": (None, "__arbor__ must be a dict with a ring name"),
+        "app.unknown": ("missing", None),
+    }
+
+    assert policy.resolve_ring(index, "app.annotated") == "composition"
+    assert policy.resolve_ring(index, "app.malformed") == "domain"
+    assert policy.resolve_ring(index, "app.unknown") == "domain"
+    assert policy.resolve_ring({}, "app.annotated") == "domain"
+
+
+def test_annotation_violation_reports_malformed_and_unknown_annotations() -> None:
+    policy = mini_policy()
+    malformed_reason = "__arbor__ must be a dict with a ring name"
+    index = {
+        "app.valid": ("domain", None),
+        "app.malformed": (None, malformed_reason),
+        "app.unknown": ("missing", None),
+    }
+
+    assert policy.annotation_violation(index, "app.valid") is None
+    assert policy.annotation_violation(index, "app.malformed") == malformed_reason
+    assert policy.annotation_violation(index, "app.unknown") is not None
+    assert policy.annotation_violation({}, "app.absent") is None
+
+
+def test_disabling_arbor_annotations_ignores_annotation_resolution_and_violations() -> None:
+    policy = mini_policy(classify={"app.*": "domain"}, disabled_tools=["arbor-annotations"])
+    index = {"app.annotated": ("composition", None), "app.bad": (None, "malformed")}
+
+    assert policy.resolve_ring(index, "app.annotated") == "domain"
+    assert policy.annotation_violation(index, "app.bad") is None
 
 
 def test_domain_does_not_know_the_config_shape() -> None:

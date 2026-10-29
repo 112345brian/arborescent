@@ -8,6 +8,7 @@ and OS-branching rules applies is the policy's preset; layering and classificati
 from __future__ import annotations
 
 from collections.abc import Collection, Iterator, Mapping
+from dataclasses import dataclass
 
 from .domain import ALL, EFFECT_RULES, Policy, RingRule, Rule, Violation, dist_name
 from .facts import ModuleInfo, resolve_targets
@@ -17,7 +18,19 @@ __all__ = ["check_modules"]
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
 
 
-def _internal_imports(policy: Policy, name: str, ring: str, line: int, targets: Collection[str]) -> list[Violation]:
+@dataclass(frozen=True)
+class RuleContext:
+    policy: Policy
+    arbor_index: Mapping[str, tuple[str | None, str | None]]
+
+    def resolve_ring(self, name: str) -> str | None:
+        return self.policy.resolve_ring(self.arbor_index, name)
+
+
+def _internal_imports(
+    context: RuleContext, name: str, ring: str, line: int, targets: Collection[str],
+) -> list[Violation]:
+    policy = context.policy
     allowed = policy.allowed_rings(ring)
     out: list[Violation] = []
     for target in filter(None, targets):
@@ -25,7 +38,7 @@ def _internal_imports(policy: Policy, name: str, ring: str, line: int, targets: 
         if banned is not None:
             out.append(Violation(Rule.INTERNAL_IMPORT, name, f"[{name}] imports forbidden module {target}; {banned!r} is forbidden by module policy", line))
             continue
-        target_ring = policy.ring_of(target)
+        target_ring = context.resolve_ring(target)
         if target_ring is not None and target_ring not in allowed:
             detail = f"[{ring}] imports {target} [{target_ring}]; {ring} may import only {sorted(allowed)}"
             out.append(Violation(Rule.INTERNAL_IMPORT, name, detail, line))
@@ -55,16 +68,19 @@ def _os_branching(policy: Policy, name: str, ring: str, rule: RingRule, info: Mo
     ]
 
 
-def _target_ring(policy: Policy, target: str) -> str | None:
+def _target_ring(context: RuleContext, target: str, known: Collection[str]) -> str | None:
     parts = target.split(".")
     for end in range(len(parts), 0, -1):
-        ring = policy.ring_of(".".join(parts[:end]))
-        if ring is not None:
-            return ring
+        module = ".".join(parts[:end])
+        if module in known:
+            return context.resolve_ring(module)
     return None
 
 
-def _effect_uses(policy: Policy, name: str, ring: str, info: ModuleInfo, known: Collection[str]) -> list[Violation]:
+def _effect_uses(
+    context: RuleContext, name: str, ring: str, info: ModuleInfo, known: Collection[str],
+) -> list[Violation]:
+    policy = context.policy
     out: list[Violation] = []
     tests_folder = policy.practices.get("secrets-guard")
     package_names = {module.split(".", 1)[0] for module in known}
@@ -80,7 +96,7 @@ def _effect_uses(policy: Policy, name: str, ring: str, info: ModuleInfo, known: 
                 continue
             if use.target.split(".", 1)[0] not in package_names:
                 continue
-            target_ring = _target_ring(policy, use.target)
+            target_ring = _target_ring(context, use.target, known)
             if target_ring is None or "patch" not in policy.forbidden_effects(target_ring):
                 continue
             detail = f"[{target_ring}] tests patch project target {use.target}; inject a port instead"
@@ -117,7 +133,9 @@ def check_modules(
     modules: Mapping[str, ModuleInfo],
     known: Collection[str],
     entry_deps: Mapping[str, tuple[str, ...] | None],
+    arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> list[Violation]:
+    context = RuleContext(policy, arbor_index)
     tops = {m.split(".")[0] for m in known}
     out = [
         Violation(Rule.WILDCARD_RING, ring.name, axis)
@@ -128,7 +146,10 @@ def check_modules(
     third_party: ThirdParty = {}
     import_graph: dict[str, set[str]] = {name: set() for name in modules}
     for name, info in sorted(modules.items()):
-        ring = policy.ring_of(name)
+        detail = policy.annotation_violation(context.arbor_index, name)
+        if detail is not None:
+            out.append(Violation(Rule.INVALID_ARBOR_ANNOTATION, name, detail))
+        ring = context.resolve_ring(name)
         if ring is None:
             out.append(Violation(Rule.UNCLASSIFIED, name, "module matches no [classify] pattern; every module needs a ring"))
             continue
@@ -138,10 +159,10 @@ def check_modules(
             import_graph[name].update(target for target in internal if target in modules)
             if error is not None:
                 out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
-            out += _internal_imports(policy, name, ring, imp.line, internal)
+            out += _internal_imports(context, name, ring, imp.line, internal)
             out += _external_imports(policy, name, ring, rule, imp.line, external, third_party)
         out += _os_branching(policy, name, ring, rule, info)
-        out += _effect_uses(policy, name, ring, info, known)
+        out += _effect_uses(context, name, ring, info, known)
     if policy.forbid_circular_imports:
         out.extend(_circular_imports(import_graph))
     return out + _entry_dependencies(policy, known, entry_deps, third_party)

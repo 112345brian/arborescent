@@ -8,6 +8,7 @@ import json
 import shutil
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,14 @@ from arborescent import baseline
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
 from arborescent.cli import main
 from arborescent.domain import PolicyError, ToolResult, Violation
-from arborescent.engine import Options, Services, pick_checker, run_check, run_own
+from arborescent.engine import (
+    Options,
+    Services,
+    pick_checker,
+    run_check,
+    run_own,
+    write_generated,
+)
 from arborescent.engines import default_engines
 from arborescent.generate import generate
 from arborescent.selftest import selftest
@@ -211,6 +219,19 @@ def test_warm_run_parses_nothing_and_an_edit_parses_one_file(repo: Path, tmp_pat
     assert run_own(policy, repo, svc, practices=False)[1].parsed == 1
 
 
+def test_invalid_annotation_outside_sources_reports_invalid_and_unclassified(repo: Path) -> None:
+    write_files(repo, {"outside.py": '__arbor__ = {"ring": 42}\n'})
+    policy = mini_policy(sources=["app"])
+
+    findings, scan = run_own(policy, repo, services(), practices=False)
+
+    assert "outside" not in scan.modules
+    assert {(finding.rule, finding.subject) for finding in findings} >= {
+        ("invalid-arbor-annotation", "outside"),
+        ("unclassified", "outside"),
+    }
+
+
 def test_cache_is_keyed_by_content_not_by_mtime(repo: Path, tmp_path: Path) -> None:
     svc = services(cache=tmp_path / "c")
     policy = mini_policy()
@@ -232,14 +253,14 @@ def test_old_fact_cache_schema_is_discarded(repo: Path, tmp_path: Path) -> None:
     cache.mkdir()
     source = (repo / "app/domain.py").read_bytes()
     digest = hashlib.blake2b(source, digest_size=16).hexdigest()
-    # Version 2 stored only os_uses; version 4 also carries effect, suppression and discard facts.
+    # Version 2 stored only os_uses; version 5 also carries annotation facts.
     (cache / "scan.json").write_text(
         json.dumps({"v": 2, "files": {"app/domain.py": [digest, [[], [[1, "os.name"]], None]]}}),
         encoding="utf-8",
     )
     scan = run_own(mini_policy(), repo, services(cache=cache), practices=False)[1]
     assert scan.parsed == 5
-    assert json.loads((cache / "scan.json").read_text(encoding="utf-8"))["v"] == 4
+    assert json.loads((cache / "scan.json").read_text(encoding="utf-8"))["v"] == 5
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
@@ -402,3 +423,20 @@ def test_no_caller_discards_the_result_of_a_check() -> None:
                 if name in watched:
                     bad.append(f"{path.name}:{node.lineno} discards {name}()")
     assert not bad, bad
+
+
+def test_generate_and_drift_use_scanned_annotation_rings(repo: Path) -> None:
+    policy = mini_policy(classify={})
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "domain"}\n', "app/main.py": '__arbor__ = {"ring": "composition"}\n'})
+    svc = services()
+    write_generated(policy, repo, svc)
+
+    tach = tomllib.loads((repo / "tach.toml").read_text(encoding="utf-8"))
+    assert [(module["path"], module["layer"]) for module in tach["modules"]] == [
+        ("app.domain", "domain"), ("app.main", "composition"),
+    ]
+    assert run_check(policy, repo, svc, Options(tools=False)).drift == []
+    write_files(repo, {"app/main.py": '__arbor__ = {"ring": "domain"}\n'})
+    assert "tach.toml: differs from the policy; run `arborescent generate`" in run_check(
+        policy, repo, svc, Options(tools=False),
+    ).drift

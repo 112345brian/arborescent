@@ -74,7 +74,7 @@ def test_default_target_is_3_11_whatever_the_host_runs() -> None:
 def _found(root: Path, python: str, **overrides: Any) -> set[tuple[str, str]]:
     policy = mini_policy(python=python, preset="standard", **overrides)
     scan = FsScanner().scan(policy, root)
-    return {(v.rule, v.subject) for v in check_modules(policy, scan.modules, scan.known, scan.entry_deps)}
+    return {(v.rule, v.subject) for v in check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)}
 
 
 def test_a_module_removed_from_the_stdlib_is_third_party_for_a_newer_target(repo: Path) -> None:

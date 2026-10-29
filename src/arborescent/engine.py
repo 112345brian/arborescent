@@ -104,7 +104,13 @@ def run_own(
     policy: Policy, root: Path, services: Services, only: frozenset[str] | None = None, practices: bool = True
 ) -> tuple[list[Violation], ScanResult]:
     scan = services.scanner.scan(policy, root, only)
-    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps)
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
+    found += [
+        Violation(Rule.INVALID_ARBOR_ANNOTATION, module, detail)
+        for module, _ in scan.unclassified
+        if module not in scan.modules
+        if (detail := policy.annotation_violation(scan.arbor_index, module)) is not None
+    ]
     found += [
         Violation(Rule.UNCLASSIFIED, module, "module matches no [classify] pattern; every module needs a ring")
         for module, _ in scan.unclassified
@@ -113,7 +119,7 @@ def run_own(
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
     found += _inventory_violations(scan.modules)
     if practices and only is None:
-        found += run_practices(policy, root, services.runner, services.fs, scan.modules, scan.known)
+        found += run_practices(policy, root, services.runner, services.fs, scan)
     return found, scan
 
 
@@ -146,7 +152,7 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     _, scan = run_own(policy, root, services, practices=False)
     wanted = [c for c in services.checkers if c.name in policy.type_checkers and not tool_is_disabled(policy, c)]
     written: list[str] = []
-    generated = sorted(generate(policy, sorted(scan.known), wanted).items())
+    generated = sorted(generate(policy, sorted(scan.known), wanted, scan.arbor_index).items())
     for rel, text in generated:
         path = root / rel
         if services.fs.exists(path):
@@ -157,9 +163,11 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     return written
 
 
-def drift(fs: FileSystem, policy: Policy, root: Path, names: Sequence[str], checkers: Sequence[TypeChecker]) -> list[str]:
+def drift(
+    fs: FileSystem, policy: Policy, root: Path, scan: ScanResult, checkers: Sequence[TypeChecker],
+) -> list[str]:
     out: list[str] = []
-    for rel, expected in sorted(generate(policy, names, checkers).items()):
+    for rel, expected in sorted(generate(policy, sorted(scan.known), checkers, scan.arbor_index).items()):
         path = root / rel
         if fs.is_file(path):
             current = fs.read_text(path)
@@ -280,7 +288,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
             services.fs,
             policy,
             root,
-            sorted(scan.known),
+            scan,
             [
                 c
                 for c in services.checkers

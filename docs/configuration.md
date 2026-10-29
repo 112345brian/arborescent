@@ -10,7 +10,7 @@ silently.
 | key | default | meaning |
 |---|---|---|
 | `rings` | required | Distinct ring names, **innermost first**. |
-| `classify` | required in practice | Table of glob -> ring. Globs match the dotted module name and `*` crosses dots. The first match wins. Every module must match one (`unclassified`). |
+| `classify` | `{}` | Table of glob -> ring, used when a module has no valid `__arbor__` annotation. Globs match the dotted module name and `*` crosses dots. The first match wins. Every module needs a ring from an annotation or a matching glob (`unclassified`). |
 | `sources` | `["."]` | Folders or single files to scan. A single `.py` file is an entry script, not a package. |
 | `source_roots` | `["."]` | Folders that module names are relative to (`src` for a `src/app` layout). Also handed to tach. |
 | `exclude` | `[]` | Globs matched against a path or a file/folder name to skip while scanning. Excluded Python files are counted by folder on every `check`. |
@@ -23,7 +23,7 @@ silently.
 | `forbid_circular_imports` | `true` | Rejects cycles in the first-party module import graph, including lazy and `TYPE_CHECKING` imports. Set to `false` only to opt out; the Arborescent minimum profile requires `true`. |
 | `entry_scripts` | `[]` | Dotted names of PEP 723 single-file scripts. Each must declare, in its `# /// script` block, every third-party distribution the project code imports. |
 | `type_checkers` | `["ty"]` | `pyright`, `basedpyright`, `ty` and/or `pyrefly`. The first one runs by default; `check --type-checker` overrides it. A config file is generated for each one listed. |
-| `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. |
+| `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
@@ -53,6 +53,10 @@ configured type checker active.
 skipped checks do not receive this label. `CERTIFIED` is printed only when the minimum profile also passes. A project
 can therefore be consistent with its own policy while remaining uncertified because it disabled required profile tools.
 
+`disabled_tools = ["arbor-annotations"]` opts out of annotation handling: all ring assignments come from `classify`,
+and `invalid-arbor-annotation` findings are not emitted. Other architecture checks still apply. This opt-out prevents
+minimum-profile certification, even when the remaining enabled checks pass and the project is `CONSISTENT`.
+
 `[tool.arborescent.ruff]` composes overrides over the optional generated Ruff preset; it never replaces that preset. It accepts
 `extend-select`, `ignore`, `per-file-ignores`, `max-complexity`, `max-args`, `max-branches`, and `max-statements`.
 The base includes correctness, typing, security, modernization, path, and performance rule families in addition to
@@ -60,6 +64,36 @@ complexity and architecture-aware rules. Ruff's broad test-assertion and subproc
 tests remain idiomatic and real process adapters can declare their deliberate subprocess boundary. `PIE807` is ignored
 because it conflicts with strict type inference for container factories. `check` prints `standard rules (baseline vN)` when no rule
 customization is active, or `customised rules: ...` with the changes that apply.
+
+## Module ring annotations: `__arbor__`
+
+A module can declare its own ring with a module-level assignment to a literal dictionary:
+
+```python
+__arbor__ = {"ring": "domain"}
+```
+
+The `ring` value must be a string naming one of the policy's configured `rings`. Arborescent reads the assignment
+statically, without importing or executing the module. Only direct module-level assignments count; assignments
+inside functions, classes or conditionals do not. If there are multiple direct assignments, the last one wins.
+
+Ring resolution follows this order while annotations are enabled (the default):
+
+1. A valid `__arbor__` annotation takes precedence over every `classify` glob, and can classify a module even when no
+   glob matches it.
+2. If the annotation is absent, the first matching `classify` glob supplies the ring.
+3. If the annotation is malformed or names an unknown ring, Arborescent reports `invalid-arbor-annotation` and still
+   uses the first matching `classify` glob for enforcement. If no glob matches, it also reports `unclassified`.
+
+For example, if `"app.domain" = "domain"` appears in `classify`, adding `__arbor__ = {"ring": 42}` to that module
+reports `invalid-arbor-annotation`. Its imports, effects and OS branching are still checked under the `domain` ring;
+the invalid annotation does not create a gap in those checks. A valid `__arbor__ = {"ring": "adapters"}` instead
+assigns that module to `adapters`, regardless of the glob.
+
+Annotations apply to individual Python modules. An annotation in `__init__.py` assigns the package module's own
+ring; it does not assign rings to its descendants. Package/distribution-level boundaries and package extraction
+support are **not supported yet**. `package` and `prepackage` declarations do not establish such boundaries;
+that capability belongs to a separate future proposal.
 
 ## Rings: `[tool.arborescent.ring.<name>]`
 
@@ -98,7 +132,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 
 | rule | fires when |
 |---|---|
-| `unclassified` | a module matches no `classify` pattern |
+| `unclassified` | a module has neither a valid enabled `__arbor__` annotation nor a matching `classify` pattern |
 | `noise-dir-code` | a tracked `.py` file appears below a skipped directory such as `.venv`, `.tox` or `node_modules` |
 | `vendor-folder` | a convention-named vendor folder is excluded and fingerprinted in the baseline |
 | `wildcard-ring` | a non-outermost ring uses `*` in `external` or `may_import` (one finding per ring and axis) |
@@ -119,6 +153,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `os-branching` | a ring not marked `os_branching` reads `os.name` or `sys.platform` |
 | `bad-import` | a relative import that points above the package root |
 | `undeclared-entry-dependency` | an entry script lacks a `# /// script` block, or omits a third-party distribution the project imports |
+| `invalid-arbor-annotation` | a module's `__arbor__` annotation is malformed or names an unknown ring |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
 `getattr`, variables, or wrappers. A test patch is checked against the target module's ring and is considered only when
@@ -198,8 +233,8 @@ intentional baseline growth and its reason.
 ### `arborescent discover`
 
 List in-scope Python files that still lack a ring classification, grouped by folder with the outermost ring suggested.
-Add matching `classify` patterns or explicitly exclude files that should not be scanned. Git-tracked Python files under
-noise directories are reported separately by `check`.
+Add valid `__arbor__` ring annotations, matching `classify` patterns, or explicitly exclude files that should not be
+scanned. Git-tracked Python files under noise directories are reported separately by `check`.
 
 ### `arborescent selftest`
 

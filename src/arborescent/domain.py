@@ -26,7 +26,7 @@ __all__ = [
 ]
 
 NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".arborescent", ".mypy_cache", ".ruff_cache", ".tox"})
-DISABLED_TOOL_NAMES = frozenset({"import-linter", "tach", "ruff", "pyright", "basedpyright", "ty", "pyrefly"})
+DISABLED_TOOL_NAMES = frozenset({"import-linter", "tach", "ruff", "pyright", "basedpyright", "ty", "pyrefly", "arbor-annotations"})
 # Folders no walker (scanner, practices, selftest copy) looks into. Practices add build output on top of this.
 
 ALL = "*"  # in `may_import` or `external`: no restriction
@@ -63,6 +63,7 @@ class Rule(StrEnum):
     DOCS_SYNC = "docs-sync"
     CRLF = "crlf"
     UNDECLARED_IMPORTS = "undeclared-imports"
+    INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {
@@ -200,6 +201,30 @@ class Policy:
         for pattern, ring in self.classify:
             if fnmatch.fnmatchcase(module, pattern):
                 return ring
+        return None
+
+    def resolve_ring(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
+        """Resolve a module's annotated ring, falling back to ``classify`` when unavailable or invalid."""
+        if "arbor-annotations" not in self.disabled_tools:
+            annotation = arbor_index.get(name)
+            if annotation is not None:
+                ring, violation = annotation
+                if violation is None and ring is not None and any(rule.name == ring for rule in self.rings):
+                    return ring
+        return self.ring_of(name)
+
+    def annotation_violation(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
+        """Return why a present annotation is invalid, independently of ring fallback."""
+        if "arbor-annotations" in self.disabled_tools:
+            return None
+        annotation = arbor_index.get(name)
+        if annotation is None:
+            return None
+        ring, violation = annotation
+        if violation is not None:
+            return violation
+        if ring is not None and not any(rule.name == ring for rule in self.rings):
+            return f"__arbor__ names unknown ring {ring!r}"
         return None
 
     def forbidden_imports(self, module: str) -> frozenset[str]:

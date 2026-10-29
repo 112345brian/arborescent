@@ -57,6 +57,8 @@ def _native_minimum(policy: Policy, scan: object) -> list[str]:
         for tool in ("ruff", "tach")
         if tool in policy.disabled_tools
     )
+    if "arbor-annotations" in policy.disabled_tools:
+        failures.append("minimum profile requires `__arbor__` annotations to be enabled")
     outer = policy.rings[-1].name
     for rule in policy.rings:
         if rule.name != outer and "*" in rule.external:
@@ -196,8 +198,11 @@ def _tach_canary_modules(policy: Policy, scan: ScanResult) -> tuple[ModuleInfo |
     )
     inner = policy.rings[0].name
     outer = policy.rings[-1].name
-    sources = sorted((module for module in leaves if policy.ring_of(module.name) == inner), key=lambda item: item.name)
-    targets = tuple(sorted(module.name for module in leaves if policy.ring_of(module.name) == outer))
+    sources = sorted(
+        (module for module in leaves if policy.resolve_ring(scan.arbor_index, module.name) == inner),
+        key=lambda item: item.name,
+    )
+    targets = tuple(sorted(module.name for module in leaves if policy.resolve_ring(scan.arbor_index, module.name) == outer))
     if not sources:
         return None, ()
     return sources[0], tuple(target for target in targets if target != sources[0].name)

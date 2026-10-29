@@ -7,7 +7,11 @@ import pytest
 from arborescent_helpers import MINI_FILES, mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
-from arborescent.certification import _native_minimum, _tach_probes
+from arborescent.certification import (
+    _native_minimum,
+    _tach_canary_modules,
+    _tach_probes,
+)
 from arborescent.generate import tach
 from arborescent.installer_adapter import _toml_array_close
 
@@ -24,6 +28,37 @@ def test_profile_requires_circular_import_enforcement(tmp_path: Path) -> None:
     scan = FsScanner().scan(mini_policy(), tmp_path)
 
     assert any("forbid_circular_imports" in failure for failure in _native_minimum(mini_policy(forbid_circular_imports=False), scan))
+
+
+def test_tach_canary_modules_follow_annotations_over_classify_globs(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        **MINI_FILES,
+        "app/domain.py": '__arbor__ = {"ring": "composition"}\n',
+        "app/main.py": '__arbor__ = {"ring": "domain"}\n',
+    })
+    policy = mini_policy()
+    scan = FsScanner().scan(policy, tmp_path)
+
+    source, targets = _tach_canary_modules(policy, scan)
+
+    assert source is not None
+    assert source.name == "app.main"
+    assert targets == ("app.domain",)
+
+
+def test_profile_requires_annotations_without_changing_other_failures(tmp_path: Path) -> None:
+    write_files(tmp_path, MINI_FILES)
+    policy = mini_policy(forbid_circular_imports=False)
+    scan = FsScanner().scan(policy, tmp_path)
+    enabled_failures = _native_minimum(policy, scan)
+    disabled_policy = mini_policy(forbid_circular_imports=False, disabled_tools=["arbor-annotations"])
+
+    assert enabled_failures == ["minimum profile requires `forbid_circular_imports = true`"]
+    assert _native_minimum(disabled_policy, scan) == [
+        *enabled_failures,
+        "minimum profile requires `__arbor__` annotations to be enabled",
+    ]
+    assert _native_minimum(mini_policy(), scan) == []
 
 
 def _tach_project(root: Path) -> tuple[object, object]:

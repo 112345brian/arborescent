@@ -2,6 +2,17 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+
+- Module-level `__arbor__ = {"ring": "domain"}` annotations take precedence over `classify` globs. Malformed
+  annotations and unknown rings report `invalid-arbor-annotation` while falling back to `classify` for enforcement;
+  modules without a fallback ring also report `unclassified`.
+- `disabled_tools = ["arbor-annotations"]` ignores annotations and their validation findings, uses `classify` alone,
+  and prevents minimum-profile certification. Package/distribution boundaries and package extraction support are
+  not supported yet.
+
 ## 0.2.0 — 2026-10-26
 
 ### Changed

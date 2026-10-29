@@ -21,7 +21,7 @@ NAMES = ["app", "app.domain", "app.ports", "app.adapters", "app.main"]
 def found_rules(root: Path, **overrides: Any) -> set[tuple[str, str]]:
     policy = mini_policy(**overrides)
     scan = FsScanner().scan(policy, root)
-    return {(v.subject, v.rule) for v in check_modules(policy, scan.modules, scan.known, scan.entry_deps)}
+    return {(v.subject, v.rule) for v in check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)}
 
 
 def linter_text(**overrides: Any) -> str:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 from arborescent_helpers import CLASSIFY, mini_policy, ring_with, write_files
 
 from arborescent import baseline
@@ -16,7 +17,7 @@ from arborescent.rules import check_modules
 def run(root: Path, **overrides: Any) -> list[Violation]:
     policy = mini_policy(**overrides)
     scan = FsScanner().scan(policy, root)
-    return check_modules(policy, scan.modules, scan.known, scan.entry_deps)
+    return check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
 
 
 def rules(found: list[Violation]) -> set[str]:
@@ -187,3 +188,74 @@ def test_entry_script_metadata_is_read_from_a_file_with_crlf_line_endings(repo: 
     (repo / "run.py").write_bytes(script)
     scan = FsScanner().scan(mini_policy(**ENTRY), repo)
     assert scan.entry_deps["run"] == ("psutil",)
+
+
+@pytest.mark.parametrize("annotation", ['__arbor__ = 3', '__arbor__ = {"ring": "missing"}'])
+def test_broken_annotation_keeps_all_classified_module_checks(repo: Path, annotation: str) -> None:
+    source = "from . import adapters\nimport os, time, requests\nos.name\ntime.time()\n"
+    write_files(repo, {"app/domain.py": source})
+    before = run(repo)
+    assert rules(before) == {
+        "internal-import", "external-import", "os-branching", "effect-clock", "circular-import",
+    }
+
+    write_files(repo, {"app/domain.py": source + annotation + "\n"})
+    after = run(repo)
+
+    assert [v for v in after if v.rule != "invalid-arbor-annotation"] == before
+    invalid = [v for v in after if v.rule == "invalid-arbor-annotation"]
+    assert len(invalid) == 1
+    assert invalid[0].subject == "app.domain"
+    assert invalid[0].detail
+
+
+def test_broken_unclassified_annotation_reports_both_problems(repo: Path) -> None:
+    write_files(repo, {"app/newcomer.py": "__arbor__ = 3\n"})
+
+    assert {(v.rule, v.subject) for v in run(repo)} == {
+        ("invalid-arbor-annotation", "app.newcomer"), ("unclassified", "app.newcomer"),
+    }
+
+
+def test_valid_annotation_classifies_module_without_classify_match(repo: Path) -> None:
+    write_files(repo, {"app/newcomer.py": '__arbor__ = {"ring": "domain"}\nimport os\n'})
+
+    assert {(v.rule, v.subject) for v in run(repo)} == {("external-import", "app.newcomer")}
+
+
+def test_internal_import_uses_target_annotation_in_changed_scan(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "import app.ports\n", "app/ports.py": '__arbor__ = {"ring": "composition"}\n'})
+    policy = mini_policy()
+    scan = FsScanner().scan(policy, repo, frozenset({"app/domain.py"}))
+
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
+
+    assert [(v.rule, v.subject) for v in found] == [("internal-import", "app.domain")]
+    assert "[composition]" in found[0].detail
+
+
+def test_disabling_annotations_preserves_classify_checks(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "composition"}\nimport os\n', "app/newcomer.py": "__arbor__ = 3\n"})
+
+    assert {(v.rule, v.subject) for v in run(repo, disabled_tools=["arbor-annotations"])} == {
+        ("external-import", "app.domain"), ("unclassified", "app.newcomer"),
+    }
+
+
+def test_patch_target_uses_annotation_in_changed_scan(repo: Path) -> None:
+    write_files(repo, {
+        "app/main.py": '__arbor__ = {"ring": "domain"}\nVALUE = 1\n',
+        "tests/test_main.py": 'from unittest.mock import patch\npatch("app.main.VALUE")\n',
+    })
+    policy = mini_policy(
+        sources=["app", "tests"], source_roots=["."],
+        classify={**CLASSIFY, "tests.*": "composition"},
+        practices={"secrets-guard": "tests"},
+        ring=ring_with(composition={"may_import": ["*"], "external": ["unittest"]}),
+    )
+    scan = FsScanner().scan(policy, repo, frozenset({"tests/test_main.py"}))
+
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
+
+    assert [(v.rule, v.subject) for v in found] == [("effect-patch", "tests.test_main")]
+    assert "[domain]" in found[0].detail

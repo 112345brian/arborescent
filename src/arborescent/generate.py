@@ -6,7 +6,7 @@ Pure: ``generate`` returns ``{relative path: text}``; ``check`` diffs that again
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 from .domain import ALL, Policy
 from .ports import TypeChecker
@@ -48,11 +48,13 @@ def _list(items: Sequence[str], indent: str = "") -> str:
     return "[\n" + "".join(f"{indent}    {_q(i)},\n" for i in items) + indent + "]"
 
 
-def import_linter(policy: Policy, names: Sequence[str]) -> str:
+def import_linter(
+    policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+) -> str:
     by_ring: dict[str, list[str]] = {r.name: [] for r in policy.rings}
     graph = set(tops_of(names))
     for n in leaves(names):
-        ring = policy.ring_of(n) if n.split('.')[0] in graph else None
+        ring = policy.resolve_ring(arbor_index, n) if n.split('.')[0] in graph else None
         if ring is not None:
             by_ring[ring].append(n)
     lines = [HEADER, "[tool.importlinter]", f"root_packages = {_list(tops_of(names))}", "include_external_packages = true", ""]
@@ -97,7 +99,9 @@ def import_linter(policy: Policy, names: Sequence[str]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def tach(policy: Policy, names: Sequence[str]) -> str:
+def tach(
+    policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+) -> str:
     explicit = not policy.expressible_by_layers()
     layers = [r.name for r in reversed(policy.rings)]  # tach: outermost first
     output_dir = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/")
@@ -117,7 +121,7 @@ def tach(policy: Policy, names: Sequence[str]) -> str:
     lines.append("")
     renames = [f"{module}:{distribution}" for module, distribution in sorted(policy.dependencies.items())]
     lines += ["[external]", "exclude = []", f"rename = {_list(renames)}", ""]
-    classified = [(n, policy.ring_of(n)) for n in leaves(names)]
+    classified = [(n, policy.resolve_ring(arbor_index, n)) for n in leaves(names)]
     for name, ring in classified:
         if ring is None:
             continue
@@ -130,7 +134,9 @@ def tach(policy: Policy, names: Sequence[str]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _ruff_ignores(policy: Policy, names: Sequence[str]) -> dict[str, set[str]]:
+def _ruff_ignores(
+    policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+) -> dict[str, set[str]]:
     ignores: dict[str, set[str]] = {}
     for pattern in ("**/tests/**/*.py", "**/test_*.py", "**/*_test.py"):
         ignores.setdefault(pattern, set()).update({"ANN", "S"})  # tests have different annotation/security idioms
@@ -138,7 +144,7 @@ def _ruff_ignores(policy: Policy, names: Sequence[str]) -> dict[str, set[str]]:
         ignores.setdefault(pattern, set()).add("RUF201")  # generated configs intentionally use stable rule codes
     composition = policy.rings[-1].name
     for module in names:
-        if policy.ring_of(module) != composition:
+        if policy.resolve_ring(arbor_index, module) != composition:
             continue
         base = module.replace(".", "/")
         for pattern in (f"**/{base}.py", f"**/{base}/**.py"):
@@ -149,9 +155,11 @@ def _ruff_ignores(policy: Policy, names: Sequence[str]) -> dict[str, set[str]]:
     return ignores
 
 
-def ruff(policy: Policy, names: Sequence[str]) -> str:
+def ruff(
+    policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+) -> str:
     """Render the shared Ruff rules and the small ring-specific exception for composition printing."""
-    ignores = _ruff_ignores(policy, names)
+    ignores = _ruff_ignores(policy, names, arbor_index)
     overrides = policy.ruff_overrides
     vendor = ("vendor", "vendored", "third_party", "site-packages")
     excludes = sorted({pattern for name in vendor for pattern in (f"**/{name}", f"**/{name}/**")})
@@ -183,14 +191,17 @@ def ruff(policy: Policy, names: Sequence[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def generate(policy: Policy, names: Sequence[str], checkers: Sequence[TypeChecker]) -> dict[str, str]:
+def generate(
+    policy: Policy, names: Sequence[str], checkers: Sequence[TypeChecker],
+    arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+) -> dict[str, str]:
     """Every generated file, keyed by posix path relative to the policy root."""
     prefix = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/") + "/"
     paths = sorted(set(policy.sources))
     files = {
-        prefix + IMPORT_LINTER_FILE: import_linter(policy, names),
-        prefix + TACH_FILE: tach(policy, names),
-        prefix + "ruff.toml": ruff(policy, names),
+        prefix + IMPORT_LINTER_FILE: import_linter(policy, names, arbor_index),
+        prefix + TACH_FILE: tach(policy, names, arbor_index),
+        prefix + "ruff.toml": ruff(policy, names, arbor_index),
     }
     for checker in checkers:
         files[prefix + checker.config_file] = checker.render_config(policy, paths)

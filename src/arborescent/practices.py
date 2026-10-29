@@ -22,7 +22,7 @@ from typing import Any, cast
 
 from .domain import NOISE_DIRS, Policy, Rule, Violation, dist_name
 from .facts import ModuleInfo, resolve_targets
-from .ports import FileSystem, ToolRunner
+from .ports import FileSystem, ScanResult, ToolRunner
 
 __all__ = ["PRACTICES", "run_practices"]
 
@@ -122,7 +122,9 @@ def secrets_guard(fs: FileSystem, root: Path, tests_dir: str) -> list[Violation]
     return []
 
 
-def docs_sync(fs: FileSystem, root: Path, doc: str, policy: Policy, known: Collection[str]) -> list[Violation]:
+def docs_sync(
+    fs: FileSystem, root: Path, doc: str, policy: Policy, scan: ScanResult,
+) -> list[Violation]:
     path = root / doc
     if not fs.is_file(path):
         return [Violation(Rule.DOCS_SYNC, doc, "documented architecture file does not exist")]
@@ -134,11 +136,11 @@ def docs_sync(fs: FileSystem, root: Path, doc: str, policy: Policy, known: Colle
             rows[mod] = m.group(2)
     out: list[Violation] = []
     for mod, ring in sorted(rows.items()):
-        if mod not in known:
+        if mod not in scan.known:
             out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} lists a module that does not exist"))
-        elif policy.ring_of(mod) != ring:
-            out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} says ring {ring!r} but the policy says {policy.ring_of(mod)!r}"))
-    out += [Violation(Rule.DOCS_SYNC, m, f"module is not in the {doc} table") for m in sorted(set(known) - set(rows))]
+        elif policy.resolve_ring(scan.arbor_index, mod) != ring:
+            out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} says ring {ring!r} but the policy says {policy.resolve_ring(scan.arbor_index, mod)!r}"))
+    out += [Violation(Rule.DOCS_SYNC, m, f"module is not in the {doc} table") for m in sorted(set(scan.known) - set(rows))]
     return out
 
 
@@ -182,8 +184,10 @@ PRACTICES = (
 
 
 def run_practices(
-    policy: Policy, root: Path, runner: ToolRunner, fs: FileSystem, modules: Mapping[str, ModuleInfo], known: Collection[str]
+    policy: Policy, root: Path, runner: ToolRunner, fs: FileSystem, scan: ScanResult,
 ) -> list[Violation]:
+    modules = scan.modules
+    known = scan.known
     cfg = policy.practices
     out: list[Violation] = []
     if cfg.get(Rule.GITIGNORE_SHADOW):
@@ -196,7 +200,7 @@ def run_practices(
     if cfg.get(Rule.SECRETS_GUARD):
         out += secrets_guard(fs, root, str(cfg[Rule.SECRETS_GUARD]))
     if cfg.get(Rule.DOCS_SYNC):
-        out += docs_sync(fs, root, str(cfg[Rule.DOCS_SYNC]), policy, known)
+        out += docs_sync(fs, root, str(cfg[Rule.DOCS_SYNC]), policy, scan)
     if cfg.get(Rule.CRLF):
         out += crlf(fs, root, list(cfg[Rule.CRLF]))
     if cfg.get(Rule.UNDECLARED_IMPORTS):
