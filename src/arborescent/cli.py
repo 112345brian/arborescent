@@ -25,7 +25,7 @@ from .engine import (
     write_generated,
 )
 from .engines import default_engines
-from .packages import PackageCatalog
+from .packages import PackageCatalog, load_extracted_package
 from .ports import FileSystem, ScanResult
 from .selftest import selftest
 from .typecheckers import all_checkers
@@ -145,6 +145,11 @@ def _parser() -> argparse.ArgumentParser:
             default="packages.toml",
             help="package metadata file relative to repository root",
         )
+    _ = package_actions.choices["validate"].add_argument(
+        "--extracted",
+        type=Path,
+        help="validate an extracted package directory instead of the repository catalog",
+    )
     extract = package_actions.add_parser("extract")
     extract.add_argument("package_id")
     extract.add_argument(
@@ -154,6 +159,10 @@ def _parser() -> argparse.ArgumentParser:
         "--catalog",
         default="packages.toml",
         help="package metadata file relative to repository root",
+    )
+    extract.add_argument(
+        "--repository",
+        help="repository the extracted package will live in (default: its origin repository)",
     )
     extract.add_argument(
         "--with-dependencies",
@@ -187,6 +196,10 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
         if args.command == "bench":
             return run_bench(args.dirs, args.checkers, default_services)
         fs = services.fs if services else LocalFileSystem()
+        if args.command == "packages" and getattr(args, "extracted", None) is not None:
+            extracted = load_extracted_package(fs, args.extracted)
+            print(f"valid: extracted {extracted.semantics.id} ({len(extracted.paths)} paths)")
+            return 0
         if args.command == "packages":
             root = (
                 args.config.parent
@@ -249,6 +262,7 @@ def _packages(args: argparse.Namespace, root: Path, fs: FileSystem) -> int:
         args.package_id,
         args.output if args.output.is_absolute() else root / args.output,
         include_dependencies=args.with_dependencies,
+        repository=args.repository,
     )
     print(f"extracted {args.package_id} to {destination}")
     return 0

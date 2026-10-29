@@ -166,7 +166,7 @@ destination = "tests/test_collection_core"
 
 The package root and every owned path must stay inside the repository. Package IDs are stable lowercase slugs, path
 ownership cannot overlap, and declared dependencies must form an acyclic graph. Extraction copies declared paths into a
-new destination and writes `.arborescent-package.toml` with the package ID and path metadata. A package with its own
+new destination and writes `.arborescent-package.toml` (see "Extraction manifest" below). A package with its own
 direct Arborescent policy is copied with that policy when it is listed as a configuration path; the child policy remains
 independently usable after extraction.
 
@@ -185,6 +185,33 @@ arborescent packages extract collection-core --output /tmp/collection-core --wit
 Dependencies are included only when explicitly requested and are placed under `dependencies/<package-id>/`. The
 destination must not already exist. Extraction does not rewrite imports or invent build configuration; the package
 metadata declares the layout and the package owns its build and architecture files.
+
+### Extraction manifest
+
+`.arborescent-package.toml` (`manifest_version = 2`) keeps what a package *is* apart from where it *is* and what
+extraction *did*:
+
+| Table | Holds | Changes on extraction? |
+|---|---|---|
+| `[package]` | `id`, `name`, `kind`, `domain`, `summary`, `capabilities`, `depends_on` | never |
+| `[[paths]]` `role`, `metadata` | per-path meaning: role plus custom metadata (import name, boundary, `arborescent_config`, scope) | never |
+| `[origin]` | `repository`, `root` and `extraction_status` as declared in the catalog | no; kept for traceability |
+| `[[paths]]` `origin_path` | the path in the origin repository | no; kept for traceability |
+| `[location]` | the current `repository` (defaults to the origin; `--repository` sets another) and `root` (`.`) | yes |
+| `[[paths]]` `current_path` | where the path lives inside the extracted tree | yes |
+| `[extraction]` | `status = "extracted"` and `included_packages` | yes; describes the operation |
+| `[[dependencies]]` | the same stable fields for each included dependency, plus its origin and `current_root` | as above |
+
+Module identity is never rewritten. Extraction copies `arborescent.toml`, `classify` globs and in-file `__arbor__`
+annotations byte for byte, and a nested policy's `sources` and `source_roots` are relative to that policy, so the same
+modules keep the same names whatever the extraction directory is called. A `destination` that moves a path away from the
+layout a nested policy expects would change module identity; extraction reports that as an error instead of inferring a
+rename. `arborescent_config` metadata is relative to the package's current root and must be shipped as a declared path.
+
+`arborescent packages validate --extracted DIR` re-validates an extracted tree (extraction runs the same check): current
+paths must resolve inside the tree without symlinks, `included_packages` must match the package and its dependencies,
+and each declared nested policy must load and find its `sources`. Parent `certify` and parent-override behaviour stay
+governed by the parent configuration; they do not edit the child's declared metadata.
 
 `suggestion_threshold` controls a report-only hint for large files. The metric counts lines containing code tokens and
 ignores blank lines, comments, module/class/function docstrings, and multi-line literal-only data tables. Suggestions

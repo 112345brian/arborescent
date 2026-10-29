@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .config import load_policy
 from .domain import NOISE_DIRS, PolicyError
 from .ports import FileSystem
 
@@ -18,6 +19,8 @@ _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 # Directories and files below a declared package path that are local build output, not distributable source.
 _GENERATED_DIRS = NOISE_DIRS | {"build", "dist"}
 _GENERATED_FILES = ("*.pyc",)
+MANIFEST_NAME = ".arborescent-package.toml"
+MANIFEST_VERSION = 2
 
 
 class CatalogError(PolicyError):
@@ -45,6 +48,71 @@ class PackageDescriptor:
     depends_on: tuple[str, ...] = ()
     extraction_status: str = "in-repository"
     paths: tuple[PackagePath, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PackageSemantics:
+    """Stable meaning of a package: identical in the catalog and in every extraction of it."""
+
+    id: str
+    name: str
+    kind: str
+    summary: str
+    domain: str | None = None
+    capabilities: tuple[str, ...] = ()
+    depends_on: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedDependency:
+    semantics: PackageSemantics
+    origin_repository: str
+    origin_root: str
+    current_root: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedPath:
+    package_id: str
+    role: str
+    metadata: Mapping[str, str]
+    origin_path: str  # coordinate in the origin repository, kept for traceability
+    current_path: str  # coordinate inside the extracted tree
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedPackage:
+    """A validated ``.arborescent-package.toml``: semantics, origin and current location, and operation state."""
+
+    semantics: PackageSemantics
+    origin_repository: str
+    origin_root: str
+    origin_status: str
+    current_repository: str
+    current_root: str
+    status: str
+    included_packages: tuple[str, ...]
+    dependencies: tuple[ExtractedDependency, ...]
+    paths: tuple[ExtractedPath, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _Placement:
+    package_id: str
+    item: PackagePath
+    current_path: str
+
+
+def semantics_of(package: PackageDescriptor) -> PackageSemantics:
+    return PackageSemantics(
+        package.id,
+        package.name,
+        package.kind,
+        package.summary,
+        package.domain,
+        package.capabilities,
+        package.depends_on,
+    )
 
 
 class PackageCatalog:
@@ -204,10 +272,19 @@ class PackageCatalog:
             visit(package.id)
 
     def extract(
-        self, package_id: str, destination: Path, *, include_dependencies: bool = False
+        self,
+        package_id: str,
+        destination: Path,
+        *,
+        include_dependencies: bool = False,
+        repository: str | None = None,
     ) -> Path:
-        """Copy owned paths to an absent destination and retain identity/path metadata."""
+        """Copy owned paths to an absent destination; semantics stay stable, locations are recorded explicitly.
+
+        ``repository`` names the repository the extracted tree will live in; it defaults to the origin repository.
+        """
         package = self.get(package_id)
+        current_repository = _current_repository(repository, package)
         included = (
             self._dependency_closure(package) if include_dependencies else (package,)
         )
@@ -225,6 +302,7 @@ class PackageCatalog:
         self.fs.mkdir(destination)
         try:
             copied: set[str] = set()
+            placements: list[_Placement] = []
             for descriptor in included:
                 for item in descriptor.paths:
                     target_relative = self._extraction_target(descriptor, item)
@@ -238,6 +316,7 @@ class PackageCatalog:
                             f"multiple package paths map to extraction path {key!r}"
                         )
                     copied.add(key)
+                    placements.append(_Placement(descriptor.id, item, key))
                     source = self.root.joinpath(*PurePosixPath(item.path).parts)
                     target = (
                         destination.joinpath(*target_relative.parts)
@@ -246,9 +325,10 @@ class PackageCatalog:
                     )
                     self._copy_owned_path(source, target)
             self.fs.write_text(
-                destination / ".arborescent-package.toml",
-                _render_manifest(package, included),
+                destination / MANIFEST_NAME,
+                _render_manifest(package, included, placements, current_repository),
             )
+            load_extracted_package(self.fs, destination)
         except Exception:
             self.fs.remove_tree(destination)
             raise
@@ -427,39 +507,226 @@ def _within(path: PurePosixPath, parent: PurePosixPath) -> bool:
 
 
 def _render_manifest(
-    package: PackageDescriptor, included: Sequence[PackageDescriptor]
+    package: PackageDescriptor,
+    included: Sequence[PackageDescriptor],
+    placements: Sequence[_Placement],
+    repository: str,
 ) -> str:
-    lines = [
-        "[package]",
-        f"id = {json.dumps(package.id)}",
-        f"name = {json.dumps(package.name)}",
-        f"kind = {json.dumps(package.kind)}",
+    lines = [f"manifest_version = {MANIFEST_VERSION}", ""]
+    lines += ["[package]", *_semantic_lines(package), ""]
+    lines += [
+        "[origin]",
         f"repository = {json.dumps(package.repository)}",
-        f"source_root = {json.dumps(package.root)}",
-        f"summary = {json.dumps(package.summary)}",
-        'extraction_status = "extracted"',
-        f"capabilities = {json.dumps(package.capabilities)}",
-        f"depends_on = {json.dumps(package.depends_on)}",
+        f"root = {json.dumps(package.root)}",
+        f"extraction_status = {json.dumps(package.extraction_status)}",
+        "",
+        "[location]",
+        f"repository = {json.dumps(repository)}",
+        'root = "."',
+        "",
+        "[extraction]",
+        'status = "extracted"',
         f"included_packages = {json.dumps([item.id for item in included])}",
         "",
     ]
-    if package.domain is not None:
-        lines.insert(-1, f"domain = {json.dumps(package.domain)}")
     for descriptor in included:
-        for item in descriptor.paths:
-            lines.extend(
-                [
-                    "[[paths]]",
-                    f"package_id = {json.dumps(descriptor.id)}",
-                    f"path = {json.dumps(item.path)}",
-                    f"role = {json.dumps(item.role)}",
-                    f"metadata = {_inline_table(item.metadata or {})}",
-                ]
-            )
-            if item.destination is not None:
-                lines.append(f"destination = {json.dumps(item.destination)}")
-            lines.append("")
+        if descriptor.id == package.id:
+            continue
+        lines += [
+            "[[dependencies]]",
+            *_semantic_lines(descriptor),
+            f"origin_repository = {json.dumps(descriptor.repository)}",
+            f"origin_root = {json.dumps(descriptor.root)}",
+            f"current_root = {json.dumps(f'dependencies/{descriptor.id}')}",
+            "",
+        ]
+    for placement in placements:
+        lines += [
+            "[[paths]]",
+            f"package_id = {json.dumps(placement.package_id)}",
+            f"role = {json.dumps(placement.item.role)}",
+            f"metadata = {_inline_table(placement.item.metadata or {})}",
+            f"origin_path = {json.dumps(placement.item.path)}",
+            f"current_path = {json.dumps(placement.current_path)}",
+            "",
+        ]
     return "\n".join(lines)
+
+
+def _semantic_lines(package: PackageDescriptor) -> list[str]:
+    lines = [
+        f"id = {json.dumps(package.id)}",
+        f"name = {json.dumps(package.name)}",
+        f"kind = {json.dumps(package.kind)}",
+    ]
+    if package.domain is not None:
+        lines.append(f"domain = {json.dumps(package.domain)}")
+    lines += [
+        f"summary = {json.dumps(package.summary)}",
+        f"capabilities = {json.dumps(package.capabilities)}",
+        f"depends_on = {json.dumps(package.depends_on)}",
+    ]
+    return lines
+
+
+def load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:
+    """Read and validate an extracted tree: current paths resolve inside it and nested policies keep their layout."""
+    base = fs.resolve(directory)
+    manifest_path = base / MANIFEST_NAME
+    try:
+        data = tomllib.loads(fs.read_text(manifest_path))
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+        raise CatalogError(f"cannot read {manifest_path}: {exc}") from exc
+    if data.get("manifest_version") != MANIFEST_VERSION:
+        raise CatalogError(
+            f"{MANIFEST_NAME} must declare manifest_version = {MANIFEST_VERSION}"
+        )
+    package = _manifest_semantics(_manifest_table(data, "package"))
+    origin = _manifest_table(data, "origin")
+    location = _manifest_table(data, "location")
+    extraction = _manifest_table(data, "extraction")
+    dependencies = tuple(
+        ExtractedDependency(
+            _manifest_semantics(item),
+            _required(item, "origin_repository"),
+            _required(item, "origin_root"),
+            _required(item, "current_root"),
+        )
+        for item in _manifest_array(data, "dependencies")
+    )
+    included = _strings(extraction.get("included_packages"), "included_packages")
+    known = {package.id, *(item.semantics.id for item in dependencies)}
+    if set(included) != known:
+        raise CatalogError(
+            "included_packages does not match the package and its dependencies"
+        )
+    roots = {
+        package.id: _current_location(_required(location, "root"), "location root")
+    }
+    for dependency in dependencies:
+        roots[dependency.semantics.id] = _current_location(
+            dependency.current_root, f"package {dependency.semantics.id} current root"
+        )
+    paths = tuple(
+        _manifest_path(item, known) for item in _manifest_array(data, "paths")
+    )
+    for item in paths:
+        _check_current_path(fs, base, item)
+    result = ExtractedPackage(
+        package,
+        _required(origin, "repository"),
+        _required(origin, "root"),
+        _required(origin, "extraction_status"),
+        _required(location, "repository"),
+        _required(location, "root"),
+        _required(extraction, "status"),
+        included,
+        dependencies,
+        paths,
+    )
+    for item in paths:
+        _check_nested_policy(fs, base, roots[item.package_id], item)
+    return result
+
+
+def _current_repository(repository: str | None, package: PackageDescriptor) -> str:
+    if repository is None:
+        return package.repository
+    if not repository.strip():
+        raise CatalogError("repository must be a non-empty string when set")
+    return repository.strip()
+
+
+def _current_location(value: str, context: str) -> PurePosixPath:
+    """A location inside the extracted tree; ``.`` is the tree root itself."""
+    return PurePosixPath() if value == "." else _relative_path(value, context)
+
+
+def _manifest_table(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value: object = data.get(key)
+    if not isinstance(value, dict):
+        raise CatalogError(f"{MANIFEST_NAME} requires a [{key}] table")
+    return value
+
+
+def _manifest_array(data: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
+    value: object = data.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise CatalogError(f"{MANIFEST_NAME} {key} must be an array of tables")
+    return value
+
+
+def _manifest_semantics(value: Mapping[str, Any]) -> PackageSemantics:
+    return PackageSemantics(
+        _required(value, "id"),
+        _required(value, "name"),
+        _required(value, "kind"),
+        _required(value, "summary"),
+        _optional(value, "domain"),
+        _strings(value.get("capabilities", []), "capabilities"),
+        _strings(value.get("depends_on", []), "depends_on"),
+    )
+
+
+def _manifest_path(value: Mapping[str, Any], known: set[str]) -> ExtractedPath:
+    package_id = _required(value, "package_id")
+    if package_id not in known:
+        raise CatalogError(
+            f"path refers to package {package_id!r} that is not included"
+        )
+    metadata: object = value.get("metadata", {})
+    if not isinstance(metadata, dict) or not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in metadata.items()
+    ):
+        raise CatalogError("path metadata must map strings to strings")
+    return ExtractedPath(
+        package_id,
+        _required(value, "role"),
+        dict(metadata),
+        _required(value, "origin_path"),
+        _required(value, "current_path"),
+    )
+
+
+def _check_current_path(fs: FileSystem, base: Path, item: ExtractedPath) -> None:
+    relative = _current_location(
+        item.current_path, f"package {item.package_id} current path"
+    )
+    target = base.joinpath(*relative.parts)
+    if not fs.exists(target) or fs.resolve(target) != target:
+        raise CatalogError(
+            f"current path {item.current_path!r} of package {item.package_id} does not resolve inside the extracted tree"
+        )
+
+
+def _check_nested_policy(
+    fs: FileSystem, base: Path, root: PurePosixPath, item: ExtractedPath
+) -> None:
+    """A declared nested ``arborescent.toml`` must load and still find its sources where it expects them."""
+    declared = item.metadata.get("arborescent_config")
+    if declared is None:
+        return
+    relative = root / _relative_path(
+        declared, f"package {item.package_id} arborescent_config"
+    )
+    config = base.joinpath(*relative.parts)
+    if not fs.is_file(config):
+        raise CatalogError(
+            f"arborescent_config {declared!r} of package {item.package_id} is missing from the extraction; declare it as a package path"
+        )
+    try:
+        policy, _ = load_policy(fs, config)
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError, PolicyError) as exc:
+        raise CatalogError(
+            f"nested policy {relative.as_posix()} is invalid: {exc}"
+        ) from exc
+    for local in (policy, *(scope.policy for scope in policy.scopes)):
+        for entry in (*local.sources, *local.source_roots):
+            if not fs.exists(config.parent / entry):
+                raise CatalogError(
+                    f"nested policy {relative.as_posix()} expects {entry!r}, which is absent after extraction; "
+                    "a changed layout would change module identity"
+                )
 
 
 def _inline_table(value: Mapping[str, str]) -> str:

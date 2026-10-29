@@ -47,6 +47,10 @@ def test_extraction_preserves_package_identity_and_path_metadata(
     source = tmp_path / "src/core"
     source.mkdir(parents=True)
     (source / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (source / "arborescent.toml").write_text(
+        'rings = ["domain"]\n[ring.domain]\nmay_import = []\nexternal = []\n[classify]\n"*" = "domain"\n',
+        encoding="utf-8",
+    )
     (tmp_path / "tests/core").mkdir(parents=True)
     (tmp_path / "tests/core/test_core.py").write_text(
         "def test_value(): pass\n", encoding="utf-8"
@@ -83,6 +87,10 @@ destination = "tests"
     )
     assert metadata["package"]["id"] == "collection-core"
     assert metadata["paths"][0]["metadata"]["arborescent_config"] == "arborescent.toml"
+    assert metadata["paths"][0]["origin_path"] == "src/core"
+    assert metadata["paths"][0]["current_path"] == "."
+    assert metadata["paths"][1]["origin_path"] == "tests/core"
+    assert metadata["paths"][1]["current_path"] == "tests"
 
 
 _ARTIFACT_PACKAGE = """
@@ -291,7 +299,7 @@ role = "source"
     manifest = tomllib.loads(
         (destination / ".arborescent-package.toml").read_text(encoding="utf-8")
     )
-    assert manifest["package"]["included_packages"] == [
+    assert manifest["extraction"]["included_packages"] == [
         "collection-policy",
         "collection-core",
     ]
