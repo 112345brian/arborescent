@@ -48,7 +48,7 @@ def test_extraction_preserves_package_identity_and_path_metadata(
     source.mkdir(parents=True)
     (source / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
     (source / "arborescent.toml").write_text(
-        'rings = ["domain"]\n[ring.domain]\nmay_import = []\nexternal = []\n[classify]\n"*" = "domain"\n',
+        'rings = ["domain", "adapters"]\n[ring.domain]\nmay_import = []\nexternal = []\n[ring.adapters]\nmay_import = ["domain"]\nexternal = []\n[classify]\n"*" = "domain"\n',
         encoding="utf-8",
     )
     (tmp_path / "tests/core").mkdir(parents=True)
@@ -123,7 +123,7 @@ def test_extraction_omits_generated_artifacts_and_keeps_declared_content(
         "pkg/module.py": "VALUE = 2\n",
         "tests/test_core.py": "def test_value(): pass\n",
         "docs/guide.md": "# Guide\n",
-        "arborescent.toml": "preset = 'strict'\n",
+        "arborescent.toml": 'rings = ["domain", "adapters"]\n[ring.domain]\nmay_import = []\nexternal = []\n[ring.adapters]\nmay_import = ["domain"]\nexternal = []\n[classify]\n"*" = "domain"\n',
         "pyproject.toml": "[project]\nname = 'core'\n",
         "pkg/data/dist-info.txt": "not a dist directory\n",
         "pkg/build.py": "VALUE = 3\n",

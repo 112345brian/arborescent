@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from arborescent_helpers import write_files
 
+from arborescent.certification import _native_minimum
 from arborescent.cli import main
 from arborescent.config import load_policy
 from arborescent.filesystem_adapter import LocalFileSystem
@@ -24,6 +25,7 @@ from arborescent.scanner import FsScanner
 FS = LocalFileSystem()
 
 CHILD_POLICY = """
+exclude = ["tests"]
 sources = ["src"]
 source_roots = ["src"]
 rings = ["domain", "adapters"]
@@ -328,3 +330,138 @@ def test_cli_validates_an_extracted_package_and_reports_a_broken_one(
     assert "valid: extracted collection-core" in capsys.readouterr().out
     (destination / "src").rename(destination / "moved")
     assert main(["packages", "validate", "--extracted", str(destination)]) == 2
+
+
+def test_non_bmp_and_special_characters_in_metadata_survive_extraction(
+    tmp_path: Path,
+) -> None:
+    summary = 'rocket \U0001f680, "quotes", back\\slash and\ttab'
+    catalog = CATALOG.replace(
+        'summary = "Domain-neutral source lifecycle."',
+        f"summary = {_toml_literal(summary)}",
+    )
+    root, _ = _repo(tmp_path)
+    write_files(root, {"packages.toml": catalog})
+
+    destination = PackageCatalog.load(FS, root).extract(
+        "collection-core", tmp_path / "out/core"
+    )
+
+    assert load_extracted_package(FS, destination).semantics.summary == summary
+
+
+def _toml_literal(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\t", "\\t")
+    return f'"{escaped}"'
+
+
+def test_renaming_a_module_through_destination_is_an_explicit_error(
+    tmp_path: Path,
+) -> None:
+    """Passed the old check: ``src`` still exists, but module ``core`` silently became ``renamed``."""
+    root, _ = _repo(tmp_path)
+    catalog = CATALOG.replace(
+        'path = "packages/core/src"\nrole = "source"',
+        'path = "packages/core/src/core"\nrole = "source"\ndestination = "src/renamed"',
+    ).replace(
+        'arborescent_config = "arborescent.toml" }\n\n[[packages.paths]]\npath = "packages/core/arborescent.toml"',
+        'arborescent_config = "arborescent.toml" }\n\n[[packages.paths]]\npath = "packages/core/arborescent.toml"',
+    )
+    write_files(root, {"packages.toml": catalog})
+
+    with pytest.raises(CatalogError, match=r"core -> renamed"):
+        PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out/core")
+    assert not (tmp_path / "out/core").exists()
+
+
+def test_module_identity_is_checked_even_when_the_policy_uses_default_sources(
+    tmp_path: Path,
+) -> None:
+    root, _ = _repo(tmp_path)
+    default_sources = CHILD_POLICY.replace(
+        'sources = ["src"]\nsource_roots = ["src"]\n', ""
+    )
+    write_files(
+        root,
+        {
+            "packages/core/arborescent.toml": default_sources,
+            "packages.toml": CATALOG.replace(
+                'path = "packages/core/src"\nrole = "source"',
+                'path = "packages/core/src"\nrole = "source"\ndestination = "lib/src"',
+            ),
+        },
+    )
+
+    with pytest.raises(CatalogError, match="would change module identity"):
+        PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out/core")
+
+
+def test_a_shipped_policy_is_validated_even_without_arborescent_config_metadata(
+    tmp_path: Path,
+) -> None:
+    root, _ = _repo(tmp_path)
+    write_files(root, {"packages/policy/arborescent.toml": "this = is [not valid"})
+    catalog = PackageCatalog.load(FS, root)
+    catalog = PackageCatalog(
+        FS,
+        root,
+        [package for package in catalog.packages if package.id == "collection-policy"],
+    )
+
+    with pytest.raises(CatalogError, match="shipped policy"):
+        catalog.extract("collection-policy", tmp_path / "out/policy")
+
+
+def test_revalidation_rejects_a_symlink_that_appears_in_the_tree_but_not_in_generated_directories(
+    tmp_path: Path,
+) -> None:
+    _, catalog = _repo(tmp_path)
+    destination = catalog.extract("collection-core", tmp_path / "out/core")
+    venv = destination / ".venv/bin"
+    venv.mkdir(parents=True)
+    (venv / "python").symlink_to(Path("/usr/bin/env"))
+    load_extracted_package(
+        FS, destination
+    )  # a virtualenv created later is ordinary development
+
+    (destination / "leak").symlink_to(Path("/usr/bin/env"))
+    with pytest.raises(CatalogError, match="contains a symlink"):
+        load_extracted_package(FS, destination)
+
+
+@pytest.mark.parametrize("mode", ["certify", "parent"])
+def test_parent_policy_neither_governs_nor_is_changed_by_a_childs_extraction(
+    tmp_path: Path, mode: str
+) -> None:
+    root, catalog = _repo(tmp_path)
+    parent = root / "arborescent.toml"
+    parent.write_text(
+        f'children = ["packages/core"]\nchild_policy_mode = "{mode}"\n'
+        + CHILD_POLICY.replace('sources = ["src"]\nsource_roots = ["src"]\n', ""),
+        encoding="utf-8",
+    )
+    before = parent.read_bytes()
+
+    destination = catalog.extract("collection-core", tmp_path / "out/core")
+
+    assert parent.read_bytes() == before
+    assert (destination / "arborescent.toml").read_bytes() == (
+        root / "packages/core/arborescent.toml"
+    ).read_bytes()
+    assert load_policy(FS, parent)[0].child_policy_mode == mode
+    assert not (destination / "children").exists()
+    assert "child_policy_mode" not in (destination / MANIFEST_NAME).read_text(
+        encoding="utf-8"
+    )
+    assert _rings(destination) == _rings(root / "packages/core")
+
+
+def test_extracted_policy_meets_the_native_minimum_profile_on_its_own(
+    tmp_path: Path,
+) -> None:
+    """Static profile requirements only: Ruff and Tach version certification needs the real tools."""
+    _, catalog = _repo(tmp_path)
+    destination = catalog.extract("collection-core", tmp_path / "out/core")
+    policy, root = load_policy(FS, destination / "arborescent.toml")
+
+    assert _native_minimum(policy, FsScanner().scan(policy, root)) == []

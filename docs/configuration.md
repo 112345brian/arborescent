@@ -203,15 +203,22 @@ extraction *did*:
 | `[[dependencies]]` | the same stable fields for each included dependency, plus its origin and `current_root` | as above |
 
 Module identity is never rewritten. Extraction copies `arborescent.toml`, `classify` globs and in-file `__arbor__`
-annotations byte for byte, and a nested policy's `sources` and `source_roots` are relative to that policy, so the same
-modules keep the same names whatever the extraction directory is called. A `destination` that moves a path away from the
-layout a nested policy expects would change module identity; extraction reports that as an error instead of inferring a
-rename. `arborescent_config` metadata is relative to the package's current root and must be shipped as a declared path.
+annotations byte for byte. Extraction then compares, for every shipped `arborescent.toml`, the module name the policy
+derives for each copied file (from its `sources` and `source_roots`) before and after the move. A `destination` that
+renames a module, or moves it out of the policy's `sources`, fails with `would change module identity` (for example
+`core -> renamed`) and the partial extraction is removed. Files that merely become newly visible to a policy, such as
+tests moved under a `sources = "."` policy, add modules and are allowed. `arborescent_config` metadata is relative to
+the package's current root and must be shipped as a declared path.
 
-`arborescent packages validate --extracted DIR` re-validates an extracted tree (extraction runs the same check): current
-paths must resolve inside the tree without symlinks, `included_packages` must match the package and its dependencies,
-and each declared nested policy must load and find its `sources`. Parent `certify` and parent-override behaviour stay
-governed by the parent configuration; they do not edit the child's declared metadata.
+The manifest is a provenance snapshot taken at extraction, not an integrity seal: an extracted package is expected to
+evolve, so its files are not hashed.
+
+`arborescent packages validate --extracted DIR` re-validates an extracted tree (extraction runs the same structural
+check): current paths must resolve inside the tree, no symlink may leave it (generated directories such as `.venv` are
+ignored), `included_packages` must match the package and its dependencies, every shipped `arborescent.toml` must load,
+and each declared nested policy must find its `sources`. The module-identity comparison needs the origin tree, so it
+runs only during extraction. A parent policy (`children`, `child_policy_mode`) is neither read nor changed by extracting
+a child; the child keeps governing itself.
 
 `suggestion_threshold` controls a report-only hint for large files. The metric counts lines containing code tokens and
 ignores blank lines, comments, module/class/function docstrings, and multi-line literal-only data tables. Suggestions

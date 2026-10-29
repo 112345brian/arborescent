@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import fnmatch
-import json
 import re
 import tomllib
 from collections.abc import Mapping, Sequence
@@ -12,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .config import load_policy
-from .domain import NOISE_DIRS, PolicyError
+from .domain import NOISE_DIRS, Policy, PolicyError
 from .ports import FileSystem
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -303,6 +302,7 @@ class PackageCatalog:
         try:
             copied: set[str] = set()
             placements: list[_Placement] = []
+            pairs: list[tuple[Path, Path]] = []
             for descriptor in included:
                 for item in descriptor.paths:
                     target_relative = self._extraction_target(descriptor, item)
@@ -323,18 +323,21 @@ class PackageCatalog:
                         if target_relative.parts
                         else destination
                     )
-                    self._copy_owned_path(source, target)
+                    pairs += self._copy_owned_path(source, target)
             self.fs.write_text(
                 destination / MANIFEST_NAME,
                 _render_manifest(package, included, placements, current_repository),
             )
             load_extracted_package(self.fs, destination)
+            _check_module_identity(self.fs, pairs)
         except Exception:
             self.fs.remove_tree(destination)
             raise
         return destination
 
-    def _copy_owned_path(self, source: Path, target: Path) -> None:
+    def _copy_owned_path(self, source: Path, target: Path) -> list[tuple[Path, Path]]:
+        """Copy one owned path; return the (source file, copied file) pairs."""
+        pairs: list[tuple[Path, Path]] = []
         resolved = self.fs.resolve(source)
         if resolved != source or not resolved.is_relative_to(self.root):
             raise CatalogError(
@@ -344,7 +347,7 @@ class PackageCatalog:
             nested_paths = [
                 nested
                 for nested in self.fs.rglob(source, "*")
-                if not self._is_generated(source, nested)
+                if not _is_generated(self.fs, source, nested)
             ]
             for nested in nested_paths:
                 nested_resolved = self.fs.resolve(nested)
@@ -366,6 +369,7 @@ class PackageCatalog:
                         )
                     self.fs.mkdir(nested_target.parent)
                     self.fs.write_bytes(nested_target, self.fs.read_bytes(nested))
+                    pairs.append((nested, nested_target))
         else:
             if self.fs.exists(target):
                 raise CatalogError(
@@ -373,16 +377,8 @@ class PackageCatalog:
                 )
             self.fs.mkdir(target.parent)
             self.fs.write_bytes(target, self.fs.read_bytes(source))
-
-    def _is_generated(self, root: Path, path: Path) -> bool:
-        """Whether ``path`` is generated output below the declared ``root`` (the root itself is always copied)."""
-        parts = path.relative_to(root).parts
-        if _GENERATED_DIRS.intersection(parts[:-1]):
-            return True
-        name = parts[-1]
-        if any(fnmatch.fnmatchcase(name, pattern) for pattern in _GENERATED_FILES):
-            return True
-        return name in _GENERATED_DIRS and self.fs.is_dir(path)
+            pairs.append((source, target))
+        return pairs
 
     def _extraction_target(
         self, package: PackageDescriptor, item: PackagePath
@@ -516,17 +512,17 @@ def _render_manifest(
     lines += ["[package]", *_semantic_lines(package), ""]
     lines += [
         "[origin]",
-        f"repository = {json.dumps(package.repository)}",
-        f"root = {json.dumps(package.root)}",
-        f"extraction_status = {json.dumps(package.extraction_status)}",
+        f"repository = {_toml_str(package.repository)}",
+        f"root = {_toml_str(package.root)}",
+        f"extraction_status = {_toml_str(package.extraction_status)}",
         "",
         "[location]",
-        f"repository = {json.dumps(repository)}",
+        f"repository = {_toml_str(repository)}",
         'root = "."',
         "",
         "[extraction]",
         'status = "extracted"',
-        f"included_packages = {json.dumps([item.id for item in included])}",
+        f"included_packages = {_toml_list([item.id for item in included])}",
         "",
     ]
     for descriptor in included:
@@ -535,19 +531,19 @@ def _render_manifest(
         lines += [
             "[[dependencies]]",
             *_semantic_lines(descriptor),
-            f"origin_repository = {json.dumps(descriptor.repository)}",
-            f"origin_root = {json.dumps(descriptor.root)}",
-            f"current_root = {json.dumps(f'dependencies/{descriptor.id}')}",
+            f"origin_repository = {_toml_str(descriptor.repository)}",
+            f"origin_root = {_toml_str(descriptor.root)}",
+            f"current_root = {_toml_str(f'dependencies/{descriptor.id}')}",
             "",
         ]
     for placement in placements:
         lines += [
             "[[paths]]",
-            f"package_id = {json.dumps(placement.package_id)}",
-            f"role = {json.dumps(placement.item.role)}",
+            f"package_id = {_toml_str(placement.package_id)}",
+            f"role = {_toml_str(placement.item.role)}",
             f"metadata = {_inline_table(placement.item.metadata or {})}",
-            f"origin_path = {json.dumps(placement.item.path)}",
-            f"current_path = {json.dumps(placement.current_path)}",
+            f"origin_path = {_toml_str(placement.item.path)}",
+            f"current_path = {_toml_str(placement.current_path)}",
             "",
         ]
     return "\n".join(lines)
@@ -555,16 +551,16 @@ def _render_manifest(
 
 def _semantic_lines(package: PackageDescriptor) -> list[str]:
     lines = [
-        f"id = {json.dumps(package.id)}",
-        f"name = {json.dumps(package.name)}",
-        f"kind = {json.dumps(package.kind)}",
+        f"id = {_toml_str(package.id)}",
+        f"name = {_toml_str(package.name)}",
+        f"kind = {_toml_str(package.kind)}",
     ]
     if package.domain is not None:
-        lines.append(f"domain = {json.dumps(package.domain)}")
+        lines.append(f"domain = {_toml_str(package.domain)}")
     lines += [
-        f"summary = {json.dumps(package.summary)}",
-        f"capabilities = {json.dumps(package.capabilities)}",
-        f"depends_on = {json.dumps(package.depends_on)}",
+        f"summary = {_toml_str(package.summary)}",
+        f"capabilities = {_toml_list(package.capabilities)}",
+        f"depends_on = {_toml_list(package.depends_on)}",
     ]
     return lines
 
@@ -612,6 +608,7 @@ def load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:
     )
     for item in paths:
         _check_current_path(fs, base, item)
+    _check_tree(fs, base)
     result = ExtractedPackage(
         package,
         _required(origin, "repository"),
@@ -627,6 +624,17 @@ def load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:
     for item in paths:
         _check_nested_policy(fs, base, roots[item.package_id], item)
     return result
+
+
+def _is_generated(fs: FileSystem, root: Path, path: Path) -> bool:
+    """Whether ``path`` is generated output below ``root`` (the root itself is always copied)."""
+    parts = path.relative_to(root).parts
+    if _GENERATED_DIRS.intersection(parts[:-1]):
+        return True
+    name = parts[-1]
+    if any(fnmatch.fnmatchcase(name, pattern) for pattern in _GENERATED_FILES):
+        return True
+    return name in _GENERATED_DIRS and fs.is_dir(path)
 
 
 def _current_repository(repository: str | None, package: PackageDescriptor) -> str:
@@ -729,13 +737,108 @@ def _check_nested_policy(
                 )
 
 
+def _toml_str(value: str) -> str:
+    """A TOML basic string. ``json.dumps`` is not one: it writes non-BMP characters as invalid surrogate pairs."""
+    escapes = {'"': '\\"', "\\": "\\\\", "\n": "\\n", "\t": "\\t", "\r": "\\r"}
+    return (
+        '"'
+        + "".join(
+            escapes.get(char)
+            or (
+                f"\\u{ord(char):04x}" if ord(char) < 0x20 or ord(char) == 0x7F else char
+            )
+            for char in value
+        )
+        + '"'
+    )
+
+
+def _toml_list(values: Sequence[str]) -> str:
+    return "[" + ", ".join(_toml_str(value) for value in values) + "]"
+
+
 def _inline_table(value: Mapping[str, str]) -> str:
     return (
         "{ "
         + ", ".join(
-            f"{json.dumps(key)} = {json.dumps(item)}" for key, item in value.items()
+            f"{_toml_str(key)} = {_toml_str(item)}" for key, item in value.items()
         )
         + " }"
         if value
         else "{}"
     )
+
+
+def _check_tree(fs: FileSystem, base: Path) -> None:
+    """No symlink may leave the tree (generated directories excepted), and every shipped policy must load."""
+    for path in fs.rglob(base, "*"):
+        if _is_generated(fs, base, path):
+            continue
+        if fs.resolve(path) != path:
+            raise CatalogError(f"extracted tree contains a symlink: {path}")
+        if path.name == "arborescent.toml" and fs.is_file(path):
+            try:
+                _ = load_policy(fs, path)
+            except (
+                OSError,
+                tomllib.TOMLDecodeError,
+                UnicodeDecodeError,
+                PolicyError,
+            ) as exc:
+                raise CatalogError(
+                    f"shipped policy {path.relative_to(base).as_posix()} is invalid: {exc}"
+                ) from exc
+
+
+def _depth(path: PurePosixPath) -> int:
+    return len(path.parts)
+
+
+def _module_name(file: Path, config_dir: Path, policy: Policy) -> str | None:
+    """The dotted module name ``policy`` derives for ``file``, or ``None`` when the file is outside its sources."""
+    if file.suffix != ".py" or not file.is_relative_to(config_dir):
+        return None
+    relative = PurePosixPath(file.relative_to(config_dir).as_posix())
+    for local in (policy, *(scope.policy for scope in policy.scopes)):
+        if not any(
+            _within(relative, PurePosixPath(source)) for source in local.sources
+        ):
+            continue
+        roots = [
+            PurePosixPath(root)
+            for root in local.source_roots
+            if _within(relative, PurePosixPath(root))
+        ]
+        if not roots:
+            return None
+        deepest = max(roots, key=_depth)
+        parts = list(relative.relative_to(deepest).with_suffix("").parts)
+        if parts and parts[-1] == "__init__":
+            parts.pop()
+        return ".".join(parts)
+    return None
+
+
+def _check_module_identity(fs: FileSystem, pairs: Sequence[tuple[Path, Path]]) -> None:
+    """Extraction must not rename a module a shipped policy governs or move it out of that policy's sources.
+
+    Files newly visible to the policy (a ``sources = "."`` policy now seeing moved tests) only add modules.
+    """
+    origin_configs = {
+        target: source for source, target in pairs if target.name == "arborescent.toml"
+    }
+    for config, origin_config in origin_configs.items():
+        policy, _ = load_policy(fs, config)
+        changed = sorted(
+            f"{before} -> {after or '(outside sources)'}"
+            for source, target in pairs
+            if target.is_relative_to(config.parent)
+            and (before := _module_name(source, origin_config.parent, policy))
+            is not None
+            and before != (after := _module_name(target, config.parent, policy))
+        )
+        if changed:
+            raise CatalogError(
+                f"extraction would change module identity under {config.name}: {'; '.join(changed[:5])}"
+                + (" ..." if len(changed) > 5 else "")
+            )
