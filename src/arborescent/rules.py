@@ -7,10 +7,20 @@ and OS-branching rules applies is the policy's preset; layering and classificati
 
 from __future__ import annotations
 
+import fnmatch
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 
-from .domain import ALL, EFFECT_RULES, Policy, RingRule, Rule, Violation, dist_name
+from .domain import (
+    ALL,
+    EFFECT_RULES,
+    Policy,
+    PolicyError,
+    RingRule,
+    Rule,
+    Violation,
+    dist_name,
+)
 from .facts import ModuleInfo, resolve_targets
 
 __all__ = ["check_modules"]
@@ -22,18 +32,47 @@ ThirdParty = dict[str, set[str]]  # distribution -> importing modules
 class RuleContext:
     policy: Policy
     arbor_index: Mapping[str, tuple[str | None, str | None]]
+    scope_by_module: Mapping[str, str]
+
+    def scope_name(self, name: str) -> str | None:
+        return self.scope_by_module.get(name) if self.policy.scopes else None
+
+    def policy_for(self, name: str) -> Policy | None:
+        if not self.policy.scopes:
+            return self.policy
+        scope_name = self.scope_name(name)
+        return self.policy.scope(scope_name).policy if scope_name is not None else None
+
+    def require_policy(self, name: str) -> Policy:
+        policy = self.policy_for(name)
+        if policy is None:
+            raise PolicyError(f"module {name!r} has no owning architecture scope")
+        return policy
 
     def resolve_ring(self, name: str) -> str | None:
-        return self.policy.resolve_ring(self.arbor_index, name)
+        policy = self.policy_for(name)
+        return policy.resolve_ring(self.arbor_index, name) if policy is not None else None
+
+    def annotation_violation(self, name: str) -> str | None:
+        policy = self.policy_for(name)
+        if policy is not None:
+            return policy.annotation_violation(self.arbor_index, name)
+        annotation = self.arbor_index.get(name)
+        return annotation[1] if annotation is not None else None
 
 
 def _internal_imports(
     context: RuleContext, name: str, ring: str, line: int, targets: Collection[str],
 ) -> list[Violation]:
-    policy = context.policy
+    policy = context.policy_for(name)
+    if policy is None:
+        return []
     allowed = policy.allowed_rings(ring)
     out: list[Violation] = []
+    source_scope = context.scope_name(name)
     for target in filter(None, targets):
+        if context.scope_name(target) != source_scope:
+            continue
         banned = policy.forbids_module_import(name, target)
         if banned is not None:
             out.append(Violation(Rule.INTERNAL_IMPORT, name, f"[{name}] imports forbidden module {target}; {banned!r} is forbidden by module policy", line))
@@ -80,7 +119,7 @@ def _target_ring(context: RuleContext, target: str, known: Collection[str]) -> s
 def _effect_uses(
     context: RuleContext, name: str, ring: str, info: ModuleInfo, known: Collection[str],
 ) -> list[Violation]:
-    policy = context.policy
+    policy = context.require_policy(name)
     out: list[Violation] = []
     tests_folder = policy.practices.get("secrets-guard")
     package_names = {module.split(".", 1)[0] for module in known}
@@ -128,44 +167,99 @@ def _entry_dependencies(
     return out
 
 
+def _scope_imports(context: RuleContext, source: str, line: int, targets: Collection[str]) -> list[Violation]:
+    source_scope_name = context.scope_name(source)
+    if source_scope_name is None:
+        return []
+    source_scope = context.policy.scope(source_scope_name)
+    out: list[Violation] = []
+    for target in filter(None, targets):
+        target_scope_name = context.scope_name(target)
+        if target_scope_name is None or target_scope_name == source_scope_name:
+            continue
+        target_scope = context.policy.scope(target_scope_name)
+        reasons = []
+        if target_scope_name not in source_scope.depends_on:
+            reasons.append(f"scope {source_scope_name!r} does not declare dependency on {target_scope_name!r}")
+        if not any(fnmatch.fnmatchcase(target, pattern) for pattern in target_scope.public):
+            reasons.append(f"module {target!r} is not public in scope {target_scope_name!r}")
+        if reasons:
+            out.append(Violation(Rule.SCOPE_IMPORT, source, "; ".join(reasons), line))
+    return out
+
+
+def _wildcard_findings(policy: Policy) -> list[Violation]:
+    scoped = ((scope.name, scope.policy) for scope in policy.scopes)
+    local_policies = scoped if policy.scopes else (("", policy),)
+    return [
+        Violation(Rule.WILDCARD_RING, f"{scope_name}:{ring.name}" if scope_name else ring.name, axis)
+        for scope_name, local_policy in local_policies
+        for ring in local_policy.rings[:-1]
+        for axis, names in (("external", ring.external), ("may_import", ring.may_import))
+        if ALL in names
+    ]
+
+
 def check_modules(
     policy: Policy,
     modules: Mapping[str, ModuleInfo],
     known: Collection[str],
     entry_deps: Mapping[str, tuple[str, ...] | None],
-    arbor_index: Mapping[str, tuple[str | None, str | None]],
+    indexes: RuleContext | Mapping[str, tuple[str | None, str | None]],
 ) -> list[Violation]:
-    context = RuleContext(policy, arbor_index)
+    context = indexes if isinstance(indexes, RuleContext) else RuleContext(policy, indexes, {})
     tops = {m.split(".")[0] for m in known}
-    out = [
-        Violation(Rule.WILDCARD_RING, ring.name, axis)
-        for ring in policy.rings[:-1]
-        for axis, names in (("external", ring.external), ("may_import", ring.may_import))
-        if ALL in names
-    ]
-    third_party: ThirdParty = {}
+    out = _wildcard_findings(policy)
+    third_party_by_scope: dict[str | None, ThirdParty] = {}
     import_graph: dict[str, set[str]] = {name: set() for name in modules}
     for name, info in sorted(modules.items()):
-        detail = policy.annotation_violation(context.arbor_index, name)
+        local_policy = context.policy_for(name)
+        detail = context.annotation_violation(name)
         if detail is not None:
             out.append(Violation(Rule.INVALID_ARBOR_ANNOTATION, name, detail))
         ring = context.resolve_ring(name)
         if ring is None:
             out.append(Violation(Rule.UNCLASSIFIED, name, "module matches no [classify] pattern; every module needs a ring"))
             continue
-        rule = policy.ring(ring)
+        if local_policy is None:
+            continue
+        rule = local_policy.ring(ring)
+        third_party = third_party_by_scope.setdefault(context.scope_name(name), {})
         for imp in info.facts.imports:
             internal, external, error = resolve_targets(name, info.is_package, imp, known, tops)
-            import_graph[name].update(target for target in internal if target in modules)
+            import_graph[name].update(
+                target for target in internal
+                if target in modules and context.scope_name(target) == context.scope_name(name)
+            )
             if error is not None:
                 out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
+            out += _scope_imports(context, name, imp.line, internal)
             out += _internal_imports(context, name, ring, imp.line, internal)
-            out += _external_imports(policy, name, ring, rule, imp.line, external, third_party)
-        out += _os_branching(policy, name, ring, rule, info)
+            out += _external_imports(local_policy, name, ring, rule, imp.line, external, third_party)
+        out += _os_branching(local_policy, name, ring, rule, info)
         out += _effect_uses(context, name, ring, info, known)
-    if policy.forbid_circular_imports:
-        out.extend(_circular_imports(import_graph))
-    return out + _entry_dependencies(policy, known, entry_deps, third_party)
+    return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
+
+
+def _finalize_checks(
+    context: RuleContext, known: Collection[str],
+    entry_deps: Mapping[str, tuple[str, ...] | None], import_graph: Mapping[str, set[str]],
+    third_party_by_scope: Mapping[str | None, ThirdParty],
+) -> list[Violation]:
+    policy = context.policy
+    if not policy.scopes:
+        circular = _circular_imports(import_graph) if policy.forbid_circular_imports else []
+        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {}))
+    out: list[Violation] = []
+    for scope in policy.scopes:
+        local_graph = {
+            name: targets for name, targets in import_graph.items()
+            if context.scope_name(name) == scope.name
+        }
+        if scope.policy.forbid_circular_imports:
+            out.extend(_circular_imports(local_graph))
+        out.extend(_entry_dependencies(scope.policy, known, entry_deps, third_party_by_scope.get(scope.name, {})))
+    return out
 
 
 def _circular_imports(graph: Mapping[str, Collection[str]]) -> list[Violation]:

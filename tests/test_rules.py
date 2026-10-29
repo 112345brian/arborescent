@@ -10,8 +10,9 @@ from arborescent_helpers import CLASSIFY, mini_policy, ring_with, write_files
 
 from arborescent import baseline
 from arborescent.adapters import FsScanner
-from arborescent.domain import Violation
-from arborescent.rules import check_modules
+from arborescent.config import policy_from_mapping
+from arborescent.domain import Policy, Rule, Violation
+from arborescent.rules import RuleContext, check_modules
 
 
 def run(root: Path, **overrides: Any) -> list[Violation]:
@@ -259,3 +260,100 @@ def test_patch_target_uses_annotation_in_changed_scan(repo: Path) -> None:
 
     assert [(v.rule, v.subject) for v in found] == [("effect-patch", "tests.test_main")]
     assert "[domain]" in found[0].detail
+
+
+def _scope_boundary_policy(*, alpha_depends: list[str] | None = None) -> Policy:
+    return policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain", "adapters"],
+                "classify": {"core": "domain", "adapter": "adapters"},
+                "public": ["core"], "depends_on": alpha_depends or [],
+            },
+            "beta": {
+                "sources": ["libs/beta/src"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain", "adapters"],
+                "classify": {"api": "domain", "private": "adapters"},
+                "public": ["api"],
+            },
+        },
+    })
+
+
+def _scope_findings(policy: Policy, root: Path) -> list[Violation]:
+    scan = FsScanner().scan(policy, root)
+    return check_modules(
+        policy, scan.modules, scan.known, scan.entry_deps,
+        RuleContext(policy, scan.arbor_index, scan.scope_by_module),
+    )
+
+
+def test_cross_scope_import_requires_declared_dependency(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import api\n",
+        "libs/beta/src/api.py": "VALUE = 1\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(), tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.SCOPE_IMPORT] == [("scope-import", "core")]
+
+
+def test_cross_scope_import_requires_public_target(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import private\n",
+        "libs/beta/src/private.py": "VALUE = 1\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.SCOPE_IMPORT] == [("scope-import", "core")]
+    assert "not public" in next(item.detail for item in found if item.rule == Rule.SCOPE_IMPORT)
+
+
+def test_public_cross_scope_import_is_allowed(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import api\n",
+        "libs/beta/src/api.py": "VALUE = 1\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.SCOPE_IMPORT]
+
+
+def test_same_scope_rings_are_independent(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import adapter\n",
+        "libs/alpha/src/adapter.py": "VALUE = 1\n",
+        "libs/beta/src/api.py": "VALUE = 2\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(), tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.INTERNAL_IMPORT] == [("internal-import", "core")]
+
+
+def test_same_name_rings_resolve_in_the_source_scope(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": '__arbor__ = {"ring": "adapters"}\n',
+        "libs/beta/src/api.py": '__arbor__ = {"ring": "domain"}\n',
+    })
+
+    found = _scope_findings(_scope_boundary_policy(), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.INVALID_ARBOR_ANNOTATION]
+
+
+def test_annotation_findings_are_scope_local(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": '__arbor__ = {"ring": "parser"}\n',
+        "libs/beta/src/api.py": '__arbor__ = {"ring": "domain"}\n',
+    })
+
+    found = _scope_findings(_scope_boundary_policy(), tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.INVALID_ARBOR_ANNOTATION] == [
+        ("invalid-arbor-annotation", "core"),
+    ]

@@ -24,7 +24,7 @@ from .ports import (
     ViolationEngine,
 )
 from .practices import run_practices
-from .rules import check_modules
+from .rules import RuleContext, check_modules
 from .suggestions import Suggestion, file_size_suggestions
 
 if TYPE_CHECKING:
@@ -104,12 +104,13 @@ def run_own(
     policy: Policy, root: Path, services: Services, only: frozenset[str] | None = None, practices: bool = True
 ) -> tuple[list[Violation], ScanResult]:
     scan = services.scanner.scan(policy, root, only)
-    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
+    indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, indexes)
     found += [
         Violation(Rule.INVALID_ARBOR_ANNOTATION, module, detail)
         for module, _ in scan.unclassified
         if module not in scan.modules
-        if (detail := policy.annotation_violation(scan.arbor_index, module)) is not None
+        if (detail := _annotation_violation(policy, scan.arbor_index, scan.scope_by_module, module)) is not None
     ]
     found += [
         Violation(Rule.UNCLASSIFIED, module, "module matches no [classify] pattern; every module needs a ring")
@@ -121,6 +122,19 @@ def run_own(
     if practices and only is None:
         found += run_practices(policy, root, services.runner, services.fs, scan)
     return found, scan
+
+
+def _annotation_violation(
+    policy: Policy, arbor_index: Mapping[str, tuple[str | None, str | None]],
+    scope_by_module: Mapping[str, str], module: str,
+) -> str | None:
+    if not policy.scopes:
+        return policy.annotation_violation(arbor_index, module)
+    scope_name = scope_by_module.get(module)
+    if scope_name is not None:
+        return policy.scope_annotation_violation(scope_name, arbor_index, module)
+    annotation = arbor_index.get(module)
+    return annotation[1] if annotation is not None else None
 
 
 def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:

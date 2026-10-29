@@ -53,6 +53,7 @@ class Rule(StrEnum):
     EFFECT_DYNAMIC_IMPORT = "effect-dynamic-import"
     EFFECT_PATCH = "effect-patch"
     INTERNAL_IMPORT = "internal-import"
+    SCOPE_IMPORT = "scope-import"
     CIRCULAR_IMPORT = "circular-import"
     EXTERNAL_IMPORT = "external-import"
     OS_BRANCHING = "os-branching"
