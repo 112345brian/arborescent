@@ -107,6 +107,9 @@ class ScanResult(Protocol):
     def arbor_index(self) -> Mapping[str, tuple[str | None, str | None]]: ...  # module -> ring annotation / error
 
     @property
+    def scope_by_module(self) -> Mapping[str, str]: ...  # module -> owning architecture scope
+
+    @property
     def modules(self) -> Mapping[str, ModuleInfo]: ...  # the ones parsed (all, or only the changed ones)
 
     @property

@@ -214,6 +214,18 @@ class Policy:
                 return scope
         return None
 
+    def resolve_scope_ring(
+        self, scope_name: str, arbor_index: Mapping[str, tuple[str | None, str | None]], module: str,
+    ) -> str | None:
+        """Resolve annotations against only the named scope's ring set."""
+        return self.scope(scope_name).policy.resolve_ring(arbor_index, module)
+
+    def scope_annotation_violation(
+        self, scope_name: str, arbor_index: Mapping[str, tuple[str | None, str | None]], module: str,
+    ) -> str | None:
+        """Validate a module annotation against only its owning scope's rings."""
+        return self.scope(scope_name).policy.annotation_violation(arbor_index, module)
+
     def ring_of(self, module: str) -> str | None:
         for pattern, ring in self.classify:
             if fnmatch.fnmatchcase(module, pattern):

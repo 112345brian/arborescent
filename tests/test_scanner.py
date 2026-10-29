@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 from arborescent_helpers import mini_policy, write_files
 
+from arborescent.config import policy_from_mapping
+from arborescent.domain import Policy, PolicyError
 from arborescent.scanner import FsScanner
 
 
@@ -127,3 +129,86 @@ def test_pre_annotation_cache_is_reparsed(tmp_path: Path) -> None:
     assert scan.parsed == 1
     assert scan.modules["app.domain"].facts.arbor_ring == "domain"
     assert scan.arbor_index == {"app.domain": ("domain", None)}
+
+
+def _scoped_policy() -> Policy:
+    return policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain", "adapters"], "classify": {"core": "domain"},
+            },
+            "shared": {
+                "sources": ["libs/shared/src"], "source_roots": ["libs/shared/src"],
+                "rings": ["domain"], "classify": {"parser": "domain"},
+            },
+        },
+    })
+
+
+def test_scanner_assigns_each_module_to_its_source_scope(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "VALUE = 1\n",
+        "libs/shared/src/parser.py": "VALUE = 2\n",
+    })
+
+    scan = FsScanner().scan(_scoped_policy(), tmp_path)
+
+    assert scan.scope_by_module == {"core": "alpha", "parser": "shared"}
+    assert set(scan.modules) == {"core", "parser"}
+
+
+def test_unowned_module_is_unclassified(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "VALUE = 1\n",
+        "loose.py": "VALUE = 2\n",
+    })
+
+    scan = FsScanner().scan(_scoped_policy(), tmp_path)
+
+    assert scan.scope_by_module == {"core": "alpha"}
+    assert ("loose", "loose.py") in scan.unclassified
+
+
+def test_duplicate_module_names_across_scopes_fail(tmp_path: Path) -> None:
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "classify": {"core": "domain"},
+            },
+            "beta": {
+                "sources": ["libs/beta/src"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain"], "classify": {"core": "domain"},
+            },
+        },
+    })
+    write_files(tmp_path, {"libs/alpha/src/core.py": "", "libs/beta/src/core.py": ""})
+
+    with pytest.raises(PolicyError, match="duplicate module name"):
+        FsScanner().scan(policy, tmp_path)
+
+
+def test_scope_annotation_ring_is_validated_locally(tmp_path: Path) -> None:
+    write_files(tmp_path, {"libs/alpha/src/core.py": '__arbor__ = {"ring": "parser"}\n'})
+    policy = _scoped_policy()
+
+    scan = FsScanner().scan(policy, tmp_path)
+
+    assert policy.scope_annotation_violation("alpha", scan.arbor_index, "core") is not None
+    assert policy.resolve_scope_ring("alpha", scan.arbor_index, "core") == "domain"
+
+
+def test_partial_scope_indexes_match_full_scan(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "VALUE = 1\n",
+        "libs/shared/src/parser.py": "VALUE = 2\n",
+    })
+    policy = _scoped_policy()
+    scanner = FsScanner(tmp_path / ".arborescent")
+    full = scanner.scan(policy, tmp_path)
+
+    partial = scanner.scan(policy, tmp_path, only=frozenset({"libs/alpha/src/core.py"}))
+
+    assert partial.scope_by_module == full.scope_by_module == {"core": "alpha", "parser": "shared"}
+    assert set(partial.modules) == {"core"}
