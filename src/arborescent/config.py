@@ -9,11 +9,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
-from .domain import ArchitectureScope, Policy, PolicyError, RingRule
+from .domain import ArchitectureScope, ChildArbor, Policy, PolicyError, RingRule
 from .ports import FileSystem
 from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS
 
-__all__ = ["find_policy", "load_policy", "policy_from_mapping"]
+__all__ = ["find_child_policy", "find_policy", "load_policy", "policy_from_mapping"]
 
 
 def find_policy(fs: FileSystem, start: Path) -> Path:
@@ -34,6 +34,34 @@ def load_policy(fs: FileSystem, path: Path) -> tuple[Policy, Path]:
     if raw is None:
         raise PolicyError(f"{path} has no [tool.arborescent] table")
     return policy_from_mapping(raw), path.parent
+
+
+def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Path:
+    """Find a policy directly inside a declared child root; never inherit an ancestor policy."""
+    child_root = parent_root / child_path
+    if not fs.is_dir(child_root):
+        raise PolicyError(f"child arbor {child_path!r} is not a directory")
+    try:
+        parent_resolved = fs.resolve(parent_root)
+        child_resolved = fs.resolve(child_root)
+    except OSError as exc:
+        raise PolicyError(f"child arbor {child_path!r} cannot be resolved: {exc}") from exc
+    if child_resolved == parent_resolved or parent_resolved not in child_resolved.parents:
+        raise PolicyError(f"child arbor {child_path!r} resolves outside the parent root")
+    arborescent = child_root / "arborescent.toml"
+    if fs.is_file(arborescent):
+        return arborescent
+    pyproject = child_root / "pyproject.toml"
+    if fs.is_file(pyproject):
+        try:
+            data = tomllib.loads(fs.read_text(pyproject))
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+            raise PolicyError(f"child arbor {child_path!r} has an invalid pyproject.toml: {exc}") from exc
+        if isinstance(data.get("tool"), Mapping) and "arborescent" in data["tool"]:
+            return pyproject
+    raise PolicyError(
+        f"child arbor {child_path!r} must declare its own arborescent.toml or [tool.arborescent] in pyproject.toml"
+    )
 
 
 def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
@@ -66,13 +94,14 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         ruff_overrides=ruff_overrides,
         customization_labels=customizations,
         practices=dict(raw.get("practices", {})),
+        children=_child_arbors(raw),
         preset=PRESETS[preset_name],
         io_modules=frozenset(io_modules),
     )
 
 
 _SCOPED_ROOT_GLOBALS = frozenset({
-    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold",
+    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
     "ruff", "practices", "exclude",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
@@ -100,7 +129,9 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
             raise PolicyError(f"scope {name!r} requires {sorted(missing)}")
         public = _scope_strings(raw_scope, "public")
         depends_on = _scope_strings(raw_scope, "depends_on")
-        child_raw = {key: value for key, value in raw.items() if key in _SCOPED_ROOT_GLOBALS}
+        child_raw = {
+            key: value for key, value in raw.items() if key in _SCOPED_ROOT_GLOBALS and key != "children"
+        }
         child_raw.update({key: value for key, value in raw_scope.items() if key in _SCOPE_ARCHITECTURE_KEYS})
         child_raw["sources"] = raw_scope["sources"]
         child_raw["source_roots"] = raw_scope["source_roots"]
@@ -121,6 +152,7 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
         entry_scripts=tuple(script for scope in scopes for script in scope.policy.entry_scripts),
         dependencies={},
         forbid_everywhere=(),
+        children=_child_arbors(raw),
         scopes=tuple(scopes),
     )
 
@@ -132,6 +164,13 @@ def _scope_strings(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
     if len(value) != len(set(value)):
         raise PolicyError(f"scope `{key}` must not contain duplicates")
     return tuple(cast("list[str]", value))
+
+
+def _child_arbors(raw: Mapping[str, Any]) -> tuple[ChildArbor, ...]:
+    value = raw.get("children", [])
+    if not isinstance(value, list) or not all(isinstance(path, str) and path for path in value):
+        raise PolicyError("`children` must be a list of non-empty relative package paths")
+    return tuple(ChildArbor(path) for path in value)
 
 
 def _core_policy(raw: Mapping[str, Any]) -> tuple[Policy, Mapping[str, Mapping[str, Any]]]:

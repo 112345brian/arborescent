@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Preset
@@ -18,6 +18,7 @@ __all__ = [
     "EFFECT_RULES",
     "NOISE_DIRS",
     "ArchitectureScope",
+    "ChildArbor",
     "Policy",
     "PolicyError",
     "RingRule",
@@ -151,6 +152,13 @@ class ArchitectureScope:
 
 
 @dataclass(frozen=True)
+class ChildArbor:
+    """A nested package root whose own direct Arborescent policy owns its source."""
+
+    path: str
+
+
+@dataclass(frozen=True)
 class Policy:
     """The single source of truth that the three tool configs and Arborescent's own checks derive from."""
 
@@ -176,6 +184,7 @@ class Policy:
     io_modules: frozenset[str] = IO_MODULES  # stdlib modules that mean "I/O, process or OS"
     disabled_tools: tuple[str, ...] = ()
     scopes: tuple[ArchitectureScope, ...] = ()
+    children: tuple[ChildArbor, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_rings(self.rings, self.classify, bool(self.scopes))
@@ -183,6 +192,7 @@ class Policy:
             if not pattern or not targets:
                 raise PolicyError("`module_forbid_imports` needs non-empty module patterns and target lists")
         _validate_disabled_tools(self.disabled_tools)
+        _validate_child_arbors(self.children)
         if self.python not in SUPPORTED_PYTHONS:
             raise PolicyError(f"`python` {self.python!r} is not supported; choose one of {list(SUPPORTED_PYTHONS)}")
         _validate_suggestion_threshold(self.suggestion_threshold)
@@ -337,6 +347,30 @@ def _validate_scopes(scopes: tuple[ArchitectureScope, ...]) -> None:
     _validate_scope_dependencies(scopes, set(names))
     _validate_scope_source_paths(scopes)
     _validate_scope_acyclic(scopes, names)
+
+
+def _validate_child_arbors(children: tuple[ChildArbor, ...]) -> None:
+    paths = [child.path for child in children]
+    for path in paths:
+        parsed = PurePosixPath(path)
+        windows_path = PureWindowsPath(path)
+        if (
+            not path
+            or parsed.is_absolute()
+            or windows_path.is_absolute()
+            or bool(windows_path.drive)
+            or path in {".", ".."}
+            or ".." in parsed.parts
+            or "\\" in path
+            or parsed.as_posix() != path
+        ):
+            raise PolicyError(f"child arbor path {path!r} must be a normalized relative path beneath the parent")
+    if len(set(paths)) != len(paths):
+        raise PolicyError("child arbor paths must be unique")
+    for index, path in enumerate(paths):
+        for other in paths[index + 1 :]:
+            if _path_contains(path, other) or _path_contains(other, path):
+                raise PolicyError(f"child arbor paths may not overlap: {path!r} and {other!r}")
 
 
 def _validate_scope_dependencies(scopes: tuple[ArchitectureScope, ...], known: set[str]) -> None:

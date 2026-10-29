@@ -197,7 +197,16 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
             root,
             svc,
         )
-    opts = Options(args.changed, args.type_checker, not args.no_tools, args.require_tools, not args.no_baseline, args.require_profile)
+    opts = Options(
+        changed=args.changed,
+        type_checker=args.type_checker,
+        tools=not args.no_tools,
+        require_tools=args.require_tools,
+        use_baseline=not args.no_baseline,
+        require_profile=args.require_profile,
+        growth_against=args.growth_against,
+        no_cache=args.no_cache,
+    )
     report = run_check(policy, root, svc, opts)
     _print_rule_label(policy)
     _print_excluded(report)

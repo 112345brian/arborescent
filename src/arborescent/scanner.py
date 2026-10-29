@@ -297,10 +297,11 @@ class FsScanner:
         unclassified: list[tuple[str, str]] = []
         vendors: dict[str, list[str]] = {}
         all_paths, tracked = _listed_paths(root, self._runner)
+        excluded_paths = (*policy.exclude, *(child.path for child in policy.children))
         for rel in all_paths:
-            if _excluded_by_policy(rel, policy.exclude):
+            if _excluded_by_policy(rel, excluded_paths):
                 if rel.endswith(".py"):
-                    folder = _excluded_folder(rel, policy.exclude)
+                    folder = _excluded_folder(rel, excluded_paths)
                     excluded[folder] = excluded.get(folder, 0) + 1
                 continue
             if _noise_parent(rel, tracked):
@@ -315,7 +316,7 @@ class FsScanner:
 
         py_paths = [rel for rel in all_paths if rel.endswith(".py")]
         for rel in py_paths:
-            if _excluded_by_policy(rel, policy.exclude) or _noise_parent(rel, tracked) or _vendor_parent(rel) is not None:
+            if _excluded_by_policy(rel, excluded_paths) or _noise_parent(rel, tracked) or _vendor_parent(rel) is not None:
                 continue
             _add_discovered(found, policy, rel)
             module = next((name for name, _, path in found.values() if path == rel), None)

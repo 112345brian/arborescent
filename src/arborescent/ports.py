@@ -51,6 +51,8 @@ class FileSystem(Protocol):
 
     def is_dir(self, path: Path) -> bool: ...
 
+    def resolve(self, path: Path) -> Path: ...  # strict canonical path, following symlinks
+
     def glob(self, root: Path, pattern: str) -> list[Path]: ...  # sorted; ``**`` spans folders
 
     def rglob(self, root: Path, pattern: str) -> list[Path]: ...  # sorted; files and folders at any depth

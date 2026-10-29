@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import mini_policy, write_files
+from arborescent_helpers import MINI, mini_policy, write_files
 
 from arborescent.config import policy_from_mapping
 from arborescent.domain import Policy, PolicyError
@@ -212,3 +212,18 @@ def test_partial_scope_indexes_match_full_scan(tmp_path: Path) -> None:
 
     assert partial.scope_by_module == full.scope_by_module == {"core": "alpha", "parser": "shared"}
     assert set(partial.modules) == {"core"}
+
+
+def test_parent_scan_excludes_declared_child_arbor_source(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "app/domain.py": "VALUE = 1\n",
+        "packages/collection_core/core.py": "VALUE = 2\n",
+        "packages/integrated/part.py": '__arbor__ = {"ring": "domain"}\nVALUE = 3\n',
+    })
+    policy = policy_from_mapping({**MINI, "children": ["packages/collection_core"]})
+
+    scan = FsScanner().scan(policy, tmp_path)
+
+    assert set(scan.modules) == {"app.domain", "packages.integrated.part"}
+    assert scan.unclassified == ()
+    assert scan.excluded["packages/collection_core"] == 1

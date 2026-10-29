@@ -13,7 +13,7 @@ uses `pathlib.PurePosixPath` only for lexical path validation; it does not acces
 
 | ring | may import | external packages | role |
 |---|---|---|---|
-| domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types, rule ids (`Rule`), violations, facts about a parsed module, presets |
+| domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types (including declared child-arbor paths), rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
 | application | domain, ports | `pathlib`, `concurrent` | use cases: generate, check, baseline, selftest, suggestions, practices |
 | adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time`, `sysconfig`, `tomllib` | focused file-system, scanner, clock, subprocess, engine and type-checker adapters |
@@ -72,11 +72,16 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
    runner, the file system (`LocalFileSystem`; tests use `testing.FakeFileSystem`), a clock, the engine adapters (`engines`: import-linter, tach) and the type-checker adapters.
 2. `engine.run_check` starts every `Engine` in `Services` (import-linter, tach) and the chosen type checker in parallel. They run as
    subprocesses behind the `ToolRunner` port; a new engine is an adapter, not an edit to `run_check`. An unknown type
-   checker name is a `PolicyError`, and the worker pool is always shut down.
+   checker name is a `PolicyError`, and the worker pool is always shut down. It then runs each declared child arbor from
+   the child's direct policy root through the same `ToolRunner`; child status contributes to the parent result.
 3. Meanwhile the scanner finds every module and parses each file once (content-hash cached); `rules.check_modules`,
    suppression and `discard()` inventories, and the practices run over that one parse.
 4. `generate.generate` renders the expected tool configs in memory; `engine.drift` diffs them against the committed files.
 5. `baseline.apply` compares the violations with the baseline: new ones fail, entries that vanished are reported stale.
+
+The parent scanner excludes only explicitly declared child roots. All other packages remain assigned to the parent's
+single policy or named scopes. A declared child owns its config and baseline; parent certification recursively requires
+every child to pass its requested check profile.
 
 ## Rules of the house
 

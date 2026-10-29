@@ -7,18 +7,25 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import time
 import tomllib
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import mini_policy, write_files
+from arborescent_helpers import MINI, mini_policy, write_files
 
 import arborescent.selftest as selftest_mod
 from arborescent import baseline
-from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.adapters import (
+    FsScanner,
+    LocalFileSystem,
+    SubprocessToolRunner,
+    SystemClock,
+)
 from arborescent.bench import bench_one
 from arborescent.cli import main
+from arborescent.config import policy_from_mapping
 from arborescent.domain import PolicyError, ToolResult, Violation
 from arborescent.engine import (
     Options,
@@ -483,3 +490,59 @@ def test_bench_accepts_scoped_policy(repo: Path) -> None:
     tach_text = (repo / "tach.toml").read_text(encoding="utf-8")
     assert 'path = "alpha.core"' in tach_text
     assert 'layer = "alpha__domain"' in tach_text
+
+
+def test_child_arbor_failure_fails_parent_check(repo: Path) -> None:
+    child = repo / "packages" / "core"
+    child.mkdir(parents=True)
+    (child / "arborescent.toml").write_text('rings = ["domain"]\nsources = ["src"]\n', encoding="utf-8")
+    runner = FakeToolRunner({sys.executable}, {sys.executable: ToolResult(1, "child failed", "")})
+    policy = policy_from_mapping({**MINI, "children": ["packages/core"]})
+
+    report = run_check(policy, repo, services(runner), Options(tools=False))
+
+    child_run = next(engine for engine in report.engines if engine.name == "child arbor packages/core")
+    assert child_run.status == "fail"
+    assert "child failed" in child_run.lines
+    assert not report.ok and not report.configured_ok
+
+
+def test_child_arbor_receives_parent_profile_requirement(repo: Path) -> None:
+    child = repo / "packages" / "core"
+    child.mkdir(parents=True)
+    (child / "arborescent.toml").write_text('rings = ["domain"]\nsources = ["src"]\n', encoding="utf-8")
+    runner = FakeToolRunner({sys.executable})
+    policy = policy_from_mapping({**MINI, "children": ["packages/core"]})
+
+    _ = run_check(policy, repo, services(runner), Options(tools=False, require_profile=True))
+
+    command = next(call for call in runner.calls if call[0] == sys.executable)
+    assert "--require-profile" in command
+    assert command[command.index("--config") + 1] == str(child / "arborescent.toml")
+
+
+def test_nested_child_arbor_failure_fails_parent_recursively(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_files(repo, {"app/domain.py": "VALUE = 1\n"})
+    write_files(repo, {
+        "packages/core/arborescent.toml": (
+            'rings = ["domain"]\nsources = ["src"]\nsource_roots = ["src"]\n'
+            'children = ["nested"]\n[classify]\n"core" = "domain"\n'
+        ),
+        "packages/core/src/core.py": "VALUE = 2\n",
+        "packages/core/nested/arborescent.toml": (
+            'rings = ["domain"]\nsources = ["src"]\nsource_roots = ["src"]\n'
+        ),
+        "packages/core/nested/src/leaf.py": "VALUE = 3\n",
+    })
+    policy = policy_from_mapping({**MINI, "children": ["packages/core"]})
+    source_root = Path(__file__).resolve().parents[1] / "src"
+    monkeypatch.setenv("PYTHONPATH", str(source_root))
+    runner = SubprocessToolRunner()
+    svc = Services(FsScanner(), runner, CHECKERS, LocalFileSystem(), SystemClock(), default_engines())
+
+    report = run_check(policy, repo, svc, Options(tools=False, use_baseline=False))
+
+    child_run = next(engine for engine in report.engines if engine.name == "child arbor packages/core")
+    assert child_run.status == "fail"
+    assert any("unclassified" in line for line in child_run.lines)
+    assert not report.ok

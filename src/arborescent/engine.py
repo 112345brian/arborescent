@@ -3,6 +3,7 @@ shared parse, then apply the baseline ratchet."""
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 
 from . import baseline as ratchet_mod
 from .certification import PROFILE, certify
+from .config import find_child_policy
 from .domain import Policy, PolicyError, Rule, ToolResult, Violation
 from .generate import generate
 from .ports import (
@@ -51,6 +53,8 @@ class Options:
     require_tools: bool = False  # a missing engine is a failure, not a skip
     use_baseline: bool = True
     require_profile: bool = False
+    growth_against: str | None = None
+    no_cache: bool = False
 
 
 @dataclass
@@ -229,6 +233,46 @@ def _tool(services: Services, engine: Engine, files: Sequence[str], root: Path, 
     return EngineRun(name, status, result.seconds, text[-15:] if status == "fail" else text[-1:], findings)
 
 
+def _child_arbor_command(config_path: Path, opts: Options) -> list[str]:
+    argv = [sys.executable, "-m", "arborescent", "--config", str(config_path.resolve()), "check"]
+    flags = (
+        (not opts.tools, "--no-tools"),
+        (opts.require_tools, "--require-tools"),
+        (opts.require_profile, "--require-profile"),
+        (not opts.use_baseline, "--no-baseline"),
+        (opts.no_cache, "--no-cache"),
+    )
+    argv.extend(flag for enabled, flag in flags if enabled)
+    if opts.type_checker is not None:
+        argv.extend(("--type-checker", opts.type_checker))
+    if opts.growth_against is not None:
+        argv.extend(("--growth-against", opts.growth_against))
+    return argv
+
+
+def _child_arbor_runs(policy: Policy, root: Path, services: Services, opts: Options) -> list[EngineRun]:
+    runs: list[EngineRun] = []
+    for child in policy.children:
+        name = f"child arbor {child.path}"
+        child_root = root / child.path
+        try:
+            config_path = find_child_policy(services.fs, root, child.path)
+        except PolicyError as exc:
+            runs.append(EngineRun(name, "fail", 0.0, [str(exc)]))
+            continue
+        if not services.runner.available(sys.executable):
+            runs.append(EngineRun(name, "fail", 0.0, [f"{sys.executable} is not available to run the child policy"]))
+            continue
+
+        argv = _child_arbor_command(config_path, opts)
+        result = services.runner.run(argv, child_root)
+        output = (result.stdout + result.stderr).strip().splitlines()
+        status = "ok" if result.returncode == 0 else "fail"
+        lines = output[-15:] if status == "fail" else [output[-1] if output else "child checks passed"]
+        runs.append(EngineRun(name, status, result.seconds, lines))
+    return runs
+
+
 def run_engine(services: Services, name: str, root: Path) -> EngineRun:
     """Run one named engine and collect its structured findings, failing closed if unavailable or malformed."""
     engines = (*services.engines, *services.checkers)
@@ -321,6 +365,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         if opts.require_profile:
             report.profile = PROFILE
             report.profile_failures = certify(root, policy, scan, services.runner, services.fs)
+        report.engines.extend(_child_arbor_runs(policy, root, services, opts))
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
     report.seconds = services.clock.now() - started

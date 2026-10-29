@@ -18,6 +18,7 @@ settings. The two forms cannot be mixed.
 | `sources` | `["."]` | Folders or single files to scan. A single `.py` file is an entry script, not a package. |
 | `source_roots` | `["."]` | Folders that module names are relative to (`src` for a `src/app` layout). Also handed to tach. |
 | `exclude` | `[]` | Globs matched against a path or a file/folder name to skip while scanning. Excluded Python files are counted by folder on every `check`. |
+| `children` | `[]` | Explicit nested package roots with their own direct Arborescent policy. Parent scanning skips these roots; `check` runs each child recursively. Unlisted packages remain in the parent's policy. |
 | `module_forbid_imports` | `{}` | Module glob -> internal module/package names this module may not import, in addition to ring rules. |
 | `preset` | `"strict"` | How much of the external and OS rules applies: `strict`, `standard` or `relaxed` (see below). |
 | `io_modules` | built-in set | Stdlib modules that count as I/O, process or OS. Replaces the default set; `[]` means none. |
@@ -52,10 +53,33 @@ repository component. Each scope requires non-empty `sources`, `source_roots` an
 | `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbid_circular_imports` | existing defaults | Existing architecture settings, evaluated within this scope. |
 
 Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
-`ruff`, `practices` and `exclude` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
+`ruff`, `practices`, `exclude` and `children` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
 `source_roots`, `classify`, `ring`, `preset`, `io_modules`, `groups` and the other architecture settings) are rejected
 when `scopes` is present. Scope names and dependencies must be unique and known, and the dependency graph must be
 acyclic.
+
+## Nested package arbors
+
+Use `children` when a package inside the repository owns a separate architecture policy. Each path is relative to the
+parent policy root, must be unique and non-overlapping, and must contain its own `arborescent.toml` or a
+`pyproject.toml` with `[tool.arborescent]` directly at that child root. Arborescent never searches upward for a child
+policy, so a missing child config cannot silently inherit the parent's rules.
+
+```toml
+[tool.arborescent]
+children = ["packages/collection_core"]
+```
+
+The parent scan excludes files under declared child roots. Other packages and source directories stay under the
+parent's own integrated policy unless explicitly declared as children. `arborescent check` invokes each child from its
+own root, so the child uses its own rings, baseline, and native tool configs; nested children are checked recursively.
+The parent's `CONSISTENT` status requires its configured checks and every child's configured checks to pass. With
+`--require-profile`, the parent passes that requirement to every child and prints `CERTIFIED` only when the parent and
+all children meet the minimum profile. A missing or failing child makes the parent check fail.
+
+Arborescent does not rewrite project-owned Tach, Ruff, or type-checker configuration. When those parent tools should
+only govern parent source, exclude each child path in their native config as well. The child invocation runs those tools
+from the child root with the child's native configuration.
 
 For example, libraries with different core layers can share one repository-owned binary parser:
 

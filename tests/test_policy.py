@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 from arborescent_helpers import MINI, mini_policy, ring_with
 
-from arborescent.config import policy_from_mapping
+from arborescent.adapters import LocalFileSystem
+from arborescent.config import find_child_policy, policy_from_mapping
 from arborescent.domain import ALL, Policy, PolicyError, RingRule
 
 
@@ -243,6 +244,14 @@ def test_scopes_can_reuse_ring_names() -> None:
     assert policy.scope("shared").policy.rings[0].name == "domain"
 
 
+def test_declared_children_can_coexist_with_parent_scopes() -> None:
+    policy = policy_from_mapping({**_scoped_raw(), "children": ["packages/core"]})
+
+    assert tuple(child.path for child in policy.children) == ("packages/core",)
+    assert {scope.name for scope in policy.scopes} == {"alpha", "shared"}
+    assert all(not scope.policy.children for scope in policy.scopes)
+
+
 def test_scope_config_rejects_legacy_architecture_keys() -> None:
     with pytest.raises(PolicyError, match="cannot be combined with `scopes`"):
         _ = policy_from_mapping({**_scoped_raw(), "rings": ["domain"]})
@@ -281,3 +290,51 @@ def test_legacy_policy_parses_unchanged() -> None:
     assert policy.scopes == ()
     assert policy.rings == tuple(policy_from_mapping(MINI).rings)
     assert policy.sources == ("app",)
+
+
+def test_child_arbors_are_parsed_as_independent_package_roots() -> None:
+    policy = policy_from_mapping({**MINI, "children": ["packages/collection_core"]})
+
+    assert tuple(child.path for child in policy.children) == ("packages/collection_core",)
+
+
+@pytest.mark.parametrize(
+    "children",
+    [
+        ["."],
+        ["/absolute/package"],
+            ["C:/external/package"],
+        ["../outside"],
+        ["packages/core", "packages/core"],
+        ["packages", "packages/core"],
+    ],
+)
+def test_child_arbor_paths_must_be_relative_unique_and_non_overlapping(children: list[str]) -> None:
+    with pytest.raises(PolicyError, match="child"):
+        _ = policy_from_mapping({**MINI, "children": children})
+
+
+def test_child_arbor_requires_a_direct_policy_file(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    (tmp_path / "child").mkdir()
+    (tmp_path / "arborescent.toml").write_text('rings = ["domain"]\n', encoding="utf-8")
+
+    with pytest.raises(PolicyError, match=r"child.*own"):
+        find_child_policy(LocalFileSystem(), tmp_path, "child")
+
+    (tmp_path / "child" / "arborescent.toml").write_text('rings = ["domain"]\n', encoding="utf-8")
+    assert find_child_policy(LocalFileSystem(), tmp_path, "child") == tmp_path / "child" / "arborescent.toml"
+
+    (tmp_path / "child" / "arborescent.toml").unlink()
+    (tmp_path / "child" / "pyproject.toml").write_text('[tool.arborescent]\nrings = ["domain"]\n', encoding="utf-8")
+    assert find_child_policy(LocalFileSystem(), tmp_path, "child") == tmp_path / "child" / "pyproject.toml"
+
+
+def test_child_arbor_cannot_resolve_through_a_symlink_outside_parent(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    parent = tmp_path / "parent"
+    outside = tmp_path / "outside"
+    parent.mkdir()
+    outside.mkdir()
+    (parent / "child").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(PolicyError, match="resolves outside"):
+        find_child_policy(LocalFileSystem(), parent, "child")
