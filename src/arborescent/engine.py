@@ -166,7 +166,7 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     _, scan = run_own(policy, root, services, practices=False)
     wanted = [c for c in services.checkers if c.name in policy.type_checkers and not tool_is_disabled(policy, c)]
     written: list[str] = []
-    generated = sorted(generate(policy, sorted(scan.known), wanted, scan.arbor_index).items())
+    generated = sorted(generate(policy, sorted(scan.known), wanted, scan.arbor_index, scan.scope_by_module).items())
     for rel, text in generated:
         path = root / rel
         if services.fs.exists(path):
@@ -181,7 +181,7 @@ def drift(
     fs: FileSystem, policy: Policy, root: Path, scan: ScanResult, checkers: Sequence[TypeChecker],
 ) -> list[str]:
     out: list[str] = []
-    for rel, expected in sorted(generate(policy, sorted(scan.known), checkers, scan.arbor_index).items()):
+    for rel, expected in sorted(generate(policy, sorted(scan.known), checkers, scan.arbor_index, scan.scope_by_module).items()):
         path = root / rel
         if fs.is_file(path):
             current = fs.read_text(path)

@@ -6,6 +6,7 @@ Pure: ``generate`` returns ``{relative path: text}``; ``check`` diffs that again
 
 from __future__ import annotations
 
+import fnmatch
 from collections.abc import Collection, Mapping, Sequence
 
 from .domain import ALL, Policy
@@ -36,6 +37,20 @@ def tops_of(names: Collection[str]) -> list[str]:
     return sorted({n.split(".")[0] for n in names if "." in n})
 
 
+def _resolve_ring(
+    policy: Policy, name: str, arbor_index: Mapping[str, tuple[str | None, str | None]],
+    scope_by_module: Mapping[str, str],
+) -> str | None:
+    if not policy.scopes:
+        return policy.resolve_ring(arbor_index, name)
+    scope_name = scope_by_module.get(name)
+    return policy.resolve_scope_ring(scope_name, arbor_index, name) if scope_name is not None else None
+
+
+def _scope_ring(scope_name: str, ring: str) -> str:
+    return f"{scope_name}__{ring}"
+
+
 def _q(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -50,7 +65,10 @@ def _list(items: Sequence[str], indent: str = "") -> str:
 
 def import_linter(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+    scope_by_module: Mapping[str, str] = {},
 ) -> str:
+    if policy.scopes:
+        return _scoped_import_linter(policy, names, arbor_index, scope_by_module)
     by_ring: dict[str, list[str]] = {r.name: [] for r in policy.rings}
     graph = set(tops_of(names))
     for n in leaves(names):
@@ -99,9 +117,92 @@ def import_linter(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _scoped_import_linter(
+    policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+    scope_by_module: Mapping[str, str],
+) -> str:
+    ring_modules: dict[tuple[str, str], list[str]] = {
+        (scope.name, ring.name): [] for scope in policy.scopes for ring in scope.policy.rings
+    }
+    module_leaves = leaves(names)
+    for name in module_leaves:
+        scope_name = scope_by_module.get(name)
+        if scope_name is None:
+            continue
+        ring = _resolve_ring(policy, name, arbor_index, scope_by_module)
+        if ring is not None:
+            ring_modules[scope_name, ring].append(name)
+    lines = [HEADER, "[tool.importlinter]", f"root_packages = {_list(tops_of(names))}", "include_external_packages = true", ""]
+    for scope in policy.scopes:
+        lines += _scoped_ring_contracts(scope.name, scope.policy, ring_modules)
+        lines += _scope_forbid_everywhere(scope.name, scope.policy, module_leaves, scope_by_module)
+        lines += _scope_boundary_contract(policy, scope.name, scope.depends_on, module_leaves, scope_by_module)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _scoped_ring_contracts(
+    scope_name: str, policy: Policy, ring_modules: Mapping[tuple[str, str], list[str]],
+) -> list[str]:
+    lines: list[str] = []
+    for rule in policy.rings:
+        mine = ring_modules[scope_name, rule.name]
+        if not mine:
+            continue
+        allowed = policy.allowed_rings(rule.name)
+        outer = [module for candidate in policy.rings if candidate.name not in allowed for module in ring_modules[scope_name, candidate.name]]
+        if outer:
+            lines += _forbidden_contract(f"{scope_name} {rule.name} ring imports only {sorted(allowed)}", mine, outer)
+        third_party = sorted(policy.dependencies)
+        banned = sorted({*(policy.io_modules if policy.preset.bans_io else ()), *third_party} - rule.external)
+        if ALL not in rule.external and banned:
+            lines += _forbidden_contract(
+                f"{scope_name} {rule.name} ring imports no I/O or third-party package it does not list", mine, banned,
+            )
+    return lines
+
+
+def _scope_forbid_everywhere(
+    scope_name: str, policy: Policy, module_leaves: Sequence[str], scope_by_module: Mapping[str, str],
+) -> list[str]:
+    modules = [module for module in module_leaves if scope_by_module.get(module) == scope_name]
+    if modules and policy.forbid_everywhere:
+        return _forbidden_contract(f"{scope_name} scope imports no forbidden package", modules, policy.forbid_everywhere)
+    return []
+
+
+def _scope_boundary_contract(
+    policy: Policy, scope_name: str, dependencies: tuple[str, ...],
+    module_leaves: Sequence[str], scope_by_module: Mapping[str, str],
+) -> list[str]:
+    sources = [module for module in module_leaves if scope_by_module.get(module) == scope_name]
+    forbidden = []
+    for module in module_leaves:
+        target_scope = scope_by_module.get(module)
+        if target_scope is None or target_scope == scope_name:
+            continue
+        is_dependency = target_scope in dependencies
+        is_public = any(fnmatch.fnmatchcase(module, pattern) for pattern in policy.scope(target_scope).public)
+        if not is_dependency or not is_public:
+            forbidden.append(module)
+    if sources and forbidden:
+        return _forbidden_contract(f"{scope_name} scope imports only declared public modules", sources, forbidden)
+    return []
+
+
+def _forbidden_contract(name: str, sources: Sequence[str], forbidden: Sequence[str]) -> list[str]:
+    return [
+        "[[tool.importlinter.contracts]]", f"name = {_q(name)}", 'type = "forbidden"',
+        f"source_modules = {_list(sources)}", f"forbidden_modules = {_list(forbidden)}",
+        "allow_indirect_imports = true", "",
+    ]
+
+
 def tach(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+    scope_by_module: Mapping[str, str] = {},
 ) -> str:
+    if policy.scopes:
+        return _scoped_tach(policy, names, arbor_index, scope_by_module)
     explicit = not policy.expressible_by_layers()
     layers = [r.name for r in reversed(policy.rings)]  # tach: outermost first
     output_dir = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/")
@@ -134,17 +235,66 @@ def tach(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _scoped_tach(
+    policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+    scope_by_module: Mapping[str, str],
+) -> str:
+    output_dir = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/")
+    relative = "../" * len([part for part in output_dir.split("/") if part and part != "."])
+    source_roots = [f"{relative}{root}" for root in policy.source_roots]
+    excludes = [f"{relative}{pattern}" for pattern in ("**/__pycache__", "tests", ".venv", "venv", "node_modules")]
+    layers = [_scope_ring(scope.name, ring.name) for scope in policy.scopes for ring in reversed(scope.policy.rings)]
+    lines = [
+        HEADER, f"source_roots = {_list(source_roots)}", f"exclude = {_list(excludes)}",
+        f"layers = {_list(layers)}", 'root_module = "ignore"',
+        "forbid_circular_dependencies = false  # per-module depends_on lists encode scope and ring boundaries",
+        "layers_explicit_depends_on = true", "",
+    ]
+    renames = sorted({
+        f"{module}:{distribution}"
+        for scope in policy.scopes for module, distribution in scope.policy.dependencies.items()
+    })
+    lines += ["[external]", "exclude = []", f"rename = {_list(renames)}", ""]
+    classified = []
+    for name in leaves(names):
+        scope_name = scope_by_module.get(name)
+        ring = _resolve_ring(policy, name, arbor_index, scope_by_module)
+        if scope_name is not None and ring is not None:
+            classified.append((name, scope_name, ring))
+    for name, scope_name, ring in classified:
+        scope = policy.scope(scope_name)
+        lines += ["[[modules]]", f"path = {_q(name)}", f"layer = {_q(_scope_ring(scope_name, ring))}"]
+        allowed = scope.policy.allowed_rings(ring)
+        dependencies = []
+        for other, other_scope_name, other_ring in classified:
+            if other == name:
+                continue
+            same_scope_inner = other_scope_name == scope_name and other_ring in allowed
+            public_dependency = other_scope_name in scope.depends_on and any(
+                fnmatch.fnmatchcase(other, pattern) for pattern in policy.scope(other_scope_name).public
+            )
+            if same_scope_inner or public_dependency:
+                dependencies.append(other)
+        lines.append("depends_on = [" + ", ".join("{ path = " + _q(other) + " }" for other in sorted(dependencies)) + "]")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _ruff_ignores(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+    scope_by_module: Mapping[str, str] = {},
 ) -> dict[str, set[str]]:
     ignores: dict[str, set[str]] = {}
     for pattern in ("**/tests/**/*.py", "**/test_*.py", "**/*_test.py"):
         ignores.setdefault(pattern, set()).update({"ANN", "S"})  # tests have different annotation/security idioms
     for pattern in ("**/pyproject.toml", "**/ruff.toml"):
         ignores.setdefault(pattern, set()).add("RUF201")  # generated configs intentionally use stable rule codes
-    composition = policy.rings[-1].name
     for module in names:
-        if policy.resolve_ring(arbor_index, module) != composition:
+        if policy.scopes:
+            scope_name = scope_by_module.get(module)
+            if scope_name is None or _resolve_ring(policy, module, arbor_index, scope_by_module) != policy.scope(scope_name).policy.rings[-1].name:
+                continue
+        elif policy.resolve_ring(arbor_index, module) != policy.rings[-1].name:
             continue
         base = module.replace(".", "/")
         for pattern in (f"**/{base}.py", f"**/{base}/**.py"):
@@ -157,9 +307,10 @@ def _ruff_ignores(
 
 def ruff(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+    scope_by_module: Mapping[str, str] = {},
 ) -> str:
     """Render the shared Ruff rules and the small ring-specific exception for composition printing."""
-    ignores = _ruff_ignores(policy, names, arbor_index)
+    ignores = _ruff_ignores(policy, names, arbor_index, scope_by_module)
     overrides = policy.ruff_overrides
     vendor = ("vendor", "vendored", "third_party", "site-packages")
     excludes = sorted({pattern for name in vendor for pattern in (f"**/{name}", f"**/{name}/**")})
@@ -194,14 +345,15 @@ def ruff(
 def generate(
     policy: Policy, names: Sequence[str], checkers: Sequence[TypeChecker],
     arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
+    scope_by_module: Mapping[str, str] = {},
 ) -> dict[str, str]:
     """Every generated file, keyed by posix path relative to the policy root."""
     prefix = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/") + "/"
     paths = sorted(set(policy.sources))
     files = {
-        prefix + IMPORT_LINTER_FILE: import_linter(policy, names, arbor_index),
-        prefix + TACH_FILE: tach(policy, names, arbor_index),
-        prefix + "ruff.toml": ruff(policy, names, arbor_index),
+        prefix + IMPORT_LINTER_FILE: import_linter(policy, names, arbor_index, scope_by_module),
+        prefix + TACH_FILE: tach(policy, names, arbor_index, scope_by_module),
+        prefix + "ruff.toml": ruff(policy, names, arbor_index, scope_by_module),
     }
     for checker in checkers:
         files[prefix + checker.config_file] = checker.render_config(policy, paths)
