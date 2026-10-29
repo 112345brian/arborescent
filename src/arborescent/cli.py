@@ -25,7 +25,8 @@ from .engine import (
     write_generated,
 )
 from .engines import default_engines
-from .ports import ScanResult
+from .packages import PackageCatalog
+from .ports import FileSystem, ScanResult
 from .selftest import selftest
 from .typecheckers import all_checkers
 
@@ -44,35 +45,138 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
         default_engines(output_dir),
     )
 
+
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="arborescent", description="One architecture policy -> import-linter, tach, a type checker.")
-    p.add_argument("--config", type=Path, help="arborescent.toml or pyproject.toml (default: search upwards)")
+    p = argparse.ArgumentParser(
+        prog="arborescent",
+        description="One architecture policy -> import-linter, tach, a type checker.",
+    )
+    p.add_argument(
+        "--config",
+        type=Path,
+        help="arborescent.toml or pyproject.toml (default: search upwards)",
+    )
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("generate", help="create missing optional tool config presets")
-    install = sub.add_parser("install-tools", help="install missing check tools into the active Python environment")
-    install.add_argument("--type-checker", choices=sorted(all_checkers()), help="install this type checker instead of the policy default")
-    install.add_argument("--yes", action="store_true", help="install without prompting (explicitly mutates this environment)")
-    c = sub.add_parser("check", help="drift, engines (parallel), own checks, baseline ratchet")
-    c.add_argument("--changed", metavar="REF", help="check only files changed since this git ref")
-    c.add_argument("--type-checker", choices=sorted(all_checkers()), help="override the policy's type checker")
-    c.add_argument("--no-tools", action="store_true", help="skip import-linter, tach and the type checker")
-    c.add_argument("--require-tools", action="store_true", help="a missing engine fails instead of skipping")
-    c.add_argument("--install-tools", action="store_true", help="prompt to install missing check tools before checking")
-    c.add_argument("--yes", action="store_true", help="install missing check tools without prompting (requires --install-tools)")
-    c.add_argument("--require-profile", action="store_true", help="require Arborescent minimum profile v1")
-    c.add_argument("--no-baseline", action="store_true", help="ignore the baseline: report every violation")
-    c.add_argument("--growth-against", metavar="REF", help="verify baseline growth entries against a git ref")
+    install = sub.add_parser(
+        "install-tools",
+        help="install missing check tools into the active Python environment",
+    )
+    install.add_argument(
+        "--type-checker",
+        choices=sorted(all_checkers()),
+        help="install this type checker instead of the policy default",
+    )
+    install.add_argument(
+        "--yes",
+        action="store_true",
+        help="install without prompting (explicitly mutates this environment)",
+    )
+    c = sub.add_parser(
+        "check", help="drift, engines (parallel), own checks, baseline ratchet"
+    )
+    c.add_argument(
+        "--changed", metavar="REF", help="check only files changed since this git ref"
+    )
+    c.add_argument(
+        "--type-checker",
+        choices=sorted(all_checkers()),
+        help="override the policy's type checker",
+    )
+    c.add_argument(
+        "--no-tools",
+        action="store_true",
+        help="skip import-linter, tach and the type checker",
+    )
+    c.add_argument(
+        "--require-tools",
+        action="store_true",
+        help="a missing engine fails instead of skipping",
+    )
+    c.add_argument(
+        "--install-tools",
+        action="store_true",
+        help="prompt to install missing check tools before checking",
+    )
+    c.add_argument(
+        "--yes",
+        action="store_true",
+        help="install missing check tools without prompting (requires --install-tools)",
+    )
+    c.add_argument(
+        "--require-profile",
+        action="store_true",
+        help="require Arborescent minimum profile v1",
+    )
+    c.add_argument(
+        "--no-baseline",
+        action="store_true",
+        help="ignore the baseline: report every violation",
+    )
+    c.add_argument(
+        "--growth-against",
+        metavar="REF",
+        help="verify baseline growth entries against a git ref",
+    )
     c.add_argument("--no-cache", action="store_true")
-    b = sub.add_parser("baseline", help="create or shrink the baseline; growth must be explicit")
+    b = sub.add_parser(
+        "baseline", help="create or shrink the baseline; growth must be explicit"
+    )
     b.add_argument("--adopt", metavar="FAMILY", help="adopt one new rule family once")
-    b.add_argument("--allow-growth", action="store_true", help="allow baseline growth with a required reason")
+    b.add_argument(
+        "--allow-growth",
+        action="store_true",
+        help="allow baseline growth with a required reason",
+    )
     b.add_argument("--reason", help="explain why new baseline keys are being recorded")
-    sub.add_parser("discover", help="list in-scope Python files that still need a ring classification")
+    sub.add_parser(
+        "discover",
+        help="list in-scope Python files that still need a ring classification",
+    )
     sub.add_parser("selftest", help="mutation-test the rules")
-    b = sub.add_parser("bench", help="time every engine, cold and warm, on prepared codebases")
-    b.add_argument("dirs", nargs="+", type=Path, help="directories that each contain an arborescent.toml")
-    b.add_argument("--checkers", nargs="*", choices=sorted(all_checkers()), default=sorted(all_checkers()))
+    packages = sub.add_parser(
+        "packages", help="validate, list or extract declared package metadata"
+    )
+    package_actions = packages.add_subparsers(dest="package_action", required=True)
+    for action in ("validate", "list"):
+        command = package_actions.add_parser(action)
+        command.add_argument(
+            "--catalog",
+            default="packages.toml",
+            help="package metadata file relative to repository root",
+        )
+    extract = package_actions.add_parser("extract")
+    extract.add_argument("package_id")
+    extract.add_argument(
+        "--output", type=Path, required=True, help="new destination directory"
+    )
+    extract.add_argument(
+        "--catalog",
+        default="packages.toml",
+        help="package metadata file relative to repository root",
+    )
+    extract.add_argument(
+        "--with-dependencies",
+        action="store_true",
+        help="include declared dependency packages",
+    )
+    b = sub.add_parser(
+        "bench", help="time every engine, cold and warm, on prepared codebases"
+    )
+    b.add_argument(
+        "dirs",
+        nargs="+",
+        type=Path,
+        help="directories that each contain an arborescent.toml",
+    )
+    b.add_argument(
+        "--checkers",
+        nargs="*",
+        choices=sorted(all_checkers()),
+        default=sorted(all_checkers()),
+    )
     return p
+
 
 def main(argv: Sequence[str] | None = None, services: Services | None = None) -> int:
     parser = _parser()
@@ -83,14 +187,40 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
         if args.command == "bench":
             return run_bench(args.dirs, args.checkers, default_services)
         fs = services.fs if services else LocalFileSystem()
+        if args.command == "packages":
+            root = (
+                args.config.parent
+                if args.config
+                else _find_catalog_root(fs, Path.cwd(), args.catalog)
+            )
+            return _packages(args, root, fs)
         policy, root = load_policy(fs, args.config or find_policy(fs, Path.cwd()))
-        svc = services or default_services(root, cache=not getattr(args, "no_cache", False), output_dir=policy.output_dir)
+        svc = services or default_services(
+            root,
+            cache=not getattr(args, "no_cache", False),
+            output_dir=policy.output_dir,
+        )
         return _dispatch(args, policy, root, svc)
     except PolicyError as exc:
         print(f"arborescent: {exc}", file=sys.stderr)
         return 2
 
-def _dispatch(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+
+def _find_catalog_root(fs: FileSystem, start: Path, catalog_path: str) -> Path:
+    candidate = Path(catalog_path)
+    if candidate.is_absolute():
+        if not fs.is_file(candidate):
+            raise PolicyError(f"package catalog does not exist: {candidate}")
+        return candidate.parent
+    for folder in (start, *start.parents):
+        if fs.is_file(folder / candidate):
+            return folder
+    raise PolicyError(f"no {catalog_path!r} found from {start}")
+
+
+def _dispatch(
+    args: argparse.Namespace, policy: Policy, root: Path, svc: Services
+) -> int:
     if args.command == "generate":
         return _generate(policy, root, svc)
     if args.command == "install-tools":
@@ -101,7 +231,28 @@ def _dispatch(args: argparse.Namespace, policy: Policy, root: Path, svc: Service
         return _discover(policy, root, svc)
     if args.command == "selftest":
         return _selftest(policy, root, svc)
+    if args.command == "packages":
+        return _packages(args, root, svc.fs)
     return _check(args, policy, root, svc)
+
+
+def _packages(args: argparse.Namespace, root: Path, fs: FileSystem) -> int:
+    catalog = PackageCatalog.load(fs, root, args.catalog)
+    if args.package_action == "validate":
+        print(f"valid: {len(catalog.packages)} packages")
+        return 0
+    if args.package_action == "list":
+        for package in catalog.packages:
+            print(f"{package.id}\t{package.root}\t{package.extraction_status}")
+        return 0
+    destination = catalog.extract(
+        args.package_id,
+        args.output if args.output.is_absolute() else root / args.output,
+        include_dependencies=args.with_dependencies,
+    )
+    print(f"extracted {args.package_id} to {destination}")
+    return 0
+
 
 def _generate(policy: Policy, root: Path, svc: Services) -> int:
     _ = pick_checker(policy, svc)
@@ -109,18 +260,29 @@ def _generate(policy: Policy, root: Path, svc: Services) -> int:
         print(f"wrote {rel}")
     return 0
 
-def _baseline(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+
+def _baseline(
+    args: argparse.Namespace, policy: Policy, root: Path, svc: Services
+) -> int:
     found, _ = run_own(policy, root, svc)
     engine_names = {item.name for item in (*svc.engines, *svc.checkers)}
     if args.adopt in engine_names:
         found += run_engine(svc, args.adopt, root).violations
     elif args.adopt is None and any(
-        key.split("|", 1)[0].startswith("ruff-") for key in ratchet_mod.load(svc.fs, root / policy.baseline)
+        key.split("|", 1)[0].startswith("ruff-")
+        for key in ratchet_mod.load(svc.fs, root / policy.baseline)
     ):
         found += run_engine(svc, "ruff", root).violations
-    elif args.adopt is not None and args.adopt not in {"coverage", "effects", "suppressions", "discard"}:
+    elif args.adopt is not None and args.adopt not in {
+        "coverage",
+        "effects",
+        "suppressions",
+        "discard",
+    }:
         families = engine_names | {"coverage", "effects", "suppressions", "discard"}
-        raise PolicyError(f"unknown adoption family {args.adopt!r}; choose from {sorted(families)}")
+        raise PolicyError(
+            f"unknown adoption family {args.adopt!r}; choose from {sorted(families)}"
+        )
     count = ratchet_mod.record(
         svc.fs,
         root / policy.baseline,
@@ -158,7 +320,10 @@ def _discover_scoped(policy: Policy, scan: ScanResult) -> int:
     candidates = dict(scan.unclassified)
     for module, path in scan.paths.items():
         scope_name = scan.scope_by_module.get(module)
-        if scope_name is not None and policy.resolve_scope_ring(scope_name, scan.arbor_index, module) is None:
+        if (
+            scope_name is not None
+            and policy.resolve_scope_ring(scope_name, scan.arbor_index, module) is None
+        ):
             candidates[module] = path
     for module, path in candidates.items():
         scope_name = scan.scope_by_module.get(module) or "unowned"
@@ -169,8 +334,14 @@ def _discover_scoped(policy: Policy, scan: ScanResult) -> int:
         return 0
     print("Unclassified Python files:")
     for (scope_name, folder), paths in sorted(by_scope_folder.items()):
-        suggestion = policy.scope(scope_name).policy.rings[-1].name if scope_name != "unowned" else "none (unowned)"
-        print(f"{scope_name}: {folder}/ ({len(paths)} file(s)); suggested ring: {suggestion}")
+        suggestion = (
+            policy.scope(scope_name).policy.rings[-1].name
+            if scope_name != "unowned"
+            else "none (unowned)"
+        )
+        print(
+            f"{scope_name}: {folder}/ ({len(paths)} file(s)); suggested ring: {suggestion}"
+        )
         for path in sorted(paths):
             print(f"  {path}")
     return 0
@@ -184,7 +355,9 @@ def _selftest(policy: Policy, root: Path, svc: Services) -> int:
         print(f"SURVIVED  {line}")
     for line in rep.skipped:
         print(f"skipped   {line}")
-    print(f"selftest: {len(rep.killed)} killed, {len(rep.survived)} survived, {len(rep.skipped)} skipped")
+    print(
+        f"selftest: {len(rep.killed)} killed, {len(rep.survived)} survived, {len(rep.skipped)} skipped"
+    )
     return 0 if rep.ok else 1
 
 
@@ -192,7 +365,9 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
     install_status = 0
     if args.install_tools:
         install_status = _install_tools(
-            argparse.Namespace(type_checker=args.type_checker, yes=args.yes, continue_on_decline=True),
+            argparse.Namespace(
+                type_checker=args.type_checker, yes=args.yes, continue_on_decline=True
+            ),
             policy,
             root,
             svc,
@@ -212,7 +387,11 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
     _print_excluded(report)
     if args.growth_against:
         report.engines.append(_growth_check(args.growth_against, policy, root, svc))
-    setup_command = None if args.no_tools else _setup_install_command(policy, root, svc, args.type_checker)
+    setup_command = (
+        None
+        if args.no_tools
+        else _setup_install_command(policy, root, svc, args.type_checker)
+    )
     _print_report(args, report, setup_command)
     return 1 if install_status else (0 if report.ok else 1)
 
@@ -221,8 +400,12 @@ def _growth_check(ref: str, policy: Policy, root: Path, svc: Services) -> Engine
     started = svc.clock.now()
     git = svc.runner.run(["git", "show", f"{ref}:{policy.baseline}"], root)
     if git.returncode != 0:
-        lines = [f"could not read {policy.baseline} at {ref}: {git.stderr.strip() or git.stdout.strip()}"]
-        return EngineRun("baseline growth log", "fail", svc.clock.now() - started, lines)
+        lines = [
+            f"could not read {policy.baseline} at {ref}: {git.stderr.strip() or git.stdout.strip()}"
+        ]
+        return EngineRun(
+            "baseline growth log", "fail", svc.clock.now() - started, lines
+        )
     try:
         current = ratchet_mod.document(svc.fs, root / policy.baseline)
         with svc.fs.temporary_directory("arborescent-growth-") as temp:
@@ -232,7 +415,9 @@ def _growth_check(ref: str, policy: Policy, root: Path, svc: Services) -> Engine
         if not isinstance(at_ref, dict):
             raise ValueError("baseline at ref is not a JSON object")
         if not ratchet_mod.growth_consistent(current, at_ref):
-            lines = [f"baseline changes since {ref} are not fully accounted for by new growth log entries"]
+            lines = [
+                f"baseline changes since {ref} are not fully accounted for by new growth log entries"
+            ]
             status = "fail"
         else:
             lines, status = [f"growth log matches baseline changes since {ref}"], "ok"

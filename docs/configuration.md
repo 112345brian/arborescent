@@ -132,7 +132,54 @@ public = ["binary_parser.reader"]
 `binary_parser.reader` has one source owner and one local policy; both libraries can import it because they declare the
 dependency and the module is public. The libraries keep their independent ring hierarchies. A shared helper is never
 duplicated to satisfy scope ownership. Scope metadata stays centralized in the root config; extracting a library later
-is optional and is not performed by Arborescent.
+uses the package metadata and extraction tools below.
+
+## Package metadata and extraction
+
+Repository package ownership and extraction metadata live in a root `packages.toml` file. Arborescent owns the schema,
+validation, and extraction command; the repository declares stable package identities and the paths/roles it owns. Each
+path can carry string metadata that follows it when copied, such as the import package name or the relative path to an
+independent `arborescent.toml`.
+
+```toml
+[[packages]]
+id = "collection-core"
+name = "Shared Collection Core"
+kind = "shared-core"
+repository = "org/repo"
+root = "packages/collection-core"
+summary = "Domain-neutral run lifecycle and source execution."
+capabilities = ["source-runner", "health-aggregation"]
+depends_on = []
+extraction_status = "experimental"
+
+[[packages.paths]]
+path = "packages/collection-core/src/collection_core"
+role = "source"
+metadata = { import = "collection_core", arborescent_config = "arborescent.toml" }
+
+[[packages.paths]]
+path = "packages/collection-core/tests/test_collection_core"
+role = "tests"
+destination = "tests/test_collection_core"
+```
+
+The package root and every owned path must stay inside the repository. Package IDs are stable lowercase slugs, path
+ownership cannot overlap, and declared dependencies must form an acyclic graph. Extraction copies declared paths into a
+new destination and writes `.arborescent-package.toml` with the package ID and path metadata. A package with its own
+direct Arborescent policy is copied with that policy when it is listed as a configuration path; the child policy remains
+independently usable after extraction.
+
+```sh
+arborescent packages validate
+arborescent packages list
+arborescent packages extract collection-core --output /tmp/collection-core
+arborescent packages extract collection-core --output /tmp/collection-core --with-dependencies
+```
+
+Dependencies are included only when explicitly requested and are placed under `dependencies/<package-id>/`. The
+destination must not already exist. Extraction does not rewrite imports or invent build configuration; the package
+metadata declares the layout and the package owns its build and architecture files.
 
 `suggestion_threshold` controls a report-only hint for large files. The metric counts lines containing code tokens and
 ignores blank lines, comments, module/class/function docstrings, and multi-line literal-only data tables. Suggestions
@@ -198,7 +245,7 @@ so scopes may reuse ring names without sharing a hierarchy.
 
 Annotations apply to individual Python modules. An annotation in `__init__.py` assigns the package module's own
 ring; it does not assign rings to its descendants. Scope boundaries are configured separately through `sources`,
-`public` and `depends_on`; package extraction and per-library config relocation remain optional future work.
+`public` and `depends_on`; package extraction is separately invoked through `arborescent packages extract`.
 
 ## Rings: `[tool.arborescent.ring.<name>]` or `[tool.arborescent.scopes.<scope>.ring.<name>]`
 

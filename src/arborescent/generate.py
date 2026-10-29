@@ -9,7 +9,7 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Collection, Mapping, Sequence
 
-from .domain import ALL, Policy
+from .domain import ALL, NOISE_DIRS, Policy
 from .ports import TypeChecker
 
 __all__ = ["IMPORT_LINTER_FILE", "TACH_FILE", "generate", "tops_of"]
@@ -313,7 +313,11 @@ def ruff(
     ignores = _ruff_ignores(policy, names, arbor_index, scope_by_module)
     overrides = policy.ruff_overrides
     vendor = ("vendor", "vendored", "third_party", "site-packages")
-    excludes = sorted({pattern for name in vendor for pattern in (f"**/{name}", f"**/{name}/**")})
+    excludes = sorted({
+        pattern
+        for name in (*NOISE_DIRS, *vendor)
+        for pattern in (f"**/{name}", f"**/{name}/**")
+    })
     lines = [
         HEADER.rstrip(),
         f'target-version = "py{policy.python.replace(".", "")}"',

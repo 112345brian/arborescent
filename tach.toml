@@ -14,32 +14,52 @@ rename = []
 [[modules]]
 path = "arborescent.__main__"
 layer = "composition"
-depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.cli" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }, { path = "arborescent.testing" }, { path = "arborescent.typecheckers" }]
+depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.cli" }, { path = "arborescent.cli_install" }, { path = "arborescent.cli_report" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
 
 [[modules]]
 path = "arborescent.adapters"
 layer = "adapters"
-depends_on = [{ path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.typecheckers" }]
+depends_on = [{ path = "arborescent.clock_adapter" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
 
 [[modules]]
 path = "arborescent.baseline"
 layer = "application"
-depends_on = [{ path = "arborescent.bench" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+depends_on = [{ path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
 
 [[modules]]
 path = "arborescent.bench"
 layer = "application"
-depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.certification" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+
+[[modules]]
+path = "arborescent.certification"
+layer = "application"
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
 
 [[modules]]
 path = "arborescent.cli"
 layer = "composition"
-depends_on = [{ path = "arborescent.__main__" }, { path = "arborescent.adapters" }, { path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }, { path = "arborescent.testing" }, { path = "arborescent.typecheckers" }]
+depends_on = [{ path = "arborescent.__main__" }, { path = "arborescent.adapters" }, { path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.cli_install" }, { path = "arborescent.cli_report" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
+
+[[modules]]
+path = "arborescent.cli_install"
+layer = "composition"
+depends_on = [{ path = "arborescent.__main__" }, { path = "arborescent.adapters" }, { path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.cli" }, { path = "arborescent.cli_report" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
+
+[[modules]]
+path = "arborescent.cli_report"
+layer = "composition"
+depends_on = [{ path = "arborescent.__main__" }, { path = "arborescent.adapters" }, { path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.cli" }, { path = "arborescent.cli_install" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
+
+[[modules]]
+path = "arborescent.clock_adapter"
+layer = "adapters"
+depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
 
 [[modules]]
 path = "arborescent.config"
 layer = "application"
-depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
 
 [[modules]]
 path = "arborescent.domain"
@@ -49,12 +69,12 @@ depends_on = [{ path = "arborescent.facts" }, { path = "arborescent.presets" }, 
 [[modules]]
 path = "arborescent.engine"
 layer = "application"
-depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
 
 [[modules]]
 path = "arborescent.engines"
 layer = "adapters"
-depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.domain" }, { path = "arborescent.facts" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.typecheckers" }]
+depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.domain" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
 
 [[modules]]
 path = "arborescent.facts"
@@ -62,9 +82,29 @@ layer = "domain"
 depends_on = [{ path = "arborescent.domain" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.stdlib" }]
 
 [[modules]]
+path = "arborescent.filesystem_adapter"
+layer = "adapters"
+depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
+
+[[modules]]
 path = "arborescent.generate"
 layer = "application"
-depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.install_tools" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+
+[[modules]]
+path = "arborescent.install_tools"
+layer = "application"
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+
+[[modules]]
+path = "arborescent.installer_adapter"
+layer = "adapters"
+depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
+
+[[modules]]
+path = "arborescent.packages"
+layer = "application"
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
 
 [[modules]]
 path = "arborescent.ports"
@@ -74,7 +114,7 @@ depends_on = [{ path = "arborescent.domain" }, { path = "arborescent.facts" }, {
 [[modules]]
 path = "arborescent.practices"
 layer = "application"
-depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
 
 [[modules]]
 path = "arborescent.presets"
@@ -87,9 +127,14 @@ layer = "domain"
 depends_on = [{ path = "arborescent.domain" }, { path = "arborescent.facts" }, { path = "arborescent.presets" }, { path = "arborescent.stdlib" }]
 
 [[modules]]
+path = "arborescent.scanner"
+layer = "adapters"
+depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
+
+[[modules]]
 path = "arborescent.selftest"
 layer = "application"
-depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.stdlib" }, { path = "arborescent.suggestions" }]
 
 [[modules]]
 path = "arborescent.stdlib"
@@ -99,14 +144,19 @@ depends_on = [{ path = "arborescent.domain" }, { path = "arborescent.facts" }, {
 [[modules]]
 path = "arborescent.suggestions"
 layer = "application"
-depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }]
+depends_on = [{ path = "arborescent.baseline" }, { path = "arborescent.bench" }, { path = "arborescent.certification" }, { path = "arborescent.config" }, { path = "arborescent.domain" }, { path = "arborescent.engine" }, { path = "arborescent.facts" }, { path = "arborescent.generate" }, { path = "arborescent.install_tools" }, { path = "arborescent.packages" }, { path = "arborescent.ports" }, { path = "arborescent.practices" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.selftest" }, { path = "arborescent.stdlib" }]
 
 [[modules]]
 path = "arborescent.testing"
 layer = "adapters"
-depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.stdlib" }, { path = "arborescent.typecheckers" }]
+depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.stdlib" }, { path = "arborescent.tool_runner" }, { path = "arborescent.typecheckers" }]
+
+[[modules]]
+path = "arborescent.tool_runner"
+layer = "adapters"
+depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.typecheckers" }]
 
 [[modules]]
 path = "arborescent.typecheckers"
 layer = "adapters"
-depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }]
+depends_on = [{ path = "arborescent.adapters" }, { path = "arborescent.clock_adapter" }, { path = "arborescent.domain" }, { path = "arborescent.engines" }, { path = "arborescent.facts" }, { path = "arborescent.filesystem_adapter" }, { path = "arborescent.installer_adapter" }, { path = "arborescent.ports" }, { path = "arborescent.presets" }, { path = "arborescent.rules" }, { path = "arborescent.scanner" }, { path = "arborescent.stdlib" }, { path = "arborescent.testing" }, { path = "arborescent.tool_runner" }]

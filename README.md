@@ -127,6 +127,9 @@ arborescent discover     # list Python files that still need ring classification
 arborescent baseline     # record existing violations; future checks fail on new findings
 arborescent selftest     # mutation-test native rules and fail if a rule stops firing
 arborescent bench DIR…   # cold/warm timings of every engine on prepared codebases
+arborescent packages validate
+arborescent packages list
+arborescent packages extract PACKAGE_ID --output DIR
 ```
 
 Documentation: [CLI commands, configuration and rules](docs/configuration.md) and

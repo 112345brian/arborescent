@@ -28,7 +28,9 @@ def test_annotation_only_modules_appear_in_each_generated_ring_config() -> None:
     domain_contract = next(contract for contract in contracts if contract["name"].startswith("domain ring imports only"))
     assert domain_contract["source_modules"] == ["app.core"]
     assert domain_contract["forbidden_modules"] == ["app.cli"]
-    ignores = tomllib.loads(files["ruff.toml"])["lint"]["per-file-ignores"]
+    ruff = tomllib.loads(files["ruff.toml"])
+    assert "**/.venv" in ruff["exclude"]
+    ignores = ruff["lint"]["per-file-ignores"]
     assert ignores["**/app/cli.py"] == ["T20"]
     assert "**/app/core.py" not in ignores
 

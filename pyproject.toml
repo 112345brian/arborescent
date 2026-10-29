@@ -106,6 +106,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.selftest" = "application"
 "arborescent.suggestions" = "application"
 "arborescent.bench" = "application"
+"arborescent.packages" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
