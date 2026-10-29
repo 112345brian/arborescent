@@ -25,6 +25,7 @@ from .engine import (
     write_generated,
 )
 from .engines import default_engines
+from .ports import ScanResult
 from .selftest import selftest
 from .typecheckers import all_checkers
 
@@ -134,6 +135,8 @@ def _baseline(args: argparse.Namespace, policy: Policy, root: Path, svc: Service
 
 def _discover(policy: Policy, root: Path, svc: Services) -> int:
     _, scan = run_own(policy, root, svc, practices=False)
+    if policy.scopes:
+        return _discover_scoped(policy, scan)
     by_folder: dict[str, list[str]] = {}
     for _, path in scan.unclassified:
         folder = Path(path).parent.as_posix()
@@ -145,6 +148,29 @@ def _discover(policy: Policy, root: Path, svc: Services) -> int:
     print("Unclassified Python files:")
     for folder, paths in sorted(by_folder.items()):
         print(f"{folder}/ ({len(paths)} file(s)); suggested ring: {suggested}")
+        for path in sorted(paths):
+            print(f"  {path}")
+    return 0
+
+
+def _discover_scoped(policy: Policy, scan: ScanResult) -> int:
+    by_scope_folder: dict[tuple[str, str], list[str]] = {}
+    candidates = dict(scan.unclassified)
+    for module, path in scan.paths.items():
+        scope_name = scan.scope_by_module.get(module)
+        if scope_name is not None and policy.resolve_scope_ring(scope_name, scan.arbor_index, module) is None:
+            candidates[module] = path
+    for module, path in candidates.items():
+        scope_name = scan.scope_by_module.get(module) or "unowned"
+        folder = Path(path).parent.as_posix()
+        by_scope_folder.setdefault((scope_name, folder), []).append(path)
+    if not by_scope_folder:
+        print("discover: no unclassified Python files")
+        return 0
+    print("Unclassified Python files:")
+    for (scope_name, folder), paths in sorted(by_scope_folder.items()):
+        suggestion = policy.scope(scope_name).policy.rings[-1].name if scope_name != "unowned" else "none (unowned)"
+        print(f"{scope_name}: {folder}/ ({len(paths)} file(s)); suggested ring: {suggestion}")
         for path in sorted(paths):
             print(f"  {path}")
     return 0

@@ -8,6 +8,7 @@ import pytest
 from arborescent_helpers import mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.config import policy_from_mapping
 from arborescent.domain import Rule
 from arborescent.engine import Services
 from arborescent.selftest import plan, selftest
@@ -58,3 +59,30 @@ def test_selftest_uses_full_scan_annotations_for_mutation_planning(tmp_path: Pat
     report = selftest(policy, tmp_path, services)
     assert report.survived == []
     assert any("domain: forbidden top-level internal import of app.first" in label for label in report.killed)
+
+
+def test_selftest_covers_cross_scope_boundary(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+        "libs/beta/src/beta/api.py": "VALUE = 2\n",
+    })
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "classify": {"alpha.core": "domain"},
+                "public": ["alpha.core"],
+            },
+            "beta": {
+                "sources": ["libs/beta/src/beta"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain"], "classify": {"beta.api": "domain"},
+                "public": ["beta.api"],
+            },
+        },
+    })
+    services = Services(FsScanner(tmp_path / "cache.json"), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), [])
+
+    report = selftest(policy, tmp_path, services)
+
+    assert report.survived == []
+    assert any(line.startswith("[scope-import]") for line in report.killed)

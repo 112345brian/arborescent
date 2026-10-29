@@ -138,10 +138,19 @@ def docs_sync(
     for mod, ring in sorted(rows.items()):
         if mod not in scan.known:
             out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} lists a module that does not exist"))
-        elif policy.resolve_ring(scan.arbor_index, mod) != ring:
-            out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} says ring {ring!r} but the policy says {policy.resolve_ring(scan.arbor_index, mod)!r}"))
+        else:
+            actual = _documented_module_ring(policy, scan, mod)
+            if actual != ring:
+                out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} says ring {ring!r} but the policy says {actual!r}"))
     out += [Violation(Rule.DOCS_SYNC, m, f"module is not in the {doc} table") for m in sorted(set(scan.known) - set(rows))]
     return out
+
+
+def _documented_module_ring(policy: Policy, scan: ScanResult, module: str) -> str | None:
+    if not policy.scopes:
+        return policy.resolve_ring(scan.arbor_index, module)
+    scope_name = scan.scope_by_module.get(module)
+    return policy.resolve_scope_ring(scope_name, scan.arbor_index, module) if scope_name is not None else None
 
 
 def crlf(fs: FileSystem, root: Path, patterns: Sequence[str]) -> list[Violation]:

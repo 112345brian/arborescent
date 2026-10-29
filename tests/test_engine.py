@@ -17,6 +17,7 @@ from arborescent_helpers import mini_policy, write_files
 import arborescent.selftest as selftest_mod
 from arborescent import baseline
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.bench import bench_one
 from arborescent.cli import main
 from arborescent.domain import PolicyError, ToolResult, Violation
 from arborescent.engine import (
@@ -440,3 +441,45 @@ def test_generate_and_drift_use_scanned_annotation_rings(repo: Path) -> None:
     assert "tach.toml: differs from the policy; run `arborescent generate`" in run_check(
         policy, repo, svc, Options(tools=False),
     ).drift
+
+
+def test_discover_groups_modules_by_scope_and_suggests_local_outer_ring(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    write_files(repo, {
+        "arborescent.toml": (
+            "[scopes.alpha]\n"
+            'sources = ["libs/alpha/src/alpha"]\nsource_roots = ["libs/alpha/src"]\n'
+            'rings = ["domain", "adapters"]\n'
+            "[scopes.alpha.classify]\n\"alpha.core\" = \"domain\"\n"
+            "[scopes.beta]\n"
+            'sources = ["libs/beta/src/beta"]\nsource_roots = ["libs/beta/src"]\n'
+            'rings = ["domain", "composition"]\n'
+            "[scopes.beta.classify]\n\"beta.core\" = \"domain\"\n"
+        ),
+        "libs/alpha/src/alpha/unclassified.py": "VALUE = 1\n",
+        "libs/beta/src/beta/unclassified.py": "VALUE = 2\n",
+    })
+
+    assert main(["--config", str(repo / "arborescent.toml"), "discover"], services()) == 0
+    output = capsys.readouterr().out
+
+    assert "alpha" in output and "suggested ring: adapters" in output
+    assert "beta" in output and "suggested ring: composition" in output
+
+
+def test_bench_accepts_scoped_policy(repo: Path) -> None:
+    write_files(repo, {
+        "arborescent.toml": (
+            "[scopes.alpha]\n"
+            'sources = ["libs/alpha/src/alpha"]\nsource_roots = ["libs/alpha/src"]\n'
+            'rings = ["domain"]\n'
+            "[scopes.alpha.classify]\n\"alpha.core\" = \"domain\"\n"
+        ),
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+    })
+
+    rows = bench_one(repo, ["ty"], lambda _: services())
+
+    assert any("WHOLE check" in row for row in rows)
+    tach_text = (repo / "tach.toml").read_text(encoding="utf-8")
+    assert 'path = "alpha.core"' in tach_text
+    assert 'layer = "alpha__domain"' in tach_text

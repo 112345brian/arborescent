@@ -6,6 +6,7 @@ Ported from the throwaway mutation script behind DeepInterview's ``tests/test_ar
 
 from __future__ import annotations
 
+import fnmatch
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -36,6 +37,7 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.EFFECT_PROCESS: "effect-process is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_DYNAMIC_IMPORT: "effect-dynamic-import is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_PATCH: "effect-patch requires a configured tests folder and project-package target; covered by focused rule tests",
+    Rule.SCOPE_IMPORT: "cross-scope boundaries are mutation-tested when a project configures multiple scopes",
     Rule.CRLF: _PRACTICE,
     Rule.UNDECLARED_IMPORTS: _PRACTICE,
     Rule.INVALID_ARBOR_ANNOTATION: "annotation validity depends on the whole-package syntax index",
@@ -63,25 +65,66 @@ class SelfTestReport:
 
 
 def plan(
-    policy: Policy, paths: dict[str, str], known: frozenset[str], arbor_index: Mapping[str, tuple[str | None, str | None]]
+    policy: Policy, paths: dict[str, str], known: frozenset[str],
+    arbor_index: Mapping[str, tuple[str | None, str | None]], scope_by_module: Mapping[str, str] | None = None,
 ) -> tuple[list[Mutation], list[str]]:
     """The mutations for this policy, plus the ones that cannot be built (and why)."""
     out: list[Mutation] = []
     skipped: list[str] = []
-    for ring in policy.rings:
-        ring_mutations, ring_skipped = _ring_mutations(policy, ring.name, paths, known, arbor_index)
-        out.extend(ring_mutations)
-        skipped.extend(ring_skipped)
+    owners = scope_by_module or {}
+    local_policies = (
+        tuple((scope.name, scope.policy, frozenset(name for name in known if owners.get(name) == scope.name)) for scope in policy.scopes)
+        if policy.scopes else (("", policy, known),)
+    )
+    for _, local_policy, local_known in local_policies:
+        local_paths = {name: paths[name] for name in local_known if name in paths}
+        for ring in local_policy.rings:
+            ring_mutations, ring_skipped = _ring_mutations(local_policy, ring.name, local_paths, local_known, arbor_index)
+            out.extend(ring_mutations)
+            skipped.extend(ring_skipped)
+        if local_policy.entry_scripts:
+            entry_host = next((
+                name for name in sorted(local_known)
+                if local_policy.resolve_ring(arbor_index, name) is not None and name not in local_policy.entry_scripts
+            ), None)
+            if entry_host is not None:
+                out.append(Mutation(
+                    Rule.UNDECLARED_ENTRY_DEPENDENCY,
+                    "a project module imports a package the scripts don't declare",
+                    local_paths[entry_host], "import arborescent_probe_dist",
+                ))
     anchor = next(iter(sorted(known)), None)
-    if not policy.forbid_circular_imports:
+    forbid_circular = any(local_policy.forbid_circular_imports for _, local_policy, _ in local_policies)
+    if not forbid_circular:
         skipped.append("circular-import: disabled by policy")
     if anchor is not None:
-        out.extend(_anchor_mutations(anchor, paths[anchor], policy.forbid_circular_imports))
-    if policy.entry_scripts:
-        entry_host = next((m for m in sorted(known) if policy.resolve_ring(arbor_index, m) is not None and m not in policy.entry_scripts), None)
-        if entry_host is not None:
-            out.append(Mutation(Rule.UNDECLARED_ENTRY_DEPENDENCY, "a project module imports a package the scripts don't declare", paths[entry_host], "import arborescent_probe_dist"))
+        out.extend(_anchor_mutations(anchor, paths[anchor], forbid_circular))
+    if policy.scopes:
+        out.extend(_scope_boundary_mutations(policy, paths, known, owners))
     return out, sorted(set(skipped))
+
+
+def _scope_boundary_mutations(
+    policy: Policy, paths: dict[str, str], known: frozenset[str], owners: Mapping[str, str],
+) -> list[Mutation]:
+    mutations = []
+    for scope in policy.scopes:
+        hosts = sorted(name for name in known if owners.get(name) == scope.name and not paths[name].endswith("__init__.py"))
+        for host in hosts:
+            target = next((
+                name for name in sorted(known)
+                if (target_scope := owners.get(name)) is not None and target_scope != scope.name
+                and (
+                    target_scope not in scope.depends_on
+                    or not any(fnmatch.fnmatchcase(name, pattern) for pattern in policy.scope(target_scope).public)
+                )
+            ), None)
+            if target is not None:
+                mutations.append(Mutation(
+                    Rule.SCOPE_IMPORT, f"{scope.name}: forbidden cross-scope import of {target}", paths[host], f"import {target}",
+                ))
+                break
+    return mutations
 
 
 def _ring_mutations(
@@ -148,7 +191,7 @@ def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
 def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     services = replace(services, scanner=services.scanner.uncached())  # mutated copies must not touch the real cache
     _, scan = run_own(policy, root, services, practices=False)
-    mutations, skipped = plan(policy, dict(scan.paths), scan.known, scan.arbor_index)
+    mutations, skipped = plan(policy, dict(scan.paths), scan.known, scan.arbor_index, scan.scope_by_module)
     report = SelfTestReport([], [], skipped)
     fs = services.fs
     with fs.temporary_directory("arborescent-selftest-") as tmp:

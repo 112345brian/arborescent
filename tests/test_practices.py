@@ -13,6 +13,7 @@ import pytest
 from arborescent_helpers import mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
+from arborescent.config import policy_from_mapping
 from arborescent.practices import (
     crlf,
     docs_sync,
@@ -106,6 +107,32 @@ def test_tests_that_can_read_real_secrets_need_a_conftest_guard(tmp_path: Path) 
         {"tests/conftest.py": "import pytest\n\n@pytest.fixture(autouse=True)\ndef scrub(monkeypatch):\n    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)\n"},
     )
     assert secrets_guard(FS, tmp_path, "tests") == []
+
+
+def test_docs_sync_uses_each_scope_ring(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+        "libs/beta/src/beta/api.py": "VALUE = 2\n",
+        "architecture.md": "| `alpha.core` | `domain` |\n| `beta.api` | `adapters` |\n",
+    })
+    policy = policy_from_mapping({
+        "practices": {"docs-sync": "architecture.md"},
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain", "adapters"], "classify": {"alpha.core": "domain"},
+            },
+            "beta": {
+                "sources": ["libs/beta/src/beta"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain", "adapters"], "classify": {"beta.api": "domain"},
+            },
+        },
+    })
+    scan = FsScanner().scan(policy, tmp_path)
+
+    found = docs_sync(FS, tmp_path, "architecture.md", policy, scan)
+
+    assert [(item.subject, item.rule) for item in found] == [("beta.api", "docs-sync")]
 
 
 def test_docs_that_drift_from_the_policy_are_caught(repo: Path) -> None:
