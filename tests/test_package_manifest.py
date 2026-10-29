@@ -419,12 +419,13 @@ def test_revalidation_rejects_a_symlink_that_appears_in_the_tree_but_not_in_gene
     destination = catalog.extract("collection-core", tmp_path / "out/core")
     venv = destination / ".venv/bin"
     venv.mkdir(parents=True)
-    (venv / "python").symlink_to(Path("/usr/bin/env"))
+    (venv / "python").symlink_to(tmp_path / "missing-interpreter")
     load_extracted_package(
         FS, destination
     )  # a virtualenv created later is ordinary development
 
-    (destination / "leak").symlink_to(Path("/usr/bin/env"))
+    (tmp_path / "outside.txt").write_text("outside\n", encoding="utf-8")
+    (destination / "leak").symlink_to(tmp_path / "outside.txt")
     with pytest.raises(CatalogError, match="contains a symlink"):
         load_extracted_package(FS, destination)
 

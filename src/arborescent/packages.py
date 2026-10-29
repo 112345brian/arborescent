@@ -633,6 +633,14 @@ def load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:
     return result
 
 
+def _resolves_to_itself(fs: FileSystem, path: Path) -> bool:
+    """False for a symlink, including a dangling one (Windows raises instead of returning the path)."""
+    try:
+        return fs.resolve(path) == path
+    except OSError:
+        return False
+
+
 def _is_generated(fs: FileSystem, root: Path, path: Path) -> bool:
     """Whether ``path`` is generated output below ``root`` (the root itself is always copied)."""
     parts = path.relative_to(root).parts
@@ -708,7 +716,7 @@ def _check_current_path(fs: FileSystem, base: Path, item: ExtractedPath) -> None
         item.current_path, f"package {item.package_id} current path"
     )
     target = base.joinpath(*relative.parts)
-    if not fs.exists(target) or fs.resolve(target) != target:
+    if not fs.exists(target) or not _resolves_to_itself(fs, target):
         raise CatalogError(
             f"current path {item.current_path!r} of package {item.package_id} does not resolve inside the extracted tree"
         )
@@ -781,7 +789,7 @@ def _check_tree(fs: FileSystem, base: Path) -> None:
     for path in fs.rglob(base, "*"):
         if _is_generated(fs, base, path):
             continue
-        if fs.resolve(path) != path:
+        if not _resolves_to_itself(fs, path):
             raise CatalogError(f"extracted tree contains a symlink: {path}")
         if path.name == "arborescent.toml" and fs.is_file(path):
             try:
