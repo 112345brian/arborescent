@@ -16,8 +16,8 @@ from .ports import FileSystem
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 # Directories and files below a declared package path that are local build output, not distributable source.
-_GENERATED_DIRS = NOISE_DIRS | {"build", "dist"}
-_GENERATED_FILES = ("*.pyc",)
+_GENERATED_DIRS = NOISE_DIRS | {"build", "dist", ".pytest_cache"}
+_GENERATED_FILES = ("*.pyc", ".DS_Store")
 MANIFEST_NAME = ".arborescent-package.toml"
 MANIFEST_VERSION = 2
 
@@ -298,7 +298,7 @@ class PackageCatalog:
                     raise CatalogError(
                         f"destination overlaps package source: {destination}"
                     )
-        self.fs.mkdir(destination)
+        self._claim_destination(destination)
         try:
             copied: set[str] = set()
             placements: list[_Placement] = []
@@ -335,6 +335,31 @@ class PackageCatalog:
             raise
         return destination
 
+    def _claim_destination(self, destination: Path) -> None:
+        """Create the destination; refuse one that already holds anything, so cleanup never deletes foreign files."""
+        self.fs.mkdir(destination)
+        if self.fs.rglob(destination, "*"):  # it appeared after the exists() check
+            raise CatalogError(f"extraction destination is not empty: {destination}")
+
+    def _check_copyable(self, nested: Path) -> None:
+        """Only regular files and directories inside the repository are copied."""
+        try:
+            resolved: Path | None = self.fs.resolve(nested)
+        except (
+            OSError
+        ):  # e.g. a dangling link: Windows raises instead of returning the path
+            resolved = None
+        if (
+            resolved is None
+            or resolved != nested
+            or not resolved.is_relative_to(self.root)
+        ):
+            raise CatalogError(f"package extraction does not copy symlinks: {nested}")
+        if not self.fs.is_dir(nested) and not self.fs.is_file(nested):
+            raise CatalogError(
+                f"package extraction does not copy special files: {nested}"
+            )
+
     def _copy_owned_path(self, source: Path, target: Path) -> list[tuple[Path, Path]]:
         """Copy one owned path; return the (source file, copied file) pairs."""
         pairs: list[tuple[Path, Path]] = []
@@ -350,20 +375,7 @@ class PackageCatalog:
                 if not _is_generated(self.fs, source, nested)
             ]
             for nested in nested_paths:
-                try:
-                    nested_resolved = self.fs.resolve(nested)
-                except (
-                    OSError
-                ):  # e.g. a dangling link: Windows raises instead of returning the path
-                    nested_resolved = None
-                if (
-                    nested_resolved is None
-                    or nested_resolved != nested
-                    or not nested_resolved.is_relative_to(self.root)
-                ):
-                    raise CatalogError(
-                        f"package extraction does not copy symlinks: {nested}"
-                    )
+                self._check_copyable(nested)
             self.fs.mkdir(target)
             for nested in nested_paths:
                 nested_target = target / nested.relative_to(source)
@@ -574,6 +586,13 @@ def _semantic_lines(package: PackageDescriptor) -> list[str]:
 
 def load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:
     """Read and validate an extracted tree: current paths resolve inside it and nested policies keep their layout."""
+    try:
+        return _load_extracted_package(fs, directory)
+    except OSError as exc:
+        raise CatalogError(f"cannot read extracted package {directory}: {exc}") from exc
+
+
+def _load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:
     base = fs.resolve(directory)
     manifest_path = base / MANIFEST_NAME
     try:
@@ -598,11 +617,7 @@ def load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:
         for item in _manifest_array(data, "dependencies")
     )
     included = _strings(extraction.get("included_packages"), "included_packages")
-    known = {package.id, *(item.semantics.id for item in dependencies)}
-    if set(included) != known:
-        raise CatalogError(
-            "included_packages does not match the package and its dependencies"
-        )
+    known = _check_identities(package, dependencies, included, extraction)
     roots = {
         package.id: _current_location(_required(location, "root"), "location root")
     }
@@ -613,9 +628,7 @@ def load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:
     paths = tuple(
         _manifest_path(item, known) for item in _manifest_array(data, "paths")
     )
-    for item in paths:
-        _check_current_path(fs, base, item)
-    _check_tree(fs, base)
+    _check_layout(fs, base, paths, roots)
     result = ExtractedPackage(
         package,
         _required(origin, "repository"),
@@ -633,6 +646,45 @@ def load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:
     return result
 
 
+def _check_identities(
+    package: PackageSemantics,
+    dependencies: Sequence[ExtractedDependency],
+    included: Sequence[str],
+    extraction: Mapping[str, Any],
+) -> set[str]:
+    known = {package.id, *(item.semantics.id for item in dependencies)}
+    if set(included) != known or len(known) != len(dependencies) + 1:
+        raise CatalogError(
+            "included_packages does not match the package and its dependencies"
+        )
+    for identity in known:
+        if not _ID.match(identity):
+            raise CatalogError(
+                f"package id {identity!r} is not a stable lowercase slug"
+            )
+    if _required(extraction, "status") != "extracted":
+        raise CatalogError("extraction status must be 'extracted'")
+    return known
+
+
+def _check_layout(
+    fs: FileSystem,
+    base: Path,
+    paths: Sequence[ExtractedPath],
+    roots: Mapping[str, PurePosixPath],
+) -> None:
+    if not paths:
+        raise CatalogError(f"{MANIFEST_NAME} declares no paths")
+    for item in paths:
+        _check_current_path(fs, base, item)
+        current = _current_location(item.current_path, "current path")
+        if not current.is_relative_to(roots[item.package_id]):
+            raise CatalogError(
+                f"current path {item.current_path!r} lies outside package {item.package_id}'s current root"
+            )
+    _check_tree(fs, base)
+
+
 def _resolves_to_itself(fs: FileSystem, path: Path) -> bool:
     """False for a symlink, including a dangling one (Windows raises instead of returning the path)."""
     try:
@@ -641,15 +693,31 @@ def _resolves_to_itself(fs: FileSystem, path: Path) -> bool:
         return False
 
 
+def _is_generated_dir(fs: FileSystem, directory: Path) -> bool:
+    """A directory with a generated-output name is output unless it is a real Python package (has ``__init__.py``)."""
+    return directory.name in _GENERATED_DIRS and not fs.is_file(
+        directory / "__init__.py"
+    )
+
+
 def _is_generated(fs: FileSystem, root: Path, path: Path) -> bool:
-    """Whether ``path`` is generated output below ``root`` (the root itself is always copied)."""
+    """Whether ``path`` is generated output below ``root`` (the root itself is always copied).
+
+    Limitation: a namespace package (no ``__init__.py``) named like generated output, e.g. ``build``, is skipped.
+    """
     parts = path.relative_to(root).parts
-    if _GENERATED_DIRS.intersection(parts[:-1]):
+    if any(
+        part in _GENERATED_DIRS
+        and _is_generated_dir(fs, root.joinpath(*parts[: index + 1]))
+        for index, part in enumerate(parts[:-1])
+    ):
         return True
     name = parts[-1]
-    if any(fnmatch.fnmatchcase(name, pattern) for pattern in _GENERATED_FILES):
-        return True
-    return name in _GENERATED_DIRS and fs.is_dir(path)
+    if name == ".git" or any(
+        fnmatch.fnmatchcase(name, pattern) for pattern in _GENERATED_FILES
+    ):
+        return True  # `.git` may be a worktree or submodule pointer file as well as a directory
+    return fs.is_dir(path) and _is_generated_dir(fs, path)
 
 
 def _current_repository(repository: str | None, package: PackageDescriptor) -> str:
@@ -706,7 +774,7 @@ def _manifest_path(value: Mapping[str, Any], known: set[str]) -> ExtractedPath:
         package_id,
         _required(value, "role"),
         dict(metadata),
-        _required(value, "origin_path"),
+        _relative_path(_required(value, "origin_path"), "origin path").as_posix(),
         _required(value, "current_path"),
     )
 
@@ -725,7 +793,7 @@ def _check_current_path(fs: FileSystem, base: Path, item: ExtractedPath) -> None
 def _check_nested_policy(
     fs: FileSystem, base: Path, root: PurePosixPath, item: ExtractedPath
 ) -> None:
-    """A declared nested ``arborescent.toml`` must load and still find its sources where it expects them."""
+    """A declared ``arborescent_config`` must be shipped and be a policy file (its content is checked with the tree)."""
     declared = item.metadata.get("arborescent_config")
     if declared is None:
         return
@@ -737,18 +805,42 @@ def _check_nested_policy(
         raise CatalogError(
             f"arborescent_config {declared!r} of package {item.package_id} is missing from the extraction; declare it as a package path"
         )
+    if _shipped_policy(fs, base, config) is None:
+        raise CatalogError(
+            f"arborescent_config {declared!r} of package {item.package_id} is not an Arborescent policy"
+        )
+
+
+def _shipped_policy(fs: FileSystem, base: Path, path: Path) -> Policy | None:
+    """The policy ``path`` defines (``arborescent.toml`` or ``pyproject.toml`` with ``[tool.arborescent]``), else ``None``."""
+    if path.name == "pyproject.toml":
+        try:
+            tool = tomllib.loads(fs.read_text(path)).get("tool")
+        except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
+            return None  # not ours to validate
+        if not isinstance(tool, dict) or "arborescent" not in tool:
+            return None
+    elif path.name != "arborescent.toml":
+        return None
+    if not fs.is_file(path):
+        return None
     try:
-        policy, _ = load_policy(fs, config)
+        return load_policy(fs, path)[0]
     except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError, PolicyError) as exc:
         raise CatalogError(
-            f"nested policy {relative.as_posix()} is invalid: {exc}"
+            f"shipped policy {path.relative_to(base).as_posix()} is invalid: {exc}"
         ) from exc
+
+
+def _check_policy_sources(
+    fs: FileSystem, base: Path, config: Path, policy: Policy
+) -> None:
     for local in (policy, *(scope.policy for scope in policy.scopes)):
         for entry in (*local.sources, *local.source_roots):
             if not fs.exists(config.parent / entry):
                 raise CatalogError(
-                    f"nested policy {relative.as_posix()} expects {entry!r}, which is absent after extraction; "
-                    "a changed layout would change module identity"
+                    f"shipped policy {config.relative_to(base).as_posix()} expects {entry!r}, which is absent after "
+                    "extraction; a changed layout would change module identity"
                 )
 
 
@@ -785,24 +877,15 @@ def _inline_table(value: Mapping[str, str]) -> str:
 
 
 def _check_tree(fs: FileSystem, base: Path) -> None:
-    """No symlink may leave the tree (generated directories excepted), and every shipped policy must load."""
+    """No symlink may leave the tree (generated directories excepted); every shipped policy loads and finds its sources."""
     for path in fs.rglob(base, "*"):
         if _is_generated(fs, base, path):
             continue
         if not _resolves_to_itself(fs, path):
             raise CatalogError(f"extracted tree contains a symlink: {path}")
-        if path.name == "arborescent.toml" and fs.is_file(path):
-            try:
-                _ = load_policy(fs, path)
-            except (
-                OSError,
-                tomllib.TOMLDecodeError,
-                UnicodeDecodeError,
-                PolicyError,
-            ) as exc:
-                raise CatalogError(
-                    f"shipped policy {path.relative_to(base).as_posix()} is invalid: {exc}"
-                ) from exc
+        policy = _shipped_policy(fs, base, path)
+        if policy is not None:
+            _check_policy_sources(fs, base, path, policy)
 
 
 def _depth(path: PurePosixPath) -> int:
@@ -840,10 +923,14 @@ def _check_module_identity(fs: FileSystem, pairs: Sequence[tuple[Path, Path]]) -
     Files newly visible to the policy (a ``sources = "."`` policy now seeing moved tests) only add modules.
     """
     origin_configs = {
-        target: source for source, target in pairs if target.name == "arborescent.toml"
+        target: source
+        for source, target in pairs
+        if target.name in ("arborescent.toml", "pyproject.toml")
     }
     for config, origin_config in origin_configs.items():
-        policy, _ = load_policy(fs, config)
+        policy = _shipped_policy(fs, config.parent, config)
+        if policy is None:
+            continue
         changed = sorted(
             f"{before} -> {after or '(outside sources)'}"
             for source, target in pairs
