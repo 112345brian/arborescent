@@ -254,7 +254,8 @@ def _scoped_tach(
         f"{module}:{distribution}"
         for scope in policy.scopes for module, distribution in scope.policy.dependencies.items()
     })
-    lines += ["[external]", "exclude = []", f"rename = {_list(renames)}", ""]
+    external_excludes = sorted({name for scope in policy.scopes for name in scope.policy.tach_external_exclude})
+    lines += ["[external]", f"exclude = {_list(external_excludes)}", f"rename = {_list(renames)}", ""]
     classified = []
     for name in leaves(names):
         scope_name = scope_by_module.get(name)

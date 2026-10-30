@@ -71,6 +71,30 @@ def _scoped_generation():
     return _scoped_policy(), names, owners
 
 
+def test_scoped_tach_external_exclude_pools_every_scope() -> None:
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "classify": {"alpha.core": "domain"},
+                "tach_external_exclude": ["livekit"],
+            },
+            "beta": {
+                "sources": ["libs/beta/src/beta"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain"], "classify": {"beta.api": "domain"},
+                "tach_external_exclude": ["sentry_sdk"],
+            },
+        },
+    })
+    names = ["alpha", "alpha.core", "beta", "beta.api"]
+    owners = {"alpha": "alpha", "alpha.core": "alpha", "beta": "beta", "beta.api": "beta"}
+
+    files = generate(policy, names, [], scope_by_module=owners)
+    tach = tomllib.loads(files["tach.toml"])
+
+    assert tach["external"]["exclude"] == ["livekit", "sentry_sdk"]
+
+
 def test_tach_uses_namespaced_scope_layers() -> None:
     policy, names, owners = _scoped_generation()
 

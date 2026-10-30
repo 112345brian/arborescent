@@ -53,7 +53,7 @@ repository component. Each scope requires non-empty `sources`, `source_roots` an
 | `public` | `[]` | Dotted module patterns consumers may import from this scope. |
 | `depends_on` | `[]` | Scope names this scope may import. Each cross-scope import must target a declared dependency and match its `public` patterns. |
 | `preset`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
-| `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbid_circular_imports` | existing defaults | Existing architecture settings, evaluated within this scope. |
+| `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbid_circular_imports`, `tach_external_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
 
 Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
 `ruff`, `practices`, `exclude` and `children` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
