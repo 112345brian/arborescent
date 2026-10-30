@@ -68,6 +68,7 @@ class Rule(StrEnum):
     CRLF = "crlf"
     UNDECLARED_IMPORTS = "undeclared-imports"
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
+    ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {
@@ -269,6 +270,21 @@ class Policy:
             return violation
         if ring is not None and not any(rule.name == ring for rule in self.rings):
             return f"__arbor__ names unknown ring {ring!r}"
+        return None
+
+    def annotation_ring_mismatch(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
+        """Return why a valid annotation's ring disagrees with what ``classify`` would assign, if it does."""
+        if "arbor-annotations" in self.disabled_tools or self.annotation_violation(arbor_index, name) is not None:
+            return None
+        annotation = arbor_index.get(name)
+        if annotation is None:
+            return None
+        ring, _ = annotation
+        if ring is None:
+            return None
+        classify_ring = self.ring_of(name)
+        if classify_ring is not None and classify_ring != ring:
+            return f"__arbor__ names ring {ring!r}, but `classify` would assign {classify_ring!r}"
         return None
 
     def forbidden_imports(self, module: str) -> frozenset[str]:

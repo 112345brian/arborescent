@@ -60,6 +60,10 @@ class RuleContext:
         annotation = self.arbor_index.get(name)
         return annotation[1] if annotation is not None else None
 
+    def annotation_ring_mismatch(self, name: str) -> str | None:
+        policy = self.policy_for(name)
+        return policy.annotation_ring_mismatch(self.arbor_index, name) if policy is not None else None
+
 
 def _internal_imports(
     context: RuleContext, name: str, ring: str, line: int, targets: Collection[str],
@@ -219,6 +223,9 @@ def check_modules(
         detail = context.annotation_violation(name)
         if detail is not None:
             out.append(Violation(Rule.INVALID_ARBOR_ANNOTATION, name, detail))
+        mismatch = context.annotation_ring_mismatch(name)
+        if mismatch is not None:
+            out.append(Violation(Rule.ARBOR_RING_MISMATCH, name, mismatch))
         ring = context.resolve_ring(name)
         if ring is None:
             out.append(Violation(Rule.UNCLASSIFIED, name, "module matches no [classify] pattern; every module needs a ring"))

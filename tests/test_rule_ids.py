@@ -53,6 +53,7 @@ def test_rule_id_strings_never_change() -> None:
             "crlf",
             "undeclared-imports",
             "invalid-arbor-annotation",
+            "arbor-ring-mismatch",
             "scope-import",
         ]
     )

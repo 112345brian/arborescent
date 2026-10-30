@@ -14,6 +14,7 @@ from arborescent_helpers import write_files
 from arborescent.certification import _native_minimum
 from arborescent.cli import main
 from arborescent.config import load_policy
+from arborescent.domain import Rule, Violation
 from arborescent.filesystem_adapter import LocalFileSystem
 from arborescent.packages import (
     MANIFEST_NAME,
@@ -193,7 +194,10 @@ def test_round_trip_into_differently_named_directories_keeps_ring_assignments(
         "core.api": "adapters",
     }  # the in-file annotation, not just classify
     assert _rings(first) == _rings(second) == expected
-    assert expected[1] == []  # the extracted policy governs itself with no violations
+    # the annotation overrides `classify` for enforcement, but the disagreement is still surfaced
+    assert expected[1] == [
+        Violation(Rule.ARBOR_RING_MISMATCH, "core.api", "__arbor__ names ring 'adapters', but `classify` would assign 'domain'"),
+    ]
 
 
 def test_round_trip_with_dependencies_keeps_each_nested_policy(tmp_path: Path) -> None:

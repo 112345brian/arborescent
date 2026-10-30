@@ -220,27 +220,60 @@ def _discard_call_lines(tree: ast.AST) -> tuple[int, ...]:
     return tuple(sorted(lines))
 
 
+_ARBOR_LEGAL_KEYS = frozenset({"ring"})
+_CONDITIONAL_CONTAINERS = (ast.If, ast.Try, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith)
+
+
+def _is_arbor_target(stmt: ast.stmt) -> bool:
+    is_assignment = isinstance(stmt, ast.Assign) and any(
+        isinstance(target, ast.Name) and target.id == "__arbor__" for target in stmt.targets
+    )
+    is_annotated_assignment = (
+        isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "__arbor__"
+    )
+    return is_assignment or is_annotated_assignment
+
+
+def _conditional_bodies(stmt: ast.stmt) -> list[list[ast.stmt]]:
+    if isinstance(stmt, ast.If):
+        return [stmt.body, stmt.orelse]
+    if isinstance(stmt, ast.Try):
+        return [stmt.body, stmt.orelse, stmt.finalbody, *(handler.body for handler in stmt.handlers)]
+    if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+        return [stmt.body, stmt.orelse]
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        return [stmt.body]
+    return []
+
+
+def _find_arbor_assignments(stmts: list[ast.stmt], conditional: bool) -> list[tuple[ast.expr | None, bool]]:
+    found: list[tuple[ast.expr | None, bool]] = []
+    for stmt in stmts:
+        if _is_arbor_target(stmt):
+            value = stmt.value if isinstance(stmt, (ast.Assign, ast.AnnAssign)) else None
+            found.append((value, conditional))
+        elif isinstance(stmt, _CONDITIONAL_CONTAINERS):
+            for body in _conditional_bodies(stmt):
+                found += _find_arbor_assignments(body, True)
+    return found
+
+
 def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None]:
-    value: ast.expr | None = None
-    found = False
-    for stmt in tree.body:
-        is_assignment = isinstance(stmt, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "__arbor__" for target in stmt.targets
-        )
-        is_annotated_assignment = (
-            isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "__arbor__"
-        )
-        if is_assignment or is_annotated_assignment:
-            value = stmt.value
-            found = True
+    found = _find_arbor_assignments(list(tree.body), False)
     if not found:
         return None, None
+    if any(conditional for _, conditional in found):
+        return None, "__arbor__ must not be assigned inside conditional code"
+    value = found[-1][0]
     try:
         annotation = ast.literal_eval(value) if value is not None else None
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
         return None, "__arbor__ must be a literal dictionary"
     if not isinstance(annotation, dict):
         return None, "__arbor__ must be a dictionary"
+    unknown = sorted(set(annotation) - _ARBOR_LEGAL_KEYS)
+    if unknown:
+        return None, f"__arbor__ has unknown key(s): {', '.join(map(repr, unknown))}"
     if "ring" not in annotation:
         return None, '__arbor__ dictionary is missing "ring"'
     ring = annotation["ring"]

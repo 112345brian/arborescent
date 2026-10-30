@@ -7,7 +7,7 @@ Ported from the throwaway mutation script behind DeepInterview's ``tests/test_ar
 from __future__ import annotations
 
 import fnmatch
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -40,7 +40,6 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.SCOPE_IMPORT: "cross-scope boundaries are mutation-tested when a project configures multiple scopes",
     Rule.CRLF: _PRACTICE,
     Rule.UNDECLARED_IMPORTS: _PRACTICE,
-    Rule.INVALID_ARBOR_ANNOTATION: "annotation validity depends on the whole-package syntax index",
 }
 
 
@@ -82,6 +81,9 @@ def plan(
             ring_mutations, ring_skipped = _ring_mutations(local_policy, ring.name, local_paths, local_known, arbor_index)
             out.extend(ring_mutations)
             skipped.extend(ring_skipped)
+        annotation_mutations, annotation_skipped = _arbor_annotation_mutations(local_policy, local_paths, local_known, arbor_index)
+        out.extend(annotation_mutations)
+        skipped.extend(annotation_skipped)
         if local_policy.entry_scripts:
             entry_host = next((
                 name for name in sorted(local_known)
@@ -158,6 +160,44 @@ def _ring_mutations(
     elif not policy.ring(name).os_branching:
         out.append(Mutation(Rule.OS_BRANCHING, f"{name}: OS branching", paths[host], "import os\n_arborescent_probe = os.name"))
     out.extend(_effect_mutations(policy, name, paths[host]))
+    return out, skipped
+
+
+def _arbor_annotation_mutations(
+    policy: Policy, paths: dict[str, str], known: Collection[str],
+    arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[list[Mutation], list[str]]:
+    """Probe the annotation-hardening rules: unknown keys, conditional assignment, and ring/classify disagreement."""
+    out: list[Mutation] = []
+    skipped: list[str] = []
+    unannotated = sorted(
+        module for module in known
+        if module in paths and not paths[module].endswith("__init__.py")
+        and arbor_index.get(module, (None, None)) == (None, None)
+        and policy.ring_of(module) is not None
+    )
+    if not unannotated:
+        skipped.append("invalid-arbor-annotation: no unannotated classified module to mutate")
+        skipped.append("arbor-ring-mismatch: no unannotated classified module to mutate")
+        return out, skipped
+    host = unannotated[0]
+    ring = policy.ring_of(host)
+    out.append(Mutation(
+        Rule.INVALID_ARBOR_ANNOTATION, "an __arbor__ dictionary with an unknown key",
+        paths[host], f'__arbor__ = {{"ring": {ring!r}, "bogus": 1}}',
+    ))
+    out.append(Mutation(
+        Rule.INVALID_ARBOR_ANNOTATION, "an __arbor__ assignment nested inside conditional code",
+        paths[host], f'if True:\n    __arbor__ = {{"ring": {ring!r}}}',
+    ))
+    other_ring = next((rule.name for rule in policy.rings if rule.name != ring), None)
+    if other_ring is None:
+        skipped.append("arbor-ring-mismatch: policy has only one ring, nothing to disagree with")
+    else:
+        out.append(Mutation(
+            Rule.ARBOR_RING_MISMATCH, f"an __arbor__ ring that disagrees with classify's {ring!r}",
+            paths[host], f'__arbor__ = {{"ring": {other_ring!r}}}',
+        ))
     return out, skipped
 
 

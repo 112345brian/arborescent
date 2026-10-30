@@ -271,9 +271,16 @@ __arbor__ = {"ring": "domain"}
 ```
 
 The `ring` value must be a string naming one of the policy's configured `rings` (the owning scope's rings in
-multi-scope mode). Arborescent reads the assignment
-statically, without importing or executing the module. Only direct module-level assignments count; assignments
-inside functions, classes or conditionals do not. If there are multiple direct assignments, the last one wins.
+multi-scope mode); `ring` is the only legal key today, and any other key reports `invalid-arbor-annotation`.
+Arborescent reads the assignment statically, without importing or executing the module. Only direct module-level
+assignments count; assignments inside functions or classes are ignored (they are not module-level annotations at
+all). An assignment inside conditional code at module level (`if`, `try`, `for`, `while` or `with`) is not ignored:
+it reports `invalid-arbor-annotation`, because a ring that depends on control flow cannot be resolved statically. If
+there are multiple unconditional direct assignments, the last one wins.
+
+A module whose valid `__arbor__` ring disagrees with the ring its first matching `classify` glob would have assigned
+reports `arbor-ring-mismatch`; the annotation still wins for enforcement (see resolution order below), but the
+disagreement is surfaced so a stale `classify` entry or annotation gets noticed and reconciled.
 
 Ring resolution follows this order while annotations are enabled (the default):
 
@@ -353,6 +360,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `bad-import` | a relative import that points above the package root |
 | `undeclared-entry-dependency` | an entry script lacks a `# /// script` block, or omits a third-party distribution the project imports |
 | `invalid-arbor-annotation` | a module's `__arbor__` annotation is malformed or names an unknown ring |
+| `arbor-ring-mismatch` | a valid `__arbor__` ring disagrees with the ring the first matching `classify` glob would assign |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
 `getattr`, variables, or wrappers. A test patch is checked against the target module's ring and is considered only when

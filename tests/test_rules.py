@@ -243,6 +243,35 @@ def test_disabling_annotations_preserves_classify_checks(repo: Path) -> None:
     }
 
 
+def test_annotation_disagreeing_with_classify_reports_mismatch(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "ports"}\n'})
+
+    found = run(repo)
+
+    assert {(v.rule, v.subject) for v in found} == {("arbor-ring-mismatch", "app.domain")}
+    mismatch = next(v for v in found if v.rule == "arbor-ring-mismatch")
+    assert "ports" in mismatch.detail
+    assert "domain" in mismatch.detail
+
+
+def test_annotation_agreeing_with_classify_reports_no_mismatch(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "domain"}\n'})
+
+    assert run(repo) == []
+
+
+def test_invalid_annotation_is_not_also_reported_as_a_mismatch(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "missing"}\n'})
+
+    assert rules(run(repo)) == {"invalid-arbor-annotation"}
+
+
+def test_disabling_annotations_suppresses_the_mismatch_rule_too(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "ports"}\n'})
+
+    assert run(repo, disabled_tools=["arbor-annotations"]) == []
+
+
 def test_patch_target_uses_annotation_in_changed_scan(repo: Path) -> None:
     write_files(repo, {
         "app/main.py": '__arbor__ = {"ring": "domain"}\nVALUE = 1\n',
