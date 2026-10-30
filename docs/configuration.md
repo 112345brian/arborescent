@@ -166,14 +166,18 @@ destination = "tests/test_collection_core"
 
 The package root and every owned path must stay inside the repository. Package IDs are stable lowercase slugs, path
 ownership cannot overlap, and declared dependencies must form an acyclic graph. Extraction copies declared paths into a
-new destination and writes `.arborescent-package.toml` with the package ID and path metadata. A package with its own
+new destination and writes `.arborescent-package.toml` (see "Extraction manifest" below). A package with its own
 direct Arborescent policy is copied with that policy when it is listed as a configuration path; the child policy remains
 independently usable after extraction.
 
 Generated local output below a declared path is not copied: `__pycache__`, `*.pyc`, `.venv`, `venv`, `node_modules`,
-`.git`, `.arborescent`, `.mypy_cache`, `.ruff_cache`, `.tox`, `build` and `dist` directories (the noise directories
-Arborescent already ignores, plus build output). A declared path itself is always copied, even when it is named
-`build`, and symlinks inside skipped directories do not abort extraction.
+`.git` (directory or worktree pointer file), `.arborescent`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache`, `.tox`,
+`build`, `dist` and `.DS_Store` (the noise directories Arborescent already ignores, plus build output). A directory with
+one of those names is treated as generated output unless it is a real Python package (it contains `__init__.py`), so a
+package such as `pkg/build/__init__.py` is copied. A namespace package without `__init__.py` that is named like build
+output is skipped; give it an `__init__.py` or rename it. A declared path itself is always copied, even when it is named
+`build`, and symlinks inside skipped directories do not abort extraction. Special files (named pipes, devices) and
+symlinks elsewhere are rejected.
 
 ```sh
 arborescent packages validate
@@ -185,6 +189,43 @@ arborescent packages extract collection-core --output /tmp/collection-core --wit
 Dependencies are included only when explicitly requested and are placed under `dependencies/<package-id>/`. The
 destination must not already exist. Extraction does not rewrite imports or invent build configuration; the package
 metadata declares the layout and the package owns its build and architecture files.
+
+### Extraction manifest
+
+`.arborescent-package.toml` (`manifest_version = 2`) keeps what a package *is* apart from where it *is* and what
+extraction *did*:
+
+| Table | Holds | Changes on extraction? |
+|---|---|---|
+| `[package]` | `id`, `name`, `kind`, `domain`, `summary`, `capabilities`, `depends_on` | never |
+| `[[paths]]` `role`, `metadata` | per-path meaning: role plus custom metadata (import name, boundary, `arborescent_config`, scope) | never |
+| `[origin]` | `repository`, `root` and `extraction_status` as declared in the catalog | no; kept for traceability |
+| `[[paths]]` `origin_path` | the path in the origin repository | no; kept for traceability |
+| `[location]` | the current `repository` (defaults to the origin; `--repository` sets another) and `root` (`.`) | yes |
+| `[[paths]]` `current_path` | where the path lives inside the extracted tree | yes |
+| `[extraction]` | `status = "extracted"` and `included_packages` | yes; describes the operation |
+| `[[dependencies]]` | the same stable fields for each included dependency, plus its origin and `current_root` | as above |
+
+Module identity is never rewritten. Extraction copies `arborescent.toml`, `classify` globs and in-file `__arbor__`
+annotations byte for byte. Extraction then compares, for every shipped `arborescent.toml`, the module name the policy
+derives for each copied file (from its `sources` and `source_roots`) before and after the move. A `destination` that
+renames a module, or moves it out of the policy's `sources`, fails with `would change module identity` (for example
+`core -> renamed`) and the partial extraction is removed. Files that merely become newly visible to a policy, such as
+tests moved under a `sources = "."` policy, add modules and are allowed. `arborescent_config` metadata is relative to
+the package's current root and must be shipped as a declared path.
+
+The manifest is a provenance snapshot taken at extraction, not an integrity seal: an extracted package is expected to
+evolve, so its files are not hashed.
+
+`arborescent packages validate --extracted DIR` re-validates an extracted tree (extraction runs the same structural
+check): the manifest must be well formed (stable lowercase package ids, status `extracted`, normalized origin paths, at
+least one path, each path inside its package's current root, no duplicate dependencies); current paths
+must resolve inside the tree; no symlink may leave it (generated directories such as `.venv` are ignored);
+`included_packages` must match the package and its dependencies; and every shipped policy, whether
+`arborescent.toml` or a `pyproject.toml` with `[tool.arborescent]` and wherever it was placed, must load and find its
+`sources` and `source_roots`. The module-identity comparison (also applied to `pyproject.toml` policies) needs the origin tree, so it
+runs only during extraction. Files outside a policy's `sources` are not part of that comparison. A parent policy (`children`, `child_policy_mode`) is neither read nor changed by extracting
+a child; the child keeps governing itself.
 
 `suggestion_threshold` controls a report-only hint for large files. The metric counts lines containing code tokens and
 ignores blank lines, comments, module/class/function docstrings, and multi-line literal-only data tables. Suggestions

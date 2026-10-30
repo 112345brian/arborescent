@@ -47,6 +47,10 @@ def test_extraction_preserves_package_identity_and_path_metadata(
     source = tmp_path / "src/core"
     source.mkdir(parents=True)
     (source / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (source / "arborescent.toml").write_text(
+        'rings = ["domain", "adapters"]\n[ring.domain]\nmay_import = []\nexternal = []\n[ring.adapters]\nmay_import = ["domain"]\nexternal = []\n[classify]\n"*" = "domain"\n',
+        encoding="utf-8",
+    )
     (tmp_path / "tests/core").mkdir(parents=True)
     (tmp_path / "tests/core/test_core.py").write_text(
         "def test_value(): pass\n", encoding="utf-8"
@@ -83,6 +87,10 @@ destination = "tests"
     )
     assert metadata["package"]["id"] == "collection-core"
     assert metadata["paths"][0]["metadata"]["arborescent_config"] == "arborescent.toml"
+    assert metadata["paths"][0]["origin_path"] == "src/core"
+    assert metadata["paths"][0]["current_path"] == "."
+    assert metadata["paths"][1]["origin_path"] == "tests/core"
+    assert metadata["paths"][1]["current_path"] == "tests"
 
 
 _ARTIFACT_PACKAGE = """
@@ -115,7 +123,7 @@ def test_extraction_omits_generated_artifacts_and_keeps_declared_content(
         "pkg/module.py": "VALUE = 2\n",
         "tests/test_core.py": "def test_value(): pass\n",
         "docs/guide.md": "# Guide\n",
-        "arborescent.toml": "preset = 'strict'\n",
+        "arborescent.toml": 'rings = ["domain", "adapters"]\n[ring.domain]\nmay_import = []\nexternal = []\n[ring.adapters]\nmay_import = ["domain"]\nexternal = []\n[classify]\n"*" = "domain"\n',
         "pyproject.toml": "[project]\nname = 'core'\n",
         "pkg/data/dist-info.txt": "not a dist directory\n",
         "pkg/build.py": "VALUE = 3\n",
@@ -307,7 +315,7 @@ role = "source"
     manifest = tomllib.loads(
         (destination / ".arborescent-package.toml").read_text(encoding="utf-8")
     )
-    assert manifest["package"]["included_packages"] == [
+    assert manifest["extraction"]["included_packages"] == [
         "collection-policy",
         "collection-core",
     ]
