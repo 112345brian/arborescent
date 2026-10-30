@@ -243,6 +243,35 @@ def test_disabling_annotations_preserves_classify_checks(repo: Path) -> None:
     }
 
 
+def test_annotation_disagreeing_with_classify_reports_mismatch(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "ports"}\n'})
+
+    found = run(repo)
+
+    assert {(v.rule, v.subject) for v in found} == {("arbor-ring-mismatch", "app.domain")}
+    mismatch = next(v for v in found if v.rule == "arbor-ring-mismatch")
+    assert "ports" in mismatch.detail
+    assert "domain" in mismatch.detail
+
+
+def test_annotation_agreeing_with_classify_reports_no_mismatch(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "domain"}\n'})
+
+    assert run(repo) == []
+
+
+def test_invalid_annotation_is_not_also_reported_as_a_mismatch(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "missing"}\n'})
+
+    assert rules(run(repo)) == {"invalid-arbor-annotation"}
+
+
+def test_disabling_annotations_suppresses_the_mismatch_rule_too(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "ports"}\n'})
+
+    assert run(repo, disabled_tools=["arbor-annotations"]) == []
+
+
 def test_patch_target_uses_annotation_in_changed_scan(repo: Path) -> None:
     write_files(repo, {
         "app/main.py": '__arbor__ = {"ring": "domain"}\nVALUE = 1\n',
@@ -376,3 +405,40 @@ def test_annotation_findings_are_scope_local(tmp_path: Path) -> None:
     assert [(item.rule, item.subject) for item in found if item.rule == Rule.INVALID_ARBOR_ANNOTATION] == [
         ("invalid-arbor-annotation", "core"),
     ]
+
+
+def test_public_import_leaking_a_forbidden_effect_is_flagged(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import api\n",
+        "libs/beta/src/api.py": "import time\nVALUE = time.time()\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    leaks = [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]
+    assert [(item.subject, item.rule) for item in leaks] == [("core", "scope-effect-leak")]
+    assert "effect clock" in leaks[0].detail
+    assert "api" in leaks[0].detail
+
+
+def test_non_public_import_leaking_an_effect_is_not_flagged_by_the_effect_rule(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import private\n",
+        "libs/beta/src/private.py": "import time\nVALUE = time.time()\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]
+    assert any(item.rule == Rule.SCOPE_IMPORT for item in found)  # the plain boundary rule still catches this
+
+
+def test_public_import_of_an_effect_the_importing_ring_allows_is_not_flagged(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/adapter.py": "import api\n",  # alpha's outermost ring forbids no effects
+        "libs/beta/src/api.py": "import time\nVALUE = time.time()\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]

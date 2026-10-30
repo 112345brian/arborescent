@@ -7,12 +7,38 @@ Ported from the throwaway mutation script behind DeepInterview's ``tests/test_ar
 from __future__ import annotations
 
 import fnmatch
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Protocol
 
-from .domain import NOISE_DIRS, Policy, Rule
+from .domain import NOISE_DIRS, ArchitectureScope, Policy, Rule
 from .engine import Services, run_own
+from .facts import ModuleInfo
+
+
+class ScanView(Protocol):
+    """The subset of ``scanner.ScanData`` this module plans mutations from.
+
+    A structural type, not an import of ``scanner``: ``selftest`` is in the ``application`` ring, which may not
+    import the ``adapters`` ring that ``scanner`` belongs to.
+    """
+
+    @property
+    def paths(self) -> Mapping[str, str]: ...
+
+    @property
+    def known(self) -> frozenset[str]: ...
+
+    @property
+    def arbor_index(self) -> Mapping[str, tuple[str | None, str | None]]: ...
+
+    @property
+    def scope_by_module(self) -> Mapping[str, str]: ...
+
+    @property
+    def modules(self) -> Mapping[str, ModuleInfo]: ...
+
 
 __all__ = ["NO_MUTATION", "Mutation", "SelfTestReport", "selftest"]
 
@@ -38,9 +64,10 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.EFFECT_DYNAMIC_IMPORT: "effect-dynamic-import is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_PATCH: "effect-patch requires a configured tests folder and project-package target; covered by focused rule tests",
     Rule.SCOPE_IMPORT: "cross-scope boundaries are mutation-tested when a project configures multiple scopes",
+    Rule.SCOPE_EFFECT_LEAK: "cross-scope effect leaks are mutation-tested when a project configures multiple "
+    "scopes with a declared public dependency",
     Rule.CRLF: _PRACTICE,
     Rule.UNDECLARED_IMPORTS: _PRACTICE,
-    Rule.INVALID_ARBOR_ANNOTATION: "annotation validity depends on the whole-package syntax index",
 }
 
 
@@ -64,14 +91,11 @@ class SelfTestReport:
         return not self.survived
 
 
-def plan(
-    policy: Policy, paths: dict[str, str], known: frozenset[str],
-    arbor_index: Mapping[str, tuple[str | None, str | None]], scope_by_module: Mapping[str, str] | None = None,
-) -> tuple[list[Mutation], list[str]]:
+def plan(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
     """The mutations for this policy, plus the ones that cannot be built (and why)."""
+    paths, known, arbor_index, owners = scan.paths, scan.known, scan.arbor_index, scan.scope_by_module
     out: list[Mutation] = []
     skipped: list[str] = []
-    owners = scope_by_module or {}
     local_policies = (
         tuple((scope.name, scope.policy, frozenset(name for name in known if owners.get(name) == scope.name)) for scope in policy.scopes)
         if policy.scopes else (("", policy, known),)
@@ -82,6 +106,9 @@ def plan(
             ring_mutations, ring_skipped = _ring_mutations(local_policy, ring.name, local_paths, local_known, arbor_index)
             out.extend(ring_mutations)
             skipped.extend(ring_skipped)
+        annotation_mutations, annotation_skipped = _arbor_annotation_mutations(local_policy, local_paths, local_known, arbor_index)
+        out.extend(annotation_mutations)
+        skipped.extend(annotation_skipped)
         if local_policy.entry_scripts:
             entry_host = next((
                 name for name in sorted(local_known)
@@ -111,11 +138,12 @@ def plan(
         ))
     if policy.scopes:
         out.extend(_scope_boundary_mutations(policy, paths, known, owners))
+        out.extend(_scope_effect_mutations(policy, scan))
     return out, sorted(set(skipped))
 
 
 def _scope_boundary_mutations(
-    policy: Policy, paths: dict[str, str], known: frozenset[str], owners: Mapping[str, str],
+    policy: Policy, paths: Mapping[str, str], known: frozenset[str], owners: Mapping[str, str],
 ) -> list[Mutation]:
     mutations = []
     for scope in policy.scopes:
@@ -135,6 +163,58 @@ def _scope_boundary_mutations(
                 ))
                 break
     return mutations
+
+
+def _scope_effect_mutations(policy: Policy, scan: ScanView) -> list[Mutation]:
+    paths, known, owners, modules = scan.paths, scan.known, scan.scope_by_module, scan.modules
+    mutations: list[Mutation] = []
+    for scope in policy.scopes:
+        hosts = sorted(
+            name for name in known
+            if owners.get(name) == scope.name and not paths[name].endswith("__init__.py") and name in modules
+        )
+        for host in hosts:
+            ring = scope.policy.resolve_ring(scan.arbor_index, host)
+            if ring is None:
+                continue
+            forbidden = scope.policy.forbidden_effects(ring)
+            if not forbidden:
+                continue
+            leak = _leaking_public_dependency(policy, scope, forbidden, scan, modules[host])
+            if leak is None:
+                continue
+            target, category = leak
+            mutations.append(Mutation(
+                Rule.SCOPE_EFFECT_LEAK,
+                f"{scope.name}: new import of {target}, a public module that uses the forbidden {category} effect",
+                paths[host], f"import {target}",
+            ))
+            break
+    return mutations
+
+
+def _leaking_public_dependency(
+    policy: Policy, scope: ArchitectureScope, forbidden: frozenset[str], scan: ScanView, host_info: ModuleInfo,
+) -> tuple[str, str] | None:
+    owners, modules = scan.scope_by_module, scan.modules
+    for dependency_name in scope.depends_on:
+        dependency = policy.scope(dependency_name)
+        for name in sorted(scan.known):
+            if owners.get(name) != dependency_name:
+                continue
+            if not any(fnmatch.fnmatchcase(name, pattern) for pattern in dependency.public):
+                continue
+            info = modules.get(name)
+            if info is None or _already_imports(host_info, name):
+                continue
+            for use in info.facts.effect_uses:
+                if use.category in forbidden:
+                    return name, use.category
+    return None
+
+
+def _already_imports(info: ModuleInfo, target: str) -> bool:
+    return any(imp.level == 0 and imp.module == target for imp in info.facts.imports)
 
 
 def _ring_mutations(
@@ -158,6 +238,44 @@ def _ring_mutations(
     elif not policy.ring(name).os_branching:
         out.append(Mutation(Rule.OS_BRANCHING, f"{name}: OS branching", paths[host], "import os\n_arborescent_probe = os.name"))
     out.extend(_effect_mutations(policy, name, paths[host]))
+    return out, skipped
+
+
+def _arbor_annotation_mutations(
+    policy: Policy, paths: dict[str, str], known: Collection[str],
+    arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[list[Mutation], list[str]]:
+    """Probe the annotation-hardening rules: unknown keys, conditional assignment, and ring/classify disagreement."""
+    out: list[Mutation] = []
+    skipped: list[str] = []
+    unannotated = sorted(
+        module for module in known
+        if module in paths and not paths[module].endswith("__init__.py")
+        and arbor_index.get(module, (None, None)) == (None, None)
+        and policy.ring_of(module) is not None
+    )
+    if not unannotated:
+        skipped.append("invalid-arbor-annotation: no unannotated classified module to mutate")
+        skipped.append("arbor-ring-mismatch: no unannotated classified module to mutate")
+        return out, skipped
+    host = unannotated[0]
+    ring = policy.ring_of(host)
+    out.append(Mutation(
+        Rule.INVALID_ARBOR_ANNOTATION, "an __arbor__ dictionary with an unknown key",
+        paths[host], f'__arbor__ = {{"ring": {ring!r}, "bogus": 1}}',
+    ))
+    out.append(Mutation(
+        Rule.INVALID_ARBOR_ANNOTATION, "an __arbor__ assignment nested inside conditional code",
+        paths[host], f'if True:\n    __arbor__ = {{"ring": {ring!r}}}',
+    ))
+    other_ring = next((rule.name for rule in policy.rings if rule.name != ring), None)
+    if other_ring is None:
+        skipped.append("arbor-ring-mismatch: policy has only one ring, nothing to disagree with")
+    else:
+        out.append(Mutation(
+            Rule.ARBOR_RING_MISMATCH, f"an __arbor__ ring that disagrees with classify's {ring!r}",
+            paths[host], f'__arbor__ = {{"ring": {other_ring!r}}}',
+        ))
     return out, skipped
 
 
@@ -199,7 +317,7 @@ def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
 def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     services = replace(services, scanner=services.scanner.uncached())  # mutated copies must not touch the real cache
     _, scan = run_own(policy, root, services, practices=False)
-    mutations, skipped = plan(policy, dict(scan.paths), scan.known, scan.arbor_index, scan.scope_by_module)
+    mutations, skipped = plan(policy, scan)
     report = SelfTestReport([], [], skipped)
     fs = services.fs
     with fs.temporary_directory("arborescent-selftest-") as tmp:

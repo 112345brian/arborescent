@@ -149,7 +149,7 @@ def test_arbor_ring_literal_error_is_stable_across_extractions() -> None:
     assert first == second == "__arbor__ must be a literal dictionary"
 
 
-def test_arbor_ring_facts_ignore_nested_annotations() -> None:
+def test_arbor_ring_facts_ignore_function_and_class_scoped_annotations() -> None:
     facts = extract(
         '''\
 def function():
@@ -157,6 +157,29 @@ def function():
 
 class Example:
     __arbor__ = {"ring": "class"}
+'''
+    )
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error is None
+
+
+def test_arbor_ring_facts_reject_conditional_module_level_annotation() -> None:
+    facts = extract(
+        '''\
+if True:
+    __arbor__ = {"ring": "conditional"}
+'''
+    )
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error == "__arbor__ must not be assigned inside conditional code"
+
+
+def test_arbor_ring_facts_reject_conditional_annotation_even_with_an_unconditional_one() -> None:
+    facts = extract(
+        '''\
+__arbor__ = {"ring": "domain"}
 
 if True:
     __arbor__ = {"ring": "conditional"}
@@ -164,7 +187,35 @@ if True:
     )
 
     assert facts.arbor_ring is None
-    assert facts.arbor_error is None
+    assert facts.arbor_error == "__arbor__ must not be assigned inside conditional code"
+
+
+def test_arbor_ring_facts_reject_annotation_nested_in_try_for_while_with() -> None:
+    sources = (
+        'try:\n    __arbor__ = {"ring": "domain"}\nexcept Exception:\n    pass\n',
+        'for _ in range(1):\n    __arbor__ = {"ring": "domain"}\n',
+        'while False:\n    __arbor__ = {"ring": "domain"}\n',
+        'with open("x") as f:\n    __arbor__ = {"ring": "domain"}\n',
+    )
+
+    for source in sources:
+        facts = extract(source)
+        assert facts.arbor_ring is None
+        assert facts.arbor_error == "__arbor__ must not be assigned inside conditional code"
+
+
+def test_arbor_ring_facts_reject_unknown_keys() -> None:
+    facts = extract('__arbor__ = {"ring": "domain", "public": True}\n')
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error == "__arbor__ has unknown key(s): 'public'"
+
+
+def test_arbor_ring_facts_reject_multiple_unknown_keys_sorted() -> None:
+    facts = extract('__arbor__ = {"ring": "domain", "zeta": 1, "alpha": 2}\n')
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error == "__arbor__ has unknown key(s): 'alpha', 'zeta'"
 
 
 def test_arbor_ring_facts_use_last_module_binding() -> None:

@@ -60,6 +60,10 @@ class RuleContext:
         annotation = self.arbor_index.get(name)
         return annotation[1] if annotation is not None else None
 
+    def annotation_ring_mismatch(self, name: str) -> str | None:
+        policy = self.policy_for(name)
+        return policy.annotation_ring_mismatch(self.arbor_index, name) if policy is not None else None
+
 
 def _internal_imports(
     context: RuleContext, name: str, ring: str, line: int, targets: Collection[str],
@@ -190,6 +194,43 @@ def _scope_imports(context: RuleContext, source: str, line: int, targets: Collec
     return out
 
 
+def _scope_effect_leaks(
+    context: RuleContext, modules: Mapping[str, ModuleInfo], source: str, line: int, targets: Collection[str],
+) -> list[Violation]:
+    """One-hop leak: a declared-public module in another scope uses an effect this scope's ring forbids."""
+    source_scope_name = context.scope_name(source)
+    if source_scope_name is None:
+        return []
+    source_ring = context.resolve_ring(source)
+    if source_ring is None:
+        return []
+    forbidden = context.policy.scope(source_scope_name).policy.forbidden_effects(source_ring)
+    if not forbidden:
+        return []
+    out: list[Violation] = []
+    for target in filter(None, targets):
+        target_scope_name = context.scope_name(target)
+        if target_scope_name is None or target_scope_name == source_scope_name:
+            continue
+        target_scope = context.policy.scope(target_scope_name)
+        if not any(fnmatch.fnmatchcase(target, pattern) for pattern in target_scope.public):
+            continue
+        info = modules.get(target)
+        if info is None:
+            continue
+        seen: set[str] = set()
+        for use in info.facts.effect_uses:
+            if use.category not in forbidden or use.category in seen:
+                continue
+            seen.add(use.category)
+            detail = (
+                f"[{source_ring}] imports public module {target!r} from scope {target_scope_name!r}; "
+                f"{target!r} uses effect {use.category} via {use.target}, forbidden for ring {source_ring!r}"
+            )
+            out.append(Violation(Rule.SCOPE_EFFECT_LEAK, source, detail, line))
+    return out
+
+
 def _wildcard_findings(policy: Policy) -> list[Violation]:
     scoped = ((scope.name, scope.policy) for scope in policy.scopes)
     local_policies = scoped if policy.scopes else (("", policy),)
@@ -219,6 +260,9 @@ def check_modules(
         detail = context.annotation_violation(name)
         if detail is not None:
             out.append(Violation(Rule.INVALID_ARBOR_ANNOTATION, name, detail))
+        mismatch = context.annotation_ring_mismatch(name)
+        if mismatch is not None:
+            out.append(Violation(Rule.ARBOR_RING_MISMATCH, name, mismatch))
         ring = context.resolve_ring(name)
         if ring is None:
             out.append(Violation(Rule.UNCLASSIFIED, name, "module matches no [classify] pattern; every module needs a ring"))
@@ -236,6 +280,7 @@ def check_modules(
             if error is not None:
                 out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
             out += _scope_imports(context, name, imp.line, internal)
+            out += _scope_effect_leaks(context, modules, name, imp.line, internal)
             out += _internal_imports(context, name, ring, imp.line, internal)
             out += _external_imports(local_policy, name, ring, rule, imp.line, external, third_party)
         out += _os_branching(local_policy, name, ring, rule, info)

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import baseline as ratchet_mod
 from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner, SystemClock
+from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .cli_install import _install_tools, _setup_install_command
 from .cli_report import _print_excluded, _print_report, _print_rule_label
@@ -133,6 +134,15 @@ def _parser() -> argparse.ArgumentParser:
         "discover",
         help="list in-scope Python files that still need a ring classification",
     )
+    annotate = sub.add_parser(
+        "annotate",
+        help="migrate classify matches into explicit __arbor__ annotations (dry-run by default)",
+    )
+    annotate.add_argument(
+        "--yes",
+        action="store_true",
+        help="write the annotations instead of printing what would change",
+    )
     sub.add_parser("selftest", help="mutation-test the rules")
     packages = sub.add_parser(
         "packages", help="validate, list or extract declared package metadata"
@@ -242,6 +252,8 @@ def _dispatch(
         return _baseline(args, policy, root, svc)
     if args.command == "discover":
         return _discover(policy, root, svc)
+    if args.command == "annotate":
+        return _annotate(args, policy, root, svc)
     if args.command == "selftest":
         return _selftest(policy, root, svc)
     if args.command == "packages":
@@ -358,6 +370,27 @@ def _discover_scoped(policy: Policy, scan: ScanResult) -> int:
         )
         for path in sorted(paths):
             print(f"  {path}")
+    return 0
+
+
+def _annotate(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    _, scan = run_own(policy, root, svc, practices=False)
+    plan = plan_annotations(policy, scan)
+    if args.yes:
+        written = apply_annotations(svc.fs, root, plan)
+        for _, rel, ring in plan.to_annotate:
+            print(f"annotated {rel} (ring: {ring})")
+    else:
+        written = 0
+        for _, rel, ring in plan.to_annotate:
+            print(f"would annotate {rel} (ring: {ring})")
+    for rel in plan.unmatched:
+        print(f"no classify match: {rel}")
+    print(
+        f"annotate: {written if args.yes else len(plan.to_annotate)} "
+        f"{'annotated' if args.yes else 'would be annotated'}, "
+        f"{len(plan.already_annotated)} already annotated, {len(plan.unmatched)} unmatched"
+    )
     return 0
 
 
