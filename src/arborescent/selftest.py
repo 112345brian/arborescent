@@ -7,7 +7,7 @@ Ported from the throwaway mutation script behind DeepInterview's ``tests/test_ar
 from __future__ import annotations
 
 import fnmatch
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
@@ -24,11 +24,20 @@ class ScanView(Protocol):
     import the ``adapters`` ring that ``scanner`` belongs to.
     """
 
-    paths: Mapping[str, str]
-    known: Collection[str]
-    arbor_index: Mapping[str, tuple[str | None, str | None]]
-    scope_by_module: Mapping[str, str]
-    modules: Mapping[str, ModuleInfo]
+    @property
+    def paths(self) -> Mapping[str, str]: ...
+
+    @property
+    def known(self) -> frozenset[str]: ...
+
+    @property
+    def arbor_index(self) -> Mapping[str, tuple[str | None, str | None]]: ...
+
+    @property
+    def scope_by_module(self) -> Mapping[str, str]: ...
+
+    @property
+    def modules(self) -> Mapping[str, ModuleInfo]: ...
 
 
 __all__ = ["NO_MUTATION", "Mutation", "SelfTestReport", "selftest"]
@@ -132,7 +141,7 @@ def plan(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
 
 
 def _scope_boundary_mutations(
-    policy: Policy, paths: dict[str, str], known: frozenset[str], owners: Mapping[str, str],
+    policy: Policy, paths: Mapping[str, str], known: frozenset[str], owners: Mapping[str, str],
 ) -> list[Mutation]:
     mutations = []
     for scope in policy.scopes:
