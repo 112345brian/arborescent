@@ -96,6 +96,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.presets" = "domain"
 "arborescent.stdlib" = "domain"
 "arborescent.ports" = "ports"
+"arborescent.annotate" = "application"
 "arborescent.generate" = "application"
 "arborescent.baseline" = "application"
 "arborescent.config" = "application"
