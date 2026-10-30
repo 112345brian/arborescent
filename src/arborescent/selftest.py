@@ -10,9 +10,35 @@ import fnmatch
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Protocol
 
-from .domain import NOISE_DIRS, Policy, Rule
+from .domain import NOISE_DIRS, ArchitectureScope, Policy, Rule
 from .engine import Services, run_own
+from .facts import ModuleInfo
+
+
+class ScanView(Protocol):
+    """The subset of ``scanner.ScanData`` this module plans mutations from.
+
+    A structural type, not an import of ``scanner``: ``selftest`` is in the ``application`` ring, which may not
+    import the ``adapters`` ring that ``scanner`` belongs to.
+    """
+
+    @property
+    def paths(self) -> Mapping[str, str]: ...
+
+    @property
+    def known(self) -> frozenset[str]: ...
+
+    @property
+    def arbor_index(self) -> Mapping[str, tuple[str | None, str | None]]: ...
+
+    @property
+    def scope_by_module(self) -> Mapping[str, str]: ...
+
+    @property
+    def modules(self) -> Mapping[str, ModuleInfo]: ...
+
 
 __all__ = ["NO_MUTATION", "Mutation", "SelfTestReport", "selftest"]
 
@@ -38,6 +64,8 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.EFFECT_DYNAMIC_IMPORT: "effect-dynamic-import is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_PATCH: "effect-patch requires a configured tests folder and project-package target; covered by focused rule tests",
     Rule.SCOPE_IMPORT: "cross-scope boundaries are mutation-tested when a project configures multiple scopes",
+    Rule.SCOPE_EFFECT_LEAK: "cross-scope effect leaks are mutation-tested when a project configures multiple "
+    "scopes with a declared public dependency",
     Rule.CRLF: _PRACTICE,
     Rule.UNDECLARED_IMPORTS: _PRACTICE,
 }
@@ -63,14 +91,11 @@ class SelfTestReport:
         return not self.survived
 
 
-def plan(
-    policy: Policy, paths: dict[str, str], known: frozenset[str],
-    arbor_index: Mapping[str, tuple[str | None, str | None]], scope_by_module: Mapping[str, str] | None = None,
-) -> tuple[list[Mutation], list[str]]:
+def plan(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
     """The mutations for this policy, plus the ones that cannot be built (and why)."""
+    paths, known, arbor_index, owners = scan.paths, scan.known, scan.arbor_index, scan.scope_by_module
     out: list[Mutation] = []
     skipped: list[str] = []
-    owners = scope_by_module or {}
     local_policies = (
         tuple((scope.name, scope.policy, frozenset(name for name in known if owners.get(name) == scope.name)) for scope in policy.scopes)
         if policy.scopes else (("", policy, known),)
@@ -113,11 +138,12 @@ def plan(
         ))
     if policy.scopes:
         out.extend(_scope_boundary_mutations(policy, paths, known, owners))
+        out.extend(_scope_effect_mutations(policy, scan))
     return out, sorted(set(skipped))
 
 
 def _scope_boundary_mutations(
-    policy: Policy, paths: dict[str, str], known: frozenset[str], owners: Mapping[str, str],
+    policy: Policy, paths: Mapping[str, str], known: frozenset[str], owners: Mapping[str, str],
 ) -> list[Mutation]:
     mutations = []
     for scope in policy.scopes:
@@ -137,6 +163,58 @@ def _scope_boundary_mutations(
                 ))
                 break
     return mutations
+
+
+def _scope_effect_mutations(policy: Policy, scan: ScanView) -> list[Mutation]:
+    paths, known, owners, modules = scan.paths, scan.known, scan.scope_by_module, scan.modules
+    mutations: list[Mutation] = []
+    for scope in policy.scopes:
+        hosts = sorted(
+            name for name in known
+            if owners.get(name) == scope.name and not paths[name].endswith("__init__.py") and name in modules
+        )
+        for host in hosts:
+            ring = scope.policy.resolve_ring(scan.arbor_index, host)
+            if ring is None:
+                continue
+            forbidden = scope.policy.forbidden_effects(ring)
+            if not forbidden:
+                continue
+            leak = _leaking_public_dependency(policy, scope, forbidden, scan, modules[host])
+            if leak is None:
+                continue
+            target, category = leak
+            mutations.append(Mutation(
+                Rule.SCOPE_EFFECT_LEAK,
+                f"{scope.name}: new import of {target}, a public module that uses the forbidden {category} effect",
+                paths[host], f"import {target}",
+            ))
+            break
+    return mutations
+
+
+def _leaking_public_dependency(
+    policy: Policy, scope: ArchitectureScope, forbidden: frozenset[str], scan: ScanView, host_info: ModuleInfo,
+) -> tuple[str, str] | None:
+    owners, modules = scan.scope_by_module, scan.modules
+    for dependency_name in scope.depends_on:
+        dependency = policy.scope(dependency_name)
+        for name in sorted(scan.known):
+            if owners.get(name) != dependency_name:
+                continue
+            if not any(fnmatch.fnmatchcase(name, pattern) for pattern in dependency.public):
+                continue
+            info = modules.get(name)
+            if info is None or _already_imports(host_info, name):
+                continue
+            for use in info.facts.effect_uses:
+                if use.category in forbidden:
+                    return name, use.category
+    return None
+
+
+def _already_imports(info: ModuleInfo, target: str) -> bool:
+    return any(imp.level == 0 and imp.module == target for imp in info.facts.imports)
 
 
 def _ring_mutations(
@@ -239,7 +317,7 @@ def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
 def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     services = replace(services, scanner=services.scanner.uncached())  # mutated copies must not touch the real cache
     _, scan = run_own(policy, root, services, practices=False)
-    mutations, skipped = plan(policy, dict(scan.paths), scan.known, scan.arbor_index, scan.scope_by_module)
+    mutations, skipped = plan(policy, scan)
     report = SelfTestReport([], [], skipped)
     fs = services.fs
     with fs.temporary_directory("arborescent-selftest-") as tmp:

@@ -354,6 +354,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
+| `scope-effect-leak` | a module imports another scope's declared-`public` module, and that module uses an effect the importing ring forbids (one hop, not transitive) |
 | `circular-import` | when `forbid_circular_imports` is enabled, first-party modules form a circular import dependency, including cycles made only of lazy or `TYPE_CHECKING` imports |
 | `external-import` | a ring imports an external package missing from its `external` list (scope set by the preset) |
 | `os-branching` | a ring not marked `os_branching` reads `os.name` or `sys.platform` |
