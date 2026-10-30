@@ -15,7 +15,7 @@ uses `pathlib.PurePosixPath` only for lexical path validation; it does not acces
 |---|---|---|---|
 | domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types (including declared child-arbor paths), rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
-| application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, selftest, suggestions, practices, package metadata and extraction |
+| application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction |
 | adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time`, `sysconfig`, `tomllib` | focused file-system, scanner, clock, subprocess, engine and type-checker adapters |
 | composition | everything | `argparse`, `pathlib`, `os`, `shlex` | the command line: wires adapters to use cases and presents reports |
 
@@ -42,6 +42,7 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.presets` | `single` | domain |
 | `arborescent.rules` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
+| `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
 | `arborescent.bench` | `single` | application |
 | `arborescent.config` | `single` | application |
