@@ -376,3 +376,40 @@ def test_annotation_findings_are_scope_local(tmp_path: Path) -> None:
     assert [(item.rule, item.subject) for item in found if item.rule == Rule.INVALID_ARBOR_ANNOTATION] == [
         ("invalid-arbor-annotation", "core"),
     ]
+
+
+def test_public_import_leaking_a_forbidden_effect_is_flagged(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import api\n",
+        "libs/beta/src/api.py": "import time\nVALUE = time.time()\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    leaks = [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]
+    assert [(item.subject, item.rule) for item in leaks] == [("core", "scope-effect-leak")]
+    assert "effect clock" in leaks[0].detail
+    assert "api" in leaks[0].detail
+
+
+def test_non_public_import_leaking_an_effect_is_not_flagged_by_the_effect_rule(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import private\n",
+        "libs/beta/src/private.py": "import time\nVALUE = time.time()\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]
+    assert any(item.rule == Rule.SCOPE_IMPORT for item in found)  # the plain boundary rule still catches this
+
+
+def test_public_import_of_an_effect_the_importing_ring_allows_is_not_flagged(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/adapter.py": "import api\n",  # alpha's outermost ring forbids no effects
+        "libs/beta/src/api.py": "import time\nVALUE = time.time()\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]

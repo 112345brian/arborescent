@@ -55,6 +55,7 @@ class Rule(StrEnum):
     EFFECT_PATCH = "effect-patch"
     INTERNAL_IMPORT = "internal-import"
     SCOPE_IMPORT = "scope-import"
+    SCOPE_EFFECT_LEAK = "scope-effect-leak"
     CIRCULAR_IMPORT = "circular-import"
     EXTERNAL_IMPORT = "external-import"
     OS_BRANCHING = "os-branching"
