@@ -50,7 +50,11 @@ def render_schema() -> str:
 
 
 def _package(item: PackageArguments) -> dict[str, Any]:
-    home = None if item.home is None else {"kind": item.home.kind, "repository": item.home.repository, "path": item.home.path}
+    home: dict[str, Any] | None = None
+    if item.home is not None:
+        home = {"kind": item.home.kind, "repository": item.home.repository, "path": item.home.path}
+        if item.home.repository is not None:
+            home["repository_is_git_url"] = item.home.repository_is_git_url
     return {
         "id": item.id,
         "name": item.name,
@@ -81,8 +85,13 @@ def _package(item: PackageArguments) -> dict[str, Any]:
     }
 
 
-def _object(properties: dict[str, Any], all_of: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    schema: dict[str, Any] = {"type": "object", "properties": properties, "required": sorted(properties), "additionalProperties": False}
+def _object(
+    properties: dict[str, Any], all_of: list[dict[str, Any]] | None = None, required: list[str] | None = None
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": "object", "properties": properties, "required": sorted(properties if required is None else required),
+        "additionalProperties": False,
+    }
     if all_of is not None:
         schema["allOf"] = all_of
     return schema
@@ -109,7 +118,16 @@ _PACKAGE = _object(
         "home": {
             "oneOf": [
                 {"type": "null"},
-                _object({"kind": {"enum": list(HOME_KINDS)}, "repository": _NULLABLE_STRING, "path": _NULLABLE_STRING}),
+                _object(
+                    {
+                        "kind": {"enum": list(HOME_KINDS)},
+                        "repository": {**_NULLABLE_STRING, "description": "any non-empty string naming the repository, exactly as annotated"},
+                        "repository_is_git_url": {"type": "boolean", "description": "derived: whether repository can be used directly as a git source (https://, ssh:// or git@host:path)"},
+                        "path": _NULLABLE_STRING,
+                    },
+                    all_of=[{"if": {"properties": {"repository": {"type": "string"}}, "required": ["repository"]}, "then": {"required": ["repository_is_git_url"]}}],
+                    required=["kind", "path", "repository"],
+                ),
             ],
             "description": "where the package lives after the migration; null while not annotated (see gaps)",
         },

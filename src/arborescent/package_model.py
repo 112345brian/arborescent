@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -24,6 +25,15 @@ class PackagePath:
 
 
 HOME_KINDS = ("repository", "workspace-member")
+_GIT_URL = re.compile(r"(?:https://|ssh://)[^\s/]+\S*|git@[^\s:@/]+:\S+")
+
+
+def is_git_url(value: str) -> bool:
+    """Whether ``value`` can be used directly as a git source: ``https://``, ``ssh://`` or scp-style ``git@host:path``.
+
+    A classifier, not a validator: nothing else counts and no host is guessed (``org/name`` is a legitimate name, not a URL).
+    """
+    return _GIT_URL.fullmatch(value) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,8 +41,13 @@ class PackageHome:
     """Where a package lives after the migration: its own repository, or a member of a workspace in the same repository."""
 
     kind: str  # one of HOME_KINDS
-    repository: str | None = None  # kind "repository": the new repository
+    repository: str | None = None  # kind "repository": any non-empty string naming the new repository
     path: str | None = None  # kind "workspace-member": the member's folder, repository-relative
+
+    @property
+    def repository_is_git_url(self) -> bool | None:
+        """Derived, never annotated: whether a consumer can use ``repository`` as a git source (None without one)."""
+        return None if self.repository is None else is_git_url(self.repository)
 
 
 @dataclass(frozen=True, slots=True)

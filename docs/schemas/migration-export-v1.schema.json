@@ -148,6 +148,25 @@
               },
               {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "repository": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "repository"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "repository_is_git_url"
+                      ]
+                    }
+                  }
+                ],
                 "properties": {
                   "kind": {
                     "enum": [
@@ -162,10 +181,15 @@
                     ]
                   },
                   "repository": {
+                    "description": "any non-empty string naming the repository, exactly as annotated",
                     "type": [
                       "string",
                       "null"
                     ]
+                  },
+                  "repository_is_git_url": {
+                    "description": "derived: whether repository can be used directly as a git source (https://, ssh:// or git@host:path)",
+                    "type": "boolean"
                   }
                 },
                 "required": [

@@ -14,7 +14,7 @@ from arborescent.migration_arguments import (
     build_migration_arguments,
 )
 from arborescent.package_assignment import RepositoryFacts
-from arborescent.package_model import CatalogError
+from arborescent.package_model import CatalogError, PackageHome, is_git_url
 from arborescent.package_parse import parse_catalog
 
 CATALOG = """
@@ -232,3 +232,35 @@ def test_a_repository_home_is_any_non_empty_name_kept_unchanged(repository: str)
 def test_an_empty_or_non_string_home_repository_is_an_error(value: str) -> None:
     with pytest.raises(CatalogError, match="repository"):
         build(CATALOG.replace('repository = "example/core"\n[[packages.module_renames]]', f"repository = {value}\n[[packages.module_renames]]"))
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("https://github.com/example/core.git", True),
+        ("https://example.org/core", True),
+        ("https://host", True),
+        ("ssh://git@github.com/example/core.git", True),
+        ("git@github.com:example/core.git", True),
+        ("example/core", False),
+        ("core", False),
+        ("http://github.com/example/core.git", False),  # no guessing: only https, ssh and scp-style git@
+        ("ftp://host/core", False),
+        ("file:///srv/core", False),
+        ("github.com/example/core", False),
+        ("https://", False),
+        ("ssh://", False),
+        ("git@github.com", False),
+        ("git@:org/name", False),
+        ("https://host/a b", False),
+        ("", False),
+    ],
+)
+def test_is_git_url_classifies_only_https_ssh_and_scp_style_urls(value: str, expected: bool) -> None:
+    assert is_git_url(value) is expected
+
+
+def test_the_home_derives_whether_its_repository_is_a_git_url_and_never_stores_it() -> None:
+    assert PackageHome("repository", repository="example/core").repository_is_git_url is False
+    assert PackageHome("repository", repository="git@github.com:example/core.git").repository_is_git_url is True
+    assert PackageHome("workspace-member", path="packages/x").repository_is_git_url is None
