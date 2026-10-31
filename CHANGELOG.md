@@ -19,6 +19,13 @@
   tool-specific emitter ships; `docs/migration-export.md` has a `git filter-repo` recipe and the comparison with
   blinkered's `blinkered.toml` (#54).
 
+- Per-package release, pin and history policy in `packages.toml`: `release.pin` (`tag` or `sha`), `release.merge`
+  (`merge-commit` only), `release.tag_before_branch_delete`, `history` (`preserve` or `fresh`) and an explicit
+  `unmanaged = true`. Values are validated and unknown `release` keys rejected. New rule
+  `package-release-policy-missing` names a package with neither a policy nor the marker (workspace members are exempt
+  and cannot declare one); `selftest` probes it. The policy fills the `policy` slot of the migration export and the gap
+  appears in its `gaps`. Any unknown key on a `[[packages]]` entry is now rejected. Data and checks only: nothing is
+  released, pinned or rewritten (#56).
 - Opt-in `package_pyproject = true` (needs `package_catalog`): `arborescent generate` creates each missing package
   `pyproject.toml` with the fields the annotations determine (dependencies from the rings' `external` allow-lists through
   the `dependencies` mapping, plus `depends_on`; `[tool.uv.sources]` per sibling; the root `[tool.uv.workspace]

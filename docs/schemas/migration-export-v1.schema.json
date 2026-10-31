@@ -289,10 +289,69 @@
             "type": "object"
           },
           "policy": {
-            "description": "release, pin and history policy (#56); never set for a workspace member",
-            "type": [
-              "object",
-              "null"
+            "description": "release, pin and history policy (#56); null when none is declared (see gaps) and always for a workspace member; an unmanaged package exports unmanaged true with no history or release",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "history": {
+                    "enum": [
+                      "preserve",
+                      "fresh",
+                      null
+                    ]
+                  },
+                  "release": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "merge": {
+                            "enum": [
+                              "merge-commit",
+                              null
+                            ]
+                          },
+                          "pin": {
+                            "enum": [
+                              "tag",
+                              "sha",
+                              null
+                            ]
+                          },
+                          "tag_before_branch_delete": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "merge",
+                          "pin",
+                          "tag_before_branch_delete"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "unmanaged": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "history",
+                  "release",
+                  "unmanaged"
+                ],
+                "type": "object"
+              }
             ]
           },
           "pyproject": {

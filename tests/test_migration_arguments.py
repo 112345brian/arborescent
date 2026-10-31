@@ -27,6 +27,11 @@ root = "src/app/core"
 summary = "domain and ports"
 public = ["app.core.api"]
 externals = ["pydantic"]
+history = "preserve"
+[packages.release]
+pin = "tag"
+merge = "merge-commit"
+tag_before_branch_delete = true
 [packages.home]
 kind = "repository"
 repository = "example/core"
@@ -207,7 +212,8 @@ def test_home_is_validated_when_the_catalog_is_parsed() -> None:
     no_repository = CATALOG.replace('repository = "example/core"\n[[packages.module_renames]]', "[[packages.module_renames]]")
     with pytest.raises(CatalogError, match="requires a repository"):
         build(no_repository)
-    clash = CATALOG.replace('kind = "repository"\nrepository = "example/core"', 'kind = "workspace-member"\npath = "packages/web/inner"')
+    member_core = CATALOG.replace('history = "preserve"\n[packages.release]\npin = "tag"\nmerge = "merge-commit"\ntag_before_branch_delete = true\n', "")  # a member has no policy
+    clash = member_core.replace('kind = "repository"\nrepository = "example/core"', 'kind = "workspace-member"\npath = "packages/web/inner"')
     with pytest.raises(CatalogError, match="nest"):
         build(clash)
 

@@ -23,6 +23,20 @@ class PackagePath:
     metadata: Mapping[str, str] | None = None
 
 
+PIN_KINDS = ("tag", "sha")  # how dependents pin the package
+MERGE_KINDS = ("merge-commit",)  # squash or rebase would orphan pinned SHAs
+HISTORY_KINDS = ("preserve", "fresh")  # whether the package's history is kept when it is split out
+
+
+@dataclass(frozen=True, slots=True)
+class ReleasePolicy:
+    """Release stance of a package. Data for the tools that release and pin; Arborescent performs none of it."""
+
+    pin: str | None = None
+    merge: str | None = None
+    tag_before_branch_delete: bool | None = None
+
+
 HOME_KINDS = ("repository", "workspace-member")
 
 
@@ -56,6 +70,9 @@ class PackageDescriptor:
     depends_on: tuple[str, ...] = ()
     extraction_status: str = "in-repository"
     paths: tuple[PackagePath, ...] = ()
+    release: ReleasePolicy | None = None
+    history: str | None = None
+    unmanaged: bool = False  # explicitly outside release, pin and history policy
     home: PackageHome | None = None  # None: not annotated yet (a gap in the migration export)
     public: tuple[str, ...] = ()  # dotted module globs other packages may import; empty = no declared surface
     externals: tuple[str, ...] | None = None  # top-level external import names the package may use; None: not annotated

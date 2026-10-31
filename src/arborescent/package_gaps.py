@@ -9,6 +9,7 @@ from .domain import Policy, Violation
 from .facts import resolve_targets
 from .package_assignment import RepositoryFacts, assignment_violations
 from .package_model import CatalogDocument
+from .package_policy import policy_violations
 from .package_pyproject_gaps import (
     derived_projects,
     existing_derived_paths,
@@ -51,7 +52,7 @@ def package_gap_violations(policy: Policy, root: Path, fs: FileSystem, scan: Sca
     context = load_package_context(policy, root, fs, scan)
     if context is None:
         return []
-    found = assignment_violations(context.catalog, context.facts)
+    found = [*assignment_violations(context.catalog, context.facts), *policy_violations(context.catalog)]
     if policy.package_pyproject:
         found += pyproject_violations(fs, root, derived_projects(policy, scan, context.catalog, context.facts))
     return found

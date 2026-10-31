@@ -13,6 +13,7 @@ from arborescent_helpers import MINI_FILES, write_files
 from jsonschema import Draft202012Validator, ValidationError
 from test_migration_arguments import CATALOG, FACTS
 
+import arborescent.migration_arguments as arguments
 from arborescent.cli import main
 from arborescent.migration_arguments import build_migration_arguments
 from arborescent.migration_json import (
@@ -72,12 +73,12 @@ def test_a_workspace_member_exports_no_history_or_pin_information() -> None:
     assert web["home"] == {"kind": "workspace-member", "path": "packages/web", "repository": None}
     assert web["policy"] is None
     tampered = copy.deepcopy(data)
-    next(p for p in tampered["packages"] if p["id"] == "web")["policy"] = {"history": "keep"}
+    next(p for p in tampered["packages"] if p["id"] == "web")["policy"] = {"history": "preserve", "release": None, "unmanaged": False}
     with pytest.raises(ValidationError):
         VALIDATOR.validate(tampered)
     own = copy.deepcopy(data)
-    next(p for p in own["packages"] if p["id"] == "core")["policy"] = {"history": "keep"}
-    VALIDATOR.validate(own)  # a package with its own repository may carry policy (#56 fills it in)
+    next(p for p in own["packages"] if p["id"] == "core")["policy"] = {"history": "fresh", "release": None, "unmanaged": False}
+    VALIDATOR.validate(own)  # a package with its own repository may carry policy (#56)
 
 
 @pytest.mark.parametrize(
@@ -107,8 +108,81 @@ def test_the_export_carries_every_field_a_migration_tool_is_given() -> None:
     assert core["dependencies"] == {"packages": [], "external": ["pydantic"]}
 
 
-def test_policy_and_pyproject_are_reserved_slots_that_stay_null_until_their_issues_land() -> None:
-    assert all(p["policy"] is None and p["pyproject"] is None for p in document()["packages"])
+def test_pyproject_is_a_reserved_slot_that_stays_null_until_its_issue_lands() -> None:
+    assert all(p["pyproject"] is None for p in document()["packages"])
+
+
+# -- the release, pin and history policy (#56) --------------------------------------------------------------------
+
+
+def policy_of(data: dict[str, Any], package: str) -> Any:
+    return next(p for p in data["packages"] if p["id"] == package)["policy"]
+
+
+def test_a_declared_policy_is_exported_whole() -> None:
+    data = document()
+    assert policy_of(data, "core") == {
+        "history": "preserve",
+        "release": {"pin": "tag", "merge": "merge-commit", "tag_before_branch_delete": True},
+        "unmanaged": False,
+    }
+    VALIDATOR.validate(data)
+
+
+def test_unset_fields_export_as_null() -> None:
+    data = document(CATALOG.replace('history = "preserve"\n[packages.release]\npin = "tag"\nmerge = "merge-commit"\ntag_before_branch_delete = true\n', '[packages.release]\npin = "sha"\n'))
+    assert policy_of(data, "core") == {"history": None, "release": {"pin": "sha", "merge": None, "tag_before_branch_delete": None}, "unmanaged": False}
+    VALIDATOR.validate(data)
+
+
+def test_an_unmanaged_package_exports_the_marker_and_no_policy() -> None:
+    data = document(CATALOG.replace('history = "preserve"\n[packages.release]\npin = "tag"\nmerge = "merge-commit"\ntag_before_branch_delete = true\n', "unmanaged = true\n"))
+    assert policy_of(data, "core") == {"history": None, "release": None, "unmanaged": True}
+    assert not [g for g in data["gaps"] if g["code"] == "package-release-policy-missing"]
+    VALIDATOR.validate(data)
+
+
+def test_a_missing_policy_is_a_null_slot_and_a_named_error_gap() -> None:
+    data = document(CATALOG.replace('history = "preserve"\n[packages.release]\npin = "tag"\nmerge = "merge-commit"\ntag_before_branch_delete = true\n', ""))
+    assert policy_of(data, "core") is None
+    assert data["ready"] is False
+    assert [(g["code"], g["subject"], g["severity"]) for g in data["gaps"] if g["code"] == "package-release-policy-missing"] == [
+        ("package-release-policy-missing", "core", "error")
+    ]
+    VALIDATOR.validate(data)
+
+
+def test_a_workspace_member_needs_no_policy_and_exports_none() -> None:
+    data = document()
+    assert policy_of(data, "web") is None
+    assert not [g for g in data["gaps"] if g["subject"] == "web" and g["code"] == "package-release-policy-missing"]
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {"history": "keep", "release": None, "unmanaged": False},
+        {"history": "preserve", "release": {"pin": "branch", "merge": None, "tag_before_branch_delete": None}, "unmanaged": False},
+        {"history": "preserve", "release": {"pin": "tag", "merge": "squash", "tag_before_branch_delete": None}, "unmanaged": False},
+        {"history": "preserve", "release": {"pin": "tag", "merge": None, "tag_before_branch_delete": "yes"}, "unmanaged": False},
+        {"history": "preserve", "release": {"pin": "tag", "merge": None, "tag_before_branch_delete": None, "extra": 1}, "unmanaged": False},
+        {"history": "preserve", "release": None},
+        {"history": "preserve", "release": None, "unmanaged": False, "extra": 1},
+    ],
+)
+def test_the_schema_rejects_a_malformed_policy(policy: dict[str, Any]) -> None:
+    data = document()
+    next(p for p in data["packages"] if p["id"] == "core")["policy"] = policy
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(data)
+
+
+def test_the_export_gap_disappears_when_the_policy_gap_is_not_collected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Guard against removal: without the policy findings in the arguments, a package without a policy reports no gap."""
+    bare = CATALOG.replace('history = "preserve"\n[packages.release]\npin = "tag"\nmerge = "merge-commit"\ntag_before_branch_delete = true\n', "")
+    assert any(g["code"] == "package-release-policy-missing" for g in document(bare)["gaps"])
+    monkeypatch.setattr(arguments, "policy_violations", lambda catalog: [])
+    assert not any(g["code"] == "package-release-policy-missing" for g in document(bare)["gaps"])
 
 
 # -- the command -------------------------------------------------------------------------------------------------
@@ -133,6 +207,7 @@ root = "app"
 summary = "everything"
 public = ["app", "app.domain"]
 externals = ["pydantic"]
+history = "preserve"
 [packages.home]
 kind = "repository"
 repository = "example/core"
@@ -152,6 +227,7 @@ def test_the_export_command_writes_the_validated_document(tmp_path: Path, capsys
     assert [m["module"] for m in core["owned"]["modules"]] == ["app", "app.domain", "app.main"]
     assert [a["path"] for a in core["owned"]["assets"]] == ["app/data.json"]
     assert data["ready"] is True
+    assert core["policy"] == {"history": "preserve", "release": None, "unmanaged": False}
 
 
 def test_the_export_command_prints_to_stdout_without_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
