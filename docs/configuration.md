@@ -293,6 +293,36 @@ package claiming an owned file, a glob contradicting a path owner, a package spa
 packages with no declared dependency. A probe that cannot be built for the catalog is listed with the reason.
 This adds no behaviour to `packages extract`, which is unchanged.
 
+### Release, pin and history policy
+
+Some inputs to a split cannot be derived from the code: how dependents pin a package, whether its history is kept, which
+merge style keeps pinned SHAs reachable. They are decisions, so a package entry in `packages.toml` records them.
+Arborescent stores and validates them; it releases, tags, pins and rewrites nothing. The tools that do receive these
+values as arguments.
+
+```toml
+[[packages]]
+id = "core"
+# ... name, kind, repository, root, summary, paths as above
+history = "preserve"               # "preserve" or "fresh": keep the package's history, or start a new one
+[packages.release]
+pin = "tag"                        # "tag" or "sha": how dependents pin this package
+merge = "merge-commit"             # only "merge-commit": squash or rebase would orphan pinned SHAs
+tag_before_branch_delete = true    # true or false: tag the release before its branch is deleted
+
+[[packages]]
+id = "scratch"
+# ...
+unmanaged = true                   # explicitly outside release, pin and history policy
+```
+
+Every field is optional. Values are checked when the catalog is read: a value outside the lists above, a wrong type, an
+unknown key under `[packages.release]`, or `unmanaged = true` together with a policy is an error naming the package
+(a hard error like any other malformed catalog, not a baselinable finding). `unmanaged` can only be `true`; omit it to
+declare a policy. A package that declares neither a policy (`history` or a `[packages.release]` table, even an empty
+one) nor `unmanaged = true` is a named gap, reported as `package-release-policy-missing`; it fails the check like the
+other assignment gaps and can be baselined. `selftest` probes it by adding a package with no policy.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:
@@ -426,6 +456,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `unannotated-module` | `require_arbor_annotations` is enabled and a module resolves its ring only through `classify`, with no valid `__arbor__` annotation |
 | `package-unassigned-module` | `package_catalog` is set and a first-party module lies under no package's owned `paths` |
 | `package-multiply-assigned-module` | a module lies under the paths of two or more packages (the message names the module and every claiming package) |
+| `package-release-policy-missing` | `package_catalog` is set and a package declares no `history`, no `[packages.release]` table and not `unmanaged = true` |
 | `package-unowned-asset` | a non-Python file below the policy's `sources` is under no package path and matches no `[[assets]]` glob |
 | `package-multiply-assigned-asset` | an asset is under one package's path and also matched by another package's `[[assets]]` glob |
 | `package-spans-rings` | information only (never fails, never baselined): a package has modules in several rings, so a split must follow module sets, not folders |

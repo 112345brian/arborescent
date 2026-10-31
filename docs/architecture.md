@@ -44,6 +44,7 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.package_model` | `single` | domain |
 | `arborescent.package_fields` | `single` | domain |
 | `arborescent.package_parse` | `single` | domain |
+| `arborescent.package_policy` | `single` | domain |
 | `arborescent.package_render` | `single` | domain |
 | `arborescent.path_exclusion` | `single` | domain |
 | `arborescent.package_assignment` | `single` | domain |

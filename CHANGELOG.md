@@ -12,6 +12,12 @@
   `package-spans-rings` is information (a `NOTE` line, never failing, never baselined). Assets are claimed by package
   `paths` or ordered `[[assets]]` globs, first match wins. `selftest` probes each rule when the key is set (#52).
 
+- Per-package release, pin and history policy in `packages.toml`: `release.pin` (`tag` or `sha`), `release.merge`
+  (`merge-commit` only), `release.tag_before_branch_delete`, `history` (`preserve` or `fresh`) and an explicit
+  `unmanaged = true`. Values are validated and unknown `release` keys rejected. New rule
+  `package-release-policy-missing` names a package with neither a policy nor the marker; `selftest` probes it. Data and
+  checks only: nothing is released, pinned or rewritten (#56).
+
 ### Changed
 
 - `packages.py` is split into cohesive `package_*` modules; behaviour and the `arborescent.packages` names are unchanged,

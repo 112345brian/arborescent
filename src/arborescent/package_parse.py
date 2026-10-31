@@ -16,6 +16,7 @@ from .package_model import (
     PackagePath,
     PackageSemantics,
 )
+from .package_policy import parse_policy
 
 
 def parse_catalog(data: Mapping[str, Any]) -> CatalogDocument:
@@ -71,8 +72,10 @@ def parse_package(value: object, index: int) -> PackageDescriptor:
                 metadata,
             )
         )
+    package_id = required(value, "id")
+    release, history, unmanaged = parse_policy(value, package_id)
     return PackageDescriptor(
-        id=required(value, "id"),
+        id=package_id,
         name=required(value, "name"),
         kind=required(value, "kind"),
         repository=required(value, "repository"),
@@ -83,6 +86,9 @@ def parse_package(value: object, index: int) -> PackageDescriptor:
         depends_on=strings(value.get("depends_on", []), "depends_on"),
         extraction_status=str(value.get("extraction_status", "in-repository")),
         paths=tuple(paths),
+        release=release,
+        history=history,
+        unmanaged=unmanaged,
     )
 
 

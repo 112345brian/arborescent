@@ -41,6 +41,10 @@ def package_mutations(
             skipped.append(f"{rule}: every source folder is wholly claimed by a package, so no new file can be unowned")
         else:
             out.append(Mutation(rule, f"a new {'asset' if asset else 'module'} no package claims", path, "", new_file=True))
+    out.append(Mutation(
+        Rule.PACKAGE_RELEASE_POLICY_MISSING, "a package with neither a release or history policy nor the unmanaged marker",
+        catalog_file, _probe_package(),
+    ))
     out += _second_claims(catalog_file, context, sole, skipped)
     out += _ring_span(RuleContext(policy, arbor_index, scope_by_module).resolve_ring, catalog_file, context, sole, skipped)
     out += _undeclared_import(context, sole, skipped)

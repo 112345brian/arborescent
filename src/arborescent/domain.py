@@ -80,6 +80,7 @@ class Rule(StrEnum):
     PACKAGE_MULTIPLY_ASSIGNED_ASSET = "package-multiply-assigned-asset"
     PACKAGE_SPANS_RINGS = "package-spans-rings"
     PACKAGE_UNDECLARED_DEPENDENCY = "package-undeclared-dependency"
+    PACKAGE_RELEASE_POLICY_MISSING = "package-release-policy-missing"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {

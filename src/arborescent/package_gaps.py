@@ -9,6 +9,7 @@ from .domain import Policy, Violation
 from .facts import resolve_targets
 from .package_assignment import RepositoryFacts, assignment_violations
 from .package_model import CatalogDocument
+from .package_policy import policy_violations
 from .package_tree import is_generated
 from .packages import read_catalog
 from .path_exclusion import excluded_by_policy
@@ -41,7 +42,9 @@ def load_package_context(policy: Policy, root: Path, fs: FileSystem, scan: ScanR
 def package_gap_violations(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> list[Violation]:
     """Findings for the configured catalog; empty when the policy does not set ``package_catalog``."""
     context = load_package_context(policy, root, fs, scan)
-    return [] if context is None else assignment_violations(context.catalog, context.facts)
+    if context is None:
+        return []
+    return [*assignment_violations(context.catalog, context.facts), *policy_violations(context.catalog)]
 
 
 def repository_facts(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> RepositoryFacts:
