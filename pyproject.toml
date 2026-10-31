@@ -100,6 +100,8 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.package_fields" = "domain"
 "arborescent.package_parse" = "domain"
 "arborescent.package_render" = "domain"
+"arborescent.path_exclusion" = "domain"
+"arborescent.package_assignment" = "domain"
 "arborescent.ports" = "ports"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
@@ -117,6 +119,9 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.package_manifest" = "application"
 "arborescent.package_validation" = "application"
 "arborescent.package_copy" = "application"
+"arborescent.mutation" = "application"
+"arborescent.package_gaps" = "application"
+"arborescent.package_probes" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
@@ -160,7 +165,8 @@ include_external_packages = true
 name = "arborescent core and ports must not import adapters, the engines or process/file/network modules"
 type = "forbidden"
 source_modules = ["arborescent.domain", "arborescent.facts", "arborescent.presets", "arborescent.stdlib", "arborescent.rules", "arborescent.ports",
-    "arborescent.package_model", "arborescent.package_fields", "arborescent.package_parse", "arborescent.package_render"]
+    "arborescent.package_model", "arborescent.package_fields", "arborescent.package_parse", "arborescent.package_render",
+    "arborescent.path_exclusion", "arborescent.package_assignment"]
 forbidden_modules = [
     "arborescent.adapters", "arborescent.tool_runner", "arborescent.typecheckers", "arborescent.engines", "arborescent.engine", "arborescent.cli", "subprocess", "shutil", "tempfile",
     "socket", "urllib",

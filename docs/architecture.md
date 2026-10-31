@@ -15,7 +15,7 @@ uses `pathlib.PurePosixPath` only for lexical path validation; it does not acces
 |---|---|---|---|
 | domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types (including declared child-arbor paths), rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
-| application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction |
+| application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction, package assignment gaps |
 | adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time`, `sysconfig`, `tomllib` | focused file-system, scanner, clock, subprocess, engine and type-checker adapters |
 | composition | everything | `argparse`, `pathlib`, `os`, `shlex` | the command line: wires adapters to use cases and presents reports |
 
@@ -45,6 +45,8 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.package_fields` | `single` | domain |
 | `arborescent.package_parse` | `single` | domain |
 | `arborescent.package_render` | `single` | domain |
+| `arborescent.path_exclusion` | `single` | domain |
+| `arborescent.package_assignment` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
@@ -62,6 +64,9 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.package_manifest` | `single` | application |
 | `arborescent.package_validation` | `single` | application |
 | `arborescent.package_copy` | `single` | application |
+| `arborescent.mutation` | `single` | application |
+| `arborescent.package_gaps` | `single` | application |
+| `arborescent.package_probes` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |

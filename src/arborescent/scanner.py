@@ -14,6 +14,7 @@ from typing import Any
 
 from .domain import NOISE_DIRS, Policy, PolicyError
 from .facts import EffectUse, ModuleInfo, RawImport, SourceFacts, TopLevelDef, extract
+from .path_exclusion import excluded_by_policy
 from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
@@ -84,17 +85,6 @@ def _is_unclassified(policy: Policy, module: str, rel: str) -> bool:
     if scope is not None:
         return scope.policy.ring_of(module) is None and not _under_sources(rel, scope.policy.sources)
     return policy.ring_of(module) is None and not _under_sources(rel, policy.sources)
-
-
-def _excluded_by_policy(rel: str, patterns: Sequence[str]) -> bool:
-    parts = rel.split("/")
-    ancestors = ["/".join(parts[:index]) for index in range(1, len(parts))]
-    return any(
-        fnmatch.fnmatch(rel, pattern)
-        or fnmatch.fnmatch(Path(rel).name, pattern)
-        or any(fnmatch.fnmatch(parent, pattern) or fnmatch.fnmatch(parent.rsplit("/", 1)[-1], pattern) for parent in ancestors)
-        for pattern in patterns
-    )
 
 
 def _excluded_folder(rel: str, patterns: Sequence[str]) -> str:
@@ -303,7 +293,7 @@ class FsScanner:
         excluded_children = _child_policy_paths(root, policy)
         excluded_paths = (*policy.exclude, *excluded_children)
         for rel in all_paths:
-            if _excluded_by_policy(rel, excluded_paths):
+            if excluded_by_policy(rel, excluded_paths):
                 if rel.endswith(".py"):
                     folder = _excluded_folder(rel, excluded_paths)
                     excluded[folder] = excluded.get(folder, 0) + 1
@@ -321,7 +311,7 @@ class FsScanner:
         py_paths = [rel for rel in all_paths if rel.endswith(".py")]
         for rel in py_paths:
             if (
-                _excluded_by_policy(rel, excluded_paths)
+                excluded_by_policy(rel, excluded_paths)
                 or _noise_parent(rel, tracked)
                 or (_vendor_parent(rel) is not None and not policy.scan_vendors)
             ):

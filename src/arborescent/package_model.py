@@ -101,3 +101,19 @@ def semantics_of(package: PackageDescriptor) -> PackageSemantics:
         package.capabilities,
         package.depends_on,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class AssetRule:
+    """A non-Python file glob owned by a package; rules are tried in order and the first match wins."""
+
+    pattern: str
+    package: str
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogDocument:
+    """What ``packages.toml`` declares, parsed but not checked against the file system."""
+
+    packages: tuple[PackageDescriptor, ...]
+    assets: tuple[AssetRule, ...] = ()

@@ -39,6 +39,7 @@ settings. The two forms cannot be mixed.
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
+| `package_catalog` | unset | Opt-in, strict preset only: path of a `packages.toml`. Every module and asset must belong to exactly one package (see [Package assignment](#package-assignment)). |
 
 ## Multi-scope configuration
 
@@ -265,6 +266,33 @@ tests remain idiomatic and real process adapters can declare their deliberate su
 because it conflicts with strict type inference for container factories. `check` prints `standard rules (baseline vN)` when no rule
 customization is active, or `customised rules: ...` with the changes that apply.
 
+### Package assignment
+
+Set `package_catalog = "packages.toml"` (strict preset only; any other preset is a policy error) and `arborescent check`
+reports, by rule id, every first-party module and every asset that does not belong to exactly one package. It reuses the
+`packages.toml` above: a package claims a file by listing it, or a folder above it, in `paths`. The catalog is only
+parsed for this check, so a double claim that `packages validate` refuses outright is reported as a finding naming the
+module and every claiming package.
+
+Non-Python files (templates, static files, vocabulary data, SQL) below the policy's `sources` are assets. Beyond the
+package `paths`, a catalog can claim assets with ordered globs; `*` and `?` stay inside one folder, `**` spans folders,
+and **the first matching rule wins**, so globs never claim a file twice. A glob that gives a file to a package other than
+the one whose path contains it is a double claim. The policy's `exclude` patterns and generated output (`__pycache__`,
+`build`, `dist`, `*.pyc`) are not assets; modules under a declared child arbor are not scanned and so not assigned.
+
+```toml
+[[assets]]
+pattern = "src/**/templates/*.html"
+package = "web"
+```
+
+Findings that name a package pair (`package-multiply-assigned-*`, `package-undeclared-dependency`) are failures like any
+other rule and can be baselined. `package-spans-rings` is printed as a `NOTE` and neither fails the check nor enters
+the baseline. `selftest` probes each rule when `package_catalog` is set: a new unowned module or asset, a second
+package claiming an owned file, a glob contradicting a path owner, a package spanning two rings, and a new import across
+packages with no declared dependency. A probe that cannot be built for the catalog is listed with the reason.
+This adds no behaviour to `packages extract`, which is unchanged.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:
@@ -396,6 +424,12 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `invalid-arbor-annotation` | a module's `__arbor__` annotation is malformed or names an unknown ring |
 | `arbor-ring-mismatch` | a valid `__arbor__` ring disagrees with the ring the first matching `classify` glob would assign |
 | `unannotated-module` | `require_arbor_annotations` is enabled and a module resolves its ring only through `classify`, with no valid `__arbor__` annotation |
+| `package-unassigned-module` | `package_catalog` is set and a first-party module lies under no package's owned `paths` |
+| `package-multiply-assigned-module` | a module lies under the paths of two or more packages (the message names the module and every claiming package) |
+| `package-unowned-asset` | a non-Python file below the policy's `sources` is under no package path and matches no `[[assets]]` glob |
+| `package-multiply-assigned-asset` | an asset is under one package's path and also matched by another package's `[[assets]]` glob |
+| `package-spans-rings` | information only (never fails, never baselined): a package has modules in several rings, so a split must follow module sets, not folders |
+| `package-undeclared-dependency` | a module imports a module of another package that its own package does not list in `depends_on` |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
 `getattr`, variables, or wrappers. A test patch is checked against the target module's ring and is considered only when

@@ -5,15 +5,40 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .package_fields import optional, relative_path, required, strings
+from .package_fields import glob_pattern, optional, relative_path, required, strings
 from .package_model import (
     MANIFEST_NAME,
+    AssetRule,
+    CatalogDocument,
     CatalogError,
     ExtractedPath,
     PackageDescriptor,
     PackagePath,
     PackageSemantics,
 )
+
+
+def parse_catalog(data: Mapping[str, Any]) -> CatalogDocument:
+    """Parse a decoded ``packages.toml``: the packages and the ordered ``[[assets]]`` rules. No file-system checks."""
+    raw_packages = data.get("packages")
+    if not isinstance(raw_packages, list) or not raw_packages:
+        raise CatalogError("catalog must contain one or more [[packages]] entries")
+    packages = tuple(parse_package(item, index) for index, item in enumerate(raw_packages))
+    known = {package.id for package in packages}
+    if len(known) != len(packages):
+        raise CatalogError("package ids must be unique")
+    raw_assets: object = data.get("assets", [])
+    if not isinstance(raw_assets, list):
+        raise CatalogError("assets must be an array of tables")
+    rules: list[AssetRule] = []
+    for index, item in enumerate(raw_assets):
+        if not isinstance(item, dict):
+            raise CatalogError(f"assets entry {index} must be a table")
+        rule = AssetRule(glob_pattern(required(item, "pattern"), f"assets entry {index} pattern"), required(item, "package"))
+        if rule.package not in known:
+            raise CatalogError(f"assets pattern {rule.pattern!r} names unknown package {rule.package}")
+        rules.append(rule)
+    return CatalogDocument(packages, tuple(rules))
 
 
 def parse_package(value: object, index: int) -> PackageDescriptor:

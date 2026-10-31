@@ -15,6 +15,9 @@ from typing import Protocol
 from .domain import NOISE_DIRS, ArchitectureScope, Policy, Rule
 from .engine import Services, run_own
 from .facts import ModuleInfo
+from .mutation import Mutation
+from .package_gaps import PackageContext, load_package_context
+from .package_probes import package_mutations
 
 
 class ScanView(Protocol):
@@ -71,15 +74,6 @@ NO_MUTATION: dict[Rule, str] = {
 }
 
 
-@dataclass(frozen=True)
-class Mutation:
-    rule: Rule  # the rule id that must newly fire
-    label: str
-    file: str  # posix path relative to the root
-    append: str  # text appended to the file ("" for an added file: see ``new_file``)
-    new_file: bool = False
-
-
 @dataclass
 class SelfTestReport:
     killed: list[str]
@@ -91,8 +85,13 @@ class SelfTestReport:
         return not self.survived
 
 
-def plan(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
-    """The mutations for this policy, plus the ones that cannot be built (and why)."""
+def plan(
+    policy: Policy, scan: ScanView, packages: PackageContext | None = None,
+) -> tuple[list[Mutation], list[str]]:
+    """The mutations for this policy, plus the ones that cannot be built (and why).
+
+    ``packages`` (the catalog and its facts) adds the package-assignment probes; without it there are none.
+    """
     paths, known, arbor_index, owners = scan.paths, scan.known, scan.arbor_index, scan.scope_by_module
     out: list[Mutation] = []
     skipped: list[str] = []
@@ -142,6 +141,10 @@ def plan(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
     if policy.scopes:
         out.extend(_scope_boundary_mutations(policy, paths, known, owners))
         out.extend(_scope_effect_mutations(policy, scan))
+    if packages is not None:
+        package_found, package_skipped = package_mutations(policy, scan.arbor_index, scan.scope_by_module, packages)
+        out.extend(package_found)
+        skipped.extend(package_skipped)
     return out, sorted(set(skipped))
 
 
@@ -375,7 +378,7 @@ def _abstraction_mutations(policy: Policy, ring: str, host: str) -> list[Mutatio
 def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     services = replace(services, scanner=services.scanner.uncached())  # mutated copies must not touch the real cache
     _, scan = run_own(policy, root, services, practices=False)
-    mutations, skipped = plan(policy, scan)
+    mutations, skipped = plan(policy, scan, load_package_context(policy, root, services.fs, scan))
     report = SelfTestReport([], [], skipped)
     fs = services.fs
     with fs.temporary_directory("arborescent-selftest-") as tmp:

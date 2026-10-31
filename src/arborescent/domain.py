@@ -16,6 +16,7 @@ from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 __all__ = [
     "ALL",
     "EFFECT_RULES",
+    "INFORMATIONAL_RULES",
     "NOISE_DIRS",
     "ArchitectureScope",
     "ChildArbor",
@@ -72,6 +73,13 @@ class Rule(StrEnum):
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
     UNANNOTATED_MODULE = "unannotated-module"
+    # package assignment (`package_catalog`): which package owns each module and asset
+    PACKAGE_UNASSIGNED_MODULE = "package-unassigned-module"
+    PACKAGE_MULTIPLY_ASSIGNED_MODULE = "package-multiply-assigned-module"
+    PACKAGE_UNOWNED_ASSET = "package-unowned-asset"
+    PACKAGE_MULTIPLY_ASSIGNED_ASSET = "package-multiply-assigned-asset"
+    PACKAGE_SPANS_RINGS = "package-spans-rings"
+    PACKAGE_UNDECLARED_DEPENDENCY = "package-undeclared-dependency"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {
@@ -85,6 +93,9 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "dynamic-import": Rule.EFFECT_DYNAMIC_IMPORT,
     "patch": Rule.EFFECT_PATCH,
 }
+
+# Findings that are reported but never fail a check and never enter the baseline: a package spanning rings is normal.
+INFORMATIONAL_RULES: frozenset[Rule] = frozenset({Rule.PACKAGE_SPANS_RINGS})
 
 
 class PolicyError(ValueError):
@@ -195,8 +206,10 @@ class Policy:
     children: tuple[ChildArbor, ...] = ()
     require_arbor_annotations: bool = False
     require_arbor_annotations_exclude: tuple[str, ...] = ()
+    package_catalog: str | None = None  # opt-in: packages.toml path; every module and asset must belong to one package
 
     def __post_init__(self) -> None:
+        _validate_package_catalog(self.package_catalog, self.preset.name)
         _validate_rings(self.rings, self.classify, bool(self.scopes))
         for pattern, targets in self.module_forbid_imports:
             if not pattern or not targets:
@@ -372,6 +385,16 @@ class Policy:
     def expressible_by_layers(self) -> bool:
         """True when every ring may import ALL inner rings, so tach's layers alone state the policy."""
         return all(self.allowed_rings(r.name) == frozenset(x.name for x in self.rings[: i + 1]) for i, r in enumerate(self.rings))
+
+
+def _validate_package_catalog(value: str | None, preset: str) -> None:
+    if value is None:
+        return
+    path = PurePosixPath(value)
+    if not value or path.is_absolute() or ".." in path.parts or "\\" in value:
+        raise PolicyError(f"`package_catalog` must be a relative path inside the repository, got {value!r}")
+    if preset != DEFAULT_PRESET:
+        raise PolicyError(f"`package_catalog` requires the {DEFAULT_PRESET} preset, not {preset!r}")
 
 
 def _validate_suggestion_threshold(value: int) -> None:

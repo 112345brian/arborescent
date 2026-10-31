@@ -4,7 +4,7 @@ shared parse, then apply the baseline ratchet."""
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -13,8 +13,16 @@ from typing import TYPE_CHECKING, cast
 from . import baseline as ratchet_mod
 from .certification import PROFILE, certify, tach_multi_root_note
 from .config import find_child_policy
-from .domain import Policy, PolicyError, Rule, ToolResult, Violation
+from .domain import (
+    INFORMATIONAL_RULES,
+    Policy,
+    PolicyError,
+    Rule,
+    ToolResult,
+    Violation,
+)
 from .generate import generate
+from .package_gaps import package_gap_violations
 from .ports import (
     Clock,
     Engine,
@@ -32,7 +40,7 @@ from .suggestions import Suggestion, file_size_suggestions
 if TYPE_CHECKING:
     from .facts import ModuleInfo
 
-__all__ = ["CheckReport", "EngineRun", "Options", "Services", "changed_files", "drift", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
+__all__ = ["CheckReport", "EngineRun", "Options", "Services", "blocking", "changed_files", "drift", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
 
 
 @dataclass(frozen=True)
@@ -71,6 +79,7 @@ class CheckReport:
     engines: list[EngineRun] = field(default_factory=lambda: [])
     drift: list[str] = field(default_factory=lambda: [])
     violations: list[Violation] = field(default_factory=lambda: [])
+    notes: list[Violation] = field(default_factory=lambda: [])  # informational findings: shown, never failing
     ratchet: ratchet_mod.Ratchet | None = None
     parsed: int = 0
     excluded: dict[str, int] = field(default_factory=lambda: {})
@@ -130,7 +139,14 @@ def run_own(
     found += _inventory_violations(scan.modules)
     if practices and only is None:
         found += run_practices(policy, root, services.runner, services.fs, scan)
+    if only is None:  # ownership is a whole-repository fact; the selftest needs it whether or not practices run
+        found += package_gap_violations(policy, root, services.fs, scan)
     return found, scan
+
+
+def blocking(found: Iterable[Violation]) -> list[Violation]:
+    """The findings that can fail a check or enter the baseline (information is reported, never recorded)."""
+    return [v for v in found if v.rule not in INFORMATIONAL_RULES]
 
 
 def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:
@@ -351,7 +367,8 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         )
         engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
         report.engines += engine_runs
-        report.violations = found + [v for run in engine_runs for v in run.violations]
+        report.notes = [v for v in found if v.rule in INFORMATIONAL_RULES]
+        report.violations = blocking(found) + [v for run in engine_runs for v in run.violations]
         base: set[str] = ratchet_mod.load(services.fs, root / policy.baseline) if opts.use_baseline else set()
         ruff_skipped = any(run.name == "ruff" and run.status in {"skipped", "disabled"} for run in engine_runs)
         if not opts.tools or ruff_skipped:

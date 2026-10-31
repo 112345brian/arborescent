@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from collections.abc import Mapping
 from pathlib import PurePosixPath
@@ -65,3 +66,25 @@ def within(path: PurePosixPath, parent: PurePosixPath) -> bool:
 def current_location(value: str, context: str) -> PurePosixPath:
     """A location inside the extracted tree; ``.`` is the tree root itself."""
     return PurePosixPath() if value == "." else relative_path(value, context)
+
+
+def glob_pattern(value: str, context: str) -> str:
+    """A repository-relative glob; ``..``, absolute paths and backslashes are refused like any other path."""
+    relative_path(value.replace("*", "x").replace("?", "x").replace("[", "x"), context)
+    return value
+
+
+def glob_match(pattern: str, path: str) -> bool:
+    """Match a posix path: ``*`` and ``?`` stay inside one folder, ``**`` spans folders (a trailing ``**`` needs one name)."""
+    return _match(tuple(pattern.split("/")), tuple(path.split("/")))
+
+
+def _match(pattern: tuple[str, ...], parts: tuple[str, ...]) -> bool:
+    if not pattern:
+        return not parts
+    head, rest = pattern[0], pattern[1:]
+    if head == "**":
+        if not rest:
+            return bool(parts)
+        return any(_match(rest, parts[skip:]) for skip in range(len(parts) + 1))
+    return bool(parts) and fnmatch.fnmatchcase(parts[0], head) and _match(rest, parts[1:])

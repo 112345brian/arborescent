@@ -17,6 +17,7 @@ from arborescent.rules import check_modules
 from arborescent.selftest import NO_MUTATION, plan
 from arborescent.testing import FakeToolRunner
 
+PACKAGE_RULES = {rule for rule in Rule if rule.startswith("package-")}
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY: dict[str, Any] = {"sources": ["app", "run.py"], "entry_scripts": ["run"], "classify": {**CLASSIFY, "run": "composition"}}
 
@@ -58,6 +59,12 @@ def test_rule_id_strings_never_change() -> None:
             "unannotated-module",
             "scope-import",
             "scope-effect-leak",
+            "package-unassigned-module",
+            "package-multiply-assigned-module",
+            "package-unowned-asset",
+            "package-multiply-assigned-asset",
+            "package-spans-rings",
+            "package-undeclared-dependency",
         ]
     )
 
@@ -74,8 +81,9 @@ def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     scan = FsScanner().scan(policy, root)
     mutated = {m.rule for m in plan(policy, scan)[0]}
     # the arborescent repo has no entry scripts, and does not enable require_arbor_annotations (its own source
-    # is not fully annotated yet); those rules' mutations are covered by the next two tests instead
-    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE} >= set(Rule)
+    # is not fully annotated yet); those rules' mutations are covered by the next two tests instead. The package rules
+    # need a configured `package_catalog` (Arborescent has none); tests/test_package_gaps.py probes them.
+    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, *PACKAGE_RULES} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
 
