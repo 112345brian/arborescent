@@ -81,11 +81,37 @@ def test_a_workspace_member_exports_no_history_or_pin_information() -> None:
     VALIDATOR.validate(own)  # a package with its own repository may carry policy (#56)
 
 
-@pytest.mark.parametrize("repository", ["example/core", "https://github.com/example/core.git"])
-def test_the_home_repository_is_exported_unchanged_and_valid(repository: str) -> None:
+@pytest.mark.parametrize(
+    ("repository", "is_url"),
+    [("example/core", False), ("https://github.com/example/core.git", True), ("git@github.com:example/core.git", True)],
+)
+def test_the_home_repository_is_exported_unchanged_with_a_derived_git_url_flag(repository: str, is_url: bool) -> None:
     data = document(CATALOG.replace('repository = "example/core"\n[[packages.module_renames]]', f'repository = "{repository}"\n[[packages.module_renames]]'))
-    assert next(p for p in data["packages"] if p["id"] == "core")["home"]["repository"] == repository
+    home = next(p for p in data["packages"] if p["id"] == "core")["home"]
+    assert (home["repository"], home["repository_is_git_url"]) == (repository, is_url)
     VALIDATOR.validate(data)
+
+
+def test_a_workspace_member_home_has_no_repository_flag() -> None:
+    home = next(p for p in document()["packages"] if p["id"] == "web")["home"]
+    assert "repository_is_git_url" not in home and home["repository"] is None
+
+
+def test_the_derived_flag_is_required_whenever_a_repository_is_present() -> None:
+    data = document()
+    del next(p for p in data["packages"] if p["id"] == "core")["home"]["repository_is_git_url"]
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(data)
+    data = document()
+    next(p for p in data["packages"] if p["id"] == "core")["home"]["repository_is_git_url"] = "yes"
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(data)
+
+
+def test_the_flag_is_computed_from_the_repository_so_it_cannot_be_annotated() -> None:
+    catalog = CATALOG.replace('repository = "example/core"\n[[packages.module_renames]]', 'repository = "example/core"\nrepository_is_git_url = true\n[[packages.module_renames]]')
+    home = next(p for p in document(catalog)["packages"] if p["id"] == "core")["home"]
+    assert home["repository_is_git_url"] is False  # an annotated value is ignored, never trusted
 
 
 @pytest.mark.parametrize(
