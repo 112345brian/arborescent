@@ -64,7 +64,7 @@ def test_availability_is_whether_libcst_imports() -> None:
 def test_the_commands_are_one_rename_per_module_in_the_given_order_over_the_given_paths() -> None:
     commands = adapter()[0].commands(REQUEST)
     assert commands == tuple(
-        (sys.executable, "-I", "-m", "libcst.tool", "codemod", "--external", "--hide-progress", "libcst.codemod.commands.rename.RenameCommand",
+        (sys.executable, "-I", "-m", "libcst.tool", "codemod", "--external", "--hide-progress", "--no-format", "libcst.codemod.commands.rename.RenameCommand",
          str(ROOT / "src/core"), "--old_name", rename.source, "--new_name", rename.target)
         for rename in RENAMES
     )
@@ -191,23 +191,32 @@ def test_a_refusal_modifies_no_file(tmp_path: Path) -> None:
     assert digest(tmp_path) == before
 
 
+@pytest.fixture
+def no_black(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """LibCST formats what it writes with ``black`` unless told not to; CI has none. Hide any that this machine has."""
+    empty = tmp_path.parent / "empty-path"
+    empty.mkdir(exist_ok=True)
+    monkeypatch.setenv("PATH", str(empty))
+
+
 @needs_libcst
-def test_real_rename_rewrites_the_supported_idioms(tmp_path: Path) -> None:
+def test_real_rename_rewrites_the_supported_idioms_without_black_and_without_reformatting(tmp_path: Path, no_black: None) -> None:
     tree(tmp_path, {
         **BASE,
         "core/use.py": "import app.core.api\nimport app.core.api as alias\nfrom app.core.api import f\nfrom app.core.internal import HIDDEN\n\n"
-                       "X = app.core.api.f() + alias.f() + f() + HIDDEN\n",
+                       "X   =   app.core.api.f() + alias.f() + f() + HIDDEN\n",
     })
     outcome = real(tmp_path).apply(RewriteRequest(tmp_path, (".",), REAL))
     assert outcome.ok, outcome.detail
     text = (tmp_path / "core/use.py").read_text(encoding="utf-8")
     assert "app" not in text
     assert "from core.api import f" in text and "from core.internal import HIDDEN" in text and "core.api.f()" in text
+    assert "X   =   " in text  # nothing but the renamed names changed: the code was not reformatted
     compile(text, "use.py", "exec")
 
 
 @needs_libcst
-def test_a_crash_of_the_rename_names_the_file_and_stops(tmp_path: Path) -> None:
+def test_a_crash_of_the_rename_names_the_file_and_stops(tmp_path: Path, no_black: None) -> None:
     # LibCST's own package-level rename raises ParserSyntaxError on this form (an attribute of the renamed package).
     tree(tmp_path, {**BASE, "core/use.py": "from app.core import f\nx = f()\n"})
     outcome = real(tmp_path).apply(RewriteRequest(tmp_path, (".",), REAL))

@@ -72,6 +72,9 @@ when `import app.core.api` is also present), so a syntax check cannot catch it. 
 with regular expressions, runs before any file is touched, and lists the statements. There is no override. The refused
 idiom is tracked in the follow-up issue linked from the pull request.
 
+LibCST runs with `--no-format`: by default it pipes every file it writes through `black`, which this extra does not
+install and which would reformat code the migration has no business touching. Only the renamed names change.
+
 The rewrite is left as an **uncommitted change** in the new repository (`git diff` shows it); the history the library
 wrote is not altered. A failure part-way (LibCST raising on one file) leaves the files renamed so far changed, and the
 command says so: delete the new repository and rerun after fixing the cause. One LibCST process runs per renamed

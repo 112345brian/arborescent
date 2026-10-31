@@ -1,8 +1,10 @@
 """Adapter: LibCST's rename codemod behind the ``ImportRewriter`` port (#67).
 
-One ``RenameCommand`` run per renamed module. That command is LibCST's, not ours; this adapter only chooses its inputs and
-refuses what it cannot do safely. Reached through the ``ToolRunner`` port and an isolated (``-I``) subprocess, so a module planted in the tree cannot shadow one; so importing this module never
-imports LibCST (the extra is optional).
+One ``RenameCommand`` run per renamed module, with ``--no-format``: by default LibCST pipes every file it writes through
+``black``, which is not a dependency of this extra and would reformat code the migration has no business touching. The
+command is LibCST's, not ours; this adapter only chooses its inputs and refuses what it cannot do safely. It is reached
+through the ``ToolRunner`` port and an isolated (``-I``) subprocess, so a module planted in the tree cannot shadow one
+and importing this module never imports LibCST (the extra is optional).
 
 Rewritten (checked on real code): ``import M``, ``import M as a``, ``from M import name``, ``from M import *``. Refused
 before any file is touched: ``from <old> import <module>``, because the output of LibCST's rename can then still parse
@@ -43,7 +45,7 @@ class LibCstRename:
     def commands(self, request: RewriteRequest) -> tuple[tuple[str, ...], ...]:
         paths = [str(request.root / item) for item in request.paths]
         return tuple(
-            (sys.executable, "-I", "-m", "libcst.tool", "codemod", "--external", "--hide-progress", _RENAME, *paths,
+            (sys.executable, "-I", "-m", "libcst.tool", "codemod", "--external", "--hide-progress", "--no-format", _RENAME, *paths,
              "--old_name", rename.source, "--new_name", rename.target)
             for rename in request.renames
         )
