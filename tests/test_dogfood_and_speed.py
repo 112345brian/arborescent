@@ -39,8 +39,16 @@ def test_arborescent_passes_its_own_policy_and_reports_generated_preset_drift_ad
     assert report.ok  # existing generated files may drift; that signal is informational
 
 
+# Both speed budgets are per file, not absolute: they were set when this repository had 32 modules (1.0 s cold, 0.10 s warm), and
+# the work is linear in the number of files. A fixed total turned the repository growing into a failure (on a slow runner 66
+# modules took 1.12 s cold and 101 ms warm), while a per-file slowdown of the scanner or the cache still trips them.
+BUDGET_ANCHOR_FILES = 32
+COLD_BUDGET_SECONDS_PER_FILE = 1.0 / BUDGET_ANCHOR_FILES
+WARM_BUDGET_SECONDS_PER_FILE = 0.10 / BUDGET_ANCHOR_FILES
+
+
 def test_warm_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> None:
-    """Budget for the code we control: ~20 files, content-hash cache warm. Generous (CI machines are slow) but a real
+    """Budget for the code we control: content-hash cache warm, scaled per file (see BUDGET_ANCHOR_FILES). Generous (CI machines are slow) but a real
     regression such as parsing twice or re-reading the tree per rule would blow through it."""
     policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     svc = own_services(tmp_path / "cache")
@@ -51,19 +59,15 @@ def test_warm_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> N
         _, scan = run_own(policy, root, svc, practices=False)
         runs.append(time.perf_counter() - t0)
         assert scan.parsed == 0
-    assert min(runs) < 0.10, f"warm own checks took {min(runs) * 1000:.0f} ms (budget 100 ms)"
+    budget = max(0.10, WARM_BUDGET_SECONDS_PER_FILE * len(scan.known))
+    assert min(runs) < budget, f"warm own checks took {min(runs) * 1000:.0f} ms for {len(scan.known)} files (budget {budget * 1000:.0f} ms)"
 
-
-COLD_BUDGET_SECONDS_PER_FILE = 1.0 / 32  # the original 1.0 s budget, set when the repository had 32 modules
 
 def test_cold_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> None:
     policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     t0 = time.perf_counter()
     _, scan = run_own(policy, root, own_services(tmp_path / "cache"), practices=False)
     cold = time.perf_counter() - t0
-    # The budget is per file, not absolute: it was 1.0 s when this repository had 32 modules, and parsing a cold tree is linear in
-    # its size. A fixed number turned the repository growing into a test failure (66 modules took 1.12 s on a slow macOS runner,
-    # about 17 ms per file against an allowance of 31 ms), while a slowdown of the scanner per file still trips it.
     budget = max(1.0, COLD_BUDGET_SECONDS_PER_FILE * scan.parsed)
     assert scan.parsed == len(scan.known) and cold < budget, (
         f"cold {cold * 1000:.0f} ms for {scan.parsed} files (budget {budget * 1000:.0f} ms)"
