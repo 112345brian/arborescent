@@ -35,6 +35,9 @@ dev = [
     { name = "tach" },
     { name = "ty" },
 ]
+filterrepo = [
+    { name = "git-filter-repo" },
+]
 importlinter = [
     { name = "import-linter" },
 ]
@@ -60,6 +63,7 @@ requires-dist = [
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.30" },
     { name = "build", marker = "extra == 'dev'" },
     { name = "git-filter-repo", marker = "extra == 'dev'", specifier = ">=2.38" },
+    { name = "git-filter-repo", marker = "extra == 'filterrepo'", specifier = ">=2.38" },
     { name = "import-linter", marker = "extra == 'all'", specifier = ">=2.0" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "import-linter", marker = "extra == 'importlinter'", specifier = ">=2.0" },
@@ -80,7 +84,7 @@ requires-dist = [
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.50" },
     { name = "ty", marker = "extra == 'ty'", specifier = ">=0.0.50" },
 ]
-provides-extras = ["importlinter", "tach", "pyright", "ruff", "basedpyright", "ty", "pyrefly", "all", "dev"]
+provides-extras = ["importlinter", "tach", "pyright", "ruff", "basedpyright", "ty", "pyrefly", "filterrepo", "all", "dev"]
 
 [[package]]
 name = "attrs"

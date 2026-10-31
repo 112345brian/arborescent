@@ -9,6 +9,7 @@ name = "domain ring imports only ['domain']"
 type = "forbidden"
 source_modules = [
     "arborescent.domain",
+    "arborescent.driver_request",
     "arborescent.facts",
     "arborescent.migration_arguments",
     "arborescent.migration_json",
@@ -25,16 +26,19 @@ source_modules = [
     "arborescent.stdlib",
 ]
 forbidden_modules = [
+    "arborescent.driver_port",
     "arborescent.ports",
     "arborescent.annotate",
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
     "arborescent.config",
+    "arborescent.driver_plan",
     "arborescent.engine",
     "arborescent.generate",
     "arborescent.install_tools",
     "arborescent.migration_export",
+    "arborescent.module_forbid_probes",
     "arborescent.mutation",
     "arborescent.package_copy",
     "arborescent.package_gaps",
@@ -50,6 +54,7 @@ forbidden_modules = [
     "arborescent.suggestions",
     "arborescent.adapters",
     "arborescent.clock_adapter",
+    "arborescent.driver_filter_repo",
     "arborescent.engines",
     "arborescent.filesystem_adapter",
     "arborescent.installer_adapter",
@@ -60,6 +65,7 @@ forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
     "arborescent.cli_install",
+    "arborescent.cli_migrate",
     "arborescent.cli_report",
 ]
 allow_indirect_imports = true
@@ -69,6 +75,7 @@ name = "domain ring imports no I/O or third-party package it does not list"
 type = "forbidden"
 source_modules = [
     "arborescent.domain",
+    "arborescent.driver_request",
     "arborescent.facts",
     "arborescent.migration_arguments",
     "arborescent.migration_json",
@@ -107,17 +114,19 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "ports ring imports only ['domain', 'ports']"
 type = "forbidden"
-source_modules = ["arborescent.ports"]
+source_modules = ["arborescent.driver_port", "arborescent.ports"]
 forbidden_modules = [
     "arborescent.annotate",
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
     "arborescent.config",
+    "arborescent.driver_plan",
     "arborescent.engine",
     "arborescent.generate",
     "arborescent.install_tools",
     "arborescent.migration_export",
+    "arborescent.module_forbid_probes",
     "arborescent.mutation",
     "arborescent.package_copy",
     "arborescent.package_gaps",
@@ -133,6 +142,7 @@ forbidden_modules = [
     "arborescent.suggestions",
     "arborescent.adapters",
     "arborescent.clock_adapter",
+    "arborescent.driver_filter_repo",
     "arborescent.engines",
     "arborescent.filesystem_adapter",
     "arborescent.installer_adapter",
@@ -143,6 +153,7 @@ forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
     "arborescent.cli_install",
+    "arborescent.cli_migrate",
     "arborescent.cli_report",
 ]
 allow_indirect_imports = true
@@ -150,7 +161,7 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "ports ring imports no I/O or third-party package it does not list"
 type = "forbidden"
-source_modules = ["arborescent.ports"]
+source_modules = ["arborescent.driver_port", "arborescent.ports"]
 forbidden_modules = [
     "asyncio",
     "ctypes",
@@ -180,10 +191,12 @@ source_modules = [
     "arborescent.bench",
     "arborescent.certification",
     "arborescent.config",
+    "arborescent.driver_plan",
     "arborescent.engine",
     "arborescent.generate",
     "arborescent.install_tools",
     "arborescent.migration_export",
+    "arborescent.module_forbid_probes",
     "arborescent.mutation",
     "arborescent.package_copy",
     "arborescent.package_gaps",
@@ -201,6 +214,7 @@ source_modules = [
 forbidden_modules = [
     "arborescent.adapters",
     "arborescent.clock_adapter",
+    "arborescent.driver_filter_repo",
     "arborescent.engines",
     "arborescent.filesystem_adapter",
     "arborescent.installer_adapter",
@@ -211,6 +225,7 @@ forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
     "arborescent.cli_install",
+    "arborescent.cli_migrate",
     "arborescent.cli_report",
 ]
 allow_indirect_imports = true
@@ -224,10 +239,12 @@ source_modules = [
     "arborescent.bench",
     "arborescent.certification",
     "arborescent.config",
+    "arborescent.driver_plan",
     "arborescent.engine",
     "arborescent.generate",
     "arborescent.install_tools",
     "arborescent.migration_export",
+    "arborescent.module_forbid_probes",
     "arborescent.mutation",
     "arborescent.package_copy",
     "arborescent.package_gaps",
@@ -268,6 +285,7 @@ type = "forbidden"
 source_modules = [
     "arborescent.adapters",
     "arborescent.clock_adapter",
+    "arborescent.driver_filter_repo",
     "arborescent.engines",
     "arborescent.filesystem_adapter",
     "arborescent.installer_adapter",
@@ -282,10 +300,12 @@ forbidden_modules = [
     "arborescent.bench",
     "arborescent.certification",
     "arborescent.config",
+    "arborescent.driver_plan",
     "arborescent.engine",
     "arborescent.generate",
     "arborescent.install_tools",
     "arborescent.migration_export",
+    "arborescent.module_forbid_probes",
     "arborescent.mutation",
     "arborescent.package_copy",
     "arborescent.package_gaps",
@@ -302,6 +322,7 @@ forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
     "arborescent.cli_install",
+    "arborescent.cli_migrate",
     "arborescent.cli_report",
 ]
 allow_indirect_imports = true
@@ -312,6 +333,7 @@ type = "forbidden"
 source_modules = [
     "arborescent.adapters",
     "arborescent.clock_adapter",
+    "arborescent.driver_filter_repo",
     "arborescent.engines",
     "arborescent.filesystem_adapter",
     "arborescent.installer_adapter",
@@ -339,7 +361,13 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "composition ring imports no I/O or third-party package it does not list"
 type = "forbidden"
-source_modules = ["arborescent.__main__", "arborescent.cli", "arborescent.cli_install", "arborescent.cli_report"]
+source_modules = [
+    "arborescent.__main__",
+    "arborescent.cli",
+    "arborescent.cli_install",
+    "arborescent.cli_migrate",
+    "arborescent.cli_report",
+]
 forbidden_modules = [
     "asyncio",
     "ctypes",
