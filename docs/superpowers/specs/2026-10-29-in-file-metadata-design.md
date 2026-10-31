@@ -122,7 +122,7 @@ The extractability closure check in this design is a nested-arbor concept: a pac
 
 ## Non-goals
 
-- Arborescent does not need to perform extraction or vendoring itself. Other tools can move files; Arborescent supplies and verifies the declared intent those tools cannot derive (ownership, public surface, legitimate dependency direction) and checks the result afterwards.
+- Arborescent does not perform history-preserving extraction, vendoring, import rewriting, graph analytics, repository creation or release, and does not plan a migration or emit tool-specific inputs (filter-repo, Copybara). Other tools do that; Arborescent supplies and verifies the declared intent those tools cannot derive (ownership, public surface, legitimate dependency direction), compiles it into engine contracts, and exports it as stable JSON. In scope: annotations, their completeness and consistency checks, the export. The existing `packages extract` (a path copy with no history) is frozen. See `2026-10-31-monorepo-split-annotations-design.md`.
 - Multi-language ring enforcement. Carrying metadata in other file types is cheap; analysing their imports is a per-language commitment that is not proposed here.
 - Content hashing of extracted packages. They are expected to evolve; the manifest is a provenance snapshot, not a seal.
 - Merging scopes and `packages.toml` into one concept. They stay distinct (see "Scopes, packages and nested arbors").
