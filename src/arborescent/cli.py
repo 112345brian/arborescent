@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from . import baseline as ratchet_mod
@@ -218,7 +219,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(
     argv: Sequence[str] | None = None, services: Services | None = None, library: MigrationLibrary | None = None,
-    rewriter: ImportRewriter | None = None,
+    rewriter: ImportRewriter | None = None, environ: Mapping[str, str] | None = None,
 ) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -248,7 +249,10 @@ def main(
             cache=not getattr(args, "no_cache", False),
             output_dir=policy.output_dir,
         )
-        return _dispatch(args, policy, root, svc, MigrationTools(library or FilterRepo(svc.runner, svc.fs), rewriter or LibCstRename(svc.runner)))
+        tools = MigrationTools(
+            library or FilterRepo(svc.runner, svc.fs), rewriter or LibCstRename(svc.runner), os.environ if environ is None else environ
+        )
+        return _dispatch(args, policy, root, svc, tools)
     except PolicyError as exc:
         print(f"arborescent: {exc}", file=sys.stderr)
         return 2

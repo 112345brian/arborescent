@@ -5,6 +5,7 @@
 ## Unreleased
 
 ### Added
+- `packages migrate` takes its target directory from `--target` or from a git-ignored local config (`[targets]` in `.arborescent/local.toml`, found through `ARBORESCENT_LOCAL_CONFIG`, a `.env`, or that default) and prints which source supplied it. Where a repository is checked out is machine-specific, so the config is read by this command only and never reaches the catalog, the export, derived files or contracts; `home.repository` stays the committed remote identity.
 
 - `arborescent packages migrate PACKAGE_ID --target DIR`: the migration driver (#67). It supplies a dedicated migration
   library with one package's migration arguments through a port and does not migrate itself. The library is git

@@ -46,6 +46,7 @@ The driver is five modules, one per ring, and the annotation layer never imports
 - domain, `driver_request`: `MigrationRequest` (one package's path renames and module renames, plus where from and to) and `MigrationOutcome`.
 - ports, `driver_port`: the `MigrationLibrary` protocol (availability, the arguments it cannot apply, the exact arguments, `supply`) and, separately, `ImportRewriter` (statements it cannot rewrite safely, the exact commands, `apply`).
 - application, `driver_plan`: `plan_supply` turns a `PackageArguments` into a request, refusing while an error gap, a bypass edge or an undeclared first-party dependency is open, and for a workspace member (it keeps its history where it is); `supply` calls the port. `driver_rewrite` turns the plan into rewrite requests for the second port.
+- application, `local_targets`: the git-ignored local config that says where a package's new repository is checked out on this machine (found through `ARBORESCENT_LOCAL_CONFIG`, a `.env`, or `.arborescent/local.toml`). Machine-specific, so only `packages migrate` reads it; the export, derived files and contracts never do. Files go through the `FileSystem` port and the environment arrives as a mapping.
 - adapters, `driver_filter_repo`: git filter-repo behind the port, reached through `ToolRunner`. `driver_libcst`: LibCST's rename command behind `ImportRewriter`, through an isolated subprocess; `driver_libcst_scan` is the entry it runs to parse with LibCST (never imported by `cli`).
 - composition, `cli_migrate`: `arborescent packages migrate`; `cli` binds the adapter.
 
@@ -107,6 +108,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.package_part_probes` | `single` | application |
 | `arborescent.package_pyproject_gaps` | `single` | application |
 | `arborescent.driver_plan` | `single` | application |
+| `arborescent.local_targets` | `single` | application |
 | `arborescent.driver_rewrite` | `single` | application |
 | `arborescent.module_forbid_probes` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |

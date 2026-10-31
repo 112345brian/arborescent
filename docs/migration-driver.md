@@ -16,6 +16,38 @@ arborescent packages migrate core --target ../core --branch release
 
 It is an explicit command. `check` and `generate` never call it. It needs the same `package_catalog` as `packages export`.
 
+## Where the new repository is checked out: a local config, not the catalog
+
+`home.repository` in the catalog is the **remote identity** of a repository (`org/name` or a URL): the same on every
+machine, so it is committed and appears in the export. A directory on one machine is not. It would break on the next
+checkout, so it is never written to the catalog, the export, a derived `pyproject.toml` or an engine contract, and only
+`packages migrate` ever reads it.
+
+The directory comes from, in order:
+
+1. `--target DIR` on the command line;
+2. the package's entry in a git-ignored **local config**:
+
+   ```toml
+   # .arborescent/local.toml (not committed)
+   [targets]
+   core = "../checkouts/core"     # relative to this file's folder, not the current directory
+   web  = "/work/web"
+   ```
+
+3. neither: the command exits 1, says so, and names both ways and the file it looked at. A package that is blocked or a
+   workspace member is still explained first, because it needs no target.
+
+The config file is found through, in order: the `ARBORESCENT_LOCAL_CONFIG` environment variable; the same variable in a
+`.env` at the repository root (only that one variable is read, and nothing else in the file is printed); the default
+`.arborescent/local.toml` under the repository root. The variable may point outside the worktree, so the file survives
+branch switches, clean checkouts and linked worktrees. `.arborescent/` and `.env` are git-ignored in this repository.
+
+The dry run prints which source supplied the target (`target from: --target`, or `target from: local config <path>
+(found via the ARBORESCENT_LOCAL_CONFIG variable in .env)`). A config that names a variable's file which does not exist,
+is not TOML, has an unknown key, a non-string path or an unknown package id is an error (exit 2), never ignored; with
+`--target` given, the config is not read at all.
+
 ## What the dry run prints
 
 The package, the library, the source (the repository root) and target, the branch, every path rename and module rename

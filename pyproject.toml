@@ -141,6 +141,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.package_part_probes" = "application"
 "arborescent.package_pyproject_gaps" = "application"
 "arborescent.driver_plan" = "application"
+"arborescent.local_targets" = "application"
 "arborescent.driver_rewrite" = "application"
 "arborescent.module_forbid_probes" = "application"
 "arborescent.adapters" = "adapters"
