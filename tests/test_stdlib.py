@@ -37,10 +37,13 @@ def test_table_matches_the_running_interpreter_when_it_is_supported() -> None:
         ("asyncore", {"3.11"}),
         ("cgi", {"3.11", "3.12"}),
         ("telnetlib", {"3.11", "3.12"}),
-        ("annotationlib", {"3.14"}),
-        ("compression", {"3.14"}),
-        ("_interpreters", {"3.13", "3.14"}),
-        ("json", {"3.11", "3.12", "3.13", "3.14"}),
+        ("annotationlib", {"3.14", "3.15"}),
+        ("compression", {"3.14", "3.15"}),
+        ("_interpreters", {"3.13", "3.14", "3.15"}),
+        ("json", {"3.11", "3.12", "3.13", "3.14", "3.15"}),
+        ("profiling", {"3.15"}),
+        ("_math_integer", {"3.15"}),
+        ("sre_parse", {"3.11", "3.12", "3.13", "3.14"}),  # removed in 3.15
         ("requests", set()),
     ],
 )

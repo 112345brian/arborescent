@@ -11,13 +11,18 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+        include:
+          # The next release (a beta for now): catches breakage early without failing the PR over a pre-release.
+          - {os: ubuntu-latest, python: "3.15", experimental: true}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental == true }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          allow-prereleases: true
       - run: python -m pip install -e ".[dev]" "ruff==0.17.2" "tach==0.35.3"
       - run: python -m pytest
       - name: Architecture (import-linter contract)
