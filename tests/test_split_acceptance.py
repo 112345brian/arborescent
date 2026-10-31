@@ -12,7 +12,10 @@ Skipped, with the reason, where an external tool is not installed. No network is
 
 from __future__ import annotations
 
+import ast
 import dataclasses
+import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -345,3 +348,93 @@ def test_the_driver_and_the_export_driven_recipe_keep_the_same_files(split_monor
     target = tmp_path / "orders-driver"
     assert migrate(monorepo, "orders", target, "--yes").returncode == 0
     assert set(run(["git", "ls-files"], target).stdout.split()) == set(run(["git", "ls-files"], works["orders"]).stdout.split())
+
+
+# --- the driver rewrites imports in the new repository, refuses what it cannot rewrite, and refuses a bypass ------------
+
+needs_libcst = pytest.mark.skipif(importlib.util.find_spec("libcst") is None, reason="LibCST not installed (pip install libcst)")
+
+
+def tree_hash(root: Path) -> str:
+    """One hash over every file below ``root`` except git's own and Arborescent's scan cache (``.arborescent/``, written by
+    any command that reads the policy), to show a command left the tree untouched."""
+    digest = hashlib.sha256()
+    skipped = {".git", ".arborescent"}
+    for path in sorted(p for p in root.rglob("*") if p.is_file() and not skipped & set(p.relative_to(root).parts)):
+        digest.update(path.relative_to(root).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+def rename_module(root: Path, pid: str, old: str, new: str) -> None:
+    """Annotate ``pid`` so that its modules move from ``old`` to ``new``: root ``app`` (so paths and names agree) plus a rename."""
+    path = root / "packages.toml"
+    head, *blocks = path.read_text(encoding="utf-8").split("[[packages]]\n")
+    blocks = [
+        block.replace('root = "."', 'root = "app"', 1).replace(
+            "[[packages.paths]]", f'[[packages.module_renames]]\nfrom = "{old}"\nto = "{new}"\n[[packages.paths]]', 1)
+        if f'id = "{pid}"' in block else block
+        for block in blocks
+    ]
+    path.write_text("[[packages]]\n".join([head, *blocks]), encoding="utf-8", newline="\n")
+    commit(root, f"{pid}: {old} becomes {new}")
+
+
+def imported_modules(tree: Path) -> set[str]:
+    names: set[str] = set()
+    for source in tree.rglob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                names |= {alias.name for alias in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names.add(node.module)
+    return names
+
+
+@needs_filter_repo
+@needs_libcst
+def test_the_driver_rewrites_the_imports_of_the_new_repository_and_leaves_the_monorepo_alone(monorepo: Path, tmp_path: Path) -> None:
+    remove_the_blocking_edge(monorepo)
+    rename_module(monorepo, "shell", "app.shell", "shell")
+    package = by_id(export(monorepo))["shell"]
+    assert {m["target_module"] for m in package["owned"]["modules"]} == {"shell", "shell.main", "shell.cli"}
+    before = tree_hash(monorepo)
+    target = tmp_path / "shell-repo"
+    done = migrate(monorepo, "shell", target, "--yes")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert tree_hash(monorepo) == before  # the monorepo is never modified
+    assert set(run(["git", "ls-files"], target).stdout.split()) == {m["target_path"] for m in package["owned"]["modules"]}
+    imported = imported_modules(target)  # the leftover-import check: nothing in the new repository names an old module
+    assert not {name for name in imported if name == "app.shell" or name.startswith("app.shell.")}, imported
+    assert {"shell.main"} <= imported
+    cli = (target / "shell/cli.py").read_text(encoding="utf-8")
+    assert "shell.main.run()" in cli and "app.shell" not in cli  # the attribute use is rewritten too
+    assert run(["git", "status", "--porcelain"], target).stdout.split() == ["M", "shell/cli.py"]  # the rewrite is an uncommitted change
+    assert "initial monorepo" in run(["git", "log", "--format=%s"], target).stdout  # and the history is intact
+
+
+@needs_filter_repo
+@needs_libcst
+def test_the_driver_refuses_an_import_form_it_cannot_rewrite_and_changes_nothing(monorepo: Path, tmp_path: Path) -> None:
+    remove_the_blocking_edge(monorepo)
+    rename_module(monorepo, "orders", "app.orders", "orders")  # orders/service.py says `from app.orders import model`
+    before = tree_hash(monorepo)
+    target = tmp_path / "orders-repo"
+    done = migrate(monorepo, "orders", target, "--yes")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "unsupported-import-form" in done.stdout + done.stderr and "app/orders/service.py" in (done.stdout + done.stderr).replace("\\", "/")
+    assert not target.exists()  # nothing was created
+    assert tree_hash(monorepo) == before  # and nothing in the monorepo was modified
+
+
+@needs_filter_repo
+def test_the_driver_refuses_a_package_whose_private_modules_other_packages_still_import(monorepo: Path, tmp_path: Path) -> None:
+    remove_the_blocking_edge(monorepo)
+    path = monorepo / "packages.toml"  # kernel stops publishing app.kernel.types, which billing and orders import
+    path.write_text(path.read_text(encoding="utf-8").replace('"app.kernel.ports", "app.kernel.types"]', '"app.kernel.ports"]'), encoding="utf-8", newline="\n")
+    commit(monorepo, "kernel: types is private")
+    before = tree_hash(monorepo)
+    target = tmp_path / "kernel-repo"
+    done = migrate(monorepo, "kernel", target, "--yes")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "private-import" in done.stdout + done.stderr and "app.kernel.types" in done.stdout + done.stderr
+    assert not target.exists() and tree_hash(monorepo) == before

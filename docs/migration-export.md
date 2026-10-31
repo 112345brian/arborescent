@@ -122,5 +122,5 @@ typed fields a migration needs.
 existing tools. On a synthetic monorepo it (1) reads the cut list of the blocked package from the generated
 import-linter and tach output, (2) clones and rewrites one repository per package with `git filter-repo`, using only the
 export's `path_renames`, (3) dresses each clone as a part and runs the preservation rules, and (4) mutates a part to see
-those rules fail. Run it with `pip install -e ".[dev]" tach` (the dev extra carries `git-filter-repo`); a missing tool
+those rules fail, and (5) drives `packages migrate` (the import rewrite, the refusal of an import form it cannot rewrite and of a package whose private modules others still import, each leaving the monorepo byte-identical). Run it with `pip install -e ".[dev]" tach` (the dev extra carries `git-filter-repo`); a missing tool
 skips the affected tests with the reason. Arborescent code does not perform the split.

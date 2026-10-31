@@ -42,6 +42,7 @@ external = ["@pure"]
 "app.orders.service" = "adapters"
 "app.shell" = "composition"
 "app.shell.main" = "composition"
+"app.shell.cli" = "composition"
 """
 
 # The deliberate blocking edge: orders reaches a billing module that billing keeps private.
@@ -88,6 +89,11 @@ FILES: dict[str, str] = {
         "from __future__ import annotations\n\nfrom app.billing import gateway\nfrom app.orders import service\n\n\n"
         "def run() -> int:\n    service.place()\n    return gateway.send()\n"
     ),
+    # the import forms the driver's rewriter supports: `import M`, `import M.x` with attribute use, `from M.x import name`
+    "app/shell/cli.py": (
+        "from __future__ import annotations\n\nimport app.shell.main\nfrom app.shell.main import run\n\n\n"
+        "def go() -> int:\n    return app.shell.main.run() + run()\n"
+    ),
     "pyproject.toml": '[project]\nname = "synthetic-monorepo"\ndependencies = []\n',
 }
 
@@ -126,7 +132,7 @@ CATALOG = "\n".join([
         "kernel", "library", "shared types and ports", depends=[],
         files=["app/__init__.py", "app/kernel/__init__.py", "app/kernel/types.py", "app/kernel/ports.py"],
         public=["app", "app.kernel", "app.kernel.ports", "app.kernel.types"],
-        home='[packages.home]\nkind = "repository"\nrepository = "example/kernel"',  # the own-repository package
+        home='[packages.home]\nkind = "repository"\nrepository = "https://example.invalid/kernel.git"',  # the own-repository package
     )),
     _package(Spec(
         "billing", "library", "invoices; its modules span three rings", depends=["kernel"],
@@ -140,12 +146,12 @@ CATALOG = "\n".join([
         "orders", "library", "orders; carries the blocking edge", depends=["kernel", "billing"],
         files=["app/orders/__init__.py", "app/orders/model.py", "app/orders/service.py"],
         public=["app.orders", "app.orders.model", "app.orders.service"],
-        home='[packages.home]\nkind = "repository"\nrepository = "example/orders"',
+        home='[packages.home]\nkind = "repository"\nrepository = "https://example.invalid/orders.git"',
     )),
     _package(Spec(
         "shell", "application", "entry point", depends=["billing", "orders"],
-        files=["app/shell/__init__.py", "app/shell/main.py"],
+        files=["app/shell/__init__.py", "app/shell/main.py", "app/shell/cli.py"],
         public=[],
-        home='[packages.home]\nkind = "repository"\nrepository = "example/shell"',
+        home='[packages.home]\nkind = "repository"\nrepository = "https://example.invalid/shell.git"',
     )),
 ])
