@@ -135,6 +135,7 @@ arborescent packages validate
 arborescent packages list
 arborescent packages extract PACKAGE_ID --output DIR
 arborescent packages export --output migration.json   # read-only JSON for migration tools; see docs/migration-export.md
+arborescent packages migrate PACKAGE_ID --target DIR  # dry run: the arguments a migration library would be given; see docs/migration-driver.md
 ```
 
 Documentation: [CLI commands, configuration and rules](docs/configuration.md) and
