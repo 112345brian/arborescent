@@ -54,6 +54,7 @@ def test_rule_id_strings_never_change() -> None:
             "undeclared-imports",
             "invalid-arbor-annotation",
             "arbor-ring-mismatch",
+            "unannotated-module",
             "scope-import",
             "scope-effect-leak",
         ]
@@ -71,8 +72,9 @@ def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     policy, root = load_policy(LocalFileSystem(), ROOT / "pyproject.toml")
     scan = FsScanner().scan(policy, root)
     mutated = {m.rule for m in plan(policy, scan)[0]}
-    # the arborescent repo has no entry scripts; that rule's mutation is covered by the next test
-    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY} >= set(Rule)
+    # the arborescent repo has no entry scripts, and does not enable require_arbor_annotations (its own source
+    # is not fully annotated yet); those rules' mutations are covered by the next two tests instead
+    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
 
@@ -82,6 +84,13 @@ def test_entry_dependency_rule_has_a_mutation(repo: Path) -> None:
     policy = mini_policy(**ENTRY)
     scan = FsScanner().scan(policy, repo)
     assert Rule.UNDECLARED_ENTRY_DEPENDENCY in {m.rule for m in plan(policy, scan)[0]}
+
+
+def test_unannotated_module_rule_has_a_mutation_when_required(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "domain"}\n\nVALUE: int = 1\n'})
+    policy = mini_policy(require_arbor_annotations=True)
+    scan = FsScanner().scan(policy, repo)
+    assert Rule.UNANNOTATED_MODULE in {m.rule for m in plan(policy, scan)[0]}
 
 
 def test_circular_import_rule_has_a_selftest_mutation(repo: Path) -> None:

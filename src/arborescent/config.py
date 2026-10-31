@@ -69,6 +69,8 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
     core, ring_tables = _core_policy(raw)
     preset_name, python, checkers, io_modules, disabled_tools, suggestion_threshold = _tool_options(raw)
     forbid_circular_imports = _boolean_option(raw, "forbid_circular_imports", True)
+    require_arbor_annotations = _boolean_option(raw, "require_arbor_annotations", False)
+    require_arbor_annotations_exclude = _string_list(raw, "require_arbor_annotations_exclude")
     raw_module_forbids = _module_forbids(raw)
     ruff_overrides = _ruff_overrides(raw.get("ruff", {}))
     customizations = _customization_labels(raw, ring_tables, suggestion_threshold, ruff_overrides, raw_module_forbids)
@@ -86,6 +88,8 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
         tach_external_exclude=tuple(raw.get("tach_external_exclude", [])),
         forbid_circular_imports=forbid_circular_imports,
+        require_arbor_annotations=require_arbor_annotations,
+        require_arbor_annotations_exclude=require_arbor_annotations_exclude,
         python=minor.group(1) if minor else python,
         type_checkers=tuple(cast("list[str]", checkers)),
         disabled_tools=disabled_tools,
@@ -110,7 +114,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "io_modules", "groups",
     "module_forbid_imports", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
-    "tach_external_exclude",
+    "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
 })
 _SCOPE_ARCHITECTURE_KEYS = _LEGACY_ARCHITECTURE_KEYS - {"sources"}
 
@@ -237,6 +241,13 @@ def _boolean_option(raw: Mapping[str, Any], key: str, default: bool) -> bool:
     return value
 
 
+def _string_list(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = raw.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
+        raise PolicyError(f"`{key}` must be a list of non-empty strings")
+    return tuple(cast("list[str]", value))
+
+
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:
     raw_module_forbids = raw.get("module_forbid_imports", {})
     if not isinstance(raw_module_forbids, Mapping) or any(
@@ -265,13 +276,22 @@ def _customization_labels(
         customizations.append("exclude")
     if raw_module_forbids:
         customizations.append("module import restrictions")
-    if raw.get("children") or raw.get("child_policy_mode", "certify") != "certify":
-        customizations.append("nested arbors")
-    if raw.get("scan_vendors", False):
-        customizations.append("vendor scanning")
-    if not raw.get("forbid_circular_imports", True):
-        customizations.append("circular imports")
+    customizations.extend(_flag_labels(raw))
     return tuple(customizations)
+
+
+def _flag_labels(raw: Mapping[str, Any]) -> list[str]:
+    """Customization labels driven by a single boolean (or boolean-like) top-level key each."""
+    labels: list[str] = []
+    if raw.get("children") or raw.get("child_policy_mode", "certify") != "certify":
+        labels.append("nested arbors")
+    if raw.get("scan_vendors", False):
+        labels.append("vendor scanning")
+    if not raw.get("forbid_circular_imports", True):
+        labels.append("circular imports")
+    if raw.get("require_arbor_annotations", False):
+        labels.append("annotations required")
+    return labels
 
 
 def _disabled_tools(raw: Mapping[str, Any]) -> tuple[str, ...]:

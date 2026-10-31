@@ -29,6 +29,8 @@ settings. The two forms cannot be mixed.
 | `tach_external_exclude` | `[]` | Package names written to the generated Tach `[external] exclude`: optional extras imported lazily, or transitive dependencies the project does not declare. Tach reads only the base dependencies and matches distribution names where they differ from import names (`google-genai`, `pyyaml`). |
 | `forbid_everywhere` | `[]` | Packages no module may import, in any ring (one global import-linter contract). |
 | `forbid_circular_imports` | `true` | Rejects cycles in the first-party module import graph, including lazy and `TYPE_CHECKING` imports. Set to `false` only to opt out; the Arborescent minimum profile requires `true`. |
+| `require_arbor_annotations` | `false` | Makes a module that resolves its ring only through `classify` (no valid `__arbor__` annotation) a hard failure (`unannotated-module`), instead of a silent fallback. See "Requiring annotations" below. |
+| `require_arbor_annotations_exclude` | `[]` | `classify`-style module-name globs exempt from `require_arbor_annotations`, for modules that cannot carry an annotation (vendored, read-only, generated). Has no effect unless `require_arbor_annotations` is set. |
 | `entry_scripts` | `[]` | Dotted names of PEP 723 single-file scripts. Each must declare, in its `# /// script` block, every third-party distribution the project code imports. |
 | `type_checkers` | `["ty"]` | `pyright`, `basedpyright`, `ty` and/or `pyrefly`. The first one runs by default; `check --type-checker` overrides it. A config file is generated for each one listed. |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
@@ -53,7 +55,7 @@ repository component. Each scope requires non-empty `sources`, `source_roots` an
 | `public` | `[]` | Dotted module patterns consumers may import from this scope. |
 | `depends_on` | `[]` | Scope names this scope may import. Each cross-scope import must target a declared dependency and match its `public` patterns. |
 | `preset`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
-| `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbid_circular_imports`, `tach_external_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
+| `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
 
 Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
 `ruff`, `practices`, `exclude` and `children` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
@@ -301,6 +303,34 @@ Annotations apply to individual Python modules. An annotation in `__init__.py` a
 ring; it does not assign rings to its descendants. Scope boundaries are configured separately through `sources`,
 `public` and `depends_on`; package extraction is separately invoked through `arborescent packages extract`.
 
+### Requiring annotations
+
+`classify` remains supported indefinitely: resolution order 2 above is not deprecated, and most projects never need
+to change it. `require_arbor_annotations = true` is an opt-in ratchet for a project (or one scope of a multi-scope
+project) that wants to finish its migration to annotations and catch regressions afterward: once set, a module that
+resolves its ring only through `classify` — no annotation at all, or an invalid one that falls back — reports
+`unannotated-module` and fails the check, instead of silently relying on resolution order 2 or 3. This changes
+nothing about *which* source wins; it only removes the option to rely on the fallback.
+
+The flag is a per-scope architecture setting, like `forbid_circular_imports`: a repository can require annotations
+in one newly-written scope while a legacy scope keeps classifying as before. `require_arbor_annotations_exclude`
+takes `classify`-style globs on the dotted module name for modules that cannot carry an annotation at all — a
+vendored, read-only or generated subtree — without forcing them into a separate scope; an excluded module still
+resolves its ring normally (by `classify`, or by an annotation if it happens to have a valid one) and is simply not
+required to have one. Setting `require_arbor_annotations = true` together with
+`disabled_tools = ["arbor-annotations"]` is a contradiction — you cannot require what you have turned off — and is
+rejected as a policy error.
+
+Migrating an existing classify-only project:
+
+1. Run `arborescent annotate` (dry-run by default) to see what it would insert; `arborescent annotate --yes` writes
+   `__arbor__ = {"ring": ...}` into every module `classify` currently resolves but that has no existing annotation.
+   It is idempotent: a second run reports already-annotated files and writes nothing.
+2. Run `arborescent discover` and `arborescent check` and confirm nothing is left relying on `classify` alone (add
+   `require_arbor_annotations_exclude` entries for anything that genuinely cannot be annotated).
+3. Set `require_arbor_annotations = true`. From then on, a new module that lands without an annotation fails
+   `check` immediately rather than silently inheriting a `classify` glob.
+
 ## Rings: `[tool.arborescent.ring.<name>]` or `[tool.arborescent.scopes.<scope>.ring.<name>]`
 
 | key | default | meaning |
@@ -363,6 +393,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `undeclared-entry-dependency` | an entry script lacks a `# /// script` block, or omits a third-party distribution the project imports |
 | `invalid-arbor-annotation` | a module's `__arbor__` annotation is malformed or names an unknown ring |
 | `arbor-ring-mismatch` | a valid `__arbor__` ring disagrees with the ring the first matching `classify` glob would assign |
+| `unannotated-module` | `require_arbor_annotations` is enabled and a module resolves its ring only through `classify`, with no valid `__arbor__` annotation |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
 `getattr`, variables, or wrappers. A test patch is checked against the target module's ring and is considered only when

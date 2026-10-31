@@ -109,6 +109,9 @@ def plan(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
         annotation_mutations, annotation_skipped = _arbor_annotation_mutations(local_policy, local_paths, local_known, arbor_index)
         out.extend(annotation_mutations)
         skipped.extend(annotation_skipped)
+        require_mutations, require_skipped = _require_annotation_plan(local_policy, local_known, local_paths, arbor_index)
+        out.extend(require_mutations)
+        skipped.extend(require_skipped)
         if local_policy.entry_scripts:
             entry_host = next((
                 name for name in sorted(local_known)
@@ -277,6 +280,47 @@ def _arbor_annotation_mutations(
             paths[host], f'__arbor__ = {{"ring": {other_ring!r}}}',
         ))
     return out, skipped
+
+
+def _require_annotation_plan(
+    policy: Policy, known: Collection[str], paths: Mapping[str, str],
+    arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[list[Mutation], list[str]]:
+    if not policy.require_arbor_annotations:
+        return [], ["unannotated-module: require_arbor_annotations is disabled by policy"]
+    mutation = _require_annotation_mutation(policy, known, paths, arbor_index)
+    if mutation is None:
+        return [], ["unannotated-module: no validly annotated module to overwrite"]
+    return [mutation], []
+
+
+def _require_annotation_mutation(
+    policy: Policy, known: Collection[str], paths: Mapping[str, str],
+    arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> Mutation | None:
+    """Overwrite a validly annotated module's `__arbor__` with an invalid one, for `require_arbor_annotations`.
+
+    Appending text to an existing file can only ever add an `__arbor__` assignment, never remove one — and the
+    last unconditional assignment wins (`facts.py`) — so the only way to make a module *newly* lose a valid
+    annotation within this append-only harness is to append a second, invalid one over a host that currently has
+    a valid one. A classify-only host would already violate the rule in the baseline (nothing "new" to detect).
+    """
+    host = next(
+        (
+            name for name in sorted(known)
+            if name in paths
+            and (entry := arbor_index.get(name, (None, None)))[1] is None
+            and entry[0] is not None
+            and any(rule.name == entry[0] for rule in policy.rings)
+        ),
+        None,
+    )
+    if host is None:
+        return None
+    return Mutation(
+        Rule.UNANNOTATED_MODULE, "a validly annotated module's __arbor__ overwritten by an invalid one",
+        paths[host], '__arbor__ = {"bogus": 1}',
+    )
 
 
 def _import_mutations(name: str, host: str, target: str | None, external: frozenset[str], lazy: bool) -> list[Mutation]:

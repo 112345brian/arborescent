@@ -115,6 +115,17 @@ def test_selftest_covers_scope_effect_leak(tmp_path: Path) -> None:
     assert any(line.startswith("[scope-effect-leak]") for line in report.killed)
 
 
+def test_selftest_covers_unannotated_module_when_required(tmp_path: Path) -> None:
+    write_files(tmp_path, {"app/first.py": '__arbor__ = {"ring": "domain"}\n'})
+    policy = mini_policy(classify={"app.first": "domain"}, require_arbor_annotations=True)
+    services = Services(FsScanner(tmp_path / "cache.json"), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), [])
+
+    report = selftest(policy, tmp_path, services)
+
+    assert report.survived == []
+    assert any(line.startswith("[unannotated-module]") for line in report.killed)
+
+
 def test_circular_import_probe_uses_a_scope_that_enforces_cycles(tmp_path: Path) -> None:
     write_files(tmp_path, {
         "libs/alpha/src/alpha/a.py": "VALUE = 1\n",
