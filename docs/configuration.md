@@ -40,6 +40,7 @@ settings. The two forms cannot be mixed.
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
 | `package_catalog` | unset | Opt-in, strict preset only: path of a `packages.toml`. Every module and asset must belong to exactly one package (see [Package assignment](#package-assignment)). |
+| `package_parts` | `[]` | Opt-in, needs `package_catalog`: relative paths, inside the repository, of extracted part trees to check against the catalog (see [Annotation preservation](#annotation-preservation-across-a-split)). |
 
 ## Multi-scope configuration
 
@@ -293,6 +294,35 @@ package claiming an owned file, a glob contradicting a path owner, a package spa
 packages with no declared dependency. A probe that cannot be built for the catalog is listed with the reason.
 This adds no behaviour to `packages extract`, which is unchanged.
 
+### Annotation preservation across a split
+
+After a split by other tools, the question for Arborescent is whether the annotations survived, not whether the graph
+or the tests did (grimp, import-linter, tach and each part's own suite judge those). Two opt-in inputs, both needing
+`package_catalog` and the strict preset:
+
+- A package may declare `public = ["app.api", "app.api.*"]` in `packages.toml`: the dotted module globs other packages
+  may import (the same matching as a scope's `public`). Without `public`, a package has no declared surface and nothing
+  of it is private. `public` is stable semantic metadata: extraction carries it into `.arborescent-package.toml`, and
+  only when set, so manifests of packages without one are unchanged.
+- `package_parts = ["split/core", "split/shell"]` lists extracted trees (#27) that live inside the repository, for
+  example a staging folder the splitting tool writes to. Keep them outside the policy's `sources` or in `exclude`, or
+  the origin scan would see their modules twice. Each part is read with its manifest and scanned under the policy it
+  ships; a part that is not a valid extraction or ships no policy is an error, never a pass. Parts outside the
+  repository are not supported: `selftest` mutates a copy of the repository and must carry the parts with it.
+
+With parts, `check` compares each part with the catalog and the origin scan: semantic metadata (`id`, `name`, `kind`,
+`domain`, `summary`, `capabilities`, `depends_on`, `public`, and each path's role and metadata, keyed by origin path)
+must be equal; where a path now lives is a coordinate and is free to change. Module identity is assumed stable (#27): a
+renamed module reads as one missing and one extra, since there is no explicit module mapping yet. Only classes and
+functions count as symbols; a dropped constant is not seen.
+
+`package-private-import` also runs on the origin without parts, for every package that declares `public`, and on each
+part's modules, resolving their imports by origin module identity, so a part importing a private module of another part
+is found. The ring comparison uses the effective ring, so a changed `classify` entry and a moved `__arbor__` annotation
+both show. Rings that disagree between `__arbor__` and `classify` inside one tree remain `arbor-ring-mismatch`, and an
+import across packages without a declared dependency remains `package-undeclared-dependency`; neither is repeated here.
+`selftest` probes each rule that applies (one needs parts) and lists a probe it cannot build with the reason.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:
@@ -430,6 +460,11 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `package-multiply-assigned-asset` | an asset is under one package's path and also matched by another package's `[[assets]]` glob |
 | `package-spans-rings` | information only (never fails, never baselined): a package has modules in several rings, so a split must follow module sets, not folders |
 | `package-undeclared-dependency` | a module imports a module of another package that its own package does not list in `depends_on` |
+| `package-semantics-drift` | a part's manifest names a package the catalog lacks, or a semantic field or a path's role or metadata differs from the catalog |
+| `package-membership-drift` | a module of an included package is missing from its part, or a part holds a module the catalog gives elsewhere or nowhere |
+| `package-ring-drift` | a module's effective ring in its part differs from the origin's |
+| `package-public-symbol-dropped` | a module on a package's declared public surface lost a public class or function in its part |
+| `package-private-import` | a module imports another package's module outside the `public` surface that package declares (checked in the origin and in each part) |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
 `getattr`, variables, or wrappers. A test patch is checked against the target module's ring and is considered only when

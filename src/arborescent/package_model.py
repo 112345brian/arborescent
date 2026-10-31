@@ -34,6 +34,7 @@ class PackageDescriptor:
     domain: str | None = None
     capabilities: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
+    public: tuple[str, ...] = ()  # dotted module globs other packages may import; empty = no declared surface
     extraction_status: str = "in-repository"
     paths: tuple[PackagePath, ...] = ()
 
@@ -49,6 +50,7 @@ class PackageSemantics:
     domain: str | None = None
     capabilities: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
+    public: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +102,7 @@ def semantics_of(package: PackageDescriptor) -> PackageSemantics:
         package.domain,
         package.capabilities,
         package.depends_on,
+        package.public,
     )
 
 

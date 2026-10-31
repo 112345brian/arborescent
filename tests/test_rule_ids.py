@@ -65,6 +65,11 @@ def test_rule_id_strings_never_change() -> None:
             "package-multiply-assigned-asset",
             "package-spans-rings",
             "package-undeclared-dependency",
+            "package-semantics-drift",
+            "package-membership-drift",
+            "package-ring-drift",
+            "package-public-symbol-dropped",
+            "package-private-import",
         ]
     )
 

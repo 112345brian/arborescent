@@ -8,7 +8,7 @@ rule wins. A package is not a ring, so spanning rings is information, not a fail
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from .domain import Rule, Violation
@@ -24,6 +24,7 @@ class RepositoryFacts:
     rings: Mapping[str, str | None]  # module -> its effective ring (None when unclassified)
     imports: Mapping[str, tuple[str, ...]]  # module -> first-party modules it imports
     assets: Sequence[str]  # non-Python files below the policy's sources, repository-relative
+    symbols: Mapping[str, frozenset[str]] = field(default_factory=dict)  # module -> public top-level class/function names
 
 
 def owners_of(catalog: CatalogDocument, path: str, *, asset: bool = False) -> tuple[str, ...]:

@@ -67,6 +67,8 @@ def semantic_lines(package: PackageDescriptor) -> list[str]:
         f"capabilities = {toml_list(package.capabilities)}",
         f"depends_on = {toml_list(package.depends_on)}",
     ]
+    if package.public:  # only when declared, so manifests of packages without a surface stay byte-identical
+        lines.append(f"public = {toml_list(package.public)}")
     return lines
 
 

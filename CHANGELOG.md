@@ -11,6 +11,11 @@
   `package-unowned-asset`, `package-multiply-assigned-asset` and `package-undeclared-dependency` fail the check;
   `package-spans-rings` is information (a `NOTE` line, never failing, never baselined). Assets are claimed by package
   `paths` or ordered `[[assets]]` globs, first match wins. `selftest` probes each rule when the key is set (#52).
+- Annotation preservation across a split: a package may declare `public` module globs, and the opt-in
+  `package_parts` lists extracted part trees (#27) to compare with the catalog. New rule ids
+  `package-semantics-drift`, `package-membership-drift`, `package-ring-drift`, `package-public-symbol-dropped` and
+  `package-private-import` (the last also runs on the origin without parts). No graph comparison and no test runs;
+  `selftest` probes each rule (#55).
 
 ### Changed
 
