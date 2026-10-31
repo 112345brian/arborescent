@@ -83,7 +83,10 @@ stays green.
 ## Interaction with multi-scope configs (`scopes.<name>.ring`)
 
 Multi-scope governance (PR #40, `consolidate/arbor-scopes-and-fixes`) was still an open PR, not yet merged into
-`main`, at the time of this change. It builds one independent `Policy` object per scope by re-entering
+`main`, when this rule was designed and first implemented; it merged into `main` while this PR was open, and this
+branch has since merged `main` back in to pick it up (the merge was mechanical: the two features touch adjacent
+lines in `rules.check_modules`'s per-module loop and nothing else conflicted in a way that needed a design
+decision). It builds one independent `Policy` object per scope by re-entering
 `config.policy_from_mapping` with that scope's own `ring` table spliced into a per-scope raw mapping (see
 `_scoped_policy`/`_SCOPE_ARCHITECTURE_KEYS`, which includes `"ring"`), and `rules.check_modules` resolves each
 module's *local* policy/ring before applying any ring-level rule (`local_policy.ring(ring)`, via its
@@ -91,11 +94,13 @@ module's *local* policy/ring before applying any ring-level rule (`local_policy.
 and consumed by reading `rule.require_abstract` off the module's own resolved `RingRule` — never off a shared or
 global default — it composes with scopes with no extra code: `[scopes.ports_lib.ring.ports]` and
 `[scopes.other_lib.ring.ports]` get independent `require_abstract` settings the same way they already get
-independent `may_import`/`external`/`forbid` settings. `tests/test_abstraction_policy.py` proves the isolation
-property directly at the `Policy`/`RingRule` level (two independently-built policies with different
-`require_abstract` settings for a same-named ring do not affect each other); re-running it against literal
-`[scopes.<name>.ring.<name>]` TOML is left to the multi-scope suite once PR #40 lands, since this change does not
-touch `config._scoped_policy` at all.
+independent `may_import`/`external`/`forbid` settings. `tests/test_abstraction_policy.py` proves this at three
+levels: isolation at the `Policy`/`RingRule` level (two independently-built policies with different
+`require_abstract` settings for a same-named ring do not affect each other), parsing of literal
+`[scopes.<name>.ring.<name>].require_abstract` TOML into two independent scope policies, and an end-to-end
+`check_modules` run over two scopes where only the one with `require_abstract = true` reports `non-abstract-port`
+(driven through `rules.RuleContext`, exactly as `check_modules`'s other per-scope rules are) — all without any
+change to `config._scoped_policy` or `rules.RuleContext`.
 
 ## Edge cases covered by tests
 
