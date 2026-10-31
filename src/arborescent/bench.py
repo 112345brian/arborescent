@@ -55,7 +55,10 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
 
     twice("arborescent own checks (parse+rules)", own, lambda: _clear(fs, root))
     chosen = [c for c in svc.checkers if c.name in names]
-    twice("generate (in memory)", lambda: f"{len(generate(policy, sorted(scan.known), chosen))} files")
+    twice(
+        "generate (in memory)",
+        lambda: f"{len(generate(policy, sorted(scan.known), chosen, scan.arbor_index, scan.scope_by_module))} files",
+    )
     _ = write_generated(policy, root, svc)
 
     def tool(argv: list[str]) -> Callable[[], str]:

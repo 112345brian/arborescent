@@ -5,18 +5,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 from arborescent_helpers import CLASSIFY, mini_policy, ring_with, write_files
 
 from arborescent import baseline
 from arborescent.adapters import FsScanner
-from arborescent.domain import Violation
-from arborescent.rules import check_modules
+from arborescent.config import policy_from_mapping
+from arborescent.domain import Policy, Rule, Violation
+from arborescent.rules import RuleContext, check_modules
 
 
 def run(root: Path, **overrides: Any) -> list[Violation]:
     policy = mini_policy(**overrides)
     scan = FsScanner().scan(policy, root)
-    return check_modules(policy, scan.modules, scan.known, scan.entry_deps)
+    return check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
 
 
 def rules(found: list[Violation]) -> set[str]:
@@ -187,3 +189,316 @@ def test_entry_script_metadata_is_read_from_a_file_with_crlf_line_endings(repo: 
     (repo / "run.py").write_bytes(script)
     scan = FsScanner().scan(mini_policy(**ENTRY), repo)
     assert scan.entry_deps["run"] == ("psutil",)
+
+
+@pytest.mark.parametrize("annotation", ['__arbor__ = 3', '__arbor__ = {"ring": "missing"}'])
+def test_broken_annotation_keeps_all_classified_module_checks(repo: Path, annotation: str) -> None:
+    source = "from . import adapters\nimport os, time, requests\nos.name\ntime.time()\n"
+    write_files(repo, {"app/domain.py": source})
+    before = run(repo)
+    assert rules(before) == {
+        "internal-import", "external-import", "os-branching", "effect-clock", "circular-import",
+    }
+
+    write_files(repo, {"app/domain.py": source + annotation + "\n"})
+    after = run(repo)
+
+    assert [v for v in after if v.rule != "invalid-arbor-annotation"] == before
+    invalid = [v for v in after if v.rule == "invalid-arbor-annotation"]
+    assert len(invalid) == 1
+    assert invalid[0].subject == "app.domain"
+    assert invalid[0].detail
+
+
+def test_broken_unclassified_annotation_reports_both_problems(repo: Path) -> None:
+    write_files(repo, {"app/newcomer.py": "__arbor__ = 3\n"})
+
+    assert {(v.rule, v.subject) for v in run(repo)} == {
+        ("invalid-arbor-annotation", "app.newcomer"), ("unclassified", "app.newcomer"),
+    }
+
+
+def test_valid_annotation_classifies_module_without_classify_match(repo: Path) -> None:
+    write_files(repo, {"app/newcomer.py": '__arbor__ = {"ring": "domain"}\nimport os\n'})
+
+    assert {(v.rule, v.subject) for v in run(repo)} == {("external-import", "app.newcomer")}
+
+
+def test_internal_import_uses_target_annotation_in_changed_scan(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "import app.ports\n", "app/ports.py": '__arbor__ = {"ring": "composition"}\n'})
+    policy = mini_policy()
+    scan = FsScanner().scan(policy, repo, frozenset({"app/domain.py"}))
+
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
+
+    assert [(v.rule, v.subject) for v in found] == [("internal-import", "app.domain")]
+    assert "[composition]" in found[0].detail
+
+
+def test_disabling_annotations_preserves_classify_checks(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "composition"}\nimport os\n', "app/newcomer.py": "__arbor__ = 3\n"})
+
+    assert {(v.rule, v.subject) for v in run(repo, disabled_tools=["arbor-annotations"])} == {
+        ("external-import", "app.domain"), ("unclassified", "app.newcomer"),
+    }
+
+
+def test_annotation_disagreeing_with_classify_reports_mismatch(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "ports"}\n'})
+
+    found = run(repo)
+
+    assert {(v.rule, v.subject) for v in found} == {("arbor-ring-mismatch", "app.domain")}
+    mismatch = next(v for v in found if v.rule == "arbor-ring-mismatch")
+    assert "ports" in mismatch.detail
+    assert "domain" in mismatch.detail
+
+
+def test_annotation_agreeing_with_classify_reports_no_mismatch(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "domain"}\n'})
+
+    assert run(repo) == []
+
+
+def test_invalid_annotation_is_not_also_reported_as_a_mismatch(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "missing"}\n'})
+
+    assert rules(run(repo)) == {"invalid-arbor-annotation"}
+
+
+def test_disabling_annotations_suppresses_the_mismatch_rule_too(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "ports"}\n'})
+
+    assert run(repo, disabled_tools=["arbor-annotations"]) == []
+
+
+def test_patch_target_uses_annotation_in_changed_scan(repo: Path) -> None:
+    write_files(repo, {
+        "app/main.py": '__arbor__ = {"ring": "domain"}\nVALUE = 1\n',
+        "tests/test_main.py": 'from unittest.mock import patch\npatch("app.main.VALUE")\n',
+    })
+    policy = mini_policy(
+        sources=["app", "tests"], source_roots=["."],
+        classify={**CLASSIFY, "tests.*": "composition"},
+        practices={"secrets-guard": "tests"},
+        ring=ring_with(composition={"may_import": ["*"], "external": ["unittest"]}),
+    )
+    scan = FsScanner().scan(policy, repo, frozenset({"tests/test_main.py"}))
+
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
+
+    assert [(v.rule, v.subject) for v in found] == [("effect-patch", "tests.test_main")]
+    assert "[domain]" in found[0].detail
+
+
+def _scope_boundary_policy(
+    *, alpha_depends: list[str] | None = None, alpha_forbid: dict[str, list[str]] | None = None,
+) -> Policy:
+    return policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain", "adapters"],
+                "classify": {"core": "domain", "adapter": "adapters"},
+                "public": ["core"], "depends_on": alpha_depends or [],
+                "module_forbid_imports": alpha_forbid or {},
+            },
+            "beta": {
+                "sources": ["libs/beta/src"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain", "adapters"],
+                "classify": {"api": "domain", "private": "adapters"},
+                "public": ["api"],
+            },
+        },
+    })
+
+
+def _scope_findings(policy: Policy, root: Path) -> list[Violation]:
+    scan = FsScanner().scan(policy, root)
+    return check_modules(
+        policy, scan.modules, scan.known, scan.entry_deps,
+        RuleContext(policy, scan.arbor_index, scan.scope_by_module),
+    )
+
+
+def test_cross_scope_import_requires_declared_dependency(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import api\n",
+        "libs/beta/src/api.py": "VALUE = 1\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(), tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.SCOPE_IMPORT] == [("scope-import", "core")]
+
+
+def test_cross_scope_import_requires_public_target(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import private\n",
+        "libs/beta/src/private.py": "VALUE = 1\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.SCOPE_IMPORT] == [("scope-import", "core")]
+    assert "not public" in next(item.detail for item in found if item.rule == Rule.SCOPE_IMPORT)
+
+
+def test_public_cross_scope_import_is_allowed(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import api\n",
+        "libs/beta/src/api.py": "VALUE = 1\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.SCOPE_IMPORT]
+
+
+def test_cross_scope_import_honours_module_forbid_patterns(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import api.deep\n",
+        "libs/beta/src/api/__init__.py": "",
+        "libs/beta/src/api/deep.py": "VALUE = 1\n",
+    })
+
+    found = _scope_findings(
+        _scope_boundary_policy(alpha_depends=["beta"], alpha_forbid={"core": ["api.*"]}), tmp_path,
+    )
+
+    scope_findings = [item for item in found if item.rule == Rule.SCOPE_IMPORT]
+    assert [(item.subject, item.rule) for item in scope_findings] == [("core", "scope-import")]
+    assert "matches 'api.*'" in scope_findings[0].detail
+
+
+def test_same_scope_rings_are_independent(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import adapter\n",
+        "libs/alpha/src/adapter.py": "VALUE = 1\n",
+        "libs/beta/src/api.py": "VALUE = 2\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(), tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.INTERNAL_IMPORT] == [("internal-import", "core")]
+
+
+def test_same_name_rings_resolve_in_the_source_scope(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": '__arbor__ = {"ring": "adapters"}\n',
+        "libs/beta/src/api.py": '__arbor__ = {"ring": "domain"}\n',
+    })
+
+    found = _scope_findings(_scope_boundary_policy(), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.INVALID_ARBOR_ANNOTATION]
+
+
+def test_annotation_findings_are_scope_local(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": '__arbor__ = {"ring": "parser"}\n',
+        "libs/beta/src/api.py": '__arbor__ = {"ring": "domain"}\n',
+    })
+
+    found = _scope_findings(_scope_boundary_policy(), tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.INVALID_ARBOR_ANNOTATION] == [
+        ("invalid-arbor-annotation", "core"),
+    ]
+
+
+def test_public_import_leaking_a_forbidden_effect_is_flagged(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import api\n",
+        "libs/beta/src/api.py": "import time\nVALUE = time.time()\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    leaks = [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]
+    assert [(item.subject, item.rule) for item in leaks] == [("core", "scope-effect-leak")]
+    assert "effect clock" in leaks[0].detail
+    assert "api" in leaks[0].detail
+
+
+def test_non_public_import_leaking_an_effect_is_not_flagged_by_the_effect_rule(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "import private\n",
+        "libs/beta/src/private.py": "import time\nVALUE = time.time()\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]
+    assert any(item.rule == Rule.SCOPE_IMPORT for item in found)  # the plain boundary rule still catches this
+
+
+def test_public_import_of_an_effect_the_importing_ring_allows_is_not_flagged(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/adapter.py": "import api\n",  # alpha's outermost ring forbids no effects
+        "libs/beta/src/api.py": "import time\nVALUE = time.time()\n",
+    })
+
+    found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
+
+    assert not [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]
+
+
+# --- require_arbor_annotations: an unannotated classify-only module is a hard failure when opted in ------------
+
+
+def test_require_arbor_annotations_off_by_default_does_not_flag_classify_only_modules(repo: Path) -> None:
+    found = run(repo)
+    assert not [item for item in found if item.rule == Rule.UNANNOTATED_MODULE]
+
+
+def test_require_arbor_annotations_flags_every_classify_only_module(repo: Path) -> None:
+    found = run(repo, require_arbor_annotations=True)
+    assert sorted(item.subject for item in found if item.rule == Rule.UNANNOTATED_MODULE) == [
+        "app", "app.adapters", "app.domain", "app.main", "app.ports",
+    ]
+
+
+def test_require_arbor_annotations_accepts_a_valid_annotation(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "domain"}\n\nVALUE: int = 1\n'})
+    found = run(repo, require_arbor_annotations=True)
+    assert "app.domain" not in [item.subject for item in found if item.rule == Rule.UNANNOTATED_MODULE]
+
+
+def test_require_arbor_annotations_still_fires_for_an_invalid_annotation(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"bogus": 1}\n\nVALUE: int = 1\n'})
+    found = run(repo, require_arbor_annotations=True)
+    assert [v.rule for v in found if v.subject == "app.domain"] == [Rule.INVALID_ARBOR_ANNOTATION, Rule.UNANNOTATED_MODULE]
+
+
+def test_require_arbor_annotations_exclude_list_exempts_matching_modules(repo: Path) -> None:
+    found = run(repo, require_arbor_annotations=True, require_arbor_annotations_exclude=["app.domain"])
+    subjects = [item.subject for item in found if item.rule == Rule.UNANNOTATED_MODULE]
+    assert "app.domain" not in subjects
+    assert "app.ports" in subjects
+
+
+def test_require_arbor_annotations_is_scope_local(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "VALUE = 1\n",
+        "libs/beta/src/api.py": "VALUE = 1\n",
+    })
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "classify": {"core": "domain"},
+                "require_arbor_annotations": True,
+            },
+            "beta": {
+                "sources": ["libs/beta/src"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain"], "classify": {"api": "domain"},
+            },
+        },
+    })
+
+    found = _scope_findings(policy, tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.UNANNOTATED_MODULE] == [
+        (Rule.UNANNOTATED_MODULE, "core"),
+    ]

@@ -119,6 +119,124 @@ discard(run())
     assert facts.discard_calls == (1, 2)
 
 
+def test_arbor_ring_facts_extract_literal_ring() -> None:
+    facts = extract('__arbor__ = {"ring": "domain"}\n')
+
+    assert facts.arbor_ring == "domain"
+    assert facts.arbor_error is None
+
+
+def test_arbor_ring_facts_report_malformed_annotations() -> None:
+    sources = (
+        '__arbor__ = {}\n',
+        '__arbor__ = {"ring": 1}\n',
+        '__arbor__ = {"ring": make_ring()}\n',
+        '__arbor__ = []\n',
+    )
+
+    for source in sources:
+        facts = extract(source)
+        assert facts.arbor_ring is None
+        assert facts.arbor_error is not None
+
+
+def test_arbor_ring_literal_error_is_stable_across_extractions() -> None:
+    source = '__arbor__ = {"ring": make_ring()}\n'
+
+    first = extract(source).arbor_error
+    second = extract(source).arbor_error
+
+    assert first == second == "__arbor__ must be a literal dictionary"
+
+
+def test_arbor_ring_facts_ignore_function_and_class_scoped_annotations() -> None:
+    facts = extract(
+        '''\
+def function():
+    __arbor__ = {"ring": "function"}
+
+class Example:
+    __arbor__ = {"ring": "class"}
+'''
+    )
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error is None
+
+
+def test_arbor_ring_facts_reject_conditional_module_level_annotation() -> None:
+    facts = extract(
+        '''\
+if True:
+    __arbor__ = {"ring": "conditional"}
+'''
+    )
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error == "__arbor__ must not be assigned inside conditional code"
+
+
+def test_arbor_ring_facts_reject_conditional_annotation_even_with_an_unconditional_one() -> None:
+    facts = extract(
+        '''\
+__arbor__ = {"ring": "domain"}
+
+if True:
+    __arbor__ = {"ring": "conditional"}
+'''
+    )
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error == "__arbor__ must not be assigned inside conditional code"
+
+
+def test_arbor_ring_facts_reject_annotation_nested_in_try_for_while_with() -> None:
+    sources = (
+        'try:\n    __arbor__ = {"ring": "domain"}\nexcept Exception:\n    pass\n',
+        'for _ in range(1):\n    __arbor__ = {"ring": "domain"}\n',
+        'while False:\n    __arbor__ = {"ring": "domain"}\n',
+        'with open("x") as f:\n    __arbor__ = {"ring": "domain"}\n',
+    )
+
+    for source in sources:
+        facts = extract(source)
+        assert facts.arbor_ring is None
+        assert facts.arbor_error == "__arbor__ must not be assigned inside conditional code"
+
+
+def test_arbor_ring_facts_reject_unknown_keys() -> None:
+    facts = extract('__arbor__ = {"ring": "domain", "public": True}\n')
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error == "__arbor__ has unknown key(s): 'public'"
+
+
+def test_arbor_ring_facts_reject_multiple_unknown_keys_sorted() -> None:
+    facts = extract('__arbor__ = {"ring": "domain", "zeta": 1, "alpha": 2}\n')
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error == "__arbor__ has unknown key(s): 'alpha', 'zeta'"
+
+
+def test_arbor_ring_facts_use_last_module_binding() -> None:
+    facts = extract(
+        '''\
+__arbor__ = {"ring": "first"}
+__arbor__: dict[str, str] = {"ring": "last"}
+'''
+    )
+
+    assert facts.arbor_ring == "last"
+    assert facts.arbor_error is None
+
+
+def test_arbor_ring_facts_default_to_absent() -> None:
+    facts = extract("value = 1\n")
+
+    assert facts.arbor_ring is None
+    assert facts.arbor_error is None
+
+
 def test_fact_cache_round_trips_suppressions_and_discard_calls(tmp_path: Path) -> None:
     write_files(
         tmp_path,

@@ -51,6 +51,8 @@ class FileSystem(Protocol):
 
     def is_dir(self, path: Path) -> bool: ...
 
+    def resolve(self, path: Path) -> Path: ...  # strict canonical path, following symlinks
+
     def glob(self, root: Path, pattern: str) -> list[Path]: ...  # sorted; ``**`` spans folders
 
     def rglob(self, root: Path, pattern: str) -> list[Path]: ...  # sorted; files and folders at any depth
@@ -102,6 +104,12 @@ class TypeChecker(Engine, Protocol):
 class ScanResult(Protocol):
     @property
     def known(self) -> frozenset[str]: ...  # every first-party module name in the repository
+
+    @property
+    def arbor_index(self) -> Mapping[str, tuple[str | None, str | None]]: ...  # module -> ring annotation / error
+
+    @property
+    def scope_by_module(self) -> Mapping[str, str]: ...  # module -> owning architecture scope
 
     @property
     def modules(self) -> Mapping[str, ModuleInfo]: ...  # the ones parsed (all, or only the changed ones)

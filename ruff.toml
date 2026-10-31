@@ -2,6 +2,22 @@
 target-version = "py311"
 force-exclude = true
 exclude = [
+    "**/.arborescent",
+    "**/.arborescent/**",
+    "**/.git",
+    "**/.git/**",
+    "**/.mypy_cache",
+    "**/.mypy_cache/**",
+    "**/.ruff_cache",
+    "**/.ruff_cache/**",
+    "**/.tox",
+    "**/.tox/**",
+    "**/.venv",
+    "**/.venv/**",
+    "**/__pycache__",
+    "**/__pycache__/**",
+    "**/node_modules",
+    "**/node_modules/**",
     "**/site-packages",
     "**/site-packages/**",
     "**/third_party",
@@ -10,6 +26,8 @@ exclude = [
     "**/vendor/**",
     "**/vendored",
     "**/vendored/**",
+    "**/venv",
+    "**/venv/**",
 ]
 
 [lint]
@@ -51,10 +69,14 @@ ignore = ["PIE807"]
 "**/arborescent/__main__/**.py" = ["T20"]
 "**/arborescent/cli.py" = ["T20"]
 "**/arborescent/cli/**.py" = ["T20"]
+"**/arborescent/cli_install.py" = ["T20"]
+"**/arborescent/cli_install/**.py" = ["T20"]
+"**/arborescent/cli_report.py" = ["T20"]
+"**/arborescent/cli_report/**.py" = ["T20"]
 "**/pyproject.toml" = ["RUF201"]
 "**/ruff.toml" = ["RUF201"]
 "**/test_*.py" = ["ANN", "S"]
 "**/tests/**/*.py" = ["ANN", "S"]
-"**/arborescent/cli_install.py" = ["T20"]
-"**/arborescent/cli_report.py" = ["T20"]
+"src/arborescent/cli_install.py" = ["T20"]
+"src/arborescent/cli_report.py" = ["T20"]
 "src/arborescent/tool_runner.py" = ["S404", "S603"]

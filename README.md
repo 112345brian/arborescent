@@ -1,6 +1,6 @@
 # Arborescent
 
-One architecture policy. It enforces architecture rules itself and runs [import-linter](https://import-linter.readthedocs.io),
+One repository policy can enforce Clean Architecture across an application and independently structured libraries. It runs [import-linter](https://import-linter.readthedocs.io),
 [tach](https://docs.gauge.sh), [Ruff](https://docs.astral.sh/ruff/) and a type checker ([ty](https://github.com/astral-sh/ty) by default, with pyright and basedpyright
 or [pyrefly](https://pyrefly.org)) using their native project configuration. `arborescent generate` can scaffold optional preset files and never overwrites an existing file.
 Arborescent also enforces: every module must be classified, each ring
@@ -45,13 +45,75 @@ os_branching = true                                         # only these rings m
 may_import = ["*"]
 external = ["@pure", "sys"]
 
-[tool.arborescent.classify]                                    # first matching glob wins; every module needs one
+[tool.arborescent.classify]                                    # fallback for modules without a valid __arbor__; first glob wins
 "app" = "domain"
 "app.domain" = "domain"
 "app.ports" = "ports"
 "app.adapters" = "adapters"
 "app.main" = "composition"
 ```
+
+Alternatively, a module can declare its ring in Python:
+
+```python
+# src/app/adapters.py
+__arbor__ = {"ring": "adapters"}
+```
+
+A valid module-level `__arbor__` takes precedence over `classify`; the ring must be declared in the policy.
+An absent annotation uses the first matching `classify` glob. In a multi-scope config, the ring must belong to the module's owning scope. A malformed annotation or unknown ring reports
+`invalid-arbor-annotation` and falls back to `classify`, so an already-classified module keeps all its ring checks.
+Without a fallback match it also reports `unclassified`. These annotations classify individual modules only.
+
+### Independently governed libraries
+
+Use named scopes when a repository contains libraries with different ring hierarchies. Each scope owns its source paths,
+module roots, rings, classifications, public module patterns and declared scope dependencies. The application can have
+its own scope. Existing root-level architecture settings remain the single-scope shorthand.
+
+```toml
+# pyproject.toml
+[tool.arborescent]
+python = "3.12"
+type_checkers = ["ty"]
+
+[tool.arborescent.scopes.packet_archive]
+sources = ["packages/packet-archive/src/packet_archive"]
+source_roots = ["packages/packet-archive/src"]
+rings = ["domain", "adapters"]
+public = ["packet_archive.api*"]
+depends_on = ["binary_parser"]
+
+[tool.arborescent.scopes.packet_archive.classify]
+"packet_archive.domain*" = "domain"
+"packet_archive.adapters*" = "adapters"
+
+[tool.arborescent.scopes.binary_parser]
+sources = ["packages/binary-parser/src/binary_parser"]
+source_roots = ["packages/binary-parser/src"]
+rings = ["domain", "adapters"]
+public = ["binary_parser.reader"]
+
+[tool.arborescent.scopes.binary_parser.classify]
+"binary_parser*" = "domain"
+
+[tool.arborescent.scopes.catalog]
+sources = ["packages/catalog/src/catalog"]
+source_roots = ["packages/catalog/src"]
+rings = ["core", "use_cases", "adapters"]
+public = ["catalog.api*"]
+depends_on = ["binary_parser"]
+
+[tool.arborescent.scopes.catalog.classify]
+"catalog.core*" = "core"
+"catalog.use_cases*" = "use_cases"
+"catalog.adapters*" = "adapters"
+```
+
+The parser has one owner and its own rings. Both libraries consume its public module through an explicit dependency;
+they keep their own core and ring rules. Scope boundaries are checked by Arborescent and composed into the generated
+root tool configs. Shared source files are not copied between scopes, and extracting a library into a separate
+repository remains a separate packaging step.
 
 ```
 arborescent generate     # optionally create missing recommended config files; existing files stay untouched
@@ -65,6 +127,9 @@ arborescent discover     # list Python files that still need ring classification
 arborescent baseline     # record existing violations; future checks fail on new findings
 arborescent selftest     # mutation-test native rules and fail if a rule stops firing
 arborescent bench DIR…   # cold/warm timings of every engine on prepared codebases
+arborescent packages validate
+arborescent packages list
+arborescent packages extract PACKAGE_ID --output DIR
 ```
 
 Documentation: [CLI commands, configuration and rules](docs/configuration.md) and
@@ -78,6 +143,8 @@ interpreter when pip is unavailable). In Poetry projects it uses `poetry add` to
 included by `dev`, then verifies the lock. Set `disabled_tools = ["import-linter", "tach", "ruff"]` in
 `[tool.arborescent]` (or the top-level `arborescent.toml`) to deliberately omit those tools from checks and setup hints;
 minimum-profile certification still requires Ruff and Tach.
+The same setting accepts `"arbor-annotations"`: `disabled_tools = ["arbor-annotations"]` ignores `__arbor__`
+annotations and their validation findings, uses `classify` alone, and prevents minimum-profile certification.
 
 ## Presets
 

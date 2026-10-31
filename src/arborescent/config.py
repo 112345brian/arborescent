@@ -9,11 +9,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
-from .domain import Policy, PolicyError, RingRule
+from .domain import ArchitectureScope, ChildArbor, Policy, PolicyError, RingRule
 from .ports import FileSystem
 from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS
 
-__all__ = ["find_policy", "load_policy", "policy_from_mapping"]
+__all__ = ["find_child_policy", "find_policy", "load_policy", "policy_from_mapping"]
 
 
 def find_policy(fs: FileSystem, start: Path) -> Path:
@@ -36,11 +36,41 @@ def load_policy(fs: FileSystem, path: Path) -> tuple[Policy, Path]:
     return policy_from_mapping(raw), path.parent
 
 
+def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Path | None:
+    """Find a direct child policy, or None so the parent keeps governing that directory."""
+    child_root = parent_root / child_path
+    if not fs.is_dir(child_root):
+        raise PolicyError(f"child arbor {child_path!r} is not a directory")
+    try:
+        parent_resolved = fs.resolve(parent_root)
+        child_resolved = fs.resolve(child_root)
+    except OSError as exc:
+        raise PolicyError(f"child arbor {child_path!r} cannot be resolved: {exc}") from exc
+    if child_resolved == parent_resolved or parent_resolved not in child_resolved.parents:
+        raise PolicyError(f"child arbor {child_path!r} resolves outside the parent root")
+    arborescent = child_root / "arborescent.toml"
+    if fs.is_file(arborescent):
+        return arborescent
+    pyproject = child_root / "pyproject.toml"
+    if fs.is_file(pyproject):
+        try:
+            data = tomllib.loads(fs.read_text(pyproject))
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+            raise PolicyError(f"child arbor {child_path!r} has an invalid pyproject.toml: {exc}") from exc
+        if isinstance(data.get("tool"), Mapping) and "arborescent" in data["tool"]:
+            return pyproject
+    return None
+
+
 def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
     """Translate the raw TOML table (``@group`` references, ``preset``, ``io_modules``, defaults) into a ``Policy``."""
+    if "scopes" in raw:
+        return _scoped_policy(raw)
     core, ring_tables = _core_policy(raw)
     preset_name, python, checkers, io_modules, disabled_tools, suggestion_threshold = _tool_options(raw)
     forbid_circular_imports = _boolean_option(raw, "forbid_circular_imports", True)
+    require_arbor_annotations = _boolean_option(raw, "require_arbor_annotations", False)
+    require_arbor_annotations_exclude = _string_list(raw, "require_arbor_annotations_exclude")
     raw_module_forbids = _module_forbids(raw)
     ruff_overrides = _ruff_overrides(raw.get("ruff", {}))
     customizations = _customization_labels(raw, ring_tables, suggestion_threshold, ruff_overrides, raw_module_forbids)
@@ -50,11 +80,16 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         sources=tuple(raw.get("sources", ["."])),
         source_roots=tuple(raw.get("source_roots", ["."])),
         exclude=tuple(raw.get("exclude", [])),
+        scan_vendors=_boolean_option(raw, "scan_vendors", False),
+        child_policy_mode=_child_policy_mode(raw),
         module_forbid_imports=tuple((pattern, tuple(targets)) for pattern, targets in raw_module_forbids.items()),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
+        tach_external_exclude=tuple(raw.get("tach_external_exclude", [])),
         forbid_circular_imports=forbid_circular_imports,
+        require_arbor_annotations=require_arbor_annotations,
+        require_arbor_annotations_exclude=require_arbor_annotations_exclude,
         python=minor.group(1) if minor else python,
         type_checkers=tuple(cast("list[str]", checkers)),
         disabled_tools=disabled_tools,
@@ -64,9 +99,95 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         ruff_overrides=ruff_overrides,
         customization_labels=customizations,
         practices=dict(raw.get("practices", {})),
+        children=_child_arbors(raw),
         preset=PRESETS[preset_name],
         io_modules=frozenset(io_modules),
     )
+
+
+_SCOPED_ROOT_GLOBALS = frozenset({
+    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
+    "scan_vendors",
+    "child_policy_mode",
+    "ruff", "practices", "exclude",
+})
+_LEGACY_ARCHITECTURE_KEYS = frozenset({
+    "sources", "source_roots", "rings", "classify", "ring", "preset", "io_modules", "groups",
+    "module_forbid_imports", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
+})
+_SCOPE_ARCHITECTURE_KEYS = _LEGACY_ARCHITECTURE_KEYS - {"sources"}
+
+
+def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
+    legacy = _LEGACY_ARCHITECTURE_KEYS & raw.keys()
+    if legacy:
+        raise PolicyError(f"root-level architecture keys cannot be combined with `scopes`: {sorted(legacy)}")
+    raw_scopes = raw.get("scopes")
+    if not isinstance(raw_scopes, Mapping) or not raw_scopes:
+        raise PolicyError("`scopes` must map non-empty scope names to tables")
+    scopes: list[ArchitectureScope] = []
+    for name, raw_scope in raw_scopes.items():
+        if not isinstance(name, str) or not name:
+            raise PolicyError("scope names must be non-empty strings")
+        if not isinstance(raw_scope, Mapping):
+            raise PolicyError(f"scope {name!r} must be a table")
+        missing = {"sources", "source_roots", "rings"} - raw_scope.keys()
+        if missing:
+            raise PolicyError(f"scope {name!r} requires {sorted(missing)}")
+        public = _scope_strings(raw_scope, "public")
+        depends_on = _scope_strings(raw_scope, "depends_on")
+        child_raw = {
+            key: value for key, value in raw.items() if key in _SCOPED_ROOT_GLOBALS and key != "children"
+        }
+        child_raw.update({key: value for key, value in raw_scope.items() if key in _SCOPE_ARCHITECTURE_KEYS})
+        child_raw["sources"] = raw_scope["sources"]
+        child_raw["source_roots"] = raw_scope["source_roots"]
+        policy = policy_from_mapping(child_raw)
+        for key, value in (("sources", raw_scope["sources"]), ("source_roots", raw_scope["source_roots"])):
+            if not isinstance(value, list) or not all(isinstance(path, str) and path for path in value):
+                raise PolicyError(f"scope {name!r} `{key}` must be a list of non-empty paths")
+        scopes.append(ArchitectureScope(name, policy, public, depends_on))
+
+    first = scopes[0].policy
+    return replace(
+        first,
+        rings=(),
+        classify=(),
+        sources=tuple(path for scope in scopes for path in scope.policy.sources),
+        source_roots=tuple(path for scope in scopes for path in scope.policy.source_roots),
+        module_forbid_imports=(),
+        entry_scripts=tuple(script for scope in scopes for script in scope.policy.entry_scripts),
+        dependencies={},
+        forbid_everywhere=(),
+        children=_child_arbors(raw),
+        scan_vendors=_boolean_option(raw, "scan_vendors", False),
+        child_policy_mode=_child_policy_mode(raw),
+        scopes=tuple(scopes),
+    )
+
+
+def _scope_strings(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = raw.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+        raise PolicyError(f"scope `{key}` must be a list of non-empty strings")
+    if len(value) != len(set(value)):
+        raise PolicyError(f"scope `{key}` must not contain duplicates")
+    return tuple(cast("list[str]", value))
+
+
+def _child_arbors(raw: Mapping[str, Any]) -> tuple[ChildArbor, ...]:
+    value = raw.get("children", [])
+    if not isinstance(value, list) or not all(isinstance(path, str) and path for path in value):
+        raise PolicyError("`children` must be a list of non-empty relative package paths")
+    return tuple(ChildArbor(path) for path in value)
+
+
+def _child_policy_mode(raw: Mapping[str, Any]) -> str:
+    value = raw.get("child_policy_mode", "certify")
+    if not isinstance(value, str) or value not in {"certify", "parent"}:
+        raise PolicyError("`child_policy_mode` must be 'certify' or 'parent'")
+    return value
 
 
 def _core_policy(raw: Mapping[str, Any]) -> tuple[Policy, Mapping[str, Mapping[str, Any]]]:
@@ -120,6 +241,13 @@ def _boolean_option(raw: Mapping[str, Any], key: str, default: bool) -> bool:
     return value
 
 
+def _string_list(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = raw.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
+        raise PolicyError(f"`{key}` must be a list of non-empty strings")
+    return tuple(cast("list[str]", value))
+
+
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:
     raw_module_forbids = raw.get("module_forbid_imports", {})
     if not isinstance(raw_module_forbids, Mapping) or any(
@@ -148,9 +276,22 @@ def _customization_labels(
         customizations.append("exclude")
     if raw_module_forbids:
         customizations.append("module import restrictions")
-    if not raw.get("forbid_circular_imports", True):
-        customizations.append("circular imports")
+    customizations.extend(_flag_labels(raw))
     return tuple(customizations)
+
+
+def _flag_labels(raw: Mapping[str, Any]) -> list[str]:
+    """Customization labels driven by a single boolean (or boolean-like) top-level key each."""
+    labels: list[str] = []
+    if raw.get("children") or raw.get("child_policy_mode", "certify") != "certify":
+        labels.append("nested arbors")
+    if raw.get("scan_vendors", False):
+        labels.append("vendor scanning")
+    if not raw.get("forbid_circular_imports", True):
+        labels.append("circular imports")
+    if raw.get("require_arbor_annotations", False):
+        labels.append("annotations required")
+    return labels
 
 
 def _disabled_tools(raw: Mapping[str, Any]) -> tuple[str, ...]:

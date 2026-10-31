@@ -50,26 +50,38 @@ def certify(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunner, fs
 
 def _native_minimum(policy: Policy, scan: object) -> list[str]:
     failures: list[str] = []
-    if not policy.forbid_circular_imports:
-        failures.append("minimum profile requires `forbid_circular_imports = true`")
+    local_policies = tuple((scope.name, scope.policy) for scope in policy.scopes) if policy.scopes else (("", policy),)
+    if any(not local_policy.forbid_circular_imports for _, local_policy in local_policies):
+        suffix = " in every scope" if policy.scopes else ""
+        failures.append(f"minimum profile requires `forbid_circular_imports = true`{suffix}")
     failures.extend(
         f"required profile tool {tool} is disabled by policy"
         for tool in ("ruff", "tach")
         if tool in policy.disabled_tools
     )
-    outer = policy.rings[-1].name
-    for rule in policy.rings:
-        if rule.name != outer and "*" in rule.external:
-            failures.append(f"ring {rule.name} has wildcard external access")
-        if rule.name != outer and "*" in rule.may_import:
-            failures.append(f"ring {rule.name} has wildcard internal imports")
+    if "arbor-annotations" in policy.disabled_tools:
+        failures.append("minimum profile requires `__arbor__` annotations to be enabled")
+    for scope_name, local_policy in local_policies:
+        failures.extend(_native_scope_minimum(scope_name, local_policy))
     unclassified = getattr(scan, "unclassified", ())
     if unclassified:
         failures.append(f"{len(unclassified)} first-party module(s) are unclassified")
+    return failures
+
+
+def _native_scope_minimum(scope_name: str, policy: Policy) -> list[str]:
+    failures: list[str] = []
+    outer = policy.rings[-1].name
+    prefix = f"scope {scope_name} " if scope_name else ""
+    for rule in policy.rings:
+        if rule.name != outer and "*" in rule.external:
+            failures.append(f"{prefix}ring {rule.name} has wildcard external access")
+        if rule.name != outer and "*" in rule.may_import:
+            failures.append(f"{prefix}ring {rule.name} has wildcard internal imports")
     for rule in policy.rings[:-1]:
         required = policy.forbidden_effects(rule.name)
         if rule.forbid is not None and not required <= rule.forbid:
-            failures.append(f"ring {rule.name} weakens positional effect defaults")
+            failures.append(f"{prefix}ring {rule.name} weakens positional effect defaults")
     return failures
 
 
@@ -129,26 +141,40 @@ def _tach_probes(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunne
     failures: list[str] = []
     if not fs.is_file(root / "tach.toml"):
         return ["Tach profile canaries require the active tach.toml at the project root"]
-    source_module, outer_modules = _tach_canary_modules(policy, scan)
-    if source_module is None or not outer_modules:
-        return ["Tach profile canaries need at least one classified innermost and outermost module"]
+    canaries = _tach_canary_modules_by_scope(policy, scan)
+    missing = [name or "legacy" for name, (source, targets) in canaries.items() if source is None or not targets]
+    if missing:
+        return [f"Tach profile canaries need classified innermost and outermost modules in scope {name!r}" for name in missing]
     try:
         with fs.temporary_directory("arborescent-tach-profile-") as temp:
             _copy_tach_project(root, policy.source_roots, temp, fs)
-            source_path = temp / source_module.path
-            if not fs.is_file(source_path):
-                return [f"Tach canary source is unavailable in the isolated project: {source_module.path}"]
             failures.extend(_tach_baseline(temp, runner))
             if failures:
                 return failures
-            if not _tach_layer_probe(temp, source_module, outer_modules, runner, fs):
-                failures.append(
-                    f"Tach layer canary is not effective: {source_module.name} may import every outermost module"
-                )
-            if not _tach_external_probe(temp, source_path, runner, fs):
-                failures.append("Tach external-dependency canary is not effective for undeclared packages")
+            for scope_name, (source_module, outer_modules) in canaries.items():
+                failures.extend(_tach_scope_probe(temp, (scope_name, source_module, outer_modules), runner, fs))
     except (OSError, UnicodeDecodeError) as exc:
         failures.append(f"could not create Tach profile canaries: {exc}")
+    return failures
+
+
+def _tach_scope_probe(
+    temp: Path, canary: tuple[str, ModuleInfo | None, tuple[str, ...]], runner: ToolRunner, fs: FileSystem,
+) -> list[str]:
+    scope_name, source_module, outer_modules = canary
+    if source_module is None:
+        return []
+    source_path = temp / source_module.path
+    if not fs.is_file(source_path):
+        return [f"Tach canary source is unavailable in the isolated project: {source_module.path}"]
+    failures = []
+    if not _tach_layer_probe(temp, source_module, outer_modules, runner, fs):
+        failures.append(
+            f"Tach layer canary is not effective in scope {scope_name!r}: "
+            f"{source_module.name} may import every outermost module"
+        )
+    if not _tach_external_probe(temp, source_path, runner, fs):
+        failures.append(f"Tach external-dependency canary is not effective in scope {scope_name!r}")
     return failures
 
 
@@ -196,11 +222,44 @@ def _tach_canary_modules(policy: Policy, scan: ScanResult) -> tuple[ModuleInfo |
     )
     inner = policy.rings[0].name
     outer = policy.rings[-1].name
-    sources = sorted((module for module in leaves if policy.ring_of(module.name) == inner), key=lambda item: item.name)
-    targets = tuple(sorted(module.name for module in leaves if policy.ring_of(module.name) == outer))
+    sources = sorted(
+        (module for module in leaves if policy.resolve_ring(scan.arbor_index, module.name) == inner),
+        key=lambda item: item.name,
+    )
+    targets = tuple(sorted(module.name for module in leaves if policy.resolve_ring(scan.arbor_index, module.name) == outer))
     if not sources:
         return None, ()
     return sources[0], tuple(target for target in targets if target != sources[0].name)
+
+
+def _tach_canary_modules_by_scope(
+    policy: Policy, scan: ScanResult,
+) -> dict[str, tuple[ModuleInfo | None, tuple[str, ...]]]:
+    if not policy.scopes:
+        return {"": _tach_canary_modules(policy, scan)}
+    canaries = {}
+    for scope in policy.scopes:
+        leaves = tuple(
+            module for module in scan.modules.values()
+            if scan.scope_by_module.get(module.name) == scope.name
+            and not any(
+                scan.scope_by_module.get(other.name) == scope.name and other.name.startswith(module.name + ".")
+                for other in scan.modules.values()
+            )
+        )
+        inner = scope.policy.rings[0].name
+        outer = scope.policy.rings[-1].name
+        sources = sorted(
+            (module for module in leaves if policy.resolve_scope_ring(scope.name, scan.arbor_index, module.name) == inner),
+            key=lambda item: item.name,
+        )
+        targets = tuple(sorted(
+            module.name for module in leaves
+            if policy.resolve_scope_ring(scope.name, scan.arbor_index, module.name) == outer
+        ))
+        source = sources[0] if sources else None
+        canaries[scope.name] = (source, tuple(target for target in targets if source is None or target != source.name))
+    return canaries
 
 
 def _copy_tach_project(root: Path, source_roots: tuple[str, ...], temp: Path, fs: FileSystem) -> None:

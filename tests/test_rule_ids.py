@@ -52,6 +52,11 @@ def test_rule_id_strings_never_change() -> None:
             "docs-sync",
             "crlf",
             "undeclared-imports",
+            "invalid-arbor-annotation",
+            "arbor-ring-mismatch",
+            "unannotated-module",
+            "scope-import",
+            "scope-effect-leak",
         ]
     )
 
@@ -66,9 +71,10 @@ def test_a_rule_id_is_a_plain_string_in_keys_and_output() -> None:
 def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     policy, root = load_policy(LocalFileSystem(), ROOT / "pyproject.toml")
     scan = FsScanner().scan(policy, root)
-    mutated = {m.rule for m in plan(policy, dict(scan.paths), scan.known)[0]}
-    # the arborescent repo has no entry scripts; that rule's mutation is covered by the next test
-    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY} >= set(Rule)
+    mutated = {m.rule for m in plan(policy, scan)[0]}
+    # the arborescent repo has no entry scripts, and does not enable require_arbor_annotations (its own source
+    # is not fully annotated yet); those rules' mutations are covered by the next two tests instead
+    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
 
@@ -77,13 +83,20 @@ def test_entry_dependency_rule_has_a_mutation(repo: Path) -> None:
     write_files(repo, {"run.py": "# /// script\n# dependencies = []\n# ///\n"})
     policy = mini_policy(**ENTRY)
     scan = FsScanner().scan(policy, repo)
-    assert Rule.UNDECLARED_ENTRY_DEPENDENCY in {m.rule for m in plan(policy, dict(scan.paths), scan.known)[0]}
+    assert Rule.UNDECLARED_ENTRY_DEPENDENCY in {m.rule for m in plan(policy, scan)[0]}
+
+
+def test_unannotated_module_rule_has_a_mutation_when_required(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "domain"}\n\nVALUE: int = 1\n'})
+    policy = mini_policy(require_arbor_annotations=True)
+    scan = FsScanner().scan(policy, repo)
+    assert Rule.UNANNOTATED_MODULE in {m.rule for m in plan(policy, scan)[0]}
 
 
 def test_circular_import_rule_has_a_selftest_mutation(repo: Path) -> None:
     policy = mini_policy()
     scan = FsScanner().scan(policy, repo)
-    assert Rule.CIRCULAR_IMPORT in {m.rule for m in plan(policy, dict(scan.paths), scan.known)[0]}
+    assert Rule.CIRCULAR_IMPORT in {m.rule for m in plan(policy, scan)[0]}
 
 
 def _table_ids(text: str, heading: str) -> set[str]:
@@ -109,7 +122,7 @@ def test_check_modules_orders_violations_by_module_then_import_then_os_then_entr
     )
     policy = mini_policy(**ENTRY)
     scan = FsScanner().scan(policy, repo)
-    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps)
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
     assert [(v.rule, v.subject) for v in found] == [
         ("bad-import", "app.adapters"),
         ("external-import", "app.adapters"),
@@ -131,9 +144,9 @@ def test_check_modules_orders_violations_by_module_then_import_then_os_then_entr
 
 def test_check_modules_edge_inputs(repo: Path) -> None:
     policy = mini_policy(**ENTRY)
-    assert check_modules(policy, {}, [], {}) == []  # nothing scanned
-    assert [v.subject for v in check_modules(policy, {}, ["run"], {})] == ["run"]  # entry script without a block
-    assert check_modules(policy, {}, [], {"run": ()}) == []  # declared, not scanned, nothing imported
+    assert check_modules(policy, {}, [], {}, {}) == []  # nothing scanned
+    assert [v.subject for v in check_modules(policy, {}, ["run"], {}, {})] == ["run"]  # entry script without a block
+    assert check_modules(policy, {}, [], {"run": ()}, {}) == []  # declared, not scanned, nothing imported
 
 
 def test_write_generated_writes_every_file_and_reports_them(repo: Path) -> None:

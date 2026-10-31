@@ -65,7 +65,7 @@ type_checkers = ["ty", "pyright"]
 pure = ["__future__", "collections", "dataclasses", "enum", "fnmatch", "re", "typing", "ast", "sys", "tomllib", "io", "tokenize", "posixpath", "json"]
 
 [tool.arborescent.ring.domain]
-external = ["@pure", "arborescent"]
+external = ["@pure", "pathlib", "arborescent"]
 
 [tool.arborescent.ring.ports]
 may_import = ["domain"]
@@ -96,6 +96,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.presets" = "domain"
 "arborescent.stdlib" = "domain"
 "arborescent.ports" = "ports"
+"arborescent.annotate" = "application"
 "arborescent.generate" = "application"
 "arborescent.baseline" = "application"
 "arborescent.config" = "application"
@@ -106,6 +107,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.selftest" = "application"
 "arborescent.suggestions" = "application"
 "arborescent.bench" = "application"
+"arborescent.packages" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"

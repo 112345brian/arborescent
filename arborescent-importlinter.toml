@@ -7,30 +7,53 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "domain ring imports only ['domain']"
 type = "forbidden"
-source_modules = ["arborescent.domain", "arborescent.facts", "arborescent.presets", "arborescent.rules", "arborescent.stdlib"]
+source_modules = [
+    "arborescent.domain",
+    "arborescent.facts",
+    "arborescent.presets",
+    "arborescent.rules",
+    "arborescent.stdlib",
+]
 forbidden_modules = [
     "arborescent.ports",
+    "arborescent.annotate",
     "arborescent.baseline",
     "arborescent.bench",
+    "arborescent.certification",
     "arborescent.config",
     "arborescent.engine",
     "arborescent.generate",
+    "arborescent.install_tools",
+    "arborescent.packages",
     "arborescent.practices",
     "arborescent.selftest",
     "arborescent.suggestions",
     "arborescent.adapters",
+    "arborescent.clock_adapter",
     "arborescent.engines",
+    "arborescent.filesystem_adapter",
+    "arborescent.installer_adapter",
+    "arborescent.scanner",
     "arborescent.testing",
+    "arborescent.tool_runner",
     "arborescent.typecheckers",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_install",
+    "arborescent.cli_report",
 ]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "domain ring imports no I/O or third-party package it does not list"
 type = "forbidden"
-source_modules = ["arborescent.domain", "arborescent.facts", "arborescent.presets", "arborescent.rules", "arborescent.stdlib"]
+source_modules = [
+    "arborescent.domain",
+    "arborescent.facts",
+    "arborescent.presets",
+    "arborescent.rules",
+    "arborescent.stdlib",
+]
 forbidden_modules = [
     "asyncio",
     "ctypes",
@@ -38,7 +61,6 @@ forbidden_modules = [
     "http",
     "multiprocessing",
     "os",
-    "pathlib",
     "platform",
     "shutil",
     "signal",
@@ -57,20 +79,31 @@ name = "ports ring imports only ['domain', 'ports']"
 type = "forbidden"
 source_modules = ["arborescent.ports"]
 forbidden_modules = [
+    "arborescent.annotate",
     "arborescent.baseline",
     "arborescent.bench",
+    "arborescent.certification",
     "arborescent.config",
     "arborescent.engine",
     "arborescent.generate",
+    "arborescent.install_tools",
+    "arborescent.packages",
     "arborescent.practices",
     "arborescent.selftest",
     "arborescent.suggestions",
     "arborescent.adapters",
+    "arborescent.clock_adapter",
     "arborescent.engines",
+    "arborescent.filesystem_adapter",
+    "arborescent.installer_adapter",
+    "arborescent.scanner",
     "arborescent.testing",
+    "arborescent.tool_runner",
     "arborescent.typecheckers",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_install",
+    "arborescent.cli_report",
 ]
 allow_indirect_imports = true
 
@@ -102,22 +135,33 @@ allow_indirect_imports = true
 name = "application ring imports only ['application', 'domain', 'ports']"
 type = "forbidden"
 source_modules = [
+    "arborescent.annotate",
     "arborescent.baseline",
     "arborescent.bench",
+    "arborescent.certification",
     "arborescent.config",
     "arborescent.engine",
     "arborescent.generate",
+    "arborescent.install_tools",
+    "arborescent.packages",
     "arborescent.practices",
     "arborescent.selftest",
     "arborescent.suggestions",
 ]
 forbidden_modules = [
     "arborescent.adapters",
+    "arborescent.clock_adapter",
     "arborescent.engines",
+    "arborescent.filesystem_adapter",
+    "arborescent.installer_adapter",
+    "arborescent.scanner",
     "arborescent.testing",
+    "arborescent.tool_runner",
     "arborescent.typecheckers",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_install",
+    "arborescent.cli_report",
 ]
 allow_indirect_imports = true
 
@@ -125,11 +169,15 @@ allow_indirect_imports = true
 name = "application ring imports no I/O or third-party package it does not list"
 type = "forbidden"
 source_modules = [
+    "arborescent.annotate",
     "arborescent.baseline",
     "arborescent.bench",
+    "arborescent.certification",
     "arborescent.config",
     "arborescent.engine",
     "arborescent.generate",
+    "arborescent.install_tools",
+    "arborescent.packages",
     "arborescent.practices",
     "arborescent.selftest",
     "arborescent.suggestions",
@@ -157,25 +205,51 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "adapters ring imports only ['adapters', 'domain', 'ports']"
 type = "forbidden"
-source_modules = ["arborescent.adapters", "arborescent.engines", "arborescent.testing", "arborescent.typecheckers"]
+source_modules = [
+    "arborescent.adapters",
+    "arborescent.clock_adapter",
+    "arborescent.engines",
+    "arborescent.filesystem_adapter",
+    "arborescent.installer_adapter",
+    "arborescent.scanner",
+    "arborescent.testing",
+    "arborescent.tool_runner",
+    "arborescent.typecheckers",
+]
 forbidden_modules = [
+    "arborescent.annotate",
     "arborescent.baseline",
     "arborescent.bench",
+    "arborescent.certification",
     "arborescent.config",
     "arborescent.engine",
     "arborescent.generate",
+    "arborescent.install_tools",
+    "arborescent.packages",
     "arborescent.practices",
     "arborescent.selftest",
     "arborescent.suggestions",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_install",
+    "arborescent.cli_report",
 ]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "adapters ring imports no I/O or third-party package it does not list"
 type = "forbidden"
-source_modules = ["arborescent.adapters", "arborescent.engines", "arborescent.testing", "arborescent.typecheckers"]
+source_modules = [
+    "arborescent.adapters",
+    "arborescent.clock_adapter",
+    "arborescent.engines",
+    "arborescent.filesystem_adapter",
+    "arborescent.installer_adapter",
+    "arborescent.scanner",
+    "arborescent.testing",
+    "arborescent.tool_runner",
+    "arborescent.typecheckers",
+]
 forbidden_modules = [
     "asyncio",
     "ctypes",
@@ -195,14 +269,13 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "composition ring imports no I/O or third-party package it does not list"
 type = "forbidden"
-source_modules = ["arborescent.__main__", "arborescent.cli"]
+source_modules = ["arborescent.__main__", "arborescent.cli", "arborescent.cli_install", "arborescent.cli_report"]
 forbidden_modules = [
     "asyncio",
     "ctypes",
     "getpass",
     "http",
     "multiprocessing",
-    "os",
     "platform",
     "shutil",
     "signal",

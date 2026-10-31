@@ -40,6 +40,9 @@ class LocalFileSystem:
     def is_dir(self, path: Path) -> bool:
         return path.is_dir()
 
+    def resolve(self, path: Path) -> Path:
+        return path.resolve(strict=True)
+
     def glob(self, root: Path, pattern: str) -> list[Path]:
         return sorted(root.glob(pattern))
 

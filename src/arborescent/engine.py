@@ -3,6 +3,7 @@ shared parse, then apply the baseline ratchet."""
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 
 from . import baseline as ratchet_mod
 from .certification import PROFILE, certify
+from .config import find_child_policy
 from .domain import Policy, PolicyError, Rule, ToolResult, Violation
 from .generate import generate
 from .ports import (
@@ -24,7 +26,7 @@ from .ports import (
     ViolationEngine,
 )
 from .practices import run_practices
-from .rules import check_modules
+from .rules import RuleContext, check_modules
 from .suggestions import Suggestion, file_size_suggestions
 
 if TYPE_CHECKING:
@@ -51,6 +53,8 @@ class Options:
     require_tools: bool = False  # a missing engine is a failure, not a skip
     use_baseline: bool = True
     require_profile: bool = False
+    growth_against: str | None = None
+    no_cache: bool = False
 
 
 @dataclass
@@ -104,7 +108,14 @@ def run_own(
     policy: Policy, root: Path, services: Services, only: frozenset[str] | None = None, practices: bool = True
 ) -> tuple[list[Violation], ScanResult]:
     scan = services.scanner.scan(policy, root, only)
-    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps)
+    indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, indexes)
+    found += [
+        Violation(Rule.INVALID_ARBOR_ANNOTATION, module, detail)
+        for module, _ in scan.unclassified
+        if module not in scan.modules
+        if (detail := _annotation_violation(policy, scan.arbor_index, scan.scope_by_module, module)) is not None
+    ]
     found += [
         Violation(Rule.UNCLASSIFIED, module, "module matches no [classify] pattern; every module needs a ring")
         for module, _ in scan.unclassified
@@ -113,8 +124,21 @@ def run_own(
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
     found += _inventory_violations(scan.modules)
     if practices and only is None:
-        found += run_practices(policy, root, services.runner, services.fs, scan.modules, scan.known)
+        found += run_practices(policy, root, services.runner, services.fs, scan)
     return found, scan
+
+
+def _annotation_violation(
+    policy: Policy, arbor_index: Mapping[str, tuple[str | None, str | None]],
+    scope_by_module: Mapping[str, str], module: str,
+) -> str | None:
+    if not policy.scopes:
+        return policy.annotation_violation(arbor_index, module)
+    scope_name = scope_by_module.get(module)
+    if scope_name is not None:
+        return policy.scope_annotation_violation(scope_name, arbor_index, module)
+    annotation = arbor_index.get(module)
+    return annotation[1] if annotation is not None else None
 
 
 def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:
@@ -146,7 +170,7 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     _, scan = run_own(policy, root, services, practices=False)
     wanted = [c for c in services.checkers if c.name in policy.type_checkers and not tool_is_disabled(policy, c)]
     written: list[str] = []
-    generated = sorted(generate(policy, sorted(scan.known), wanted).items())
+    generated = sorted(generate(policy, sorted(scan.known), wanted, scan.arbor_index, scan.scope_by_module).items())
     for rel, text in generated:
         path = root / rel
         if services.fs.exists(path):
@@ -157,9 +181,11 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     return written
 
 
-def drift(fs: FileSystem, policy: Policy, root: Path, names: Sequence[str], checkers: Sequence[TypeChecker]) -> list[str]:
+def drift(
+    fs: FileSystem, policy: Policy, root: Path, scan: ScanResult, checkers: Sequence[TypeChecker],
+) -> list[str]:
     out: list[str] = []
-    for rel, expected in sorted(generate(policy, names, checkers).items()):
+    for rel, expected in sorted(generate(policy, sorted(scan.known), checkers, scan.arbor_index, scan.scope_by_module).items()):
         path = root / rel
         if fs.is_file(path):
             current = fs.read_text(path)
@@ -205,6 +231,50 @@ def _tool(services: Services, engine: Engine, files: Sequence[str], root: Path, 
         status = "fail"
         text.append(f"failed to collect violations: {exc}")
     return EngineRun(name, status, result.seconds, text[-15:] if status == "fail" else text[-1:], findings)
+
+
+def _child_arbor_command(config_path: Path, opts: Options) -> list[str]:
+    argv = [sys.executable, "-m", "arborescent", "--config", str(config_path.resolve()), "check"]
+    flags = (
+        (not opts.tools, "--no-tools"),
+        (opts.require_tools, "--require-tools"),
+        (opts.require_profile, "--require-profile"),
+        (not opts.use_baseline, "--no-baseline"),
+        (opts.no_cache, "--no-cache"),
+    )
+    argv.extend(flag for enabled, flag in flags if enabled)
+    if opts.type_checker is not None:
+        argv.extend(("--type-checker", opts.type_checker))
+    if opts.growth_against is not None:
+        argv.extend(("--growth-against", opts.growth_against))
+    return argv
+
+
+def _child_arbor_runs(policy: Policy, root: Path, services: Services, opts: Options) -> list[EngineRun]:
+    if policy.child_policy_mode == "parent":
+        return []
+    runs: list[EngineRun] = []
+    for child in policy.children:
+        name = f"child arbor {child.path}"
+        child_root = root / child.path
+        try:
+            config_path = find_child_policy(services.fs, root, child.path)
+        except PolicyError as exc:
+            runs.append(EngineRun(name, "fail", 0.0, [str(exc)]))
+            continue
+        if config_path is None:
+            continue
+        if not services.runner.available(sys.executable):
+            runs.append(EngineRun(name, "fail", 0.0, [f"{sys.executable} is not available to run the child policy"]))
+            continue
+
+        argv = _child_arbor_command(config_path, opts)
+        result = services.runner.run(argv, child_root)
+        output = (result.stdout + result.stderr).strip().splitlines()
+        status = "ok" if result.returncode == 0 else "fail"
+        lines = output[-15:] if status == "fail" else [output[-1] if output else "child checks passed"]
+        runs.append(EngineRun(name, status, result.seconds, lines))
+    return runs
 
 
 def run_engine(services: Services, name: str, root: Path) -> EngineRun:
@@ -280,7 +350,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
             services.fs,
             policy,
             root,
-            sorted(scan.known),
+            scan,
             [
                 c
                 for c in services.checkers
@@ -299,6 +369,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         if opts.require_profile:
             report.profile = PROFILE
             report.profile_failures = certify(root, policy, scan, services.runner, services.fs)
+        report.engines.extend(_child_arbor_runs(policy, root, services, opts))
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
     report.seconds = services.clock.now() - started

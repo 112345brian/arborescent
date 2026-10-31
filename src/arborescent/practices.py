@@ -22,7 +22,7 @@ from typing import Any, cast
 
 from .domain import NOISE_DIRS, Policy, Rule, Violation, dist_name
 from .facts import ModuleInfo, resolve_targets
-from .ports import FileSystem, ToolRunner
+from .ports import FileSystem, ScanResult, ToolRunner
 
 __all__ = ["PRACTICES", "run_practices"]
 
@@ -122,24 +122,55 @@ def secrets_guard(fs: FileSystem, root: Path, tests_dir: str) -> list[Violation]
     return []
 
 
-def docs_sync(fs: FileSystem, root: Path, doc: str, policy: Policy, known: Collection[str]) -> list[Violation]:
+def docs_sync(
+    fs: FileSystem, root: Path, doc: str, policy: Policy, scan: ScanResult,
+) -> list[Violation]:
     path = root / doc
     if not fs.is_file(path):
         return [Violation(Rule.DOCS_SYNC, doc, "documented architecture file does not exist")]
-    rows: dict[str, str] = {}
-    for line in fs.read_text(path).splitlines():
-        m = re.match(r"\|\s*`([^`]+)`\s*\|\s*`?([\w-]+)`?\s*\|", line)
-        if m:
-            mod = m.group(1).removesuffix(".py").replace("/", ".").removesuffix(".__init__")
-            rows[mod] = m.group(2)
+    rows = _architecture_rows(fs.read_text(path).splitlines())
     out: list[Violation] = []
-    for mod, ring in sorted(rows.items()):
-        if mod not in known:
+    for mod, (scope_name, ring) in sorted(rows.items()):
+        if mod not in scan.known:
             out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} lists a module that does not exist"))
-        elif policy.ring_of(mod) != ring:
-            out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} says ring {ring!r} but the policy says {policy.ring_of(mod)!r}"))
-    out += [Violation(Rule.DOCS_SYNC, m, f"module is not in the {doc} table") for m in sorted(set(known) - set(rows))]
+        else:
+            actual = _documented_module_ring(policy, scan, mod)
+            if actual != ring:
+                out.append(Violation(Rule.DOCS_SYNC, mod, f"{doc} says ring {ring!r} but the policy says {actual!r}"))
+            elif policy.scopes and scope_name != scan.scope_by_module.get(mod):
+                out.append(Violation(
+                    Rule.DOCS_SYNC, mod,
+                    f"{doc} says scope {scope_name!r} but the policy assigns it to {scan.scope_by_module.get(mod)!r}",
+                ))
+    out += [Violation(Rule.DOCS_SYNC, m, f"module is not in the {doc} table") for m in sorted(set(scan.known) - set(rows))]
     return out
+
+
+def _architecture_rows(lines: Sequence[str]) -> dict[str, tuple[str | None, str]]:
+    rows: dict[str, tuple[str | None, str]] = {}
+    for line in lines:
+        cells = [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
+        if cells and (cells[0].lower() == "module" or all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)):
+            continue
+        if len(cells) == 2:
+            module, ring = cells
+            scope_name = None
+        elif len(cells) == 3:
+            module, scope_name, ring = cells
+        else:
+            continue
+        if not re.fullmatch(r"[\w.\-/]+", module) or not re.fullmatch(r"[\w-]+", ring):
+            continue
+        mod = module.removesuffix(".py").replace("/", ".").removesuffix(".__init__")
+        rows[mod] = (scope_name or None, ring)
+    return rows
+
+
+def _documented_module_ring(policy: Policy, scan: ScanResult, module: str) -> str | None:
+    if not policy.scopes:
+        return policy.resolve_ring(scan.arbor_index, module)
+    scope_name = scan.scope_by_module.get(module)
+    return policy.resolve_scope_ring(scope_name, scan.arbor_index, module) if scope_name is not None else None
 
 
 def crlf(fs: FileSystem, root: Path, patterns: Sequence[str]) -> list[Violation]:
@@ -166,11 +197,14 @@ def undeclared_imports(
         }
     tops = {m.split(".")[0] for m in known}
     stdlib = policy.stdlib
+    dependencies = dict(policy.dependencies)
+    for scope in policy.scopes:
+        dependencies.update(scope.policy.dependencies)
     out: dict[str, Violation] = {}
     for name, info in modules.items():
         for imp in info.facts.imports:
             for top in resolve_targets(name, info.is_package, imp, known, tops)[1]:
-                dist = dist_name(policy.dependencies.get(top, top))
+                dist = dist_name(dependencies.get(top, top))
                 if top not in stdlib and dist not in declared:
                     out[dist] = Violation(Rule.UNDECLARED_IMPORTS, dist, f"imported (e.g. by {name}) but not declared in {manifest}", imp.line)
     return list(out.values())
@@ -182,8 +216,10 @@ PRACTICES = (
 
 
 def run_practices(
-    policy: Policy, root: Path, runner: ToolRunner, fs: FileSystem, modules: Mapping[str, ModuleInfo], known: Collection[str]
+    policy: Policy, root: Path, runner: ToolRunner, fs: FileSystem, scan: ScanResult,
 ) -> list[Violation]:
+    modules = scan.modules
+    known = scan.known
     cfg = policy.practices
     out: list[Violation] = []
     if cfg.get(Rule.GITIGNORE_SHADOW):
@@ -196,7 +232,7 @@ def run_practices(
     if cfg.get(Rule.SECRETS_GUARD):
         out += secrets_guard(fs, root, str(cfg[Rule.SECRETS_GUARD]))
     if cfg.get(Rule.DOCS_SYNC):
-        out += docs_sync(fs, root, str(cfg[Rule.DOCS_SYNC]), policy, known)
+        out += docs_sync(fs, root, str(cfg[Rule.DOCS_SYNC]), policy, scan)
     if cfg.get(Rule.CRLF):
         out += crlf(fs, root, list(cfg[Rule.CRLF]))
     if cfg.get(Rule.UNDECLARED_IMPORTS):

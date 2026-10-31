@@ -15,7 +15,7 @@ from arborescent.rules import check_modules
 def run(root: Path, **overrides: Any) -> list[Any]:
     policy = mini_policy(**overrides)
     scan = FsScanner().scan(policy, root)
-    return check_modules(policy, scan.modules, scan.known, scan.entry_deps)
+    return check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
 
 
 def effects(found: list[Any]) -> set[tuple[str, str]]:
@@ -76,7 +76,7 @@ def test_custom_ring_names_get_positional_defaults(repo: Path) -> None:
     )
     scan = FsScanner().scan(policy, repo)
 
-    assert effects(check_modules(policy, scan.modules, scan.known, scan.entry_deps)) == {("effect-clock", "app.core")}
+    assert effects(check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)) == {("effect-clock", "app.core")}
 
 
 def test_patch_target_uses_its_project_ring_and_only_in_configured_tests(repo: Path) -> None:
@@ -100,7 +100,36 @@ def test_patch_target_uses_its_project_ring_and_only_in_configured_tests(repo: P
     policy = policy_from_mapping(raw)
     scan = FsScanner().scan(policy, repo)
 
-    findings = check_modules(policy, scan.modules, scan.known, scan.entry_deps)
+    findings = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
+
+    assert effects(findings) == {("effect-patch", "tests.test_domain")}
+
+
+def test_patch_target_annotation_wins_over_broad_classify_on_attribute(repo: Path) -> None:
+    write_files(
+        repo,
+        {
+            "app/domain.py": '__arbor__ = {"ring": "domain"}\nVALUE = 1\n',
+            "tests/test_domain.py": 'from unittest.mock import patch\npatch("app.domain.VALUE")\n',
+        },
+    )
+    policy = policy_from_mapping(
+        {
+            "sources": ["app", "tests"],
+            "source_roots": ["."],
+            "rings": ["domain", "ports", "adapters", "composition"],
+            "groups": {"pure": ["__future__"]},
+            "ring": ring_with(
+                domain={"external": ["unittest"]},
+                composition={"may_import": ["*"], "external": ["unittest"]},
+            ),
+            "classify": {"app*": "composition", "tests.*": "composition"},
+            "practices": {"secrets-guard": "tests"},
+        }
+    )
+    scan = FsScanner().scan(policy, repo)
+
+    findings = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
 
     assert effects(findings) == {("effect-patch", "tests.test_domain")}
 
