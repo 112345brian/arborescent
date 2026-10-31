@@ -10,8 +10,20 @@ from dataclasses import dataclass
 
 from .domain import PolicyError
 from .driver_port import MigrationLibrary
-from .driver_request import MigrationOutcome, MigrationRequest, MigrationSite
-from .migration_arguments import ERROR, Bypass, Gap, MigrationArguments
+from .driver_request import (
+    ImportRewrite,
+    MigrationOutcome,
+    MigrationRequest,
+    MigrationSite,
+)
+from .migration_arguments import (
+    ERROR,
+    Bypass,
+    Gap,
+    MigrationArguments,
+    PackageArguments,
+)
+from .package_model import ModuleRename
 
 __all__ = ["BLOCKED", "READY", "STAYS", "DriverPlan", "plan_supply", "supply"]
 
@@ -30,6 +42,7 @@ class DriverPlan:
     request: MigrationRequest | None
     arguments: tuple[str, ...]  # what the library would be called with; empty unless ready
     unapplied: tuple[str, ...]  # arguments the library cannot apply
+    rewrite: ImportRewrite | None = None  # the import-rewriting step; None when no module changes its name
 
 
 def plan_supply(arguments: MigrationArguments, package_id: str, library: MigrationLibrary, site: MigrationSite) -> DriverPlan:
@@ -52,7 +65,18 @@ def plan_supply(arguments: MigrationArguments, package_id: str, library: Migrati
             (), (), None, (), (),
         )
     request = MigrationRequest(package_id, site.source, site.target, site.branch, package.path_renames, package.module_renames)
-    return DriverPlan(package_id, READY, "ready", (), (), request, library.arguments(request), library.unsupported(request))
+    return DriverPlan(package_id, READY, "ready", (), (), request, library.arguments(request), library.unsupported(request), _rewrite_of(package))
+
+
+def _rewrite_of(package: PackageArguments) -> ImportRewrite | None:
+    """The per-module map, longest old name first so a package's own rename never runs before its children's."""
+    renames = tuple(sorted(
+        (ModuleRename(item.module, item.target_module) for item in package.modules if item.module != item.target_module),
+        key=lambda rename: (-len(rename.source), rename.source),
+    ))
+    if not renames:
+        return None
+    return ImportRewrite(renames, tuple(r.source for r in package.path_renames), tuple(r.target for r in package.path_renames))
 
 
 def supply(plan: DriverPlan, library: MigrationLibrary) -> MigrationOutcome:

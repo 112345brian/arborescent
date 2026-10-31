@@ -7,7 +7,7 @@ module renames are reported as not applied, never silently dropped. Reached thro
 
 from __future__ import annotations
 
-from .driver_request import MigrationOutcome, MigrationRequest
+from .driver_request import MODULE_RENAMES, MigrationOutcome, MigrationRequest
 from .ports import FileSystem, ToolRunner
 
 __all__ = ["EXECUTABLE", "REQUIREMENT", "FilterRepo"]
@@ -29,7 +29,7 @@ class FilterRepo:
         return self._runner.available(EXECUTABLE) and self._runner.available("git")
 
     def unsupported(self, request: MigrationRequest) -> tuple[str, ...]:
-        return ("module renames (git filter-repo does not rewrite imports)",) if request.module_renames else ()
+        return (f"{MODULE_RENAMES} (git filter-repo does not rewrite imports)",) if request.module_renames else ()
 
     def arguments(self, request: MigrationRequest) -> tuple[str, ...]:
         out: list[str] = [EXECUTABLE, "--source", str(request.source), "--target", str(request.target), "--refs", request.branch]

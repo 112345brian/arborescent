@@ -12,7 +12,10 @@
   A dry run (default) prints the exact arguments; `--yes` supplies them. It refuses, with no override, while the package
   has an open error gap, an undeclared first-party dependency, or private modules that other packages still import, and
   does nothing for a workspace member. Module renames are reported as not applied (filter-repo does not rewrite
-  imports). The annotation layer cannot import the driver: `module_forbid_imports` in Arborescent's own policy, now
+  imports), unless a second port rewrites them: a LibCST adapter (`arborescent[libcst]`) applies the module-name map to the new
+  repository only, one `RenameCommand` per module, as an uncommitted change. It refuses (exit 1, statements listed, nothing
+  touched) when a `from <old> import <module>` statement is present, because LibCST's output could then still parse while
+  naming an unbound name, and fails loudly on any import still naming an old module. The annotation layer cannot import the driver: `module_forbid_imports` in Arborescent's own policy, now
   probed by `selftest` for every configured pattern. `docs/migration-driver.md`.
 - Opt-in `package_catalog = "packages.toml"` (strict preset only): every first-party module and asset must belong to
   exactly one package. New rule ids `package-unassigned-module`, `package-multiply-assigned-module`,

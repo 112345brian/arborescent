@@ -33,8 +33,10 @@ ty = ["ty>=0.0.50"]
 pyrefly = ["pyrefly>=0.40"]
 # The migration library the driver supplies (`arborescent packages migrate`); not needed by any check.
 filterrepo = ["git-filter-repo>=2.38"]
+# What `arborescent packages migrate` rewrites imports with, after the library ran.
+libcst = ["libcst>=1.0"]
 all = ["import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "ty>=0.0.50"]
-dev = ["pytest>=8", "jsonschema>=4", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "git-filter-repo>=2.38", "build"]
+dev = ["pytest>=8", "jsonschema>=4", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "git-filter-repo>=2.38", "libcst>=1.0", "build"]
 
 [project.urls]
 Homepage = "https://github.com/112345brian/arborescent"
@@ -60,6 +62,8 @@ sources = ["src/arborescent"]
 source_roots = ["src"]
 exclude = ["__pycache__", "tests", "tools"]
 forbid_circular_imports = true
+# Optional extras that are only imported by modules run as a subprocess (driver_libcst_scan): not required dependencies.
+tach_external_exclude = ["libcst"]
 rings = ["domain", "ports", "application", "adapters", "composition"]
 type_checkers = ["ty", "pyright"]
 
@@ -83,7 +87,7 @@ forbid = ["clock", "dynamic-import", "env", "identity", "patch", "process", "ran
 
 [tool.arborescent.ring.adapters]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "arborescent"]
+external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "libcst", "arborescent"]
 os_branching = true
 forbid = ["clock", "dynamic-import", "env", "identity", "patch", "randomness", "sleep", "threads"]
 
@@ -130,6 +134,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.package_probes" = "application"
 "arborescent.migration_export" = "application"
 "arborescent.driver_plan" = "application"
+"arborescent.driver_rewrite" = "application"
 "arborescent.module_forbid_probes" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
@@ -140,6 +145,8 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.typecheckers" = "adapters"
 "arborescent.engines" = "adapters"
 "arborescent.driver_filter_repo" = "adapters"
+"arborescent.driver_libcst" = "adapters"
+"arborescent.driver_libcst_scan" = "adapters"
 "arborescent.testing" = "adapters"
 "arborescent.cli" = "composition"
 "arborescent.cli_install" = "composition"
@@ -150,12 +157,12 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 # The annotation layer never depends on the driver (#67): the driver sits on top of it and may import it, not the reverse.
 # `selftest` injects one forbidden import per line (module_forbid_probes); tests/test_driver_boundary.py pins the lists.
 [tool.arborescent.module_forbid_imports]
-"arborescent.package_*" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_filter_repo", "arborescent.cli_migrate"]
-"arborescent.path_exclusion" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_filter_repo", "arborescent.cli_migrate"]
-"arborescent.migration_arguments" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_filter_repo", "arborescent.cli_migrate"]
-"arborescent.migration_json" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_filter_repo", "arborescent.cli_migrate"]
-"arborescent.migration_export" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_filter_repo", "arborescent.cli_migrate"]
-"arborescent.packages" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_filter_repo", "arborescent.cli_migrate"]
+"arborescent.package_*" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
+"arborescent.path_exclusion" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
+"arborescent.migration_arguments" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
+"arborescent.migration_json" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
+"arborescent.migration_export" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
+"arborescent.packages" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
 
 [tool.arborescent.practices]
 crlf = ["*.sh", "*.bash"]

@@ -42,9 +42,9 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 The driver is five modules, one per ring, and the annotation layer never imports any of them:
 
 - domain, `driver_request`: `MigrationRequest` (one package's path renames and module renames, plus where from and to) and `MigrationOutcome`.
-- ports, `driver_port`: the `MigrationLibrary` protocol (availability, the arguments it cannot apply, the exact arguments, `supply`).
-- application, `driver_plan`: `plan_supply` turns a `PackageArguments` into a request, refusing while an error gap of the package is open and for a workspace member (it keeps its history where it is); `supply` calls the port.
-- adapters, `driver_filter_repo`: git filter-repo behind the port, reached through `ToolRunner`.
+- ports, `driver_port`: the `MigrationLibrary` protocol (availability, the arguments it cannot apply, the exact arguments, `supply`) and, separately, `ImportRewriter` (statements it cannot rewrite safely, the exact commands, `apply`).
+- application, `driver_plan`: `plan_supply` turns a `PackageArguments` into a request, refusing while an error gap, a bypass edge or an undeclared first-party dependency is open, and for a workspace member (it keeps its history where it is); `supply` calls the port. `driver_rewrite` turns the plan into rewrite requests for the second port.
+- adapters, `driver_filter_repo`: git filter-repo behind the port, reached through `ToolRunner`. `driver_libcst`: LibCST's rename command behind `ImportRewriter`, through an isolated subprocess; `driver_libcst_scan` is the entry it runs to parse with LibCST (never imported by `cli`).
 - composition, `cli_migrate`: `arborescent packages migrate`; `cli` binds the adapter.
 
 The constraint "the annotation layer must not import the driver" is `module_forbid_imports` in Arborescent's own policy,
@@ -54,7 +54,7 @@ application ring (the ring rules and their probes), and the application imports 
 git filter-repo is the first library because it keeps history, takes explicit path selection and renames, reads one
 repository and writes another (the monorepo is never modified) and installs from PyPI (`arborescent[filterrepo]`). It
 does not rewrite imports, so the module renames of a request are reported as not applied; an import-rewriting library
-would be a second adapter over the same port.
+is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibCST and what it refuses.
 
 ## Modules
 
@@ -98,6 +98,7 @@ would be a second adapter over the same port.
 | `arborescent.package_probes` | `single` | application |
 | `arborescent.migration_export` | `single` | application |
 | `arborescent.driver_plan` | `single` | application |
+| `arborescent.driver_rewrite` | `single` | application |
 | `arborescent.module_forbid_probes` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
@@ -107,6 +108,8 @@ would be a second adapter over the same port.
 | `arborescent.tool_runner` | `single` | adapters |
 | `arborescent.engines` | `single` | adapters |
 | `arborescent.driver_filter_repo` | `single` | adapters |
+| `arborescent.driver_libcst` | `single` | adapters |
+| `arborescent.driver_libcst_scan` | `single` | adapters |
 | `arborescent.testing` | `single` | adapters |
 | `arborescent.typecheckers` | `single` | adapters |
 | `arborescent.__main__` | `single` | composition |
