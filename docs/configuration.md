@@ -296,6 +296,22 @@ package claiming an owned file, a glob contradicting a path owner, a package spa
 packages with no declared dependency. A probe that cannot be built for the catalog is listed with the reason.
 This adds no behaviour to `packages extract`, which is unchanged.
 
+**Two layers.** The *annotation layer* is everything on this page that describes the code: the `__arbor__` ring
+annotations ([below](#module-ring-annotations-__arbor__)), the package catalog and its keys above, and the checks that
+report a missing or contradictory annotation by rule id. From it Arborescent builds the *migration arguments*: typed,
+tool-neutral objects (`arborescent.migration_arguments`: `MigrationArguments`, `PackageArguments`, `OwnedModule`,
+`OwnedAsset`, `PathRename`, `Bypass`, `Edge`, `Gap`) that carry, per package, its identity and `home`, the modules and
+assets it owns with their target paths, the module-name map, its public surface and the modules that bypass it, its
+declared dependencies and the open gaps. `packages export` is those objects serialised as JSON. Any tool can consume the
+arguments; none is named in them.
+
+The *auxiliary driver* is a separate layer on top. Its only job is to supply a dedicated migration library with the
+arguments it needs, through a port; it does not migrate, and the annotation layer never depends on it. The command is
+`arborescent packages migrate` ([migration-driver.md](migration-driver.md)).
+[migration-recipes.md](migration-recipes.md) describes it and shows, with a worked example and the caveats found by running
+each tool, how to supply the same arguments by hand to git filter-repo, `git subtree split`, rope, deptry, Copybara and
+Josh. Those recipes are documentation, not commands Arborescent ships.
+
 ### Migration annotations and export
 
 (The [migration driver](migration-driver.md), `arborescent packages migrate`, hands one package's arguments to a migration library.)
