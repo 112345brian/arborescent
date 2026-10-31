@@ -96,12 +96,10 @@ def _undeclared_edges(catalog: CatalogDocument, facts: RepositoryFacts, sole: Ma
     declared = {package.id: set(package.depends_on) for package in catalog.packages}
     out: list[Violation] = []
     for module, owner in sorted(sole.items()):
-        seen: set[str] = set()
-        for target in sorted(facts.imports.get(module, ())):
+        for target in sorted(facts.imports.get(module, ())):  # every offending import, not one per package pair
             other = sole.get(target)
-            if other is None or other == owner or other in seen or other in declared.get(owner, set()):
+            if other is None or other == owner or other in declared.get(owner, set()):
                 continue
-            seen.add(other)
             out.append(Violation(
                 Rule.PACKAGE_UNDECLARED_DEPENDENCY, module,
                 f"imports {target} of package {other!r}, which package {owner!r} does not list in depends_on",
