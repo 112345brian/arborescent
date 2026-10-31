@@ -69,6 +69,7 @@ customization is active, or `customised rules: ...` with the changes that apply.
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
 | `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `dynamic-import`, or `patch`. |
+| `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 
 A ring that is not given a table has no inner imports, no external imports and no OS branching. If `forbid` is omitted,
 the innermost ring forbids every effect, the outermost allows every effect, and middle rings use the preset default.
@@ -114,6 +115,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-dynamic-import` | a ring that forbids any effect uses `importlib` or `__import__` |
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
+| `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `circular-import` | when `forbid_circular_imports` is enabled, first-party modules form a circular import dependency, including cycles made only of lazy or `TYPE_CHECKING` imports |
 | `external-import` | a ring imports an external package missing from its `external` list (scope set by the preset) |
 | `os-branching` | a ring not marked `os_branching` reads `os.name` or `sys.platform` |

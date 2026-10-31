@@ -100,6 +100,7 @@ def _ring_mutations(
     elif not policy.ring(name).os_branching:
         out.append(Mutation(Rule.OS_BRANCHING, f"{name}: OS branching", paths[host], "import os\n_arborescent_probe = os.name"))
     out.extend(_effect_mutations(policy, name, paths[host]))
+    out.extend(_abstraction_mutations(policy, name, paths[host]))
     return out, skipped
 
 
@@ -136,6 +137,19 @@ def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
             f"{ring}: ambient clock use",
             host,
             "import time\n_arborescent_probe = time.time()",
+        )
+    ]
+
+
+def _abstraction_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
+    if not policy.ring(ring).require_abstract:
+        return []
+    return [
+        Mutation(
+            Rule.NON_ABSTRACT_PORT,
+            f"{ring}: concrete class in a ring that requires abstract members",
+            host,
+            "class ArborescentProbeConcrete:\n    def probe(self) -> None:\n        pass",
         )
     ]
 

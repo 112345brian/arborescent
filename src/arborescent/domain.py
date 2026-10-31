@@ -51,6 +51,7 @@ class Rule(StrEnum):
     EFFECT_DYNAMIC_IMPORT = "effect-dynamic-import"
     EFFECT_PATCH = "effect-patch"
     INTERNAL_IMPORT = "internal-import"
+    NON_ABSTRACT_PORT = "non-abstract-port"
     CIRCULAR_IMPORT = "circular-import"
     EXTERNAL_IMPORT = "external-import"
     OS_BRANCHING = "os-branching"
@@ -134,6 +135,7 @@ class RingRule:
     external: frozenset[str]  # top-level third-party/stdlib names; ALL = unrestricted
     os_branching: bool = False
     forbid: frozenset[str] | None = None  # None means the positional preset default; [] explicitly allows all effects
+    require_abstract: bool = False  # every public class/function in this ring must be an abc.ABC/typing.Protocol shape
 
 
 @dataclass(frozen=True)

@@ -239,7 +239,7 @@ def test_old_fact_cache_schema_is_discarded(repo: Path, tmp_path: Path) -> None:
     )
     scan = run_own(mini_policy(), repo, services(cache=cache), practices=False)[1]
     assert scan.parsed == 5
-    assert json.loads((cache / "scan.json").read_text(encoding="utf-8"))["v"] == 4
+    assert json.loads((cache / "scan.json").read_text(encoding="utf-8"))["v"] == 5
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")

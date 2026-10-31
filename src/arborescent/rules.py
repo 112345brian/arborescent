@@ -94,6 +94,20 @@ def _effect_uses(policy: Policy, name: str, ring: str, info: ModuleInfo, known: 
     return out
 
 
+def _abstraction_violations(name: str, ring: str, rule: RingRule, info: ModuleInfo) -> list[Violation]:
+    if not rule.require_abstract:
+        return []
+    out: list[Violation] = []
+    for member in info.facts.top_level_defs:
+        if member.name.startswith("_") or member.is_abstract:
+            continue
+        kind = "class" if member.is_class else "function"
+        shape = "abc.ABC, typing.Protocol or a declared ABCMeta" if member.is_class else "a stub body (`...`, `pass` or `raise NotImplementedError`)"
+        detail = f"[{ring}] {kind} {member.name!r} is concrete; this ring requires {shape}"
+        out.append(Violation(Rule.NON_ABSTRACT_PORT, name, detail, member.line))
+    return out
+
+
 def _entry_dependencies(
     policy: Policy, known: Collection[str], entry_deps: Mapping[str, tuple[str, ...] | None], third_party: ThirdParty
 ) -> list[Violation]:
@@ -142,6 +156,7 @@ def check_modules(
             out += _external_imports(policy, name, ring, rule, imp.line, external, third_party)
         out += _os_branching(policy, name, ring, rule, info)
         out += _effect_uses(policy, name, ring, info, known)
+        out += _abstraction_violations(name, ring, rule, info)
     if policy.forbid_circular_imports:
         out.extend(_circular_imports(import_graph))
     return out + _entry_dependencies(policy, known, entry_deps, third_party)
