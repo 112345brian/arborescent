@@ -48,9 +48,10 @@ The migration arguments are tool-neutral value objects in `arborescent.migration
 
 The same data is available as JSON with a published schema ([migration-export.md](migration-export.md)). Release, pin and
 history policy (`history`, `[packages.release]`; #56) and derivable `pyproject.toml` fields (`package_pyproject`; #60) are
-annotation-layer features in sibling pull requests (#62, #63) and are documented on those branches. Annotation
-preservation across extracted parts (`package_parts`, `package-semantics-drift` and related rules; #55) is a `check`-time
-verification in #64. Their fields are not yet written into the export; see [What the schema left](#what-the-schema-left).
+annotation-layer features in sibling pull requests (#62, #63) and are documented on those branches. On those branches the
+export's `policy` slot is filled by #62 and its `pyproject` slot by #63; **on the branch this page is part of both are still
+`null`** (gap 7). Annotation preservation across extracted parts (`package_parts`, `package-semantics-drift` and related
+rules; #55) is a `check`-time verification in #64; it is not part of the export (gap 8).
 
 ## Worked example
 
@@ -79,7 +80,7 @@ public = ["shop.core.models"]
 externals = []
 [packages.home]
 kind = "repository"
-repository = "example/shop-core"
+repository = "https://example.invalid/shop-core.git"
 [[packages.module_renames]]
 from = "shop.core"
 to = "shop_core"
@@ -136,7 +137,7 @@ A trimmed export of `core` (the full document is in the [schema](schemas/migrati
 ```json
 {
   "id": "core",
-  "home": { "kind": "repository", "path": null, "repository": "example/shop-core" },
+  "home": { "kind": "repository", "path": null, "repository": "https://example.invalid/shop-core.git" },
   "owned": {
     "modules": [
       { "module": "shop.core.models", "path": "src/shop/core/models.py",
@@ -157,8 +158,9 @@ A trimmed export of `core` (the full document is in the [schema](schemas/migrati
 ```
 
 The `bypasses` entries are the deliberate blocking edge: `web` reaches into `core` outside its declared public surface
-(`from shop.core import _ids` is listed twice, once against the package itself; see gap 6). The export names it, so a consumer can refuse to proceed, and `package-private-import` (#55) and the engine contracts (#53)
-report the same edge from the verification side.
+(`from shop.core import _ids` is listed twice, once against the package itself; see gap 6). The export names the edge in `surface.bypasses`, but **`ready` stays `true` while it is open** (gap 11), so a
+consumer that wants to refuse on a blocking edge must test `bypasses` itself and cannot rely on `ready`. `package-private-import`
+(#55) and the engine contracts (#53) report the same edge from the verification side.
 
 ## Reading the cut list
 
@@ -350,21 +352,32 @@ Both come from `owned.path_renames`.
 This section is the case-study ledger: every gap the export schema left, so that the tools above still needed something
 Arborescent did not give them. Sources are explicit.
 
-- **Built from:** the synthetic `shop` example on this page, the schema in `docs/schemas/migration-export-v1.schema.json`,
-  and the sibling branches #55, #56, #60, #53 as they stand.
-- **Not yet recorded:** the findings of the real downstream case study of #57 (a large application, about 1,400 modules).
-  #57 has not landed, so none of its results are on this page, and no downstream paths or data are published here
-  (this repository is public). When #57 lands, its gaps are added to this list rather than a second one.
+- **Built from:** the synthetic `shop` example on this page; the schema in `docs/schemas/migration-export-v1.schema.json`;
+  the sibling branches #55, #56, #60, #53 as they stand; and the synthetic acceptance fixture of #57 (draft PR #70), which
+  drove a split from the export alone with git filter-repo and the #55 checks. Rows 11 to 16 and the extra detail in rows 2
+  and 7 come from that fixture.
+- **Not recorded:** results from a real downstream application. #57's real-application case study (about 1,400 modules) was
+  not attempted, because it needs a private repository and this one is public. Every gap here therefore comes from synthetic
+  inputs, and the real application may show more. No downstream paths or data are published here. When that study is done,
+  its gaps are added to this list rather than a second one.
+- **Fixed in a sibling pull request** is stated in the Consequence column (only row 7). No gap is fixed in the branch this
+  page is part of, and #62 and #63 change none of the others.
 
 | # | Gap the schema left | Seen where | Consequence |
 |---|---|---|---|
 | 1 | **No entity for files outside owned modules and assets**: root configuration that packages extend, scripts and CI outside the package folders. | Nx's manual items | Two of Nx's three manual items stay manual; nothing in the export names them. |
-| 2 | **`target_module` and `target_path` are not checked against each other.** A workspace member with no `destination` exports a path that does not match its module name. | the example's first export | The mismatch is found only when a tool or import fails. |
+| 2 | **`target_module` and `target_path` are not checked against each other.** A workspace member with no `destination` exports a path that does not match its module name. | the example's first export; #57 | The mismatch is found only when a tool or import fails. #57 saw the same with a package `root = "app"`: `target_path` drops the `app/` prefix (`app/billing/x.py` becomes `billing/x.py`) while `target_module` stays `app.billing.x`, so a rewriting tool gets inconsistent input unless `module_renames` is set by hand. Its fixture used `root = "."` to avoid it, so rope was not driven there. |
 | 3 | **Namespace-package parents are not marked.** rope silently skipped imports through a namespace parent. | rope run | Nothing in the export warns that the rewrite will be partial. |
 | 4 | **External names are import names, not distributions.** The mapping (`dependencies` in the policy) is not in the export. | deptry run | deptry needs `--package-module-name-map` supplied separately. #60 derives `pyproject.toml` with that table. |
 | 5 | **No global module map.** `module_renames` is per package (its own modules). Rewriting importers needs the union over all packages. | rope, LibCST | Every consumer merges the lists (the rope recipe above loops over all packages). |
 | 6 | **A `from pkg import private_module` import is reported as two bypasses**, one against the package `__init__` and one against the submodule, when the surface lists neither the `__init__` nor the module. | `core` bypasses above | The count of bypasses overstates the number of edges to cut. |
-| 7 | **`policy` and `pyproject` are always `null`.** The #56 and #63 branches add the annotations and the derivation but neither diff touches `migration_arguments.py` or `migration_json.py`. | release policy, `package_pyproject` | A consumer cannot read history, pin or derived `pyproject.toml` fields from the export yet. |
+| 7 | **`policy` and `pyproject` are `null` in the export of this branch.** | release policy, `package_pyproject`; #57 | A consumer cannot read history, pin or derived `pyproject.toml` fields from the export, and #57's fixture could not exercise those slots. **Fixed in #62** (`policy`: `{ history, release, unmanaged }`, `null` for a workspace member, with a `package-release-policy-missing` gap) **and in #63** (`pyproject`: path, `requires_python`, dependencies, sources, workspace members, source roots, root packages, only when `package_pyproject` is set), once they merge. |
 | 8 | **Preservation results are not in the export.** `package_parts` (#55) is a `check`-time verification of already-extracted parts. | #55 | The export is read before the split; verification after the split comes from `check`. |
 | 9 | **No cut list.** Which imports to remove comes from the engines' violation output (#53), not the export. | by design | The export alone cannot tell you how to unblock a package, only that a bypass exists. |
 | 10 | **The workspace-member join is not described.** Where a rewritten package's history enters the workspace repository is not an annotation. | filter-repo run | The final merge step is yours and was not run for this page. |
+| 11 | **`ready` is `true` while a blocking private-import edge is open.** The edge shows only as `surface.bypasses`; no gap entry is raised. | #57 | A consumer that refuses on `ready` or on a gap code lets a split through that the engine contracts would break. It has to test `bypasses` separately. |
+| 12 | **No per-module ring in `owned.modules[]`.** | #57 | A harness re-reads the monorepo policy to write each part's `classify` or `__arbor__`. |
+| 13 | **No part manifest or policy in the export.** #55 compares a part with `.arborescent-package.toml` and a shipped policy. The export carries neither, nor the origin `repository` and `root`, `extraction_status`, each path's `role` and `metadata`, or which `[[assets]]` directory a file came from (assets are exported per file; the catalog and the manifest key them by directory). | #57 | The harness hand-writes the manifest and the policy for every part. |
+| 14 | **List order.** The export sorts `public`, but `package-semantics-drift` (#55) compares `public` as an ordered tuple. | #57 | A part built from the export differs from a catalog whose `public` is not sorted. #57's fixture writes `public` sorted. |
+| 15 | **Workspace-member parts.** The export's `target_path`s include `home.path`, but a part's tree and its manifest `current_path`s are relative to the member folder. | #57 | The harness strips the `home.path` prefix by hand. |
+| 16 | **#55 assumes stable module names.** A package with `module_renames` cannot be checked as a part. | #57 | The preservation check and the module-name map cannot be used together. |
