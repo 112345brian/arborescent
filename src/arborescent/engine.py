@@ -167,7 +167,8 @@ def _apply_modularity(policy: Policy, report: CheckReport, found: Sequence[Viola
     ``run_own``'s list is untouched, so the selftest still probes the rules). Also records ``--require-modularity``."""
     gaps = [v for v in blocking(found) if _is_package_gap(v)]
     if opts.require_modularity:
-        report.modularity_failures = _modularity_failures(policy, gaps, complete)
+        unpartitioned = [v for v in found if v.rule == Rule.PACKAGE_OWNS_EVERYTHING]
+        report.modularity_failures = _modularity_failures(policy, [*gaps, *unpartitioned], complete)
         report.modularity_certified = not report.modularity_failures
     if policy.modularity != "report":
         return blocking(found)
@@ -183,7 +184,7 @@ def _modularity_failures(policy: Policy, gaps: Sequence[Violation], complete: bo
         return (f"`modularity` is {policy.modularity!r}: package gaps are only reported, not enforced",)
     if not complete:
         return ("package gaps are a whole-repository fact and are not evaluated in --changed mode",)
-    return tuple(f"open package gap: {v.render()}" for v in gaps)
+    return tuple(f"open package gap: {v.render()}" for v in gaps)  # includes package-owns-everything: no partition to certify
 
 
 def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:

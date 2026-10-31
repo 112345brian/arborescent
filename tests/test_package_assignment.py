@@ -202,3 +202,62 @@ def test_parse_catalog_rejects_duplicate_ids_and_an_empty_catalog() -> None:
         parse_catalog(data)
     with pytest.raises(CatalogError, match="one or more"):
         parse_catalog({})
+
+
+def test_packages_that_depend_on_each_other_are_a_cycle() -> None:
+    catalog = CatalogDocument((package("app", "src/app", depends_on=("lib",)), package("lib", "src/lib", depends_on=("app",))))
+    [violation] = found(catalog, facts({"app.a": "src/app/a.py", "lib.b": "src/lib/b.py"}), Rule.PACKAGE_DEPENDENCY_CYCLE)
+    assert violation.subject in {"app", "lib"}
+    assert Rule.PACKAGE_DEPENDENCY_CYCLE not in INFORMATIONAL_RULES  # it fails the check and the modularity certificate
+
+
+def test_a_longer_cycle_and_a_self_dependency_are_found() -> None:
+    three = CatalogDocument((
+        package("a", "src/a", depends_on=("b",)), package("b", "src/b", depends_on=("c",)), package("c", "src/c", depends_on=("a",)),
+    ))
+    assert found(three, facts({}), Rule.PACKAGE_DEPENDENCY_CYCLE)
+    assert found(CatalogDocument((package("a", "src/a", depends_on=("a",)),)), facts({}), Rule.PACKAGE_DEPENDENCY_CYCLE)
+
+
+def test_a_chain_and_a_diamond_are_not_cycles() -> None:
+    diamond = CatalogDocument((
+        package("a", "src/a", depends_on=("b", "c")), package("b", "src/b", depends_on=("d",)),
+        package("c", "src/c", depends_on=("d",)), package("d", "src/d"),
+    ))
+    assert found(diamond, facts({}), Rule.PACKAGE_DEPENDENCY_CYCLE) == []
+
+
+def test_an_unknown_dependency_is_not_reported_as_a_cycle() -> None:
+    assert found(CatalogDocument((package("a", "src/a", depends_on=("ghost",)),)), facts({}), Rule.PACKAGE_DEPENDENCY_CYCLE) == []
+
+
+def test_a_declared_dependency_nobody_imports_is_information() -> None:
+    data = facts({"app.a": "src/app/a.py", "lib.b": "src/lib/b.py"})
+    [violation] = found(two_packages(("lib",)), data, Rule.PACKAGE_UNUSED_DEPENDENCY)
+    assert violation.subject == "app" and "lib" in violation.detail
+    assert Rule.PACKAGE_UNUSED_DEPENDENCY in INFORMATIONAL_RULES
+
+
+def test_a_used_declared_dependency_is_not_unused() -> None:
+    data = facts({"app.a": "src/app/a.py", "lib.b": "src/lib/b.py"}, imports={"app.a": ("lib.b",)})
+    assert found(two_packages(("lib",)), data, Rule.PACKAGE_UNUSED_DEPENDENCY) == []
+
+
+def test_one_package_owning_every_module_is_information() -> None:
+    catalog = CatalogDocument((package("all", "src"),))
+    [violation] = found(catalog, facts({"a.x": "src/a/x.py", "b.y": "src/b/y.py"}), Rule.PACKAGE_OWNS_EVERYTHING)
+    assert violation.subject == "all" and "2 modules" in violation.detail
+    assert Rule.PACKAGE_OWNS_EVERYTHING in INFORMATIONAL_RULES
+
+
+def test_owning_everything_also_applies_when_other_declared_packages_own_nothing() -> None:
+    catalog = CatalogDocument((package("all", "src"), package("empty", "elsewhere")))
+    assert found(catalog, facts({"a.x": "src/a/x.py", "b.y": "src/b/y.py"}), Rule.PACKAGE_OWNS_EVERYTHING)
+
+
+def test_a_real_partition_or_a_single_module_does_not_own_everything() -> None:
+    data = facts({"app.a": "src/app/a.py", "lib.b": "src/lib/b.py"})
+    assert found(two_packages(), data, Rule.PACKAGE_OWNS_EVERYTHING) == []
+    assert found(CatalogDocument((package("all", "src"),)), facts({"a.x": "src/a/x.py"}), Rule.PACKAGE_OWNS_EVERYTHING) == []
+    unassigned = facts({"a.x": "src/a/x.py", "b.y": "elsewhere/y.py"})
+    assert found(CatalogDocument((package("all", "src"),)), unassigned, Rule.PACKAGE_OWNS_EVERYTHING) == []

@@ -7,6 +7,7 @@ A probe that cannot be built for this catalog says why, instead of silently disa
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from pathlib import PurePosixPath
 
@@ -48,6 +49,7 @@ def package_mutations(
     out += _second_claims(catalog_file, context, sole, skipped)
     out += _ring_span(RuleContext(policy, arbor_index, scope_by_module).resolve_ring, catalog_file, context, sole, skipped)
     out += _undeclared_import(context, sole, skipped)
+    out += _dependency_probes(catalog_file, context, skipped)
     out += _pyproject_drift(context, skipped)
     preservation, not_planned = part_mutations(context)
     return out + preservation, skipped + not_planned
@@ -57,11 +59,11 @@ def _join(folder: str, name: str) -> str:
     return name if folder in ("", ".") else f"{folder}/{name}"
 
 
-def _probe_package(*paths: str) -> str:
+def _probe_package(*paths: str, ident: str = _PROBE_ID, depends_on: tuple[str, ...] = ()) -> str:
     owned = "".join(f'[[packages.paths]]\npath = "{path}"\nrole = "source"\n' for path in paths)
     return (
-        f'[[packages]]\nid = "{_PROBE_ID}"\nname = "Probe"\nkind = "library"\nrepository = "probe"\n'
-        f'root = "."\nsummary = "selftest probe"\n{owned}'
+        f'[[packages]]\nid = "{ident}"\nname = "Probe"\nkind = "library"\nrepository = "probe"\n'
+        f'root = "{"." if ident == _PROBE_ID else ident}"\nsummary = "selftest probe"\ndepends_on = {json.dumps(list(depends_on))}\n{owned}'
     )
 
 
@@ -126,6 +128,25 @@ def _undeclared_import(context: PackageContext, sole: dict[str, str], skipped: l
             )]
     skipped.append(f"{Rule.PACKAGE_UNDECLARED_DEPENDENCY}: no two packages without a declared dependency to import across")
     return []
+
+
+def _dependency_probes(catalog_file: str, context: PackageContext, skipped: list[str]) -> list[Mutation]:
+    """Two probe packages that depend on each other (a cycle), and a probe package that declares a dependency it never uses."""
+    other = f"{_PROBE_ID}-two"
+    cycle = Mutation(
+        Rule.PACKAGE_DEPENDENCY_CYCLE, "two packages that depend on each other", catalog_file,
+        _probe_package(depends_on=(other,)) + "\n" + _probe_package(ident=other, depends_on=(_PROBE_ID,)),
+    )
+    first = next((package.id for package in context.catalog.packages), None)
+    if first is None:
+        skipped.append(f"{Rule.PACKAGE_UNUSED_DEPENDENCY}: the catalog declares no package to depend on")
+        return [cycle]
+    unused = Mutation(
+        Rule.PACKAGE_UNUSED_DEPENDENCY, f"a package listing {first} in depends_on without importing it", catalog_file,
+        _probe_package(depends_on=(first,)),
+    )
+    skipped.append(f"{Rule.PACKAGE_OWNS_EVERYTHING}: a probe can only append to the catalog, and appended packages cannot take ownership away; covered by unit tests")
+    return [cycle, unused]
 
 
 def _pyproject_drift(context: PackageContext, skipped: list[str]) -> list[Mutation]:

@@ -15,7 +15,7 @@ from .domain import Rule, Violation
 from .package_fields import glob_match, within
 from .package_model import CatalogDocument
 
-__all__ = ["RepositoryFacts", "assignment_violations", "owners_of"]
+__all__ = ["RepositoryFacts", "assignment_violations", "dependency_cycle", "owners_of"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +69,9 @@ def assignment_violations(catalog: CatalogDocument, facts: RepositoryFacts) -> l
             ))
     out += _ring_spans(catalog, facts, claimed)
     out += _undeclared_edges(catalog, facts, sole)
+    out += _dependency_cycle(catalog)
+    out += _unused_dependencies(catalog, facts, sole)
+    out += _owns_everything(catalog, facts, sole)
     return out
 
 
@@ -105,3 +108,67 @@ def _undeclared_edges(catalog: CatalogDocument, facts: RepositoryFacts, sole: Ma
                 f"imports {target} of package {other!r}, which package {owner!r} does not list in depends_on",
             ))
     return out
+
+
+def dependency_cycle(depends_on: Mapping[str, Sequence[str]]) -> str | None:
+    """The id of a package on a dependency cycle, or ``None``. Dependencies on unknown ids are ignored here (the catalog
+    validation reports them)."""
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(package_id: str) -> str | None:
+        if package_id in visiting:
+            return package_id
+        if package_id in visited:
+            return None
+        visiting.add(package_id)
+        for dependency in depends_on[package_id]:
+            if dependency in depends_on and (found := visit(dependency)) is not None:
+                return found
+        visiting.remove(package_id)
+        visited.add(package_id)
+        return None
+
+    return next((found for package_id in depends_on if (found := visit(package_id)) is not None), None)
+
+
+def _dependency_cycle(catalog: CatalogDocument) -> list[Violation]:
+    """Packages that depend on each other cannot be ordered, so none of them can be split or released first. ``check`` only
+    parses the catalog, so ``packages validate``'s cycle search is also run here, on the declared edges."""
+    found = dependency_cycle({package.id: package.depends_on for package in catalog.packages})
+    if found is None:
+        return []
+    return [Violation(
+        Rule.PACKAGE_DEPENDENCY_CYCLE, found,
+        f"package dependency cycle includes {found}; packages that depend on each other cannot be split apart",
+    )]
+
+
+def _unused_dependencies(catalog: CatalogDocument, facts: RepositoryFacts, sole: Mapping[str, str]) -> list[Violation]:
+    """A declared ``depends_on`` that no module of the package uses widens what the package may import, unnoticed. Information:
+    a dependency can be real without a static import (a plugin, a runtime-loaded or asset-only one)."""
+    used: dict[str, set[str]] = {}
+    for module, owner in sole.items():
+        used.setdefault(owner, set()).update(sole[t] for t in facts.imports.get(module, ()) if t in sole)
+    return [
+        Violation(
+            Rule.PACKAGE_UNUSED_DEPENDENCY, package.id,
+            f"package {package.id!r} lists {dependency!r} in depends_on but none of its modules imports a module of it",
+        )
+        for package in catalog.packages
+        for dependency in package.depends_on
+        if dependency not in used.get(package.id, set())
+    ]
+
+
+def _owns_everything(catalog: CatalogDocument, facts: RepositoryFacts, sole: Mapping[str, str]) -> list[Violation]:
+    """One package owning every module is not a partition: every ownership and dependency check passes trivially.
+    Information, because a one-package catalog is a legitimate way to own assets."""
+    owners = set(sole.values())
+    if len(facts.modules) < 2 or len(sole) != len(facts.modules) or len(owners) != 1:
+        return []
+    (only,) = owners
+    return [Violation(
+        Rule.PACKAGE_OWNS_EVERYTHING, only,
+        f"package {only!r} owns all {len(facts.modules)} modules; nothing is partitioned, so the ownership and dependency checks cannot find a boundary to break",
+    )]

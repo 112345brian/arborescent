@@ -70,7 +70,7 @@ reported as a gap, never guessed.
 - **Gaps are named entries.** `ready` is `true` when no gap has severity `error`; a consumer can refuse on `ready` or on
   a code it cares about. Codes are the package-assignment rule ids (`package-unassigned-module`,
   `package-multiply-assigned-module`, `package-unowned-asset`, `package-multiply-assigned-asset`,
-  `package-undeclared-dependency`, `package-release-policy-missing`; `package-spans-rings` has severity `info`) and these export-only codes:
+  `package-undeclared-dependency`, `package-dependency-cycle`, `package-release-policy-missing`; `package-spans-rings`, `package-unused-dependency` and `package-owns-everything` have severity `info`) and these export-only codes:
 
 | Code | Raised when |
 |---|---|

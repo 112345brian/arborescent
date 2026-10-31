@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
+from .package_assignment import dependency_cycle
 from .package_fields import extraction_target, is_slug, relative_path, within
 from .package_model import MANIFEST_NAME, CatalogError, PackageDescriptor, PackagePath
 from .ports import FileSystem
@@ -17,7 +18,7 @@ def validate_catalog(fs: FileSystem, root: Path, packages: Sequence[PackageDescr
     owners: list[tuple[PurePosixPath, str]] = []
     for package in packages:
         _validate_package(fs, root, package, by_id, owners)
-    _validate_dependencies(by_id, packages)
+    validate_dependencies(by_id, packages)
 
 
 def _validate_package(
@@ -113,22 +114,9 @@ def _validate_owned_path(
         extraction_target(package, item)
 
 
-def _validate_dependencies(
+def validate_dependencies(
     by_id: Mapping[str, PackageDescriptor], packages: Sequence[PackageDescriptor]
 ) -> None:
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(package_id: str) -> None:
-        if package_id in visiting:
-            raise CatalogError(f"package dependency cycle includes {package_id}")
-        if package_id in visited:
-            return
-        visiting.add(package_id)
-        for dependency in by_id[package_id].depends_on:
-            visit(dependency)
-        visiting.remove(package_id)
-        visited.add(package_id)
-
-    for package in packages:
-        visit(package.id)
+    cycle = dependency_cycle({package.id: package.depends_on for package in packages})
+    if cycle is not None:
+        raise CatalogError(f"package dependency cycle includes {cycle}")

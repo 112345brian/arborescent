@@ -101,3 +101,30 @@ def test_require_modularity_fails_on_an_open_gap(tmp_path: Path) -> None:
 def test_require_modularity_is_passed_to_child_arbors(tmp_path: Path) -> None:
     assert "--require-modularity" in _child_arbor_command(tmp_path / "arborescent.toml", REQUIRE)
     assert "--require-modularity" not in _child_arbor_command(tmp_path / "arborescent.toml", OPTS)
+
+
+def test_a_declared_package_cycle_fails_require_modularity(tmp_path: Path) -> None:
+    """Found by mutation: a catalog edit making two packages depend on each other used to be certified."""
+    repo(tmp_path)
+    text = (tmp_path / "packages.toml").read_text(encoding="utf-8")
+    (tmp_path / "packages.toml").write_text(text.replace("[[packages]]\nid = \"core\"", "[[packages]]\nid = \"core\"\ndepends_on = [\"shell\"]", 1), encoding="utf-8")
+    report = run_check(policy(), tmp_path, services(), REQUIRE)
+    assert any("package-dependency-cycle" in f for f in report.modularity_failures)
+    assert not report.ok
+
+
+def test_a_repository_with_one_all_owning_package_is_not_certified(tmp_path: Path) -> None:
+    """#73: no partition means nothing for the ownership and dependency checks to enforce, so there is nothing to certify."""
+    repo(tmp_path)
+    one = (
+        '[[packages]]\nid = "all"\nname = "All"\nkind = "application"\nrepository = "example/repo"\nroot = "app"\n'
+        'summary = "everything"\nunmanaged = true\n[[packages.paths]]\npath = "app"\nrole = "source"\n'
+        '[[packages.paths]]\npath = "app/templates"\nrole = "assets"\n[[assets]]\npattern = "app/**/*.sql"\npackage = "all"\n'
+    )
+    (tmp_path / "packages.toml").write_text(one, encoding="utf-8")
+    plain = run_check(policy(), tmp_path, services(), OPTS)
+    assert Rule.PACKAGE_OWNS_EVERYTHING in {n.rule for n in plain.notes}
+    assert plain.ok  # plain `check` only notes it
+    report = run_check(policy(), tmp_path, services(), REQUIRE)
+    assert any("package-owns-everything" in f for f in report.modularity_failures)
+    assert not report.ok
