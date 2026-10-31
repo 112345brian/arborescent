@@ -8,6 +8,7 @@ and only ``packages migrate`` reads it.
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -90,10 +91,11 @@ def write_config(tmp_path: Path, text: str, name: str = "local.toml") -> ConfigL
 
 
 def test_relative_directories_resolve_against_the_config_files_directory(tmp_path: Path) -> None:
-    location = write_config(tmp_path / "cfg", '[targets]\ncore = "../checkouts/core"\nweb = "/abs/web"\n')
+    absolute = tmp_path / "elsewhere" / "web"  # absolute on every platform: "/abs/web" has no drive, so it is relative on Windows
+    location = write_config(tmp_path / "cfg", f'[targets]\ncore = "../checkouts/core"\nweb = {json.dumps(str(absolute))}\n')
     targets = load_local_targets(FS, location, ("core", "web"))
     assert targets.directories["core"] == tmp_path / "cfg" / ".." / "checkouts" / "core"
-    assert targets.directories["web"] == Path("/abs/web")
+    assert targets.directories["web"] == absolute
 
 
 def test_a_missing_default_file_is_simply_no_config(tmp_path: Path) -> None:
