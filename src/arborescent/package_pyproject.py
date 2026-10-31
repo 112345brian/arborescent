@@ -59,14 +59,38 @@ def pyproject_path(package: PackageDescriptor) -> str:
     return ROOT_FILE if package.root in (".", "") else f"{package.root}/{ROOT_FILE}"
 
 
-def source_of(sibling: PackageDescriptor) -> dict[str, object] | None:
-    """How a dependent obtains ``sibling``, from the sibling's ``home``; ``None`` when ``home`` is not annotated."""
+def source_of(consumer: PackageDescriptor, sibling: PackageDescriptor) -> dict[str, object] | None:
+    """How ``consumer`` obtains ``sibling``, from their ``home``s; ``None`` when the sibling's ``home`` is not annotated.
+
+    ``{ workspace = true }`` only when both are members of the same workspace. A workspace member that a package outside
+    the workspace needs is fetched from the repository it lives in today (its catalog ``repository``) at its ``home.path``;
+    a package in its own repository is fetched from that repository. The pin is not derived.
+    """
     home = sibling.home
     if home is None:
         return None
     if home.kind == "workspace-member":
-        return {"workspace": True}
+        if consumer.home is not None and consumer.home.kind == "workspace-member":
+            return {"workspace": True}
+        return {"git": sibling.repository, **({} if home.path is None else {"subdirectory": home.path})}
     return None if home.repository is None else {"git": home.repository}
+
+
+def is_git_url(value: object) -> bool:
+    return isinstance(value, str) and ("://" in value or value.startswith("git@"))
+
+
+def source_notes(project: DerivedProject) -> list[Violation]:
+    """A git source built from a value that is not a URL: reported, never replaced by a guessed URL."""
+    return [
+        Violation(
+            Rule.PACKAGE_PYPROJECT_DRIFT, f"{project.path}:tool.uv.sources",
+            f"{name} would use git = {entry['git']!r}, which is not a git URL; the repository it comes from (`home.repository`, "
+            "or the catalog `repository` of a workspace member) must be one",
+        )
+        for name, entry in sorted(project.sources.items())
+        if "git" in entry and not is_git_url(entry["git"])
+    ]
 
 
 def _check_roots(catalog: CatalogDocument) -> None:
@@ -117,7 +141,7 @@ def derive_projects(catalog: CatalogDocument, facts: ProjectFacts) -> tuple[Deri
         allowed = {name for module in modules for name in facts.externals.get(module, ())}
         third_party = {facts.distributions[name] for name in allowed if name in facts.distributions}
         names = sorted({*third_party, *package.depends_on}, key=dist_name)
-        sources = {dep: entry for dep in package.depends_on if dep in by_id and (entry := source_of(by_id[dep])) is not None}
+        sources = {dep: entry for dep in package.depends_on if dep in by_id and (entry := source_of(package, by_id[dep])) is not None}
         roots = _own_source_roots(package, modules, facts)
         out.append(DerivedProject(
             pyproject_path(package), package, tuple(names), sources,
@@ -246,6 +270,7 @@ def _source_drift(project: DerivedProject, package: PackageDescriptor, actual: M
         agrees = (
             value == {"workspace": True} if entry.get("workspace") is True
             else "workspace" not in value and value.get("git", entry["git"]) == entry["git"] and bool(value)
+            and value.get("subdirectory", entry.get("subdirectory")) == entry.get("subdirectory")
         )
         if not agrees:
             out.append(_drift(project.path, "tool.uv.sources", f"{key} = {value or 'missing'}", f"{name} = {dict(entry)}",

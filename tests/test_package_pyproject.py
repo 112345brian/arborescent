@@ -344,3 +344,46 @@ def test_the_export_with_the_slot_filled_validates_against_the_published_schema(
     document["packages"][1]["pyproject"]["dependencies"] = "core"
     with pytest.raises(ValidationError):
         Draft202012Validator(SCHEMA).validate(document)
+
+
+MONOREPO = "https://example.test/mono.git"
+
+
+def catalog_with_shell_in_its_own_repository(monorepo: str = MONOREPO) -> str:
+    """core stays a workspace member of the monorepo it lives in today; shell moves to its own repository."""
+    text = CATALOG.replace('[packages.home]\nkind = "workspace-member"\npath = "shell"\n', '[packages.home]\nkind = "repository"\nrepository = "https://example.test/shell.git"\n')
+    return text.replace('repository = "example/mono"\nroot = "core"', f'repository = "{monorepo}"\nroot = "core"')
+
+
+def test_an_own_repository_consumer_of_a_workspace_member_gets_a_git_source_with_a_subdirectory(tmp_path: Path) -> None:
+    derived = derived_sources(tmp_path, catalog_with_shell_in_its_own_repository())
+    assert derived["shell/pyproject.toml"]["tool"]["uv"]["sources"] == {"core": {"git": MONOREPO, "subdirectory": "core"}}  # type: ignore[index]
+    assert "workspace" not in str(derived["shell/pyproject.toml"]["tool"]["uv"]["sources"])  # type: ignore[index]
+
+
+def test_workspace_true_needs_both_packages_to_be_members_of_the_workspace(tmp_path: Path) -> None:
+    derived = derived_sources(tmp_path, CATALOG)
+    assert derived["shell/pyproject.toml"]["tool"]["uv"]["sources"] == {"core": {"workspace": True}}  # type: ignore[index]
+
+
+def test_the_subdirectory_of_a_git_source_is_compared(tmp_path: Path) -> None:
+    catalog = catalog_with_shell_in_its_own_repository()
+    good = f'[project]\nname = "shell"\ndependencies = ["beautifulsoup4", "core"]\n[tool.uv.sources]\ncore = {{ git = "{MONOREPO}", subdirectory = "core", rev = "abc" }}\n'
+    repo(tmp_path, catalog, {"shell/pyproject.toml": good})
+    assert [s for s, _ in drift(tmp_path) if "sources" in s] == []
+    write_files(tmp_path, {"shell/pyproject.toml": good.replace('subdirectory = "core"', 'subdirectory = "elsewhere"')})
+    assert [s for s, _ in drift(tmp_path) if "sources" in s] == ["shell/pyproject.toml:tool.uv.sources"]
+
+
+def test_a_git_source_built_from_a_value_that_is_not_a_url_is_reported_without_guessing_a_url(tmp_path: Path) -> None:
+    repo(tmp_path, catalog_with_shell_in_its_own_repository(monorepo="example/mono"))  # no pyproject.toml exists yet
+    notes = [(s, d) for s, d in drift(tmp_path) if "not a git URL" in d]
+    assert [s for s, _ in notes] == ["shell/pyproject.toml:tool.uv.sources"]
+    assert "example/mono" in notes[0][1]
+    write_generated(policy(), tmp_path, services())
+    assert 'git = "example/mono"' in (tmp_path / "shell/pyproject.toml").read_text(encoding="utf-8"), "the value is written as given"
+
+
+def test_urls_are_not_reported(tmp_path: Path) -> None:
+    repo(tmp_path, catalog_with_shell_in_its_own_repository())
+    assert [d for _, d in drift(tmp_path) if "not a git URL" in d] == []

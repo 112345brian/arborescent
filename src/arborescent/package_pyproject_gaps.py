@@ -18,6 +18,7 @@ from .package_pyproject import (
     derive_projects,
     drift_violations,
     render_template,
+    source_notes,
 )
 from .ports import FileSystem, ScanResult
 
@@ -59,6 +60,7 @@ def pyproject_violations(fs: FileSystem, root: Path, projects: tuple[DerivedProj
     """Drift of the existing files; a file that is absent is not drift (``generate`` creates it)."""
     found: list[Violation] = []
     for project in projects:
+        found += source_notes(project)
         path = root / project.path
         if not fs.is_file(path):
             continue
