@@ -153,7 +153,7 @@ def test_a_package_without_a_declared_surface_is_open(tmp_path: Path) -> None:
 def test_a_part_that_is_not_an_extraction_is_an_error_not_a_pass(tmp_path: Path) -> None:
     build(tmp_path, split=False)
     (tmp_path / "parts" / "core").mkdir(parents=True)
-    with pytest.raises(CatalogError, match=r"parts/core|manifest"):
+    with pytest.raises(CatalogError, match=r"cannot read .*\.arborescent-package\.toml"):
         run_own(policy(), tmp_path, services())
 
 
