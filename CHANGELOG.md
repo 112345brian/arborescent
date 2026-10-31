@@ -16,6 +16,10 @@
   `package-semantics-drift`, `package-membership-drift`, `package-ring-drift`, `package-public-symbol-dropped` and
   `package-private-import` (the last also runs on the origin without parts). No graph comparison and no test runs;
   `selftest` probes each rule (#55).
+- With `package_catalog` set, `arborescent generate` compiles the package assignment into import-linter (one `forbidden`
+  contract per package for undeclared packages and for modules outside a declared package's `public` list, and one for
+  third-party names its rings do not list) and into tach's per-module `depends_on`, so the engines' own violation output
+  is a package's cut list. Tach switches to explicit `depends_on` when the catalog is set (#53).
 
 ### Changed
 
