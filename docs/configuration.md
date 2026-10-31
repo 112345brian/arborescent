@@ -362,6 +362,36 @@ generated file that is out of date as drift. The engines' output is not ratchete
 The same edges are also reported by Arborescent's own `package-undeclared-dependency` (#52) and `package-private-import`
 (#55) rules, which need no engine installed; a test keeps the contracts and those rules from disagreeing.
 
+### Dependency report: what crosses the packages
+
+`arborescent packages report` states the imports between the packages `package_catalog` declares, with the modules behind each
+one. Single responsibility implies a package can leave the repository, and a package's imports of other packages are exactly its
+dependencies, so this is the question a split asks first. It reads what the scan already knows; it discovers no groups, plans
+nothing and migrates nothing.
+
+```text
+package imports: 3 packages, 5 import edge(s) between them
+  annotations -> core  33 import(s)  declared
+  core -> annotations  11 import(s)  UNDECLARED
+      arborescent.engine imports arborescent.package_gaps
+      ...
+cut list: 2 edge(s) no depends_on allows; remove these imports, or declare the dependency
+cycles (these packages import each other, so none of them can be split off alone):
+  annotations, core, driver
+```
+
+- An edge is **declared** when the importing package lists the other in `depends_on`. The **cut list** is the observed imports that
+  no `depends_on` allows, each with its `module imports module` evidence: remove those imports (usually by turning the dependency
+  into a port) or declare the dependency. `--all` lists the evidence of declared edges too; `--json` writes the report;
+  `--check` exits 1 while the cut list is not empty.
+- A declared dependency that is never imported is reported as unused.
+- Importing a submodule also imports its parent package, so a shared top-level `__init__.py` belongs to someone and appears as an
+  edge to its owner. A composition root (the module that wires adapters) imports everything: give it a package of its own that
+  depends on the others, or it shows up as a back-edge into each of them.
+- **Cycles** (packages that import each other) are found by a graph library, not by Arborescent: `pip install 'arborescent[graph]'`
+  (networkx). Without it the report says cycles were not computed; everything else works. Arborescent implements and vendors no
+  graph algorithm.
+
 ### Annotation preservation across a split
 
 After a split by other tools, the question for Arborescent is whether the annotations survived, not whether the graph

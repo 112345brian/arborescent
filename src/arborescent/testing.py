@@ -246,3 +246,21 @@ class FakeFileSystem:
             yield tmp
         finally:
             self.remove_tree(tmp)
+
+
+@dataclass
+class FakeCycleFinder:
+    """A ``CycleFinder`` that answers with the groups it is given and records the edges it was asked about."""
+
+    groups: tuple[tuple[str, ...], ...] = ()
+    installed: bool = True
+    name: str = "fake graph"
+    requirement: str = "fake-graph>=1"
+    asked: list[tuple[tuple[str, str], ...]] = field(default_factory=lambda: [])
+
+    def available(self) -> bool:
+        return self.installed
+
+    def cycles(self, edges: Sequence[tuple[str, str]]) -> list[tuple[str, ...]]:
+        self.asked.append(tuple(edges))
+        return [tuple(sorted(group)) for group in self.groups]

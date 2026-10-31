@@ -27,6 +27,7 @@ from .package_gaps import load_package_context, package_gap_violations, package_
 from .package_pyproject_gaps import derived_projects, pyproject_files
 from .ports import (
     Clock,
+    CycleFinder,
     Engine,
     FileSystem,
     ModuleScanner,
@@ -54,6 +55,7 @@ class Services:
     fs: FileSystem
     clock: Clock
     engines: Sequence[Engine]  # run beside the chosen type checker (import-linter, tach); see arborescent.engines. No default: a forgotten list used to skip them silently
+    cycles: CycleFinder | None = None  # optional: lets `packages report` name the packages that import each other
 
 
 @dataclass(frozen=True)

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import ModuleType
 
 from . import baseline as ratchet_mod
 from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner, SystemClock
@@ -14,6 +16,7 @@ from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
+from .cli_package_report import add_report_parser, run_report
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
 from .domain import Policy, PolicyError
@@ -32,6 +35,7 @@ from .engine import (
     write_generated,
 )
 from .engines import default_engines
+from .graph_adapter import NetworkxCycles
 from .migration_export import migration_arguments_of
 from .migration_json import export_document, render_export, render_schema
 from .packages import PackageCatalog, load_extracted_package
@@ -41,6 +45,14 @@ from .selftest import selftest
 from .typecheckers import all_checkers
 
 __all__ = ["default_services", "main"]
+
+
+def _load_networkx() -> ModuleType | None:
+    """Imports networkx on demand; ``None`` when the optional extra is not installed."""
+    try:
+        return importlib.import_module("networkx")
+    except ImportError:
+        return None
 
 
 def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> Services:
@@ -53,6 +65,7 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
         LocalFileSystem(),
         SystemClock(),
         default_engines(output_dir),
+        NetworkxCycles(_load_networkx),
     )
 
 
@@ -180,6 +193,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     _ = package_actions.add_parser("schema", help="print the JSON Schema the export validates against")
     add_migrate_parser(package_actions)
+    add_report_parser(package_actions)
     extract = package_actions.add_parser("extract")
     extract.add_argument("package_id")
     extract.add_argument(
@@ -236,7 +250,7 @@ def main(
             extracted = load_extracted_package(fs, args.extracted)
             print(f"valid: extracted {extracted.semantics.id} ({len(extracted.paths)} paths)")
             return 0
-        if args.command == "packages" and args.package_action not in ("export", "migrate"):
+        if args.command == "packages" and args.package_action not in ("export", "migrate", "report"):
             root = (
                 args.config.parent
                 if args.config
@@ -287,6 +301,8 @@ def _dispatch(
         return _selftest(policy, root, svc)
     if args.command == "packages" and args.package_action == "migrate":
         return run_migrate(args, policy, root, svc, tools)
+    if args.command == "packages" and args.package_action == "report":
+        return run_report(args, policy, root, svc)
     if args.command == "packages":
         return _export(args, policy, root, svc)
     return _check(args, policy, root, svc)

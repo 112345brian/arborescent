@@ -83,6 +83,24 @@ class Engine(Protocol):
     def passed(self, result: ToolResult) -> bool: ...
 
 
+class CycleFinder(Protocol):
+    """Finds the groups of nodes that all reach each other in a directed graph.
+
+    A graph algorithm Arborescent does not implement or vendor: an adapter over a graph library does it, bound in
+    ``Services`` and optional like the engines (``available`` is false when its library is not installed).
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def requirement(self) -> str: ...  # what to install, e.g. ``networkx>=3``
+
+    def available(self) -> bool: ...
+
+    def cycles(self, edges: Sequence[tuple[str, str]]) -> list[tuple[str, ...]]: ...  # each group sorted, groups sorted
+
+
 class RootAwareEngine(Protocol):
     """Optional extension for an engine whose command depends on the project it runs in.
 

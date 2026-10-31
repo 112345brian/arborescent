@@ -5,6 +5,11 @@
 ## Unreleased
 
 ### Added
+- `arborescent packages report`: the imports between the packages `package_catalog` declares, with the module pairs behind each,
+  the observed imports no `depends_on` allows (the cut list), declared dependencies never imported, and the packages that
+  import each other. `--all`, `--json` and `--check` (exit 1 while the cut list is not empty). Cycles come from a graph library
+  through a new `CycleFinder` port with a networkx adapter (optional extra `arborescent[graph]`); Arborescent implements no graph
+  algorithm and the report works without it. The package-level edge grouping is shared with the migration export.
 - `packages migrate` takes its target directory from `--target` or from a git-ignored local config (`[targets]` in `.arborescent/local.toml`, found through `ARBORESCENT_LOCAL_CONFIG`, a `.env`, or that default) and prints which source supplied it. Where a repository is checked out is machine-specific, so the config is read by this command only and never reaches the catalog, the export, derived files or contracts; `home.repository` stays the committed remote identity.
 
 - `arborescent packages migrate PACKAGE_ID --target DIR`: the migration driver (#67). It supplies a dedicated migration

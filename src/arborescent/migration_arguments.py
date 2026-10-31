@@ -29,6 +29,7 @@ from .package_model import (
     ReleasePolicy,
 )
 from .package_policy import policy_violations
+from .package_report import observed_imports, sole_owners
 
 __all__ = [
     "Bypass", "Edge", "Gap", "GapCode", "MigrationArguments", "OwnedAsset", "OwnedModule", "PackageArguments",
@@ -149,7 +150,7 @@ def build_migration_arguments(catalog: CatalogDocument, facts: RepositoryFacts) 
         Gap(str(v.rule), v.subject, v.detail, INFO if v.rule in INFORMATIONAL_RULES else ERROR)
         for v in [*assignment_violations(catalog, facts), *policy_violations(catalog)]
     ]
-    inputs = _Inputs(catalog, facts, _sole_owners(catalog, facts))
+    inputs = _Inputs(catalog, facts, sole_owners(catalog, facts))
     observed, importers = _observed_edges(facts, inputs.sole)
     packages = tuple(
         _package_arguments(package, inputs, importers.get(package.id, {}), gaps)
@@ -164,27 +165,15 @@ def build_migration_arguments(catalog: CatalogDocument, facts: RepositoryFacts) 
     )
 
 
-def _sole_owners(catalog: CatalogDocument, facts: RepositoryFacts) -> dict[str, str]:
-    return {
-        module: owners[0]
-        for module, path in facts.modules.items()
-        if len(owners := owners_of(catalog, path)) == 1
-    }
-
-
 def _observed_edges(
     facts: RepositoryFacts, sole: Mapping[str, str]
 ) -> tuple[set[tuple[str, str]], dict[str, dict[str, list[tuple[str, str]]]]]:
     """Package-level imports, and for each imported package the (importing module, imported module) pairs by package."""
-    edges: set[tuple[str, str]] = set()
+    found = observed_imports(facts, sole)
     importers: dict[str, dict[str, list[tuple[str, str]]]] = defaultdict(lambda: defaultdict(list))
-    for module, owner in sole.items():
-        for target in facts.imports.get(module, ()):
-            other = sole.get(target)
-            if other is not None and other != owner:
-                edges.add((owner, other))
-                importers[other][owner].append((module, target))
-    return edges, importers
+    for (owner, other), uses in found.items():
+        importers[other][owner] = [(use.module, use.imports) for use in uses]
+    return set(found), importers
 
 
 def _package_arguments(

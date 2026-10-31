@@ -70,6 +70,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.presets` | `single` | domain |
 | `arborescent.rules` | `single` | domain |
 | `arborescent.package_model` | `single` | domain |
+| `arborescent.package_report` | `single` | domain |
 | `arborescent.package_fields` | `single` | domain |
 | `arborescent.package_parse` | `single` | domain |
 | `arborescent.package_policy` | `single` | domain |
@@ -103,6 +104,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.package_copy` | `single` | application |
 | `arborescent.mutation` | `single` | application |
 | `arborescent.package_gaps` | `single` | application |
+| `arborescent.package_dependencies` | `single` | application |
 | `arborescent.package_probes` | `single` | application |
 | `arborescent.migration_export` | `single` | application |
 | `arborescent.package_parts` | `single` | application |
@@ -115,6 +117,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |
+| `arborescent.graph_adapter` | `single` | adapters |
 | `arborescent.filesystem_adapter` | `single` | adapters |
 | `arborescent.scanner` | `single` | adapters |
 | `arborescent.tool_runner` | `single` | adapters |
@@ -129,6 +132,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.cli_install` | `single` | composition |
 | `arborescent.cli_report` | `single` | composition |
 | `arborescent.cli_migrate` | `single` | composition |
+| `arborescent.cli_package_report` | `single` | composition |
 
 ## Data flow of `arborescent check`
 

@@ -35,8 +35,10 @@ pyrefly = ["pyrefly>=0.40"]
 filterrepo = ["git-filter-repo>=2.38"]
 # What `arborescent packages migrate` rewrites imports with, after the library ran.
 libcst = ["libcst>=1.0"]
+# What `arborescent packages report` asks for the packages that import each other; the report works without it.
+graph = ["networkx>=3"]
 all = ["import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "ty>=0.0.50"]
-dev = ["pytest>=8", "jsonschema>=4", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "git-filter-repo>=2.38", "libcst>=1.0", "build"]
+dev = ["pytest>=8", "jsonschema>=4", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "git-filter-repo>=2.38", "libcst>=1.0", "networkx>=3", "build"]
 
 [project.urls]
 Homepage = "https://github.com/112345brian/arborescent"
@@ -64,7 +66,7 @@ source_roots = ["src"]
 exclude = ["__pycache__", "tests", "tools"]
 forbid_circular_imports = true
 # Optional extras that are only imported by modules run as a subprocess (driver_libcst_scan): not required dependencies.
-tach_external_exclude = ["libcst"]
+tach_external_exclude = ["libcst", "networkx"]
 rings = ["domain", "ports", "application", "adapters", "composition"]
 type_checkers = ["ty", "pyright"]
 
@@ -88,13 +90,13 @@ forbid = ["clock", "dynamic-import", "env", "identity", "patch", "process", "ran
 
 [tool.arborescent.ring.adapters]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "libcst", "arborescent"]
+external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "libcst", "types", "arborescent"]
 os_branching = true
 forbid = ["clock", "dynamic-import", "env", "identity", "patch", "randomness", "sleep", "threads"]
 
 [tool.arborescent.ring.composition]
 may_import = ["*"]
-external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
+external = ["@pure", "argparse", "importlib", "pathlib", "os", "shlex", "types", "arborescent"]
 
 [tool.arborescent.classify]
 "arborescent" = "domain"
@@ -104,6 +106,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.presets" = "domain"
 "arborescent.stdlib" = "domain"
 "arborescent.package_model" = "domain"
+"arborescent.package_report" = "domain"
 "arborescent.package_fields" = "domain"
 "arborescent.package_parse" = "domain"
 "arborescent.package_policy" = "domain"
@@ -137,6 +140,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.package_copy" = "application"
 "arborescent.mutation" = "application"
 "arborescent.package_gaps" = "application"
+"arborescent.package_dependencies" = "application"
 "arborescent.package_probes" = "application"
 "arborescent.migration_export" = "application"
 "arborescent.package_parts" = "application"
@@ -149,6 +153,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
+"arborescent.graph_adapter" = "adapters"
 "arborescent.filesystem_adapter" = "adapters"
 "arborescent.scanner" = "adapters"
 "arborescent.tool_runner" = "adapters"
@@ -162,6 +167,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.cli_install" = "composition"
 "arborescent.cli_report" = "composition"
 "arborescent.cli_migrate" = "composition"
+"arborescent.cli_package_report" = "composition"
 "arborescent.__main__" = "composition"
 
 # The annotation layer never depends on the driver (#67): the driver sits on top of it and may import it, not the reverse.
@@ -188,6 +194,7 @@ docs-sync = "docs/architecture.md"
 "src/arborescent/cli_install.py" = ["T20"]
 "src/arborescent/cli_report.py" = ["T20"]
 "src/arborescent/cli_migrate.py" = ["T20"]
+"src/arborescent/cli_package_report.py" = ["T20"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
