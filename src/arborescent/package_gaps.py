@@ -6,13 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .domain import Policy, Violation
-from .facts import resolve_targets
 from .package_assignment import RepositoryFacts, assignment_violations
-from .package_model import CatalogDocument
+from .package_model import CatalogDocument, CatalogError
+from .package_parts import load_parts, module_imports, public_symbols
+from .package_preservation import PartFacts, preservation_violations
 from .package_tree import is_generated
 from .packages import read_catalog
 from .path_exclusion import excluded_by_policy
-from .ports import FileSystem, ScanResult
+from .ports import FileSystem, ModuleScanner, ScanResult
 from .rules import RuleContext
 
 __all__ = ["PackageContext", "asset_paths", "load_package_catalog", "load_package_context", "package_gap_violations", "repository_facts"]
@@ -29,38 +30,43 @@ class PackageContext:
 
     catalog: CatalogDocument
     facts: RepositoryFacts
+    parts: tuple[PartFacts, ...] = ()
 
 
-def load_package_context(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> PackageContext | None:
-    """``None`` when the policy does not set ``package_catalog``."""
+def load_package_context(
+    policy: Policy, root: Path, fs: FileSystem, scan: ScanResult, scanner: ModuleScanner | None = None
+) -> PackageContext | None:
+    """``None`` when the policy does not set ``package_catalog``. Configured parts are scanned with ``scanner``."""
     if policy.package_catalog is None:
         return None
-    return PackageContext(load_package_catalog(fs, root, policy), repository_facts(policy, root, fs, scan))
+    facts = repository_facts(policy, root, fs, scan)
+    if not policy.package_parts:
+        return PackageContext(load_package_catalog(fs, root, policy), facts)
+    if scanner is None:
+        raise CatalogError("`package_parts` needs a module scanner to read the parts")
+    return PackageContext(load_package_catalog(fs, root, policy), facts, load_parts(policy, root, fs, scanner, scan.known))
 
 
-def package_gap_violations(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> list[Violation]:
-    """Findings for the configured catalog; empty when the policy does not set ``package_catalog``."""
-    context = load_package_context(policy, root, fs, scan)
-    return [] if context is None else assignment_violations(context.catalog, context.facts)
+def package_gap_violations(
+    policy: Policy, root: Path, fs: FileSystem, scan: ScanResult, scanner: ModuleScanner | None = None
+) -> list[Violation]:
+    """Findings for the configured catalog (assignment, #52; preservation across parts, #55); none without ``package_catalog``."""
+    context = load_package_context(policy, root, fs, scan, scanner)
+    if context is None:
+        return []
+    return assignment_violations(context.catalog, context.facts) + preservation_violations(
+        context.catalog, context.facts, context.parts
+    )
 
 
 def repository_facts(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> RepositoryFacts:
     context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
-    tops = {name.split(".")[0] for name in scan.known}
-    imports: dict[str, tuple[str, ...]] = {}
-    for name, info in scan.modules.items():
-        targets = {
-            target
-            for imp in info.facts.imports
-            for target in resolve_targets(name, info.is_package, imp, scan.known, tops)[0]
-            if target in scan.known and target != name
-        }
-        imports[name] = tuple(sorted(targets))
     return RepositoryFacts(
         dict(scan.paths),
         {name: context.resolve_ring(name) for name in scan.paths},
-        imports,
+        module_imports(scan.modules, scan.known),
         asset_paths(policy, root, fs),
+        public_symbols(scan.modules),
     )
 
 

@@ -139,6 +139,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         customization_labels=customizations,
         practices=dict(raw.get("practices", {})),
         package_catalog=_package_catalog(raw),
+        package_parts=_package_parts(raw),
         children=_child_arbors(raw),
         preset=PRESETS[preset_name],
         io_modules=frozenset(io_modules),
@@ -149,7 +150,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
     "scan_vendors",
     "child_policy_mode",
-    "ruff", "practices", "exclude", "package_catalog",
+    "ruff", "practices", "exclude", "package_catalog", "package_parts",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "io_modules", "groups",
@@ -410,3 +411,10 @@ def _package_catalog(raw: Mapping[str, Any]) -> str | None:
     if value is not None and not isinstance(value, str):
         raise PolicyError("`package_catalog` must be a relative path to a packages.toml file")
     return value
+
+
+def _package_parts(raw: Mapping[str, Any]) -> tuple[str, ...]:
+    value: object = raw.get("package_parts", [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise PolicyError("`package_parts` must be a list of relative paths to extracted part trees")
+    return tuple(item for item in value if isinstance(item, str))

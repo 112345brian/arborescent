@@ -80,6 +80,12 @@ class Rule(StrEnum):
     PACKAGE_MULTIPLY_ASSIGNED_ASSET = "package-multiply-assigned-asset"
     PACKAGE_SPANS_RINGS = "package-spans-rings"
     PACKAGE_UNDECLARED_DEPENDENCY = "package-undeclared-dependency"
+    # annotation preservation (`package_parts`): a split part keeps the catalog's annotations and public contracts
+    PACKAGE_SEMANTICS_DRIFT = "package-semantics-drift"
+    PACKAGE_MEMBERSHIP_DRIFT = "package-membership-drift"
+    PACKAGE_RING_DRIFT = "package-ring-drift"
+    PACKAGE_PUBLIC_SYMBOL_DROPPED = "package-public-symbol-dropped"
+    PACKAGE_PRIVATE_IMPORT = "package-private-import"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {
@@ -207,9 +213,11 @@ class Policy:
     require_arbor_annotations: bool = False
     require_arbor_annotations_exclude: tuple[str, ...] = ()
     package_catalog: str | None = None  # opt-in: packages.toml path; every module and asset must belong to one package
+    package_parts: tuple[str, ...] = ()  # opt-in: extracted part trees (inside the repository) checked against the catalog
 
     def __post_init__(self) -> None:
         _validate_package_catalog(self.package_catalog, self.preset.name)
+        _validate_package_parts(self.package_parts, self.package_catalog)
         _validate_rings(self.rings, self.classify, bool(self.scopes))
         for pattern, targets in self.module_forbid_imports:
             if not pattern or not targets:
@@ -395,6 +403,19 @@ def _validate_package_catalog(value: str | None, preset: str) -> None:
         raise PolicyError(f"`package_catalog` must be a relative path inside the repository, got {value!r}")
     if preset != DEFAULT_PRESET:
         raise PolicyError(f"`package_catalog` requires the {DEFAULT_PRESET} preset, not {preset!r}")
+
+
+def _validate_package_parts(parts: tuple[str, ...], catalog: str | None) -> None:
+    if not parts:
+        return
+    if catalog is None:
+        raise PolicyError("`package_parts` needs `package_catalog`: the parts are checked against the catalog")
+    for value in parts:
+        path = PurePosixPath(value)
+        if not value or path.is_absolute() or ".." in path.parts or "\\" in value or value in (".", "./"):
+            raise PolicyError(f"`package_parts` must list relative paths inside the repository, got {value!r}")
+    if len(set(parts)) != len(parts):
+        raise PolicyError("`package_parts` must not list a path twice")
 
 
 def _validate_suggestion_threshold(value: int) -> None:

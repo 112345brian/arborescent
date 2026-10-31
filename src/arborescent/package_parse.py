@@ -81,6 +81,7 @@ def parse_package(value: object, index: int) -> PackageDescriptor:
         domain=optional(value, "domain"),
         capabilities=strings(value.get("capabilities", []), "capabilities"),
         depends_on=strings(value.get("depends_on", []), "depends_on"),
+        public=strings(value.get("public", []), "public"),
         extraction_status=str(value.get("extraction_status", "in-repository")),
         paths=tuple(paths),
     )
@@ -109,6 +110,7 @@ def manifest_semantics(value: Mapping[str, Any]) -> PackageSemantics:
         optional(value, "domain"),
         strings(value.get("capabilities", []), "capabilities"),
         strings(value.get("depends_on", []), "depends_on"),
+        strings(value.get("public", []), "public"),
     )
 
 
