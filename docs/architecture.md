@@ -34,8 +34,8 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 ## Migration: supply the arguments, do not reimplement the tools
 
 Arborescent supplies annotations, the checks that they are complete and consistent, engine contracts compiled from
-them, and a stable export, including the typed arguments a monorepo-to-polyrepo migration needs. A driver layer on top runs the migration by driving existing tools
-(history extraction, import rewriting) through ports with adapters, as it drives import-linter and tach. It does not
+them, and a stable export, including the typed arguments a monorepo-to-polyrepo migration needs. An auxiliary driver on top supplies those arguments to a dedicated migration library
+(history extraction, import rewriting) through ports with adapters; it does not migrate, as it drives import-linter and tach. It does not
 reimplement what those tools do. The boundary, the wrapper rules, the tool landscape and the status of the existing
 `packages extract` are in `docs/superpowers/specs/2026-10-31-monorepo-split-annotations-design.md`.
 
