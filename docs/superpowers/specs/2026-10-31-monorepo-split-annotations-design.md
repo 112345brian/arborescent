@@ -5,17 +5,36 @@ Status: decision record for issue #51 (Phase 0 of program #59). Docs only; no co
 ## Principle
 
 A monorepo-to-polyrepo split is mostly mechanical once the repository says, in annotations, what each unit is.
-Arborescent's job is the annotation layer (schema, completeness and consistency checks, a stable export) and, on top of
-it, a **thin wrapper that can run the migration by driving existing tools**. It never implements migration logic
-itself: history rewriting, import rewriting, dependency checking and graph analysis are done by the external tool, and
-Arborescent only decides what to hand it, from the annotations.
+Arborescent's core job is to **supply the annotation data and the objects that make a migration possible**: for any
+package, the exact arguments a migration needs, derived from the annotations and checked for completeness and
+consistency. Specialized tools (git filter-repo, rope, LibCST, grimp, deptry, import-linter, tach, Copybara, Josh) do
+the work with those arguments. Arborescent never reimplements what they do better and more robustly.
 
-This is the same relationship Arborescent already has with import-linter, tach, ruff and ty: it compiles configuration
-for the engine, invokes it, and reports its output.
+Running a migration is optional and secondary: where useful, a thin wrapper may pass the arguments to a tool through a
+port (see "Wrapper rules"). The arguments exist whether or not Arborescent runs anything.
 
 Placement rule used by the first downstream case: a package gets its own repository only if it would be its own
 product; every other generic package becomes a workspace member in the same repository. Which one applies is a
 per-package annotation (`home`), not an architecture fork.
+
+## What Arborescent supplies: migration arguments
+
+Typed, tool-neutral value objects in the domain ring, built from the annotations and available both as Python objects
+and through the stable JSON export. For one package:
+
+- identity and `home` (own repository, or workspace member and where);
+- the modules and assets it owns (exactly one package each), as repository-relative paths, and the path-to-path
+  renames from monorepo location to target location;
+- the module-name map (old import name to new) for import rewriting;
+- its public surface (`public`) and the monorepo modules that import it through anything else;
+- its declared dependencies: other first-party packages and allowed external distributions per ring;
+- release, pin and history policy (what history to keep, how dependents pin it);
+- the derivable `pyproject.toml` fields (#60).
+
+Tool-neutral means these objects name no tool. Turning them into one tool's input (a filter-repo paths file, a rope
+move, a Copybara workflow) is a small renderer owned by an adapter or a documented recipe; the data itself lives here.
+What Arborescent can already check about them (unassigned or doubly assigned paths, public-surface violations,
+undeclared dependencies, annotation-vs-`classify` drift) is reported by rule id, so a gap is found before a tool runs.
 
 ## Wrapper rules (clean architecture)
 
@@ -40,7 +59,7 @@ per-package annotation (`home`), not an architecture fork.
   the engines' own violation output is the cut list.
 - One stable, read-only JSON export of the annotation data for any external tool to consume.
 - Deriving a package's `pyproject.toml` fields from the annotations, with a drift check (#60).
-- Optional orchestration of the migration through the ports and adapters above.
+- Optional orchestration of the migration through the ports and adapters above, using the arguments supplied here.
 
 ## Out of scope
 
