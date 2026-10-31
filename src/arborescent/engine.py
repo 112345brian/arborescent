@@ -23,13 +23,12 @@ from .domain import (
 )
 from .generate import generate_for_scan
 from .generated_config import GENERATED_MARKER
-from .package_gaps import load_package_context, package_gap_violations, package_layout
-from .package_pyproject_gaps import derived_projects, pyproject_files
 from .ports import (
     Clock,
     Engine,
     FileSystem,
     ModuleScanner,
+    PackageChecks,
     RootAwareEngine,
     ScanResult,
     ToolRunner,
@@ -43,7 +42,7 @@ from .suggestions import Suggestion, file_size_suggestions
 if TYPE_CHECKING:
     from .facts import ModuleInfo
 
-__all__ = ["CheckReport", "EngineRun", "Options", "Services", "blocking", "changed_files", "drift", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
+__all__ = ["CheckReport", "EngineRun", "Options", "Services", "blocking", "changed_files", "drift", "package_checks", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
 
 
 @dataclass(frozen=True)
@@ -54,6 +53,7 @@ class Services:
     fs: FileSystem
     clock: Clock
     engines: Sequence[Engine]  # run beside the chosen type checker (import-linter, tach); see arborescent.engines. No default: a forgotten list used to skip them silently
+    packages: PackageChecks | None = None  # the package-annotation layer; needed only when the policy sets `package_catalog`
 
 
 @dataclass(frozen=True)
@@ -143,7 +143,9 @@ def run_own(
     if practices and only is None:
         found += run_practices(policy, root, services.runner, services.fs, scan)
     if only is None:  # ownership is a whole-repository fact; the selftest needs it whether or not practices run
-        found += package_gap_violations(policy, root, services.fs, scan, services.scanner)
+        checks = package_checks(policy, services)
+        if checks is not None:
+            found += checks.violations(policy, root, services.fs, scan, services.scanner)
     return found, scan
 
 
@@ -181,8 +183,9 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     _, scan = run_own(policy, root, services, practices=False)
     wanted = [c for c in services.checkers if c.name in policy.type_checkers and not tool_is_disabled(policy, c)]
     written: list[str] = []
-    packages = package_layout(policy, root, services.fs, scan)
-    generated = sorted(generate_for_scan(policy, scan, wanted, packages).items())
+    checks = package_checks(policy, services)
+    boundaries = None if checks is None else checks.boundaries(policy, root, services.fs, scan)
+    generated = sorted(generate_for_scan(policy, scan, wanted, boundaries).items())
     for rel, text in generated:
         path = root / rel
         if services.fs.exists(path):
@@ -190,35 +193,47 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
         services.fs.mkdir(path.parent)
         services.fs.write_text(path, text)
         written.append(rel)
-    return written + _write_package_projects(policy, root, services, scan)
-
-
-def _write_package_projects(policy: Policy, root: Path, services: Services, scan: ScanResult) -> list[str]:
-    """Create each missing package ``pyproject.toml`` from the annotations; an existing one is never touched."""
-    context = load_package_context(policy, root, services.fs, scan)
-    if context is None or not policy.package_pyproject:
-        return []
-    projects = derived_projects(policy, scan, context.catalog, context.facts)
-    written: list[str] = []
-    for rel, text in sorted(pyproject_files(services.fs, root, projects).items()):
+    if checks is None:
+        return written
+    for rel, text in sorted(checks.new_files(policy, root, services.fs, scan).items()):  # package pyproject.toml files; never an existing one
         services.fs.mkdir((root / rel).parent)
         services.fs.write_text(root / rel, text)
         written.append(rel)
     return written
 
 
-def drift(
-    fs: FileSystem, policy: Policy, root: Path, scan: ScanResult, checkers: Sequence[TypeChecker],
-) -> list[str]:
+def package_checks(policy: Policy, services: Services) -> PackageChecks | None:
+    """The bound package-annotation layer, or ``None`` when the policy declares no catalog. A catalog with nothing bound is
+    an error: the engine will not read a missing binding as a clean result."""
+    if policy.package_catalog is None:
+        return None
+    if services.packages is None:
+        raise PolicyError("`package_catalog` is set but no package checks are bound in Services; the entrypoint must bind them")
+    return services.packages
+
+
+def drift(fs: FileSystem, root: Path, expected: Mapping[str, str]) -> list[str]:
+    """Generated files on disk that differ from what ``generate`` would write now. A file Arborescent did not generate is not
+    drift: only one that carries the generated header is compared."""
     out: list[str] = []
-    packages = package_layout(policy, root, fs, scan)
-    for rel, expected in sorted(generate_for_scan(policy, scan, checkers, packages).items()):
+    for rel, text in sorted(expected.items()):
         path = root / rel
         if fs.is_file(path):
             current = fs.read_text(path)
-            if current.startswith(GENERATED_MARKER) and current != expected:
+            if current.startswith(GENERATED_MARKER) and current != text:
                 out.append(f"{rel}: differs from the policy; run `arborescent generate`")
     return out
+
+
+def _drift_report(policy: Policy, root: Path, services: Services, scan: ScanResult, opts: Options) -> list[str]:
+    checker = pick_checker(policy, services, opts.type_checker)
+    checks = package_checks(policy, services)
+    boundaries = None if checks is None else checks.boundaries(policy, root, services.fs, scan)
+    checkers = [
+        c for c in services.checkers if c.name in {*policy.type_checkers, checker.name} and not tool_is_disabled(policy, c)
+    ]
+    expected = generate_for_scan(policy, scan, checkers, boundaries)
+    return _tach_notes(policy, opts) + drift(services.fs, root, expected)
 
 
 def pick_checker(policy: Policy, services: Services, override: str | None = None) -> TypeChecker:
@@ -379,17 +394,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
             {module.name: module.path for module in scan.modules.values()},
             threshold=policy.suggestion_threshold,
         )
-        report.drift = _tach_notes(policy, opts) + drift(
-            services.fs,
-            policy,
-            root,
-            scan,
-            [
-                c
-                for c in services.checkers
-                if c.name in {*policy.type_checkers, checker.name} and not tool_is_disabled(policy, c)
-            ],
-        )
+        report.drift = _drift_report(policy, root, services, scan, opts)
         engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
         report.engines += engine_runs
         report.notes = [v for v in found if v.rule in INFORMATIONAL_RULES]

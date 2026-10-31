@@ -14,6 +14,7 @@ from arborescent.config import policy_from_mapping
 from arborescent.domain import Policy
 from arborescent.engine import Services
 from arborescent.engines import default_engines
+from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.testing import FakeToolRunner
 from arborescent.typecheckers import all_checkers
 
@@ -72,4 +73,6 @@ CHECKERS = list(all_checkers().values())
 
 
 def services(runner: FakeToolRunner | None = None, cache: Path | None = None) -> Services:
-    return Services(FsScanner(cache), runner or FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines())
+    return Services(
+        FsScanner(cache), runner or FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines(), AnnotationPackageChecks()
+    )

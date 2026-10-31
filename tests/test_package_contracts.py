@@ -20,6 +20,7 @@ from arborescent.generate import (
     IMPORT_LINTER_FILE,
     TACH_FILE,
     generate,
+    generate_for_scan,
     import_linter,
     tach,
 )
@@ -245,9 +246,10 @@ def test_generate_writes_package_contracts_and_check_reports_a_stale_file(tmp_pa
     assert "package shell imports only declared" in "".join(
         (tmp_path / rel).read_text(encoding="utf-8") for rel in write_generated(policy, tmp_path, services()) if rel.endswith("importlinter.toml"))
     scan = FsScanner().scan(policy, tmp_path)
-    assert drift(FS, policy, tmp_path, scan, []) == []
+    boundaries = package_layout(policy, tmp_path, FS, scan)
+    assert drift(FS, tmp_path, generate_for_scan(policy, scan, [], boundaries)) == []
     write_files(tmp_path, {"packages.toml": PUBLIC_CATALOG.replace('public = ["app.domain"]', 'public = ["app.domain", "app.ports"]')})
-    assert any("arborescent-importlinter.toml: differs from the policy" in line for line in drift(FS, policy, tmp_path, scan, []))
+    assert any("arborescent-importlinter.toml: differs from the policy" in line for line in drift(FS, tmp_path, generate_for_scan(policy, scan, [], package_layout(policy, tmp_path, FS, scan))))
 
 
 def test_engines_are_the_only_judge_of_the_edges_check_does_not_import_a_graph_library() -> None:

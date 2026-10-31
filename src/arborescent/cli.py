@@ -34,6 +34,7 @@ from .engine import (
 from .engines import default_engines
 from .migration_export import migration_arguments_of
 from .migration_json import export_document, render_export, render_schema
+from .package_checks import AnnotationPackageChecks
 from .packages import PackageCatalog, load_extracted_package
 from .ports import FileSystem, ScanResult
 from .rules import RuleContext
@@ -53,6 +54,7 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
         LocalFileSystem(),
         SystemClock(),
         default_engines(output_dir),
+        AnnotationPackageChecks(),
     )
 
 

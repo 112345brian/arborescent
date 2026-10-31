@@ -20,7 +20,7 @@ from arborescent.config import find_policy, load_policy
 from arborescent.domain import PolicyError, Violation
 from arborescent.engine import Services, drift
 from arborescent.facts import ModuleInfo, extract
-from arborescent.generate import generate
+from arborescent.generate import generate, generate_for_scan
 from arborescent.ports import FileSystem
 from arborescent.practices import (
     crlf,
@@ -210,12 +210,12 @@ def test_drift_reports_missing_differing_and_crlf_files(env: Env) -> None:
     checkers = by_name(["pyright"])
     scan = ScanData(known=frozenset(names), modules={}, entry_deps={}, paths={})
     expected = generate(policy, names, checkers)
-    assert drift(fs, policy, root, scan, checkers) == []  # optional presets need not exist
+    assert drift(fs, root, generate_for_scan(policy, scan, checkers)) == []  # optional presets need not exist
     put(fs, root, dict(expected))
-    assert drift(fs, policy, root, scan, checkers) == []
+    assert drift(fs, root, generate_for_scan(policy, scan, checkers)) == []
     rel = next(iter(expected))
     put(fs, root, {rel: expected[rel].replace("\n", "\r\n")})  # CRLF is drift: the content is compared exactly
-    assert len(drift(fs, policy, root, scan, checkers)) == 1
+    assert len(drift(fs, root, generate_for_scan(policy, scan, checkers))) == 1
 
 
 # --- selftest and bench (they need the real scanner, so the real disk) -----------------------------------------

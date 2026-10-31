@@ -101,8 +101,8 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.package_manifest` | `single` | application |
 | `arborescent.package_validation` | `single` | application |
 | `arborescent.package_copy` | `single` | application |
-| `arborescent.mutation` | `single` | application |
 | `arborescent.package_gaps` | `single` | application |
+| `arborescent.package_checks` | `single` | application |
 | `arborescent.package_probes` | `single` | application |
 | `arborescent.migration_export` | `single` | application |
 | `arborescent.package_parts` | `single` | application |

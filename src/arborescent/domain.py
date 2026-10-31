@@ -18,8 +18,11 @@ __all__ = [
     "EFFECT_RULES",
     "INFORMATIONAL_RULES",
     "NOISE_DIRS",
+    "Allowance",
     "ArchitectureScope",
     "ChildArbor",
+    "Contract",
+    "Mutation",
     "Policy",
     "PolicyError",
     "RingRule",
@@ -546,3 +549,19 @@ def _validate_scope_acyclic(scopes: tuple[ArchitectureScope, ...], names: list[s
 
     for name in names:
         visit(name)
+
+
+# (names that are not third-party-free for the module, names its ring lists); ``None`` for a module with no ring.
+Allowance = tuple[frozenset[str], frozenset[str]]
+Contract = tuple[str, list[str], list[str]]  # (name, source modules, forbidden modules)
+
+
+@dataclass(frozen=True)
+class Mutation:
+    """A selftest mutation: text appended to one file (or a new file) that must make one rule newly fire."""
+
+    rule: Rule  # the rule id that must newly fire
+    label: str
+    file: str  # posix path relative to the root
+    append: str  # text appended to the file ("" for an added file: see ``new_file``)
+    new_file: bool = False
