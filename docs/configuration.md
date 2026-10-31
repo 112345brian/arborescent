@@ -304,7 +304,7 @@ id = "core"
 # ... id, name, kind, repository, root, summary, depends_on, paths as above
 public = ["app.core.api", "app.core.models.*"]   # the public surface (module-name globs)
 externals = ["pydantic"]                          # third-party import names it may use
-[packages.home]                                   # kind = "repository", repository = "org/core"
+[packages.home]                                   # kind = "repository", repository = "https://github.com/org/core.git"
 kind = "workspace-member"                         # ... or a member of a workspace in the same repository
 path = "packages/core"
 [[packages.module_renames]]                       # module names that change in the target
@@ -329,7 +329,7 @@ id = "core"
 # ... name, kind, repository, root, summary, paths as above
 [packages.home]
 kind = "repository"
-repository = "org/core"
+repository = "https://github.com/org/core.git"
 history = "preserve"               # "preserve" or "fresh": keep the package's history, or start a new one
 [packages.release]
 pin = "tag"                        # "tag" or "sha": how dependents pin this package

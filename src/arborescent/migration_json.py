@@ -12,7 +12,13 @@ import json
 from typing import Any
 
 from .migration_arguments import MigrationArguments, PackageArguments
-from .package_model import HISTORY_KINDS, HOME_KINDS, MERGE_KINDS, PIN_KINDS
+from .package_model import (
+    GIT_URL_PATTERN,
+    HISTORY_KINDS,
+    HOME_KINDS,
+    MERGE_KINDS,
+    PIN_KINDS,
+)
 from .package_policy import is_workspace_member
 
 __all__ = ["EXPORT_NAME", "EXPORT_VERSION", "SCHEMA", "export_document", "render_export", "render_schema", "schema_filename"]
@@ -156,7 +162,13 @@ _PACKAGE = _object(
         "home": {
             "oneOf": [
                 {"type": "null"},
-                _object({"kind": {"enum": list(HOME_KINDS)}, "repository": _NULLABLE_STRING, "path": _NULLABLE_STRING}),
+                _object(
+                    {
+                        "kind": {"enum": list(HOME_KINDS)},
+                        "repository": {"type": ["string", "null"], "pattern": GIT_URL_PATTERN, "description": "a git URL (https://, ssh:// or git@host:path), used verbatim as a git source"},
+                        "path": _NULLABLE_STRING,
+                    }
+                ),
             ],
             "description": "where the package lives after the migration; null while not annotated (see gaps)",
         },

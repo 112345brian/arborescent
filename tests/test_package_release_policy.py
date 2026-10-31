@@ -217,7 +217,7 @@ def test_an_unknown_package_key_is_rejected_and_named(key: str) -> None:
 def test_every_known_package_key_is_still_accepted() -> None:
     package = parsed(
         'domain = "d"\ncapabilities = ["c"]\ndepends_on = []\nextraction_status = "in-repository"\npublic = ["app.*"]\n'
-        'externals = []\nunmanaged = true\n[packages.home]\nkind = "repository"\nrepository = "org/core"\n'
+        'externals = []\nunmanaged = true\n[packages.home]\nkind = "repository"\nrepository = "https://github.com/org/core.git"\n'
     )
     assert package.home is not None and package.unmanaged
 
@@ -238,7 +238,7 @@ def test_a_workspace_member_may_be_marked_unmanaged_or_carry_no_policy() -> None
 
 
 def test_a_repository_home_may_carry_a_policy() -> None:
-    package = parsed('history = "fresh"\n[packages.home]\nkind = "repository"\nrepository = "org/core"\n')
+    package = parsed('history = "fresh"\n[packages.home]\nkind = "repository"\nrepository = "https://github.com/org/core.git"\n')
     assert package.history == "fresh"
 
 
@@ -246,6 +246,6 @@ def test_the_gap_check_exempts_workspace_members_only(tmp_path: Path) -> None:
     member = f'[[packages]]\n{HEAD}{MEMBER}[[packages.paths]]\npath = "app"\nrole = "source"\n'
     repo(tmp_path, member)
     assert gaps(tmp_path) == []
-    own = member.replace(MEMBER, '[packages.home]\nkind = "repository"\nrepository = "org/core"\n')
+    own = member.replace(MEMBER, '[packages.home]\nkind = "repository"\nrepository = "https://github.com/org/core.git"\n')
     repo(tmp_path, own)
     assert gaps(tmp_path) == ["core"]

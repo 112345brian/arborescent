@@ -34,7 +34,7 @@ merge = "merge-commit"
 tag_before_branch_delete = true
 [packages.home]
 kind = "repository"
-repository = "example/core"
+repository = "https://github.com/example/core.git"
 [[packages.module_renames]]
 from = "app.core"
 to = "core"
@@ -101,7 +101,7 @@ def test_identity_and_home_are_carried_for_both_outcomes() -> None:
     arguments = build()
     core, web = package(arguments, "core"), package(arguments, "web")
     assert (core.name, core.kind, core.summary) == ("Core", "library", "domain and ports")
-    assert (core.home.kind, core.home.repository, core.home.path) == ("repository", "example/core", None)  # type: ignore[union-attr]
+    assert (core.home.kind, core.home.repository, core.home.path) == ("repository", "https://github.com/example/core.git", None)  # type: ignore[union-attr]
     assert (web.home.kind, web.home.repository, web.home.path) == ("workspace-member", None, "packages/web")  # type: ignore[union-attr]
 
 
@@ -164,7 +164,7 @@ def test_a_complete_catalog_has_no_blocking_gap() -> None:
 @pytest.mark.parametrize(
     ("edit", "expected"),
     [
-        (lambda c: c.replace('[packages.home]\nkind = "repository"\nrepository = "example/core"\n', ""), ("package-undeclared-home", "core")),
+        (lambda c: c.replace('[packages.home]\nkind = "repository"\nrepository = "https://github.com/example/core.git"\n', ""), ("package-undeclared-home", "core")),
         (lambda c: c.replace('public = ["app.core.api"]\n', ""), ("package-undeclared-public-surface", "core")),
         (lambda c: c.replace('externals = ["pydantic"]\n', ""), ("package-undeclared-external", "core")),
         (lambda c: c.replace('externals = ["flask"]\n', ""), ("package-undeclared-external", "web")),
@@ -209,11 +209,11 @@ def test_home_is_validated_when_the_catalog_is_parsed() -> None:
     no_path = CATALOG.replace('path = "packages/web"\n', "")
     with pytest.raises(CatalogError, match="requires a path"):
         build(no_path)
-    no_repository = CATALOG.replace('repository = "example/core"\n[[packages.module_renames]]', "[[packages.module_renames]]")
+    no_repository = CATALOG.replace('repository = "https://github.com/example/core.git"\n[[packages.module_renames]]', "[[packages.module_renames]]")
     with pytest.raises(CatalogError, match="requires a repository"):
         build(no_repository)
     member_core = CATALOG.replace('history = "preserve"\n[packages.release]\npin = "tag"\nmerge = "merge-commit"\ntag_before_branch_delete = true\n', "")  # a member has no policy
-    clash = member_core.replace('kind = "repository"\nrepository = "example/core"', 'kind = "workspace-member"\npath = "packages/web/inner"')
+    clash = member_core.replace('kind = "repository"\nrepository = "https://github.com/example/core.git"', 'kind = "workspace-member"\npath = "packages/web/inner"')
     with pytest.raises(CatalogError, match="nest"):
         build(clash)
 
@@ -226,3 +226,21 @@ def test_a_package_with_no_declared_surface_has_none_and_nothing_bypasses_it() -
     core = package(build(CATALOG.replace('public = ["app.core.api"]\n', "")), "core")
     assert core.public_surface == ()
     assert core.bypasses == ()  # no declared surface: nothing is private (the same meaning as in package_parts, #55)
+
+
+@pytest.mark.parametrize(
+    "repository",
+    ["example/core", "http://github.com/example/core.git", "ftp://host/example/core", "file:///srv/core", "https://", "ssh://", "git@github.com", "git@:org/name", "https://host/a b"],
+)
+def test_a_repository_home_must_be_a_git_url(repository: str) -> None:
+    with pytest.raises(CatalogError, match=r"package core home repository must be a git URL"):
+        build(CATALOG.replace("https://github.com/example/core.git", repository))
+
+
+@pytest.mark.parametrize(
+    "repository",
+    ["https://github.com/example/core.git", "https://example.org/core", "ssh://git@github.com/example/core.git", "git@github.com:example/core.git"],
+)
+def test_https_ssh_and_scp_style_git_urls_are_accepted_verbatim(repository: str) -> None:
+    core = package(build(CATALOG.replace("https://github.com/example/core.git", repository)), "core")
+    assert core.home is not None and core.home.repository == repository
