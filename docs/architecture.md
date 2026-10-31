@@ -41,6 +41,10 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.stdlib` | `single` | domain |
 | `arborescent.presets` | `single` | domain |
 | `arborescent.rules` | `single` | domain |
+| `arborescent.package_model` | `single` | domain |
+| `arborescent.package_fields` | `single` | domain |
+| `arborescent.package_parse` | `single` | domain |
+| `arborescent.package_render` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
@@ -54,6 +58,10 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.selftest` | `single` | application |
 | `arborescent.suggestions` | `single` | application |
 | `arborescent.packages` | `single` | application |
+| `arborescent.package_tree` | `single` | application |
+| `arborescent.package_manifest` | `single` | application |
+| `arborescent.package_validation` | `single` | application |
+| `arborescent.package_copy` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |
