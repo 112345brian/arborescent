@@ -33,7 +33,44 @@ def load_policy(fs: FileSystem, path: Path) -> tuple[Policy, Path]:
     raw = data if path.name == "arborescent.toml" else data.get("tool", {}).get("arborescent")
     if raw is None:
         raise PolicyError(f"{path} has no [tool.arborescent] table")
-    return policy_from_mapping(raw), path.parent
+    return policy_from_mapping(_with_derived_classify(fs, path.parent, raw)), path.parent
+
+
+def _with_derived_classify(fs: FileSystem, root: Path, raw: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Expand `classify_from` (top level and per scope) into `classify` entries read from a tach layer file."""
+    scopes = raw.get("scopes")
+    if isinstance(scopes, Mapping):
+        raw = {**raw, "scopes": {
+            name: _with_derived_classify(fs, root, scope) if isinstance(scope, Mapping) else scope
+            for name, scope in scopes.items()
+        }}
+    if "classify_from" not in raw:
+        return raw
+    source = raw["classify_from"]
+    if not isinstance(source, str) or not source:
+        raise PolicyError("`classify_from` must be a path to a tach.toml file")
+    explicit = raw.get("classify", {})
+    derived = {
+        pattern: ring
+        for pattern, ring in _tach_classify(fs, root / source, source).items()
+        if pattern not in explicit
+    }
+    return {**{k: v for k, v in raw.items() if k != "classify_from"}, "classify": {**explicit, **derived}}
+
+
+def _tach_classify(fs: FileSystem, path: Path, label: str) -> dict[str, str]:
+    """Each tach `[[modules]]` with a `layer` becomes `path` and `path.*` entries, mirroring tach's own layers."""
+    try:
+        data = tomllib.loads(fs.read_text(path))
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise PolicyError(f"`classify_from` could not read {label}: {error}") from error
+    out: dict[str, str] = {}
+    for module in data.get("modules", []):
+        module_path, layer = module.get("path"), module.get("layer")
+        if isinstance(module_path, str) and isinstance(layer, str) and module_path and layer:
+            out[module_path] = layer
+            out[module_path + ".*"] = layer
+    return out
 
 
 def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Path | None:

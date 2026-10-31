@@ -60,6 +60,10 @@ Alternatively, a module can declare its ring in Python:
 __arbor__ = {"ring": "adapters"}
 ```
 
+`classify_from = "tach.toml"` (top level or per scope) derives `classify` entries from tach's `[[modules]]` `layer`s
+(`path` and `path.*`), so a project that already assigns layers in tach need not duplicate them. Explicit `classify`
+entries stay first and win. Don't also `generate` `tach.toml` from that policy: the file would become both source and output.
+
 A valid module-level `__arbor__` takes precedence over `classify`; the ring must be declared in the policy.
 An absent annotation uses the first matching `classify` glob. In a multi-scope config, the ring must belong to the module's owning scope. A malformed annotation or unknown ring reports
 `invalid-arbor-annotation` and falls back to `classify`, so an already-classified module keeps all its ring checks.

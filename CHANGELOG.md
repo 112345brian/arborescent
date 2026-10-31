@@ -2,6 +2,12 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+
+- `classify_from = "tach.toml"` (top level or per scope) derives `classify` from tach layers; explicit entries win.
+
 ## 0.3.0 — 2026-10-30
 
 ### Added

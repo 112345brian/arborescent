@@ -4,7 +4,7 @@ import pytest
 from arborescent_helpers import MINI, mini_policy, ring_with
 
 from arborescent.adapters import LocalFileSystem
-from arborescent.config import find_child_policy, policy_from_mapping
+from arborescent.config import find_child_policy, load_policy, policy_from_mapping
 from arborescent.domain import ALL, Policy, PolicyError, RingRule
 
 
@@ -482,3 +482,54 @@ def test_scope_path_normalization_is_memoized_across_lookups() -> None:
     assert domain._normalized_source_path("./libs/alpha/src/") == "libs/alpha/src"
     assert domain._NORMALIZED_SOURCE_PATHS == {"./libs/alpha/src/": "libs/alpha/src"}
     assert domain._normalized_source_path("./libs/alpha/src/") == "libs/alpha/src"
+
+
+def _classify_from_repo(tmp_path, arbor: str, tach: str | None = None):  # type: ignore[no-untyped-def]
+    (tmp_path / "arborescent.toml").write_text(arbor, encoding="utf-8")
+    if tach is not None:
+        (tmp_path / "tach.toml").write_text(tach, encoding="utf-8")
+    return load_policy(LocalFileSystem(), tmp_path / "arborescent.toml")[0]
+
+
+TACH_LAYERS = '[[modules]]\npath = "pkg.core"\nlayer = "domain"\n[[modules]]\npath = "pkg.cli"\nlayer = "composition"\n[[modules]]\npath = "pkg.nolayer"\n'
+
+
+def test_classify_from_derives_entries_from_tach_layers(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    policy = _classify_from_repo(
+        tmp_path, 'classify_from = "tach.toml"\nrings = ["domain", "composition"]\n', TACH_LAYERS,
+    )
+    assert policy.ring_of("pkg.core") == "domain"
+    assert policy.ring_of("pkg.core.deep.leaf") == "domain"
+    assert policy.ring_of("pkg.cli") == "composition"
+    assert policy.ring_of("pkg.nolayer") is None
+
+
+def test_classify_from_keeps_explicit_entries_first(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    policy = _classify_from_repo(
+        tmp_path,
+        'classify_from = "tach.toml"\nrings = ["domain", "composition"]\n[classify]\n"pkg.core.special" = "composition"\n"pkg.cli" = "domain"\n',
+        TACH_LAYERS,
+    )
+    assert policy.ring_of("pkg.core.special") == "composition"
+    assert policy.ring_of("pkg.cli") == "domain"  # explicit wins over the tach layer
+    assert policy.ring_of("pkg.cli.sub") == "composition"
+
+
+def test_classify_from_works_per_scope(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    policy = _classify_from_repo(
+        tmp_path,
+        '[scopes.alpha]\nsources = ["pkg"]\nsource_roots = ["."]\nrings = ["domain", "composition"]\nclassify_from = "tach.toml"\n',
+        TACH_LAYERS,
+    )
+    assert policy.scope("alpha").policy.ring_of("pkg.core.x") == "domain"
+
+
+def test_classify_from_reports_missing_or_malformed_files_and_unknown_layers(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    with pytest.raises(PolicyError, match="classify_from"):
+        _classify_from_repo(tmp_path, 'classify_from = "nope.toml"\nrings = ["domain"]\n')
+    with pytest.raises(PolicyError, match="classify_from"):
+        _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["domain"]\n', "not = [valid")
+    with pytest.raises(PolicyError, match="classify_from"):
+        _classify_from_repo(tmp_path, 'classify_from = 3\nrings = ["domain"]\n')
+    with pytest.raises(PolicyError, match="unknown ring"):
+        _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["domain"]\n', TACH_LAYERS)
