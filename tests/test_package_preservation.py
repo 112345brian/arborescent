@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from arborescent_helpers import MINI, mini_policy, services, write_files
+from extracted_tree import extract_tree
 
 import arborescent.package_gaps as package_gaps
 from arborescent.adapters import FsScanner, LocalFileSystem
@@ -74,7 +75,7 @@ def build(root: Path, *, core_public: list[str] | None = None, split: bool = Tru
     if split:
         catalog = PackageCatalog.load(FS, root, "packages.toml")
         for pid in ("core", "shell"):
-            catalog.extract(pid, root / "parts" / pid)
+            extract_tree(catalog, pid, root / "parts" / pid)
 
 
 def policy(**overrides: object):

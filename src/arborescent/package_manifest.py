@@ -1,4 +1,4 @@
-"""Read and validate an extracted tree's ``.arborescent-package.toml``."""
+"""Read and validate an extracted tree's ``.arborescent-package.toml``, and write it after a migration library has extracted."""
 
 from __future__ import annotations
 
@@ -7,15 +7,24 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .package_fields import current_location, is_slug, relative_path, required, strings
+from .package_fields import (
+    current_location,
+    extraction_target,
+    is_slug,
+    relative_path,
+    required,
+    strings,
+)
 from .package_model import (
     MANIFEST_NAME,
     MANIFEST_VERSION,
+    CatalogDocument,
     CatalogError,
     ExtractedDependency,
     ExtractedPackage,
     ExtractedPath,
     PackageSemantics,
+    Placement,
 )
 from .package_parse import (
     manifest_array,
@@ -23,8 +32,40 @@ from .package_parse import (
     manifest_semantics,
     manifest_table,
 )
+from .package_render import render_manifest
 from .package_tree import check_tree, resolves_to_itself, shipped_policy
 from .ports import FileSystem
+
+
+def write_extracted_manifest(
+    fs: FileSystem, catalog: CatalogDocument, package_id: str, directory: Path, repository: str | None = None
+) -> ExtractedPackage:
+    """Record what was extracted into ``directory``, then read it back so a manifest that does not validate is an error.
+
+    The files themselves were put there by a migration library; this is only Arborescent's own record of them (what the
+    package is, where it came from, where each owned path now lives). ``repository`` names where the tree lives now: the
+    flag, else the package's home repository, else the repository it came from.
+    """
+    package = next((item for item in catalog.packages if item.id == package_id), None)
+    if package is None:
+        raise CatalogError(f"unknown package {package_id!r}")
+    home = package.home
+    if repository is not None:
+        if not repository.strip():
+            raise CatalogError("repository must be a non-empty string when set")
+        current = repository.strip()
+    elif home is not None and home.repository is not None:
+        current = home.repository
+    else:
+        current = package.repository
+    placements = [
+        Placement(package.id, item, relative.as_posix() if relative.parts else ".")
+        for item in package.paths
+        for relative in [extraction_target(package, item)]
+    ]
+    fs.mkdir(directory)
+    fs.write_text(directory / MANIFEST_NAME, render_manifest(package, (package,), placements, current))
+    return load_extracted_package(fs, directory)
 
 
 def load_extracted_package(fs: FileSystem, directory: Path) -> ExtractedPackage:

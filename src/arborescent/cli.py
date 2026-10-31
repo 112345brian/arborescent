@@ -182,25 +182,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     _ = package_actions.add_parser("schema", help="print the JSON Schema the export validates against")
     add_migrate_parser(package_actions)
-    extract = package_actions.add_parser("extract")
-    extract.add_argument("package_id")
-    extract.add_argument(
-        "--output", type=Path, required=True, help="new destination directory"
-    )
-    extract.add_argument(
-        "--catalog",
-        default="packages.toml",
-        help="package metadata file relative to repository root",
-    )
-    extract.add_argument(
-        "--repository",
-        help="repository the extracted package will live in (default: its origin repository)",
-    )
-    extract.add_argument(
-        "--with-dependencies",
-        action="store_true",
-        help="include declared dependency packages",
-    )
     b = sub.add_parser(
         "bench", help="time every engine, cold and warm, on prepared codebases"
     )
@@ -227,6 +208,8 @@ def main(
     args = parser.parse_args(argv)
     if args.command == "check" and args.yes and not args.install_tools:
         parser.error("--yes requires --install-tools")
+    if getattr(args, "with_dependencies", False):
+        parser.error("--with-dependencies was removed: a dependency is a separate package, so extract each one on its own")
     try:
         if args.command == "bench":
             return run_bench(args.dirs, args.checkers, default_services)
@@ -238,7 +221,7 @@ def main(
             extracted = load_extracted_package(fs, args.extracted)
             print(f"valid: extracted {extracted.semantics.id} ({len(extracted.paths)} paths)")
             return 0
-        if args.command == "packages" and args.package_action not in ("export", "migrate"):
+        if args.command == "packages" and args.package_action not in ("export", "migrate", "extract"):
             root = (
                 args.config.parent
                 if args.config
@@ -287,7 +270,7 @@ def _dispatch(
         return _annotate(args, policy, root, svc)
     if args.command == "selftest":
         return _selftest(policy, root, svc)
-    if args.command == "packages" and args.package_action == "migrate":
+    if args.command == "packages" and args.package_action in ("migrate", "extract"):
         return run_migrate(args, policy, root, svc, tools)
     if args.command == "packages":
         return _export(args, policy, root, svc)
@@ -303,13 +286,6 @@ def _packages(args: argparse.Namespace, root: Path, fs: FileSystem) -> int:
         for package in catalog.packages:
             print(f"{package.id}\t{package.root}\t{package.extraction_status}")
         return 0
-    destination = catalog.extract(
-        args.package_id,
-        args.output if args.output.is_absolute() else root / args.output,
-        include_dependencies=args.with_dependencies,
-        repository=args.repository,
-    )
-    print(f"extracted {args.package_id} to {destination}")
     return 0
 
 

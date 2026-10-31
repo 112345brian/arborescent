@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import fnmatch
 import tomllib
-from collections.abc import Sequence
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from .config import load_policy
 from .domain import NOISE_DIRS, Policy, PolicyError
-from .package_fields import within
 from .package_model import CatalogError
 from .ports import FileSystem
 
@@ -98,59 +96,3 @@ def check_tree(fs: FileSystem, base: Path) -> None:
             check_policy_sources(fs, base, path, policy)
 
 
-def _depth(path: PurePosixPath) -> int:
-    return len(path.parts)
-
-
-def module_name(file: Path, config_dir: Path, policy: Policy) -> str | None:
-    """The dotted module name ``policy`` derives for ``file``, or ``None`` when the file is outside its sources."""
-    if file.suffix != ".py" or not file.is_relative_to(config_dir):
-        return None
-    relative = PurePosixPath(file.relative_to(config_dir).as_posix())
-    for local in (policy, *(scope.policy for scope in policy.scopes)):
-        if not any(
-            within(relative, PurePosixPath(source)) for source in local.sources
-        ):
-            continue
-        roots = [
-            PurePosixPath(root)
-            for root in local.source_roots
-            if within(relative, PurePosixPath(root))
-        ]
-        if not roots:
-            return None
-        deepest = max(roots, key=_depth)
-        parts = list(relative.relative_to(deepest).with_suffix("").parts)
-        if parts and parts[-1] == "__init__":
-            parts.pop()
-        return ".".join(parts)
-    return None
-
-
-def check_module_identity(fs: FileSystem, pairs: Sequence[tuple[Path, Path]]) -> None:
-    """Extraction must not rename a module a shipped policy governs or move it out of that policy's sources.
-
-    Files newly visible to the policy (a ``sources = "."`` policy now seeing moved tests) only add modules.
-    """
-    origin_configs = {
-        target: source
-        for source, target in pairs
-        if target.name in ("arborescent.toml", "pyproject.toml")
-    }
-    for config, origin_config in origin_configs.items():
-        policy = shipped_policy(fs, config.parent, config)
-        if policy is None:
-            continue
-        changed = sorted(
-            f"{before} -> {after or '(outside sources)'}"
-            for source, target in pairs
-            if target.is_relative_to(config.parent)
-            and (before := module_name(source, origin_config.parent, policy))
-            is not None
-            and before != (after := module_name(target, config.parent, policy))
-        )
-        if changed:
-            raise CatalogError(
-                f"extraction would change module identity under {config.name}: {'; '.join(changed[:5])}"
-                + (" ..." if len(changed) > 5 else "")
-            )

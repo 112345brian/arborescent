@@ -172,10 +172,6 @@ path = "src/arborescent/package_contracts.py"
 role = "source"
 
 [[packages.paths]]
-path = "src/arborescent/package_copy.py"
-role = "source"
-
-[[packages.paths]]
 path = "src/arborescent/package_fields.py"
 role = "source"
 

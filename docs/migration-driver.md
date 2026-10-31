@@ -48,6 +48,13 @@ The dry run prints which source supplied the target (`target from: --target`, or
 is not TOML, has an unknown key, a non-string path or an unknown package id is an error (exit 2), never ignored; with
 `--target` given, the config is not read at all.
 
+## `extract`: the same pipeline plus the manifest
+
+`arborescent packages extract PACKAGE_ID --output DIR` is `migrate` with one more step. After the library and the rewriter have
+run, Arborescent writes `.arborescent-package.toml` into the new tree and reads it back, so `packages validate --extracted` and the
+preservation checks (`package_parts`) can use it. Everything else, including the dry run, the refusals and `--target`, is shared.
+`migrate` alone leaves the tree without a manifest. Arborescent copies no files for either command.
+
 ## What the dry run prints
 
 The package, the library, the source (the repository root) and target, the branch, every path rename and module rename

@@ -30,7 +30,7 @@ ANNOTATION = {
     "arborescent.package_model", "arborescent.package_fields", "arborescent.package_parse", "arborescent.package_render",
     "arborescent.path_exclusion", "arborescent.package_assignment", "arborescent.migration_arguments", "arborescent.migration_json",
     "arborescent.packages", "arborescent.package_tree", "arborescent.package_manifest", "arborescent.package_validation",
-    "arborescent.package_copy", "arborescent.package_gaps", "arborescent.package_probes", "arborescent.migration_export",
+    "arborescent.package_gaps", "arborescent.package_probes", "arborescent.migration_export",
 }
 
 

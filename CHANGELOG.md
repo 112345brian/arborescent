@@ -71,6 +71,12 @@
   skips with a reason where `git filter-repo`, import-linter or tach is not installed; Arborescent does not migrate (#57).
 
 ### Changed
+- `packages extract` is a wrapper: it runs the `migrate` pipeline (a migration library such as git filter-repo, then the import
+  rewriter) and writes `.arborescent-package.toml` afterwards. It takes `--output` as another name for `--target`, is a dry run
+  unless `--yes`, and needs `package_catalog` in the policy. Arborescent no longer copies files itself: `PackageCatalog.extract`,
+  the symlink and generated-output handling, `package_copy` and the extraction-time module-identity comparison are removed, and
+  `--with-dependencies` is refused (a dependency is a separate package). A path move that changes an import name without a
+  declared `module_renames` entry is therefore no longer caught at extraction; nothing checks it yet.
 - `check` now runs import-linter with the generated `arborescent-importlinter.toml` (it was written and drift-checked but never
   read, so a hand-written copy of the contracts had to be kept beside it). The file is used only when it carries the
   generated header and the project has no import-linter configuration of its own; a project's own config always wins and

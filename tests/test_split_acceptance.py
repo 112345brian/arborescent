@@ -438,3 +438,17 @@ def test_the_driver_refuses_a_package_whose_private_modules_other_packages_still
     assert done.returncode == 1, done.stdout + done.stderr
     assert "private-import" in done.stdout + done.stderr and "app.kernel.types" in done.stdout + done.stderr
     assert not target.exists() and tree_hash(monorepo) == before
+
+
+@needs_filter_repo
+def test_extract_keeps_history_and_writes_a_manifest_that_validates(monorepo: Path, tmp_path: Path) -> None:
+    """`packages extract` is the migration library plus Arborescent's manifest: real git filter-repo, real history."""
+    out = tmp_path / "kernel-extract"
+    argv = [sys.executable, "-m", "arborescent", "--config", str(monorepo / "arborescent.toml"), "packages", "extract", "kernel",
+            "--output", str(out), "--yes"]
+    done = run(argv, monorepo, check=False)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (out / ".arborescent-package.toml").is_file()
+    assert run(["git", "log", "--oneline"], out).stdout.strip()  # history came across
+    check = run([sys.executable, "-m", "arborescent", "packages", "validate", "--extracted", str(out)], monorepo, check=False)
+    assert check.returncode == 0, check.stdout + check.stderr

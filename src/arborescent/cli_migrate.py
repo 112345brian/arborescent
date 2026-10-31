@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .domain import Policy
+from .domain import Policy, PolicyError
 from .driver_plan import BLOCKED, READY, DriverPlan, plan_supply, supply
 from .driver_port import ImportRewriter, MigrationLibrary
 from .driver_request import (
@@ -34,6 +34,9 @@ from .local_targets import (
     missing_target_message,
 )
 from .migration_export import migration_arguments_of
+from .package_gaps import load_package_context
+from .package_manifest import write_extracted_manifest
+from .package_model import MANIFEST_NAME, CatalogError
 
 __all__ = ["MigrationTools", "add_migrate_parser", "run_migrate"]
 
@@ -56,15 +59,23 @@ class _View:
 
 
 def add_migrate_parser(package_actions: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
-    migrate = package_actions.add_parser(
-        "migrate", help="supply a migration library with one package's migration arguments (dry run unless --yes)"
-    )
-    migrate.add_argument("package_id")
-    migrate.add_argument(
-        "--target", type=Path, help="the new repository to create; it must not exist (else the package's entry in the local config)"
-    )
-    migrate.add_argument("--branch", default="main", help="the history to carry over (default: main)")
-    migrate.add_argument("--yes", action="store_true", help="supply the library instead of printing the arguments")
+    """``migrate`` and ``extract``: one pipeline (a migration library, then the import rewriter); ``extract`` also writes the
+    manifest that records what was extracted, which the preservation checks and ``packages validate --extracted`` read."""
+    for name, summary in (
+        ("migrate", "supply a migration library with one package's migration arguments (dry run unless --yes)"),
+        ("extract", "migrate one package into a new tree and record it in a .arborescent-package.toml (dry run unless --yes)"),
+    ):
+        command = package_actions.add_parser(name, help=summary)
+        command.add_argument("package_id")
+        command.add_argument(
+            "--target", "--output", dest="target", type=Path,
+            help="the new repository to create; it must not exist (else the package's entry in the local config)",
+        )
+        command.add_argument("--branch", default="main", help="the history to carry over (default: main)")
+        command.add_argument("--yes", action="store_true", help="supply the library instead of printing the arguments")
+        if name == "extract":
+            command.add_argument("--repository", help="where the extracted tree lives now (default: the package's home repository)")
+            command.add_argument("--with-dependencies", action="store_true", help=argparse.SUPPRESS)  # refused in cli.main, with the reason
 
 
 def run_migrate(args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: MigrationTools) -> int:
@@ -95,7 +106,24 @@ def run_migrate(args: argparse.Namespace, policy: Policy, root: Path, svc: Servi
         return 1 if args.yes else 0  # nothing has been created: the missing tool is named before the first step runs
     if not args.yes:
         return 0
-    return _supply_and_rewrite(plan, tools, site)
+    code = _supply_and_rewrite(plan, tools, site)
+    if code == 0 and args.package_action == "extract":
+        return _write_manifest(args, policy, root, svc, site)
+    return code
+
+
+def _write_manifest(args: argparse.Namespace, policy: Policy, root: Path, svc: Services, site: MigrationSite) -> int:
+    """``extract`` only: record what the library extracted, in Arborescent's own manifest, and read it back."""
+    context = load_package_context(policy, root, svc.fs, svc.scanner.scan(policy, root))
+    if context is None:
+        raise PolicyError("packages extract needs package_catalog in the policy (strict preset)")
+    try:
+        write_extracted_manifest(svc.fs, context.catalog, args.package_id, site.target, args.repository)
+    except CatalogError as exc:
+        print(f"FAILED: the tree was extracted to {site.target} but its manifest is not valid: {exc}")
+        return 1
+    print(f"ok: wrote {MANIFEST_NAME} in {site.target}")
+    return 0
 
 
 def _supply_and_rewrite(plan: DriverPlan, tools: MigrationTools, site: MigrationSite) -> int:

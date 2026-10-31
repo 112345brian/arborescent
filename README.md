@@ -133,7 +133,7 @@ arborescent selftest     # mutation-test native rules and fail if a rule stops f
 arborescent bench DIR…   # cold/warm timings of every engine on prepared codebases
 arborescent packages validate
 arborescent packages list
-arborescent packages extract PACKAGE_ID --output DIR
+arborescent packages extract PACKAGE_ID --output DIR  # migrate + the manifest the preservation checks read; dry run unless --yes
 arborescent packages export --output migration.json   # read-only JSON for migration tools; see docs/migration-export.md and docs/migration-recipes.md
 arborescent packages migrate PACKAGE_ID --target DIR  # dry run: the arguments a migration library would be given; see docs/migration-driver.md
 ```
