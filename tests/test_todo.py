@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from arborescent_helpers import mini_policy
+from arborescent_helpers import generate, mini_policy
 
-from arborescent.generate import generate
 from arborescent.typecheckers import by_name
 
 

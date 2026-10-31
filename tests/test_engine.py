@@ -13,7 +13,14 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import CHECKERS, MINI, mini_policy, services, write_files
+from arborescent_helpers import (
+    CHECKERS,
+    MINI,
+    generate,
+    mini_policy,
+    services,
+    write_files,
+)
 
 import arborescent.selftest as selftest_mod
 from arborescent import baseline
@@ -36,7 +43,6 @@ from arborescent.engine import (
     write_generated,
 )
 from arborescent.engines import default_engines
-from arborescent.generate import generate
 from arborescent.selftest import selftest
 from arborescent.testing import FakeToolRunner
 from arborescent.typecheckers import Pyrefly, by_name

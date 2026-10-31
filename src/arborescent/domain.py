@@ -19,9 +19,11 @@ __all__ = [
     "INFORMATIONAL_RULES",
     "NOISE_DIRS",
     "Allowance",
+    "ArchitectureContracts",
     "ArchitectureScope",
     "ChildArbor",
     "Contract",
+    "ModuleLayer",
     "Mutation",
     "Policy",
     "PolicyError",
@@ -554,6 +556,34 @@ def _validate_scope_acyclic(scopes: tuple[ArchitectureScope, ...], names: list[s
 # (names that are not third-party-free for the module, names its ring lists); ``None`` for a module with no ring.
 Allowance = tuple[frozenset[str], frozenset[str]]
 Contract = tuple[str, list[str], list[str]]  # (name, source modules, forbidden modules)
+
+
+@dataclass(frozen=True)
+class ModuleLayer:
+    """One module in the neutral contracts: the layer it sits in and, when the boundaries are listed per module, who it may import."""
+
+    path: str
+    layer: str
+    may_import: tuple[str, ...] | None = None  # ``None``: the layer order alone decides
+
+
+@dataclass(frozen=True)
+class ArchitectureContracts:
+    """What the policy requires of the import graph, in no tool's format. The engine adapters render it (import-linter,
+    tach) or are handed it (any graph analyzer the user supplies); the core never writes a tool's configuration itself.
+
+    Paths are relative to the repository root; the adapter that writes a file relative to ``config_dir`` does the offsetting.
+    """
+
+    root_packages: tuple[str, ...]
+    forbidden: tuple[Contract, ...]  # (name, importers, modules they may not import), in the order they are reported
+    layers: tuple[str, ...]  # outermost first
+    modules: tuple[ModuleLayer, ...]
+    explicit_boundaries: bool  # ``modules`` carry ``may_import``: same-layer peers and package boundaries are listed, not implied
+    source_roots: tuple[str, ...]
+    config_dir: str  # where the generated files go, relative to the repository root ("" = the root)
+    distributions: tuple[tuple[str, str], ...]  # (module, distribution) where the import name differs from the package name
+    external_exclude: tuple[str, ...]  # third-party imports no tool should demand a declaration for
 
 
 @dataclass(frozen=True)

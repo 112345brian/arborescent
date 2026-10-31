@@ -7,12 +7,11 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import mini_policy, write_files
+from arborescent_helpers import generate, mini_policy, write_files
 
 from arborescent.adapters import LocalFileSystem, SubprocessToolRunner
 from arborescent.domain import ToolResult
 from arborescent.engines import Ruff, TachExternal, default_engines
-from arborescent.generate import generate
 from arborescent.typecheckers import by_name
 
 

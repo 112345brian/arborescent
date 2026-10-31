@@ -10,7 +10,13 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import MINI_FILES, mini_policy, write_files
+from arborescent_helpers import (
+    MINI_FILES,
+    generate,
+    generate_for_scan,
+    mini_policy,
+    write_files,
+)
 from fs_helpers import KINDS, make_fs, put
 
 from arborescent import baseline
@@ -19,8 +25,8 @@ from arborescent.bench import bench_one
 from arborescent.config import find_policy, load_policy
 from arborescent.domain import PolicyError, Violation
 from arborescent.engine import Services, drift
+from arborescent.engines import default_engines
 from arborescent.facts import ModuleInfo, extract
-from arborescent.generate import generate, generate_for_scan
 from arborescent.ports import FileSystem
 from arborescent.practices import (
     crlf,
@@ -225,7 +231,7 @@ def test_selftest_works_on_a_copy_and_leaves_the_repository_untouched(repo: Path
     (repo / ".git").mkdir()
     (repo / ".git" / "HEAD").write_text("ref", encoding="utf-8")
     before = tree(repo)
-    report = selftest(mini_policy(), repo, Services(FsScanner(), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), []))
+    report = selftest(mini_policy(), repo, Services(FsScanner(), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines()))
     assert report.ok
     assert tree(repo) == before
 
@@ -237,7 +243,7 @@ def test_bench_writes_the_generated_configs_and_clears_the_cache(tmp_path: Path)
     write_files(tmp_path, {"app/__init__.py": "", "app/domain.py": "X = 1\n", "arborescent.toml": BENCH_TOML})
     (tmp_path / ".arborescent").mkdir()
     (tmp_path / ".arborescent" / "stale").write_text("x", encoding="utf-8")
-    lines = bench_one(tmp_path, ["pyright"], lambda r: Services(FsScanner(r / ".arborescent"), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), []))
+    lines = bench_one(tmp_path, ["pyright"], lambda r: Services(FsScanner(r / ".arborescent"), FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines()))
     assert lines[0].startswith("### ") and any("arborescent own checks" in ln for ln in lines)
     assert (tmp_path / "pyrightconfig.json").is_file() and (tmp_path / "arborescent-importlinter.toml").is_file()
     assert not (tmp_path / ".arborescent" / "stale").exists()

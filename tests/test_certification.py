@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import MINI_FILES, mini_policy, services, write_files
+from arborescent_helpers import MINI_FILES, mini_policy, services, tach, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from arborescent.certification import (
@@ -17,7 +17,6 @@ from arborescent.certification import (
 )
 from arborescent.config import policy_from_mapping
 from arborescent.engine import Options, run_check
-from arborescent.generate import tach
 from arborescent.installer_adapter import _toml_array_close
 from arborescent.testing import FakeToolRunner
 

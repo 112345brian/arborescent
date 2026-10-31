@@ -93,6 +93,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.install_tools` | `single` | application |
 | `arborescent.engine` | `single` | application |
 | `arborescent.generate` | `single` | application |
+| `arborescent.architecture_contracts` | `single` | application |
 | `arborescent.practices` | `single` | application |
 | `arborescent.selftest` | `single` | application |
 | `arborescent.suggestions` | `single` | application |
@@ -139,7 +140,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
    the child's direct policy root through the same `ToolRunner`; child status contributes to the parent result.
 3. Meanwhile the scanner finds every module and parses each file once (content-hash cached); `rules.check_modules`,
    suppression and `discard()` inventories, and the practices run over that one parse.
-4. `generate.generate` renders the expected tool configs in memory; `engine.drift` diffs them against the committed files.
+4. `architecture_contracts.compile_contracts` turns the policy into neutral contracts, each contract renderer among the engines (`ImportLinter`, `Tach`, or one the caller supplies) writes its own format from them, and `generate.generate` collects the files in memory; `engine.drift` diffs them against the committed files.
 5. `baseline.apply` compares the violations with the baseline: new ones fail, entries that vanished are reported stale.
 
 The parent scanner excludes explicitly listed child roots only when they have a direct policy and
