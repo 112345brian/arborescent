@@ -1,6 +1,6 @@
 # Annotations for a mechanical monorepo-to-polyrepo migration: the boundary
 
-Status: decision record for issue #51 (Phase 0 of program #59). Docs only; no code change. Revised after owner clarification: Arborescent may run the migration, as a wrapper over external tools.
+Status: decision record for issue #51 (Phase 0 of program #59). Docs only; no code change. Revised after owner clarification: Arborescent supplies the migration arguments and a required driver layer runs external tools with them.
 
 ## Principle
 
@@ -10,8 +10,11 @@ package, the exact arguments a migration needs, derived from the annotations and
 consistency. Specialized tools (git filter-repo, rope, LibCST, grimp, deptry, import-linter, tach, Copybara, Josh) do
 the work with those arguments. Arborescent never reimplements what they do better and more robustly.
 
-Running a migration is optional and secondary: where useful, a thin wrapper may pass the arguments to a tool through a
-port (see "Wrapper rules"). The arguments exist whether or not Arborescent runs anything.
+Arborescent has two layers. The **annotation layer** (annotations, checks, migration arguments, export) is the
+foundation. The **driver layer** sits on top of it and is a required part of Arborescent: it takes the migration
+arguments and runs the specialized tools with them through ports and adapters (see "Wrapper rules"). The driver
+contains no migration logic of its own; it owns the sequencing and the translation from arguments to each tool's input.
+The annotation layer never depends on the driver, and the arguments stay usable by any external tool.
 
 Placement rule used by the first downstream case: a package gets its own repository only if it would be its own
 product; every other generic package becomes a workspace member in the same repository. Which one applies is a
@@ -32,7 +35,7 @@ and through the stable JSON export. For one package:
 - the derivable `pyproject.toml` fields (#60).
 
 Tool-neutral means these objects name no tool. Turning them into one tool's input (a filter-repo paths file, a rope
-move, a Copybara workflow) is a small renderer owned by an adapter or a documented recipe; the data itself lives here.
+move, a Copybara workflow) is done by that tool's adapter in the driver layer; the data itself lives in the annotation layer.
 What Arborescent can already check about them (unassigned or doubly assigned paths, public-surface violations,
 undeclared dependencies, annotation-vs-`classify` drift) is reported by rule id, so a gap is found before a tool runs.
 
@@ -42,11 +45,11 @@ undeclared dependencies, annotation-vs-`classify` drift) is reported by rule id,
   rewriter). The application ring orchestrates through the port and holds no knowledge of any tool's command line.
 - Each tool has an adapter in the adapters ring that invokes it as a subprocess or library, following the existing
   engine adapters. Adapters do not import the application ring; only composition wires them.
-- Tools are optional dependencies (extras). A missing tool reports a `SETUP` line naming the install command, as
+- The driver is core; the individual tools are optional dependencies (extras) installed per use. A missing tool reports a `SETUP` line naming the install command, as
   missing engines do today. Arborescent never vendors or reimplements a tool.
 - The application ring only translates annotations into the tool's inputs (paths, renames, targets) and sequences the
   steps. If a step needs logic the tool lacks, the answer is a different tool or an upstream change, not code here.
-- Execution is explicit and opt-in. Planning and dry-run output come from the same path, so what is shown is what runs.
+- Execution is an explicit command, never a side effect of `check` or `generate`. Planning and dry-run output come from the same path, so what is shown is what runs.
 - Tests use in-memory fake tools through the ports, never patch a concrete module.
 
 ## In scope
@@ -59,7 +62,7 @@ undeclared dependencies, annotation-vs-`classify` drift) is reported by rule id,
   the engines' own violation output is the cut list.
 - One stable, read-only JSON export of the annotation data for any external tool to consume.
 - Deriving a package's `pyproject.toml` fields from the annotations, with a drift check (#60).
-- Optional orchestration of the migration through the ports and adapters above, using the arguments supplied here.
+- The driver layer: running the migration through the ports and adapters above, using the arguments supplied here.
 
 ## Out of scope
 
