@@ -86,6 +86,7 @@ class Rule(StrEnum):
     PACKAGE_RING_DRIFT = "package-ring-drift"
     PACKAGE_PUBLIC_SYMBOL_DROPPED = "package-public-symbol-dropped"
     PACKAGE_PRIVATE_IMPORT = "package-private-import"
+    PACKAGE_RELEASE_POLICY_MISSING = "package-release-policy-missing"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {

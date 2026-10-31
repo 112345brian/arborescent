@@ -26,6 +26,7 @@ kind = "library"
 repository = "example/repo"
 root = "app"
 summary = "domain and ports"
+history = "preserve"
 [[packages.paths]]
 path = "app/__init__.py"
 role = "source"
@@ -43,6 +44,7 @@ kind = "application"
 repository = "example/repo"
 root = "app"
 summary = "adapters and entry point"
+unmanaged = true
 depends_on = ["core"]
 [[packages.paths]]
 path = "app/adapters.py"
@@ -62,6 +64,7 @@ package = "core"
 PACKAGE_RULES = {
     Rule.PACKAGE_UNASSIGNED_MODULE, Rule.PACKAGE_MULTIPLY_ASSIGNED_MODULE, Rule.PACKAGE_UNOWNED_ASSET,
     Rule.PACKAGE_MULTIPLY_ASSIGNED_ASSET, Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_UNDECLARED_DEPENDENCY,
+    Rule.PACKAGE_RELEASE_POLICY_MISSING,
 }
 
 

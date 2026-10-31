@@ -26,7 +26,9 @@ from .package_model import (
     ModuleRename,
     PackageDescriptor,
     PackageHome,
+    ReleasePolicy,
 )
+from .package_policy import policy_violations
 
 __all__ = [
     "Bypass", "Edge", "Gap", "GapCode", "MigrationArguments", "OwnedAsset", "OwnedModule", "PackageArguments",
@@ -118,6 +120,9 @@ class PackageArguments:
     bypasses: tuple[Bypass, ...]
     depends_on: tuple[str, ...]
     externals: tuple[str, ...] | None  # None: not annotated
+    release: ReleasePolicy | None = None  # release/pin/history policy (#56); a workspace member exports none
+    history: str | None = None
+    unmanaged: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +146,7 @@ class MigrationArguments:
 def build_migration_arguments(catalog: CatalogDocument, facts: RepositoryFacts) -> MigrationArguments:
     gaps: list[Gap] = [
         Gap(str(v.rule), v.subject, v.detail, INFO if v.rule in INFORMATIONAL_RULES else ERROR)
-        for v in assignment_violations(catalog, facts)
+        for v in [*assignment_violations(catalog, facts), *policy_violations(catalog)]
     ]
     inputs = _Inputs(catalog, facts, _sole_owners(catalog, facts))
     observed, importers = _observed_edges(facts, inputs.sole)
@@ -211,6 +216,7 @@ def _package_arguments(
         package.id, package.name, package.kind, package.summary, package.domain, package.capabilities, package.home,
         modules, assets, tuple(PathRename(source.as_posix(), _posix(target)) for source, target in placements),
         package.module_renames, surface, bypasses, package.depends_on, externals,
+        package.release, package.history, package.unmanaged,
     )
 
 

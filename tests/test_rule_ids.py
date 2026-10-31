@@ -70,6 +70,7 @@ def test_rule_id_strings_never_change() -> None:
             "package-ring-drift",
             "package-public-symbol-dropped",
             "package-private-import",
+            "package-release-policy-missing",
         ]
     )
 

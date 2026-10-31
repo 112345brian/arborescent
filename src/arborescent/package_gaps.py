@@ -11,6 +11,7 @@ from .package_assignment import RepositoryFacts, assignment_violations
 from .package_contracts import PackageLayout, layout_of
 from .package_model import CatalogDocument, CatalogError
 from .package_parts import load_parts, module_imports, public_symbols
+from .package_policy import policy_violations
 from .package_preservation import PartFacts, preservation_violations
 from .package_tree import is_generated
 from .packages import read_catalog
@@ -66,9 +67,11 @@ def package_gap_violations(
     context = load_package_context(policy, root, fs, scan, scanner)
     if context is None:
         return []
-    return assignment_violations(context.catalog, context.facts) + preservation_violations(
-        context.catalog, context.facts, context.parts
-    )
+    return [
+        *assignment_violations(context.catalog, context.facts),
+        *preservation_violations(context.catalog, context.facts, context.parts),
+        *policy_violations(context.catalog),
+    ]
 
 
 def repository_facts(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> RepositoryFacts:

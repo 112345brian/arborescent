@@ -29,6 +29,14 @@
   third-party names its rings do not list) and into tach's per-module `depends_on`, so the engines' own violation output
   is a package's cut list. Tach switches to explicit `depends_on` when the catalog is set (#53).
 
+- Per-package release, pin and history policy in `packages.toml`: `release.pin` (`tag` or `sha`), `release.merge`
+  (`merge-commit` only), `release.tag_before_branch_delete`, `history` (`preserve` or `fresh`) and an explicit
+  `unmanaged = true`. Values are validated and unknown `release` keys rejected. New rule
+  `package-release-policy-missing` names a package with neither a policy nor the marker (workspace members are exempt
+  and cannot declare one); `selftest` probes it. The policy fills the `policy` slot of the migration export and the gap
+  appears in its `gaps`. Any unknown key on a `[[packages]]` entry is now rejected. Data and checks only: nothing is
+  released, pinned or rewritten (#56).
+
 ### Changed
 
 - `packages.py` is split into cohesive `package_*` modules; behaviour and the `arborescent.packages` names are unchanged,

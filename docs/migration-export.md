@@ -54,14 +54,21 @@ reported as a gap, never guessed.
   job.
 - **`surface.bypasses[]`** lists the modules of *other* packages that import a module of this package which is not on
   its public surface (`module`, importing `package`, the module it `imports`). A package that declares no surface has none.
-- **`policy` and `pyproject` are reserved** (release, pin and history policy: #56; derivable `pyproject.toml` fields:
-  #60). They are always `null` in version 1 and typed `object | null`, so they can be filled without a version bump. The
-  schema already requires `policy` to be `null` for a workspace member: a workspace member exports no history or pin
-  information.
+- **`policy`** is the release, pin and history policy annotated in `packages.toml` (see
+  [Release, pin and history policy](configuration.md#release-pin-and-history-policy)): `null` when none is declared (the
+  export then carries a `package-release-policy-missing` gap), otherwise
+  `{ history: "preserve" | "fresh" | null, release: { pin: "tag" | "sha" | null, merge: "merge-commit" | null,
+  tag_before_branch_delete: boolean | null } | null, unmanaged: boolean }`. An unmanaged package exports
+  `{ history: null, release: null, unmanaged: true }`. The schema requires `null` for a workspace member, which has no
+  history or pin of its own, and the catalog refuses a policy on one. Arborescent releases and pins nothing; these are
+  the values the tools that do receive.
+- **`pyproject` is reserved** (derivable `pyproject.toml` fields: #60). It is always `null` in version 1 and typed
+  `object | null`, so it can be filled without a version bump. `policy` was filled the same way: it was typed
+  `object | null` and always `null` before, so no existing document stops validating.
 - **Gaps are named entries.** `ready` is `true` when no gap has severity `error`; a consumer can refuse on `ready` or on
   a code it cares about. Codes are the package-assignment rule ids (`package-unassigned-module`,
   `package-multiply-assigned-module`, `package-unowned-asset`, `package-multiply-assigned-asset`,
-  `package-undeclared-dependency`; `package-spans-rings` has severity `info`) and these export-only codes:
+  `package-undeclared-dependency`, `package-release-policy-missing`; `package-spans-rings` has severity `info`) and these export-only codes:
 
 | Code | Raised when |
 |---|---|
