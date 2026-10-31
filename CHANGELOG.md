@@ -2,7 +2,7 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
-## Unreleased
+## 0.3.0 — 2026-10-31
 
 ### Added
 
@@ -10,11 +10,6 @@
 - tach is optional for the minimum profile: `disabled_tools = ["tach"]` passes when import-linter stays enabled and
   installed. `check` warns (advisory) when tach is enabled over several distinct `source_roots`, where tach cannot
   enforce cross-root edges, and the minimum profile then skips tach's layer canary if import-linter is enabled (#41).
-
-## 0.3.0 — 2026-10-30
-
-### Added
-
 - Module-level `__arbor__ = {"ring": "domain"}` annotations take precedence over `classify` globs. Malformed
   annotations and unknown rings report `invalid-arbor-annotation` while falling back to `classify` for enforcement;
   modules without a fallback ring also report `unclassified`.
