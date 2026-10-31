@@ -28,6 +28,6 @@ jobs:
       - name: Architecture (import-linter contract)
         run: lint-imports --config arborescent-importlinter.toml
       - name: Architecture (arborescent dogfood)
-        run: python -m arborescent check --require-profile
+        run: python -m arborescent check --require-profile --require-modularity
       - name: Mutation self-test
         run: python -m arborescent selftest

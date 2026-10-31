@@ -23,7 +23,7 @@ jobs:
       - run: python -m pip install -e ".[dev]" "ruff==0.17.2" "tach==0.35.3"
       - run: python -m pytest
       - run: lint-imports --config arborescent-importlinter.toml
-      - run: python -m arborescent check --require-profile
+      - run: python -m arborescent check --require-profile --require-modularity
       - run: python -m arborescent selftest
 
   build:
