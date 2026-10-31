@@ -31,6 +31,14 @@ pool; it still forbids every other effect category under the strict preset.
 Adapters do **not** import `application`. Use cases receive adapters through the ports (`Services` in `engine.py`), and
 only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 
+## What Arborescent does not do
+
+Arborescent supplies annotations, the checks that they are complete and consistent, engine contracts compiled from
+them, and a stable export. It does not perform or plan a monorepo-to-polyrepo migration (history rewriting, import
+rewriting, graph analytics, repository creation, syncing); existing tools do. The boundary, the researched tool
+landscape and the status of the existing `packages extract` are in
+`docs/superpowers/specs/2026-10-31-monorepo-split-annotations-design.md`.
+
 ## Modules
 
 | module | scope | ring |
