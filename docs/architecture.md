@@ -31,7 +31,7 @@ pool; it still forbids every other effect category under the strict preset.
 Adapters do **not** import `application`. Use cases receive adapters through the ports (`Services` in `engine.py`), and
 only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 
-## Migration: a wrapper, not an implementation
+## Migration: supply the arguments, do not reimplement the tools
 
 Arborescent supplies annotations, the checks that they are complete and consistent, engine contracts compiled from
 them, and a stable export, including the typed arguments a monorepo-to-polyrepo migration needs. It may also run a migration, but only by driving existing tools
