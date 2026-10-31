@@ -54,12 +54,20 @@ def test_warm_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> N
     assert min(runs) < 0.10, f"warm own checks took {min(runs) * 1000:.0f} ms (budget 100 ms)"
 
 
+COLD_BUDGET_SECONDS_PER_FILE = 1.0 / 32  # the original 1.0 s budget, set when the repository had 32 modules
+
 def test_cold_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> None:
     policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     t0 = time.perf_counter()
     _, scan = run_own(policy, root, own_services(tmp_path / "cache"), practices=False)
     cold = time.perf_counter() - t0
-    assert scan.parsed == len(scan.known) and cold < 1.0, f"cold {cold * 1000:.0f} ms for {scan.parsed} files"
+    # The budget is per file, not absolute: it was 1.0 s when this repository had 32 modules, and parsing a cold tree is linear in
+    # its size. A fixed number turned the repository growing into a test failure (66 modules took 1.12 s on a slow macOS runner,
+    # about 17 ms per file against an allowance of 31 ms), while a slowdown of the scanner per file still trips it.
+    budget = max(1.0, COLD_BUDGET_SECONDS_PER_FILE * scan.parsed)
+    assert scan.parsed == len(scan.known) and cold < budget, (
+        f"cold {cold * 1000:.0f} ms for {scan.parsed} files (budget {budget * 1000:.0f} ms)"
+    )
 
 
 def test_no_file_is_parsed_twice_in_one_run(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
