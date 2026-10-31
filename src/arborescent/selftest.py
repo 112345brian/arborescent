@@ -15,6 +15,7 @@ from typing import Protocol
 from .domain import NOISE_DIRS, ArchitectureScope, Policy, Rule
 from .engine import Services, run_own
 from .facts import ModuleInfo
+from .module_forbid_probes import module_forbid_mutations
 from .mutation import Mutation
 from .package_gaps import PackageContext, load_package_context
 from .package_probes import package_mutations
@@ -111,6 +112,9 @@ def plan(
         require_mutations, require_skipped = _require_annotation_plan(local_policy, local_known, local_paths, arbor_index)
         out.extend(require_mutations)
         skipped.extend(require_skipped)
+        forbid_found, forbid_skipped = module_forbid_mutations(local_policy, local_paths, local_known)
+        out.extend(forbid_found)
+        skipped.extend(forbid_skipped)
         if local_policy.entry_scripts:
             entry_host = next((
                 name for name in sorted(local_known)
