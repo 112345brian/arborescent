@@ -22,6 +22,7 @@ from arborescent.config import load_policy
 from arborescent.engine import Options, Services, run_check, run_own
 from arborescent.engines import default_engines
 from arborescent.generate import generate
+from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.typecheckers import all_checkers
 
 HERE = Path(__file__).resolve().parents[1]
@@ -29,7 +30,7 @@ CHECKERS = list(all_checkers().values())
 
 
 def own_services(cache: Path | None = None) -> Services:
-    return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines())
+    return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines(), AnnotationPackageChecks())
 
 
 def test_arborescent_passes_its_own_policy_and_reports_generated_preset_drift_advisorially() -> None:
@@ -78,7 +79,7 @@ def test_no_file_is_parsed_twice_in_one_run(repo: Path, monkeypatch: pytest.Monk
     seen: list[str] = []
     real = scanner.extract
     monkeypatch.setattr(scanner, "extract", lambda src, name="": (seen.append(name), real(src, name))[1])
-    _ = run_check(mini_policy(), repo, Services(FsScanner(), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines()), Options(tools=False))
+    _ = run_check(mini_policy(), repo, Services(FsScanner(), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines(), AnnotationPackageChecks()), Options(tools=False))
     assert len(seen) == len(set(seen)) == 5
 
 

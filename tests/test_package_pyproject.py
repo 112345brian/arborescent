@@ -9,13 +9,13 @@ import pytest
 from arborescent_helpers import mini_policy, services, write_files
 from jsonschema import Draft202012Validator, ValidationError
 
-import arborescent.engine as engine
+import arborescent.package_checks as package_checks
 from arborescent.adapters import FsScanner, LocalFileSystem
 from arborescent.domain import INFORMATIONAL_RULES, PolicyError, Rule
 from arborescent.engine import Options, run_check, run_own, write_generated
 from arborescent.migration_export import migration_arguments_of
 from arborescent.migration_json import SCHEMA, export_document
-from arborescent.package_gaps import load_package_context
+from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_model import CatalogError
 from arborescent.practices import undeclared_imports
 from arborescent.selftest import plan, selftest
@@ -279,7 +279,7 @@ def test_drift_is_information_that_never_fails_a_check(tmp_path: Path) -> None:
 
 def mutated_rules(root: Path) -> set[Rule]:
     scan = FsScanner().scan(policy(), root)
-    return {m.rule for m in plan(policy(), scan, load_package_context(policy(), root, FS, scan))[0]}
+    return {m.rule for m in plan(policy(), scan, AnnotationPackageChecks().probes(policy(), root, FS, scan, FsScanner()))[0]}
 
 
 def test_the_drift_rule_has_a_selftest_probe_when_a_derived_file_exists(tmp_path: Path) -> None:
@@ -291,7 +291,7 @@ def test_the_drift_rule_has_a_selftest_probe_when_a_derived_file_exists(tmp_path
 def test_the_probe_is_skipped_with_a_reason_when_no_derived_file_exists(tmp_path: Path) -> None:
     repo(tmp_path)
     scan = FsScanner().scan(policy(), tmp_path)
-    mutations, skipped = plan(policy(), scan, load_package_context(policy(), tmp_path, FS, scan))
+    mutations, skipped = plan(policy(), scan, AnnotationPackageChecks().probes(policy(), tmp_path, FS, scan, FsScanner()))
     assert Rule.PACKAGE_PYPROJECT_DRIFT not in {m.rule for m in mutations}
     assert any(Rule.PACKAGE_PYPROJECT_DRIFT in line for line in skipped)
 
@@ -308,7 +308,7 @@ def test_selftest_survives_when_the_drift_check_is_removed(tmp_path: Path, monke
     """The guard against rule removal: with the drift check stubbed out, its probe must report a survivor."""
     repo(tmp_path)
     write_generated(policy(), tmp_path, services())
-    monkeypatch.setattr(engine, "package_gap_violations", lambda *args, **kwargs: [])
+    monkeypatch.setattr(package_checks, "package_gap_violations", lambda *args, **kwargs: [])
     report = selftest(policy(), tmp_path, services())
     assert any(entry.startswith(f"[{Rule.PACKAGE_PYPROJECT_DRIFT}]") for entry in report.survived)
 

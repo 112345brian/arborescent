@@ -12,13 +12,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from .domain import NOISE_DIRS, ArchitectureScope, Policy, Rule
-from .engine import Services, run_own
+from .domain import NOISE_DIRS, ArchitectureScope, Mutation, Policy, Rule
+from .engine import Services, package_checks, run_own
 from .facts import ModuleInfo
 from .module_forbid_probes import module_forbid_mutations
-from .mutation import Mutation
-from .package_gaps import PackageContext, load_package_context
-from .package_probes import package_mutations
+from .ports import PackageProbes
 
 
 class ScanView(Protocol):
@@ -87,7 +85,7 @@ class SelfTestReport:
 
 
 def plan(
-    policy: Policy, scan: ScanView, packages: PackageContext | None = None,
+    policy: Policy, scan: ScanView, packages: PackageProbes | None = None,
 ) -> tuple[list[Mutation], list[str]]:
     """The mutations for this policy, plus the ones that cannot be built (and why).
 
@@ -146,7 +144,7 @@ def plan(
         out.extend(_scope_boundary_mutations(policy, paths, known, owners))
         out.extend(_scope_effect_mutations(policy, scan))
     if packages is not None:
-        package_found, package_skipped = package_mutations(policy, scan.arbor_index, scan.scope_by_module, packages)
+        package_found, package_skipped = packages.mutations(policy, scan.arbor_index, scan.scope_by_module)
         out.extend(package_found)
         skipped.extend(package_skipped)
     return out, sorted(set(skipped))
@@ -382,7 +380,9 @@ def _abstraction_mutations(policy: Policy, ring: str, host: str) -> list[Mutatio
 def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     services = replace(services, scanner=services.scanner.uncached())  # mutated copies must not touch the real cache
     _, scan = run_own(policy, root, services, practices=False)
-    mutations, skipped = plan(policy, scan, load_package_context(policy, root, services.fs, scan, services.scanner))
+    checks = package_checks(policy, services)
+    probes = None if checks is None else checks.probes(policy, root, services.fs, scan, services.scanner)
+    mutations, skipped = plan(policy, scan, probes)
     report = SelfTestReport([], [], skipped)
     fs = services.fs
     with fs.temporary_directory("arborescent-selftest-") as tmp:

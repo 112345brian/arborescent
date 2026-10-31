@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Protocol
 
-from .domain import Policy, ToolResult, Violation
+from .domain import Allowance, Contract, Mutation, Policy, ToolResult, Violation
 from .facts import ModuleInfo
 
-__all__ = ["Clock", "Engine", "FileSystem", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker", "ViolationEngine"]
+__all__ = [
+    "Clock", "Engine", "FileSystem", "ModuleScanner", "PackageBoundaries", "PackageChecks", "PackageProbes", "RootAwareEngine",
+    "ScanResult", "ToolRunner", "TypeChecker", "ViolationEngine",
+]
 
 
 class ToolRunner(Protocol):
@@ -92,6 +95,43 @@ class RootAwareEngine(Protocol):
     """
 
     def command_in(self, files: Sequence[str], root: Path, fs: FileSystem) -> list[str]: ...
+
+
+class PackageBoundaries(Protocol):
+    """What the engine configs are compiled from when packages are declared: who may import whom, as contracts."""
+
+    def allows(self, importer: str, imported: str) -> bool: ...
+
+    def contracts(self, module_leaves: Sequence[str], allowance: Callable[[str], Allowance | None]) -> list[Contract]: ...
+
+
+class PackageProbes(Protocol):
+    """The selftest mutations the package rules contribute, built over the catalog that was loaded for this run."""
+
+    def mutations(
+        self, policy: Policy, arbor_index: Mapping[str, tuple[str | None, str | None]], scope_by_module: Mapping[str, str]
+    ) -> tuple[list[Mutation], list[str]]: ...  # (mutations, why the rest cannot be built)
+
+
+class PackageChecks(Protocol):
+    """Everything the engine asks of the package-annotation layer, and nothing else.
+
+    The engine owns this interface and the annotation layer implements it, so the core never imports the annotation layer:
+    a package that depends on the core is not also depended on by it. Bound in ``Services``; with a ``package_catalog`` in
+    the policy and nothing bound the engine refuses to run, so a missing binding cannot read as a clean result.
+    """
+
+    def gap_violations(
+        self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult, scanner: ModuleScanner
+    ) -> list[Violation]: ...
+
+    def boundaries(self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> PackageBoundaries | None: ...
+
+    def new_files(self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> dict[str, str]: ...  # path -> text
+
+    def probes(
+        self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult, scanner: ModuleScanner
+    ) -> PackageProbes | None: ...
 
 
 class ViolationEngine(Protocol):

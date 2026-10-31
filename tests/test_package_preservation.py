@@ -11,7 +11,7 @@ import arborescent.package_gaps as package_gaps
 from arborescent.adapters import FsScanner, LocalFileSystem
 from arborescent.domain import INFORMATIONAL_RULES, PolicyError, Rule
 from arborescent.engine import Options, run_check, run_own
-from arborescent.package_gaps import load_package_context
+from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_model import CatalogError
 from arborescent.packages import PackageCatalog, load_extracted_package
 from arborescent.selftest import plan, selftest
@@ -294,7 +294,7 @@ def test_preservation_findings_fail_the_check_and_are_never_informational(tmp_pa
 def planned(root: Path):
     pol = policy()
     scan = FsScanner().scan(pol, root)
-    context = load_package_context(pol, root, FS, scan, scanner=FsScanner())
+    context = AnnotationPackageChecks().probes(pol, root, FS, scan, FsScanner())
     return plan(pol, scan, context)
 
 
@@ -308,7 +308,7 @@ def test_no_preservation_mutation_is_planned_without_parts(tmp_path: Path) -> No
     build(tmp_path)
     pol = mini_policy(package_catalog="packages.toml", classify={**MINI["classify"], "app.internal": "domain"})
     scan = FsScanner().scan(pol, tmp_path)
-    rules = {m.rule for m in plan(pol, scan, load_package_context(pol, tmp_path, FS, scan))[0]}
+    rules = {m.rule for m in plan(pol, scan, AnnotationPackageChecks().probes(pol, tmp_path, FS, scan, FsScanner()))[0]}
     assert Rule.PACKAGE_PRIVATE_IMPORT in rules  # needs only the catalog's public surfaces
     assert not rules & (PRESERVATION_RULES - {Rule.PACKAGE_PRIVATE_IMPORT})  # the drift rules need parts to compare with
 

@@ -9,16 +9,13 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
-from .domain import ALL
+from .domain import ALL, Allowance, Contract
 from .package_assignment import owners_of
 from .package_model import CatalogDocument
 from .package_preservation import is_public
 
-__all__ = ["Allowance", "PackageLayout", "boundary_contracts", "external_contracts", "layout_of"]
+__all__ = ["PackageLayout", "boundary_contracts", "external_contracts", "layout_of"]
 
-# (names that are not third-party-free for the module, names its ring lists); ``None`` for a module with no ring.
-Allowance = tuple[frozenset[str], frozenset[str]]
-Contract = tuple[str, list[str], list[str]]  # (name, source modules, forbidden modules)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +37,10 @@ class PackageLayout:
         if mine is None or theirs is None or mine == theirs:
             return True
         return theirs in self.depends_on.get(mine, frozenset()) and self.is_public(imported)
+
+    def contracts(self, module_leaves: Sequence[str], allowance: Callable[[str], Allowance | None]) -> list[Contract]:
+        """The package boundaries and the third-party bans per package, as the contracts the engines are told to enforce."""
+        return [*boundary_contracts(self, module_leaves), *external_contracts(self, module_leaves, allowance)]
 
     def members(self, modules: Sequence[str]) -> dict[str, list[str]]:
         found: dict[str, list[str]] = {}

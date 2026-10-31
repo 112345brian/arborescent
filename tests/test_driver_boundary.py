@@ -17,6 +17,7 @@ from arborescent.domain import Policy, Rule
 from arborescent.driver_filter_repo import FilterRepo
 from arborescent.engine import Services, run_own
 from arborescent.module_forbid_probes import module_forbid_mutations
+from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.selftest import plan
 from arborescent.testing import FakeToolRunner
 
@@ -58,7 +59,7 @@ def test_the_policy_rule_bites_on_the_real_source(tmp_path: Path) -> None:
     victim = target / "package_gaps.py"
     _ = victim.write_text(victim.read_text(encoding="utf-8") + "\nimport arborescent.driver_plan\n", encoding="utf-8")
     policy = load_policy(LocalFileSystem(), copy / "pyproject.toml")[0]
-    found, _ = run_own(policy, copy, Services(FsScanner(), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), []), practices=False)
+    found, _ = run_own(policy, copy, Services(FsScanner(), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), [], AnnotationPackageChecks()), practices=False)
     assert any(v.rule == Rule.INTERNAL_IMPORT and v.subject == "arborescent.package_gaps" and "driver_plan" in v.detail for v in found)
 
 

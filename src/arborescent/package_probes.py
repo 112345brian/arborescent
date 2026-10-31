@@ -10,8 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from pathlib import PurePosixPath
 
-from .domain import Policy, Rule
-from .mutation import Mutation
+from .domain import Mutation, Policy, Rule
 from .package_assignment import owners_of
 from .package_fields import glob_match
 from .package_gaps import PackageContext

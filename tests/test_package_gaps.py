@@ -7,12 +7,13 @@ from pathlib import Path
 import pytest
 from arborescent_helpers import MINI_FILES, mini_policy, services, write_files
 
-import arborescent.engine as engine
+import arborescent.package_checks as package_checks
 from arborescent.adapters import FsScanner, LocalFileSystem
 from arborescent.cli import main
 from arborescent.domain import INFORMATIONAL_RULES, PolicyError, Rule
 from arborescent.engine import Options, run_check, run_own
-from arborescent.package_gaps import load_package_catalog, load_package_context
+from arborescent.package_checks import AnnotationPackageChecks
+from arborescent.package_gaps import load_package_catalog
 from arborescent.package_model import CatalogError
 from arborescent.selftest import plan, selftest
 
@@ -170,7 +171,7 @@ def test_the_loader_returns_assets_and_packages(tmp_path: Path) -> None:
 def mutated_rules(root: Path) -> set[Rule]:
     policy = policy_with_catalog()
     scan = FsScanner().scan(policy, root)
-    context = load_package_context(policy, root, FS, scan)
+    context = AnnotationPackageChecks().probes(policy, root, FS, scan, FsScanner())
     return {m.rule for m in plan(policy, scan, context)[0]}
 
 
@@ -197,6 +198,6 @@ def test_selftest_kills_every_package_rule_mutation(tmp_path: Path) -> None:
 def test_selftest_survives_when_the_gap_check_is_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The guard against rule removal: with the check stubbed out, the probes must report survivors."""
     repo(tmp_path)
-    monkeypatch.setattr(engine, "package_gap_violations", lambda *args, **kwargs: [])
+    monkeypatch.setattr(package_checks, "package_gap_violations", lambda *args, **kwargs: [])
     report = selftest(policy_with_catalog(), tmp_path, services())
     assert {entry.split("]")[0].lstrip("[") for entry in report.survived} >= PACKAGE_RULES

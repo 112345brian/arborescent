@@ -10,8 +10,7 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Collection, Mapping
 
-from .domain import Policy, Rule
-from .mutation import Mutation
+from .domain import Mutation, Policy, Rule
 
 __all__ = ["module_forbid_mutations"]
 

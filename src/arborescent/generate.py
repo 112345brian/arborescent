@@ -10,15 +10,9 @@ import fnmatch
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 
-from .domain import ALL, NOISE_DIRS, Policy
+from .domain import ALL, NOISE_DIRS, Allowance, Policy
 from .generated_config import GENERATED_MARKER
-from .package_contracts import (
-    Allowance,
-    PackageLayout,
-    boundary_contracts,
-    external_contracts,
-)
-from .ports import ScanResult, TypeChecker
+from .ports import PackageBoundaries, ScanResult, TypeChecker
 from .rules import RuleContext
 
 __all__ = ["IMPORT_LINTER_FILE", "TACH_FILE", "generate", "generate_for_scan", "tops_of"]
@@ -71,7 +65,7 @@ def _list(items: Sequence[str], indent: str = "") -> str:
 
 def import_linter(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
-    scope_by_module: Mapping[str, str] = {}, packages: PackageLayout | None = None,
+    scope_by_module: Mapping[str, str] = {}, packages: PackageBoundaries | None = None,
 ) -> str:
     if policy.scopes:
         return _scoped_import_linter(policy, names, arbor_index, scope_by_module, packages)
@@ -126,7 +120,7 @@ def import_linter(
 
 def _scoped_import_linter(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
-    scope_by_module: Mapping[str, str], packages: PackageLayout | None,
+    scope_by_module: Mapping[str, str], packages: PackageBoundaries | None,
 ) -> str:
     ring_modules: dict[tuple[str, str], list[str]] = {
         (scope.name, ring.name): [] for scope in policy.scopes for ring in scope.policy.rings
@@ -199,7 +193,7 @@ def _scope_boundary_contract(
 
 def _package_contracts(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
-    scope_by_module: Mapping[str, str], packages: PackageLayout | None,
+    scope_by_module: Mapping[str, str], packages: PackageBoundaries | None,
 ) -> list[str]:
     """The package assignment as import-linter contracts: the engine's own broken-contract output is the cut list."""
     if packages is None:
@@ -215,7 +209,7 @@ def _package_contracts(
         return frozenset(universe), local.ring(ring).external
 
     lines: list[str] = []
-    for name, sources, forbidden in (*boundary_contracts(packages, module_leaves), *external_contracts(packages, module_leaves, allowance)):
+    for name, sources, forbidden in packages.contracts(module_leaves, allowance):
         lines += _forbidden_contract(name, sources, forbidden)
     return lines
 
@@ -230,7 +224,7 @@ def _forbidden_contract(name: str, sources: Sequence[str], forbidden: Sequence[s
 
 def tach(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
-    scope_by_module: Mapping[str, str] = {}, packages: PackageLayout | None = None,
+    scope_by_module: Mapping[str, str] = {}, packages: PackageBoundaries | None = None,
 ) -> str:
     if policy.scopes:
         return _scoped_tach(policy, names, arbor_index, scope_by_module, packages)
@@ -268,7 +262,7 @@ def tach(
 
 def _scoped_tach(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
-    scope_by_module: Mapping[str, str], packages: PackageLayout | None,
+    scope_by_module: Mapping[str, str], packages: PackageBoundaries | None,
 ) -> str:
     output_dir = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/")
     relative = "../" * len([part for part in output_dir.split("/") if part and part != "."])
@@ -383,7 +377,7 @@ class _Facts:
     names: Sequence[str]
     arbor_index: Mapping[str, tuple[str | None, str | None]]
     scope_by_module: Mapping[str, str]
-    packages: PackageLayout | None = None
+    packages: PackageBoundaries | None = None
 
 
 def generate(
@@ -396,7 +390,7 @@ def generate(
 
 
 def generate_for_scan(
-    policy: Policy, scan: ScanResult, checkers: Sequence[TypeChecker], packages: PackageLayout | None = None,
+    policy: Policy, scan: ScanResult, checkers: Sequence[TypeChecker], packages: PackageBoundaries | None = None,
 ) -> dict[str, str]:
     """``generate`` for a scanned repository; ``packages`` adds the package assignment to the import-linter and tach files."""
     return _generate(policy, _Facts(sorted(scan.known), scan.arbor_index, scan.scope_by_module, packages), checkers)

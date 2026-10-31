@@ -197,13 +197,13 @@ def test_arborescent_probes_its_own_package_rules() -> None:
         "package-multiply-assigned-module",
         "package-multiply-assigned-asset",
         "package-spans-rings",
+        "package-unassigned-module",
+        "package-unowned-asset",
+        "package-undeclared-dependency",
     ):
         assert any(entry.startswith(f"[{rule}]") for entry in report.killed), rule
     for rule in (
-        "package-private-import",
-        "package-pyproject-drift",
-        "package-unassigned-module",
-        "package-undeclared-dependency",
-        "package-unowned-asset",
-    ):  # a single package that wholly owns the source folder cannot have these fire
+        "package-private-import",  # no package declares a public surface
+        "package-pyproject-drift",  # package_pyproject is off, so there is no derived file to edit
+    ):
         assert any(entry.startswith(f"{rule}:") for entry in report.skipped), rule
