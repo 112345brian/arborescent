@@ -214,3 +214,9 @@ def test_home_is_validated_when_the_catalog_is_parsed() -> None:
 
 def test_export_only_gap_codes_never_collide_with_check_rule_ids() -> None:
     assert not set(GapCode.ALL) & {str(rule) for rule in Rule}
+
+
+def test_a_package_with_no_declared_surface_has_none_and_nothing_bypasses_it() -> None:
+    core = package(build(CATALOG.replace('public = ["app.core.api"]\n', "")), "core")
+    assert core.public_surface == ()
+    assert core.bypasses == ()  # no declared surface: nothing is private (the same meaning as in package_parts, #55)

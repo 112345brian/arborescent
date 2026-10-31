@@ -114,7 +114,7 @@ class PackageArguments:
     assets: tuple[OwnedAsset, ...]
     path_renames: tuple[PathRename, ...]
     module_renames: tuple[ModuleRename, ...]
-    public_surface: tuple[str, ...] | None  # None: not annotated
+    public_surface: tuple[str, ...]  # empty: no declared surface, so nothing of the package counts as private
     bypasses: tuple[Bypass, ...]
     depends_on: tuple[str, ...]
     externals: tuple[str, ...] | None  # None: not annotated
@@ -287,11 +287,11 @@ def _external_gaps(
 def _public_surface(
     package: PackageDescriptor, modules: Sequence[OwnedModule], importers: Mapping[str, Sequence[tuple[str, str]]],
     gaps: list[Gap],
-) -> tuple[tuple[str, ...] | None, tuple[Bypass, ...]]:
-    if package.public is None:
+) -> tuple[tuple[str, ...], tuple[Bypass, ...]]:
+    if not package.public:
         if importers:
-            gaps.append(Gap(GapCode.UNDECLARED_PUBLIC_SURFACE, package.id, f"imported by packages {', '.join(sorted(importers))} but public is not annotated", ERROR, package.id))
-        return None, ()
+            gaps.append(Gap(GapCode.UNDECLARED_PUBLIC_SURFACE, package.id, f"imported by packages {', '.join(sorted(importers))} but declares no public surface", ERROR, package.id))
+        return (), ()
     surface = tuple(m.module for m in modules if _is_public(m.module, package.public))
     bypasses = tuple(sorted(
         (Bypass(module, importer, target) for importer, pairs in importers.items() for module, target in pairs if not _is_public(target, package.public)),

@@ -69,7 +69,7 @@ def _package(item: PackageArguments) -> dict[str, Any]:
             "module_renames": [{"source": r.source, "target": r.target} for r in item.module_renames],
         },
         "surface": {
-            "public": None if item.public_surface is None else list(item.public_surface),
+            "public": list(item.public_surface),
             "bypasses": [{"module": b.module, "package": b.package, "imports": b.imports} for b in item.bypasses],
         },
         "dependencies": {
@@ -123,7 +123,7 @@ _PACKAGE = _object(
         ),
         "surface": _object(
             {
-                "public": _NULLABLE_STRINGS,
+                "public": _STRINGS,
                 "bypasses": _array(_object({"module": _STRING, "package": _STRING, "imports": _STRING})),
             }
         ),

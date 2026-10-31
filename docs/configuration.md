@@ -312,7 +312,7 @@ from = "app.core"
 to = "core"
 ```
 
-All four keys are optional; a missing one is a named gap in the export, never a guess. See
+All four keys are optional; a missing one is a named gap in the export when it matters (`public` only when another package imports the package), never a guess. See
 [migration-export.md](migration-export.md) for the document, the schema, the gap codes, a `git filter-repo` recipe and the
 comparison with blinkered's `blinkered.toml`.
 

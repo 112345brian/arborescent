@@ -335,10 +335,7 @@
                 "items": {
                   "type": "string"
                 },
-                "type": [
-                  "array",
-                  "null"
-                ]
+                "type": "array"
               }
             },
             "required": [

@@ -25,7 +25,7 @@ reported as a gap, never guessed.
 | Key | Meaning |
 |---|---|
 | `[packages.home]` | Where the package lives after the migration. `kind = "repository"` with `repository = "org/name"` (its own repository), or `kind = "workspace-member"` with `path = "packages/x"` (a member of a workspace in the same repository). Workspace members may not share or nest folders. |
-| `public = [...]` | Module-name globs (`fnmatch`) of the public surface. `[]` means nothing is public. |
+| `public = [...]` | Dotted module globs (`fnmatch`) other packages may import: the public surface. The same key `package_parts` checks (#55); absent or empty means no declared surface, so nothing of the package counts as private. |
 | `externals = [...]` | Top-level third-party import names the package may use. `[]` means none. |
 | `[[packages.module_renames]]` | `from`/`to` dotted-module prefixes that change name in the target; the longest matching prefix wins. |
 
@@ -53,7 +53,7 @@ reported as a gap, never guessed.
   applied. Arborescent does not check that it agrees with the target layout; that is the rewriting tool's input, not its
   job.
 - **`surface.bypasses[]`** lists the modules of *other* packages that import a module of this package which is not on
-  its public surface (`module`, importing `package`, the module it `imports`). `null` public means not annotated.
+  its public surface (`module`, importing `package`, the module it `imports`). A package that declares no surface has none.
 - **`policy` and `pyproject` are reserved** (release, pin and history policy: #56; derivable `pyproject.toml` fields:
   #60). They are always `null` in version 1 and typed `object | null`, so they can be filled without a version bump. The
   schema already requires `policy` to be `null` for a workspace member: a workspace member exports no history or pin
@@ -66,7 +66,7 @@ reported as a gap, never guessed.
 | Code | Raised when |
 |---|---|
 | `package-undeclared-home` | the package has no `[packages.home]` |
-| `package-undeclared-public-surface` | other packages import it and `public` is not annotated |
+| `package-undeclared-public-surface` | other packages import it and it declares no `public` surface |
 | `package-undeclared-external` | a module imports a third-party name that `externals` does not list (or `externals` is absent) |
 | `package-unplaceable-path` | an owned path lies outside the package `root` and has no `destination` |
 | `package-unplaced-asset` | an `[[assets]]` glob owns a file that lies below none of the package's paths |

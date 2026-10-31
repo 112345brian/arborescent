@@ -96,7 +96,7 @@ def parse_package(value: object, index: int) -> PackageDescriptor:
         extraction_status=str(value.get("extraction_status", "in-repository")),
         paths=tuple(paths),
         home=_home(value),
-        public=_optional_strings(value, "public"),
+        public=strings(value.get("public", []), "public"),
         externals=_optional_strings(value, "externals"),
         module_renames=_module_renames(value),
     )

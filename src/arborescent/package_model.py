@@ -57,7 +57,7 @@ class PackageDescriptor:
     extraction_status: str = "in-repository"
     paths: tuple[PackagePath, ...] = ()
     home: PackageHome | None = None  # None: not annotated yet (a gap in the migration export)
-    public: tuple[str, ...] | None = None  # module-name globs of the public surface; None: not annotated yet
+    public: tuple[str, ...] = ()  # dotted module globs other packages may import; empty = no declared surface
     externals: tuple[str, ...] | None = None  # top-level external import names the package may use; None: not annotated
     module_renames: tuple[ModuleRename, ...] = ()
 
