@@ -396,19 +396,23 @@ def _validate_rings(rings: tuple[RingRule, ...], classify: tuple[tuple[str, str]
             raise PolicyError(f"classify {pattern!r} names unknown ring {ring!r}")
 
 
-_NORMALIZED_SOURCE_PATHS: dict[str, str] = {}
+_NORMALIZED_SOURCES: dict[str, str] = {}
 
 
 def _normalized_source_path(value: str) -> str:
-    """Normalize a repository-relative path; memoized because scope lookups repeat it per file per scope."""
-    cached = _NORMALIZED_SOURCE_PATHS.get(value)
+    return PurePosixPath(value).as_posix().removeprefix("./").rstrip("/") or "."
+
+
+def _normalized_source(value: str) -> str:
+    """Memoized for configured source roots only (a small fixed set); per-file paths must not enter this cache."""
+    cached = _NORMALIZED_SOURCES.get(value)
     if cached is None:
-        cached = _NORMALIZED_SOURCE_PATHS[value] = PurePosixPath(value).as_posix().removeprefix("./").rstrip("/") or "."
+        cached = _NORMALIZED_SOURCES[value] = _normalized_source_path(value)
     return cached
 
 
 def _path_contains(source: str, path: str) -> bool:
-    source = _normalized_source_path(source)
+    source = _normalized_source(source)
     return source == "." or path == source or path.startswith(source + "/")
 
 

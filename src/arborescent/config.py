@@ -50,6 +50,8 @@ def _with_derived_classify(fs: FileSystem, root: Path, raw: Mapping[str, Any]) -
     if not isinstance(source, str) or not source:
         raise PolicyError("`classify_from` must be a path to a tach.toml file")
     explicit = raw.get("classify", {})
+    if not isinstance(explicit, Mapping):
+        raise PolicyError("`classify` must map module globs to rings")
     derived = {
         pattern: ring
         for pattern, ring in _tach_classify(fs, root / source, source).items()

@@ -46,9 +46,24 @@ def certify(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunner, fs
         failures.extend(_ruff_probes(root, policy.source_roots, runner, fs))
     if "tach" not in policy.disabled_tools:
         failures.extend(_tach_probes(root, policy, scan, runner, fs))
-    elif "import-linter" not in policy.disabled_tools and not runner.available("lint-imports"):
-        failures.append("import-linter is not installed; it is required when tach is disabled")
+    elif "import-linter" not in policy.disabled_tools:
+        failures.extend(_import_linter_authority(root, runner, fs))
     return tuple(failures)
+
+
+def _import_linter_authority(root: Path, runner: ToolRunner, fs: FileSystem) -> list[str]:
+    """With tach disabled, import-linter is the cross-package engine: it must be installed and configured."""
+    failures: list[str] = []
+    if not runner.available("lint-imports"):
+        failures.append("import-linter is not installed; it is required when tach is disabled")
+    # `lint-imports` reads only these files; the generated arborescent-importlinter.toml is not discovered by default.
+    configured = fs.is_file(root / ".importlinter") or any(
+        fs.is_file(root / name) and marker in fs.read_text(root / name)
+        for name, marker in (("pyproject.toml", "[tool.importlinter"), ("setup.cfg", "[importlinter"), ("tox.ini", "[importlinter"))
+    )
+    if not configured:
+        failures.append("import-linter has no contracts configured (.importlinter, pyproject.toml, setup.cfg or tox.ini); it is required when tach is disabled")
+    return failures
 
 
 def _native_minimum(policy: Policy, scan: object) -> list[str]:
@@ -166,14 +181,12 @@ def _tach_probes(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunne
             failures.extend(_tach_baseline(temp, runner))
             if failures:
                 return failures
+            note = tach_multi_root_note(policy)
+            layers = note is None or "import-linter" in policy.disabled_tools  # else import-linter is the authority
             for scope_name, (source_module, outer_modules) in canaries.items():
                 failures.extend(
-                    _tach_scope_probe(
-                        temp, (scope_name, source_module, outer_modules), runner, fs,
-                        layers=tach_multi_root_note(policy) is None or "import-linter" in policy.disabled_tools,
-                    )
+                    _tach_scope_probe(temp, (scope_name, source_module, outer_modules), runner, fs, layers=layers)
                 )
-            note = tach_multi_root_note(policy)
             if failures and note is not None:
                 failures.append(f"note: {note}")
     except (OSError, UnicodeDecodeError) as exc:

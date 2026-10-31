@@ -2,6 +2,14 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Fixed
+
+- With tach disabled, the minimum profile now also requires import-linter to have contracts configured (it does not
+  auto-discover the generated `arborescent-importlinter.toml`).
+- Scope-path normalization no longer caches every scanned file path.
+
 ## 0.3.0 — 2026-10-31
 
 ### Added

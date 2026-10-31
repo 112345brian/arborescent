@@ -164,13 +164,19 @@ def test_minimum_profile_accepts_disabled_tach_only_when_import_linter_stays_on(
     assert "required profile tool tach is disabled by policy" in both
 
 
-def test_disabled_tach_requires_installed_import_linter(tmp_path: Path) -> None:
+def test_disabled_tach_requires_installed_and_configured_import_linter(tmp_path: Path) -> None:
     write_files(tmp_path, MINI_FILES)
     policy = mini_policy(disabled_tools=["tach", "ruff"])
     scan = FsScanner().scan(policy, tmp_path)
+    fs = LocalFileSystem()
 
-    missing = certify(tmp_path, policy, scan, FakeToolRunner(set()), LocalFileSystem())
+    missing = certify(tmp_path, policy, scan, FakeToolRunner(set()), fs)
     assert "import-linter is not installed; it is required when tach is disabled" in missing
-    present = certify(tmp_path, policy, scan, FakeToolRunner({"lint-imports"}), LocalFileSystem())
-    assert "import-linter is not installed; it is required when tach is disabled" not in present
-    assert not any("Tach" in failure or "tach" in failure for failure in present if "disabled by policy" not in failure)
+    assert any("no contracts configured" in failure for failure in missing)
+
+    write_files(tmp_path, {"pyproject.toml": "[tool.importlinter]\nroot_packages = ['app']\n"})
+    ready = certify(tmp_path, policy, scan, FakeToolRunner({"lint-imports"}), fs)
+    assert not any("import-linter" in failure for failure in ready)
+    write_files(tmp_path, {"pyproject.toml": "[project]\nname = 'x'\n"})
+    unconfigured = certify(tmp_path, policy, scan, FakeToolRunner({"lint-imports"}), fs)
+    assert any("no contracts configured" in failure for failure in unconfigured)
