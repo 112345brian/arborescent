@@ -26,6 +26,9 @@
 - Generated `tach.toml` now writes `[external] exclude` from `tach_external_exclude` (lazily-imported optional
   extras tach can't see from base dependencies) in both the single-scope and multi-scope generators; the multi-scope
   path previously always wrote an empty exclude list.
+- The `unclassified` finding now hints `pkg*` when a `classify` glob names only a parent package (`classify` matches
+  whole module names, so `pkg` does not cover `pkg.sub`).
+- Scope-path normalization is memoized, removing redundant work in multi-scope scans.
 
 ## 0.2.0 — 2026-10-26
 
