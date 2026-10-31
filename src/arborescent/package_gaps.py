@@ -8,6 +8,7 @@ from pathlib import Path
 from .domain import Policy, Violation
 from .facts import resolve_targets
 from .package_assignment import RepositoryFacts, assignment_violations
+from .package_contracts import PackageLayout, layout_of
 from .package_model import CatalogDocument, CatalogError
 from .package_parts import load_parts, module_imports, public_symbols
 from .package_preservation import PartFacts, preservation_violations
@@ -17,7 +18,10 @@ from .path_exclusion import excluded_by_policy
 from .ports import FileSystem, ModuleScanner, ScanResult
 from .rules import RuleContext
 
-__all__ = ["PackageContext", "asset_paths", "load_package_catalog", "load_package_context", "package_gap_violations", "repository_facts"]
+__all__ = [
+    "PackageContext", "asset_paths", "load_package_catalog", "load_package_context", "package_gap_violations", "package_layout",
+    "repository_facts",
+]
 
 
 def load_package_catalog(fs: FileSystem, root: Path, policy: Policy) -> CatalogDocument:
@@ -46,6 +50,13 @@ def load_package_context(
     if scanner is None:
         raise CatalogError("`package_parts` needs a module scanner to read the parts")
     return PackageContext(load_package_catalog(fs, root, policy), facts, load_parts(policy, root, fs, scanner, scan.known))
+
+
+def package_layout(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> PackageLayout | None:
+    """What ``generate`` compiles into the engine configs; ``None`` when the policy does not set ``package_catalog``."""
+    if policy.package_catalog is None:
+        return None
+    return layout_of(load_package_catalog(fs, root, policy), scan.paths)
 
 
 def package_gap_violations(

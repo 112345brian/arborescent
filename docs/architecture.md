@@ -58,6 +58,7 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 | `arborescent.migration_arguments` | `single` | domain |
 | `arborescent.migration_json` | `single` | domain |
 | `arborescent.package_preservation` | `single` | domain |
+| `arborescent.package_contracts` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
