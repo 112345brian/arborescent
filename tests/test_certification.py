@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from arborescent_helpers import MINI_FILES, mini_policy, write_files
+from test_engine import services
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from arborescent.certification import (
@@ -12,8 +13,10 @@ from arborescent.certification import (
     _tach_canary_modules,
     _tach_canary_modules_by_scope,
     _tach_probes,
+    tach_multi_root_note,
 )
 from arborescent.config import policy_from_mapping
+from arborescent.engine import Options, run_check
 from arborescent.generate import tach
 from arborescent.installer_adapter import _toml_array_close
 
@@ -128,8 +131,6 @@ def test_tach_canaries_accept_enforced_profile_and_catch_disabled_checks(tmp_pat
 
 
 def test_tach_multi_root_note_covers_multi_root_and_multi_scope_policies() -> None:
-    from arborescent.certification import tach_multi_root_note
-
     assert tach_multi_root_note(mini_policy()) is None
     assert tach_multi_root_note(mini_policy(source_roots=["src", "src/"])) is None
     note = tach_multi_root_note(mini_policy(source_roots=["packages/a/src", "packages/b/src"]))
@@ -144,9 +145,6 @@ def test_tach_multi_root_note_covers_multi_root_and_multi_scope_policies() -> No
 
 
 def test_check_reports_multi_root_tach_limitation_as_advisory_drift(repo: Path) -> None:
-    from arborescent.engine import Options, run_check
-    from test_engine import services  # type: ignore[import-not-found]
-
     policy = mini_policy(source_roots=[".", "app"])
     report = run_check(policy, repo, services(), Options(tools=True))
     assert any(line.startswith("tach: ") and "#41" in line for line in report.drift)

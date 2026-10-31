@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from arborescent_helpers import MINI, mini_policy, ring_with
 
+from arborescent import domain
 from arborescent.adapters import LocalFileSystem
 from arborescent.config import find_child_policy, load_policy, policy_from_mapping
 from arborescent.domain import ALL, Policy, PolicyError, RingRule
@@ -476,8 +477,6 @@ def test_unclassified_detail_hints_when_a_glob_names_only_the_parent_package() -
 
 
 def test_scope_path_normalization_is_memoized_across_lookups() -> None:
-    from arborescent import domain
-
     domain._NORMALIZED_SOURCE_PATHS.clear()
     assert domain._normalized_source_path("./libs/alpha/src/") == "libs/alpha/src"
     assert domain._NORMALIZED_SOURCE_PATHS == {"./libs/alpha/src/": "libs/alpha/src"}

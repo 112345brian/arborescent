@@ -346,10 +346,12 @@ def _discover_scoped(policy: Policy, scan: ScanResult) -> int:
     by_scope_folder: dict[tuple[str, str], list[str]] = {}
     candidates = dict(scan.unclassified)
     indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
-    for module, path in scan.paths.items():
-        # Scope-owned modules whose scope assigns no ring; orphans are already in `scan.unclassified`.
-        if indexes.scope_name(module) is not None and indexes.resolve_ring(module) is None:
-            candidates[module] = path
+    # Scope-owned modules whose scope assigns no ring; orphans are already in `scan.unclassified`.
+    candidates.update({
+        module: path
+        for module, path in scan.paths.items()
+        if indexes.scope_name(module) is not None and indexes.resolve_ring(module) is None
+    })
     for module, path in candidates.items():
         scope_name = scan.scope_by_module.get(module) or "unowned"
         folder = Path(path).parent.as_posix()

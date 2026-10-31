@@ -96,6 +96,11 @@ class CheckReport:
         return self.tool_checks_enabled and engines_ok and (self.ratchet is None or self.ratchet.ok)
 
 
+def _tach_notes(policy: Policy, opts: Options) -> list[str]:
+    note = tach_multi_root_note(policy) if opts.tools and "tach" not in policy.disabled_tools else None
+    return [] if note is None else [f"tach: {note}"]
+
+
 def changed_files(runner: ToolRunner, root: Path, ref: str) -> frozenset[str] | None:
     diff = runner.run(["git", "diff", "--name-only", "--relative", ref], root)
     other = runner.run(["git", "ls-files", "--others", "--exclude-standard"], root)
@@ -333,7 +338,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
             {module.name: module.path for module in scan.modules.values()},
             threshold=policy.suggestion_threshold,
         )
-        report.drift = drift(
+        report.drift = _tach_notes(policy, opts) + drift(
             services.fs,
             policy,
             root,
@@ -344,8 +349,6 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
                 if c.name in {*policy.type_checkers, checker.name} and not tool_is_disabled(policy, c)
             ],
         )
-        if opts.tools and "tach" not in policy.disabled_tools and (note := tach_multi_root_note(policy)) is not None:
-            report.drift.append(f"tach: {note}")
         engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
         report.engines += engine_runs
         report.violations = found + [v for run in engine_runs for v in run.violations]
