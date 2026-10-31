@@ -114,7 +114,7 @@ def run_own(
         Violation(Rule.INVALID_ARBOR_ANNOTATION, module, detail)
         for module, _ in scan.unclassified
         if module not in scan.modules
-        if (detail := _annotation_violation(policy, scan.arbor_index, scan.scope_by_module, module)) is not None
+        if (detail := indexes.annotation_violation(module)) is not None
     ]
     found += [
         Violation(Rule.UNCLASSIFIED, module, (indexes.policy_for(module) or policy).unclassified_detail(module))
@@ -126,19 +126,6 @@ def run_own(
     if practices and only is None:
         found += run_practices(policy, root, services.runner, services.fs, scan)
     return found, scan
-
-
-def _annotation_violation(
-    policy: Policy, arbor_index: Mapping[str, tuple[str | None, str | None]],
-    scope_by_module: Mapping[str, str], module: str,
-) -> str | None:
-    if not policy.scopes:
-        return policy.annotation_violation(arbor_index, module)
-    scope_name = scope_by_module.get(module)
-    if scope_name is not None:
-        return policy.scope_annotation_violation(scope_name, arbor_index, module)
-    annotation = arbor_index.get(module)
-    return annotation[1] if annotation is not None else None
 
 
 def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:

@@ -12,6 +12,7 @@ from arborescent.annotate import (
     plan_annotations,
 )
 from arborescent.cli import main
+from arborescent.config import policy_from_mapping
 from arborescent.domain import ToolResult
 from arborescent.engine import Services, run_own
 from arborescent.engines import default_engines
@@ -99,6 +100,26 @@ def test_plan_annotations_finds_classify_matches_without_annotation(repo: Path) 
     plan = plan_annotations(policy, scan)
 
     assert ("app.domain", "app/domain.py", "domain") in plan.to_annotate
+
+
+def test_plan_annotations_resolves_classify_match_within_its_owning_scope(repo: Path) -> None:
+    runner = GitFiles(["app/__init__.py", "app/domain.py"])
+    services = make_services(runner)
+    policy = policy_from_mapping({
+        "scopes": {
+            "app": {
+                "sources": ["app"], "source_roots": ["."],
+                "rings": ["domain"],
+                "classify": {"app": "domain", "app.domain": "domain"},
+            },
+        },
+    })
+
+    _, scan = run_own(policy, repo, services, practices=False)
+    plan = plan_annotations(policy, scan)
+
+    assert ("app.domain", "app/domain.py", "domain") in plan.to_annotate
+    assert not plan.unmatched
 
 
 def test_apply_annotations_writes_the_file_and_is_idempotent(repo: Path) -> None:

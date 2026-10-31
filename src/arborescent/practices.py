@@ -23,6 +23,7 @@ from typing import Any, cast
 from .domain import NOISE_DIRS, Policy, Rule, Violation, dist_name
 from .facts import ModuleInfo, resolve_targets
 from .ports import FileSystem, ScanResult, ToolRunner
+from .rules import RuleContext
 
 __all__ = ["PRACTICES", "run_practices"]
 
@@ -167,10 +168,7 @@ def _architecture_rows(lines: Sequence[str]) -> dict[str, tuple[str | None, str]
 
 
 def _documented_module_ring(policy: Policy, scan: ScanResult, module: str) -> str | None:
-    if not policy.scopes:
-        return policy.resolve_ring(scan.arbor_index, module)
-    scope_name = scan.scope_by_module.get(module)
-    return policy.resolve_scope_ring(scope_name, scan.arbor_index, module) if scope_name is not None else None
+    return RuleContext(policy, scan.arbor_index, scan.scope_by_module).resolve_ring(module)
 
 
 def crlf(fs: FileSystem, root: Path, patterns: Sequence[str]) -> list[Violation]:

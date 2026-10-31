@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .domain import Policy
+    from .domain import Policy, RingRule
     from .facts import ModuleInfo
     from .ports import FileSystem, ScanResult, ToolRunner
 
@@ -215,21 +216,26 @@ def _append_import(fs: FileSystem, path: Path, original: bytes, module: str) -> 
     fs.write_text(path, f"{source.rstrip()}\nimport {module}\n")
 
 
-def _tach_canary_modules(policy: Policy, scan: ScanResult) -> tuple[ModuleInfo | None, tuple[str, ...]]:
-    modules = tuple(scan.modules.values())
+def _canary_modules(
+    modules: Sequence[ModuleInfo], rings: tuple[RingRule, ...], resolve_ring: Callable[[str], str | None],
+) -> tuple[ModuleInfo | None, tuple[str, ...]]:
+    """Pick a leaf module in the innermost ring (the probe target) and leaves in the outermost ring (the
+    expected violators), over whatever ``modules`` already is — the single policy's, or one scope's."""
     leaves = tuple(
         module for module in modules if not any(other.name.startswith(module.name + ".") for other in modules)
     )
-    inner = policy.rings[0].name
-    outer = policy.rings[-1].name
-    sources = sorted(
-        (module for module in leaves if policy.resolve_ring(scan.arbor_index, module.name) == inner),
-        key=lambda item: item.name,
+    inner = rings[0].name
+    outer = rings[-1].name
+    sources = sorted((module for module in leaves if resolve_ring(module.name) == inner), key=lambda item: item.name)
+    targets = tuple(sorted(module.name for module in leaves if resolve_ring(module.name) == outer))
+    source = sources[0] if sources else None
+    return source, tuple(target for target in targets if source is None or target != source.name)
+
+
+def _tach_canary_modules(policy: Policy, scan: ScanResult) -> tuple[ModuleInfo | None, tuple[str, ...]]:
+    return _canary_modules(
+        tuple(scan.modules.values()), policy.rings, lambda name: policy.resolve_ring(scan.arbor_index, name),
     )
-    targets = tuple(sorted(module.name for module in leaves if policy.resolve_ring(scan.arbor_index, module.name) == outer))
-    if not sources:
-        return None, ()
-    return sources[0], tuple(target for target in targets if target != sources[0].name)
 
 
 def _tach_canary_modules_by_scope(
@@ -237,29 +243,14 @@ def _tach_canary_modules_by_scope(
 ) -> dict[str, tuple[ModuleInfo | None, tuple[str, ...]]]:
     if not policy.scopes:
         return {"": _tach_canary_modules(policy, scan)}
-    canaries = {}
-    for scope in policy.scopes:
-        leaves = tuple(
-            module for module in scan.modules.values()
-            if scan.scope_by_module.get(module.name) == scope.name
-            and not any(
-                scan.scope_by_module.get(other.name) == scope.name and other.name.startswith(module.name + ".")
-                for other in scan.modules.values()
-            )
+    return {
+        scope.name: _canary_modules(
+            tuple(module for module in scan.modules.values() if scan.scope_by_module.get(module.name) == scope.name),
+            scope.policy.rings,
+            lambda name, scope_name=scope.name: policy.resolve_scope_ring(scope_name, scan.arbor_index, name),
         )
-        inner = scope.policy.rings[0].name
-        outer = scope.policy.rings[-1].name
-        sources = sorted(
-            (module for module in leaves if policy.resolve_scope_ring(scope.name, scan.arbor_index, module.name) == inner),
-            key=lambda item: item.name,
-        )
-        targets = tuple(sorted(
-            module.name for module in leaves
-            if policy.resolve_scope_ring(scope.name, scan.arbor_index, module.name) == outer
-        ))
-        source = sources[0] if sources else None
-        canaries[scope.name] = (source, tuple(target for target in targets if source is None or target != source.name))
-    return canaries
+        for scope in policy.scopes
+    }
 
 
 def _copy_tach_project(root: Path, source_roots: tuple[str, ...], temp: Path, fs: FileSystem) -> None:
