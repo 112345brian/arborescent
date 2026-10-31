@@ -13,9 +13,11 @@ import tomllib
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
-__all__ = ["OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "extract", "resolve_targets"]
+__all__ = ["OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef", "extract", "resolve_targets"]
 
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
+_ABSTRACT_BASE_NAMES = frozenset({"ABC", "abc.ABC", "Protocol", "typing.Protocol", "typing_extensions.Protocol"})
+_ABC_META_NAMES = frozenset({"ABCMeta", "abc.ABCMeta"})
 _THREAD_POOL_APIS = frozenset({
     "concurrent.futures.ThreadPoolExecutor",
     "concurrent.futures.thread.ThreadPoolExecutor",
@@ -56,12 +58,28 @@ class EffectUse:
 
 
 @dataclass(frozen=True)
+class TopLevelDef:
+    """A module-level class or function. ``is_abstract`` is a static shape fact, not a policy decision:
+
+    a class is abstract when it inherits (directly) from ``abc.ABC``/``typing.Protocol`` or declares
+    ``metaclass=ABCMeta``; a function is abstract when its body is a stub (``...``, ``pass`` or
+    ``raise NotImplementedError``, past an optional docstring).
+    """
+
+    name: str
+    line: int
+    is_class: bool
+    is_abstract: bool
+
+
+@dataclass(frozen=True)
 class SourceFacts:
     imports: tuple[RawImport, ...]
     effect_uses: tuple[EffectUse, ...]
     script_deps: tuple[str, ...] | None  # PEP 723 `dependencies`, None when the file has no block
     suppressions: tuple[tuple[int, str], ...] = ()  # (line, kind); comments only, not strings
     discard_calls: tuple[int, ...] = ()  # `discard(value, reason=...)`; no type-aware Result claim
+    top_level_defs: tuple[TopLevelDef, ...] = ()  # module-level classes and functions only
     arbor_ring: str | None = None
     arbor_error: str | None = None
 
@@ -220,6 +238,45 @@ def _discard_call_lines(tree: ast.AST) -> tuple[int, ...]:
     return tuple(sorted(lines))
 
 
+def _is_stub_statement(stmt: ast.stmt, aliases: dict[str, str]) -> bool:
+    if isinstance(stmt, ast.Pass):
+        return True
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and stmt.value.value is ...:
+        return True
+    if isinstance(stmt, ast.Raise) and stmt.exc is not None:
+        target = stmt.exc.func if isinstance(stmt.exc, ast.Call) else stmt.exc
+        return _dotted(target, aliases) == "NotImplementedError"
+    return False
+
+
+def _is_stub_body(body: list[ast.stmt], aliases: dict[str, str]) -> bool:
+    stmts = body[1:] if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str) else body
+    if not stmts:
+        return True
+    return len(stmts) == 1 and _is_stub_statement(stmts[0], aliases)
+
+
+def _is_abstract_class(node: ast.ClassDef, aliases: dict[str, str]) -> bool:
+    for base in node.bases:
+        if _dotted(base, aliases) in _ABSTRACT_BASE_NAMES:
+            return True
+    for keyword in node.keywords:
+        if keyword.arg == "metaclass" and _dotted(keyword.value, aliases) in _ABC_META_NAMES:
+            return True
+    return False
+
+
+def _top_level_defs(tree: ast.AST, aliases: dict[str, str]) -> tuple[TopLevelDef, ...]:
+    out: list[TopLevelDef] = []
+    body = tree.body if isinstance(tree, ast.Module) else []
+    for stmt in body:
+        if isinstance(stmt, ast.ClassDef):
+            out.append(TopLevelDef(stmt.name, stmt.lineno, True, _is_abstract_class(stmt, aliases)))
+        elif isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+            out.append(TopLevelDef(stmt.name, stmt.lineno, False, _is_stub_body(stmt.body, aliases)))
+    return tuple(out)
+
+
 _ARBOR_LEGAL_KEYS = frozenset({"ring"})
 _CONDITIONAL_CONTAINERS = (ast.If, ast.Try, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith)
 
@@ -309,6 +366,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _script_deps(source),
         _suppression_comments(source),
         _discard_call_lines(tree),
+        _top_level_defs(tree, _aliases(tree)),
         arbor_ring,
         arbor_error,
     )

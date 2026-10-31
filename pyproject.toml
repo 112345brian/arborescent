@@ -70,6 +70,7 @@ external = ["@pure", "pathlib", "arborescent"]
 [tool.arborescent.ring.ports]
 may_import = ["domain"]
 external = ["@pure", "pathlib", "contextlib", "arborescent"]
+require_abstract = true
 
 [tool.arborescent.ring.application]
 may_import = ["domain", "ports"]

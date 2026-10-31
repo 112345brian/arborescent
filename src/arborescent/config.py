@@ -354,6 +354,7 @@ def _ring_from_mapping(
         expand(table.get("external", [])),
         bool(table.get("os_branching", False)),
         forbid,
+        bool(table.get("require_abstract", False)),
     )
 
 

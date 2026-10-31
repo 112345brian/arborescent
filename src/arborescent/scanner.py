@@ -13,12 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from .domain import NOISE_DIRS, Policy, PolicyError
-from .facts import EffectUse, ModuleInfo, RawImport, SourceFacts, extract
+from .facts import EffectUse, ModuleInfo, RawImport, SourceFacts, TopLevelDef, extract
 from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 5
+_CACHE_VERSION = 6
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
@@ -176,9 +176,10 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
     imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only] for i in f.imports]
     effects = [[u.line, u.category, u.target] for u in f.effect_uses]
     suppressions = [[line, kind] for line, kind in f.suppressions]
+    top_level_defs = [[d.name, d.line, d.is_class, d.is_abstract] for d in f.top_level_defs]
     return [
         imports, effects, None if f.script_deps is None else list(f.script_deps),
-        suppressions, list(f.discard_calls), f.arbor_ring, f.arbor_error,
+        suppressions, list(f.discard_calls), top_level_defs, f.arbor_ring, f.arbor_error,
     ]
 
 
@@ -186,9 +187,10 @@ def _facts_from_json(raw: list[Any]) -> SourceFacts:
     imports = tuple(RawImport(i[0], i[1], tuple(i[2]), i[3], i[4], i[5]) for i in raw[0])
     effects = tuple(EffectUse(u[0], u[1], u[2]) for u in raw[1])
     suppressions = tuple((item[0], item[1]) for item in raw[3])
+    top_level_defs = tuple(TopLevelDef(d[0], d[1], d[2], d[3]) for d in raw[5])
     return SourceFacts(
         imports, effects, None if raw[2] is None else tuple(raw[2]),
-        suppressions, tuple(raw[4]), raw[5], raw[6],
+        suppressions, tuple(raw[4]), top_level_defs, raw[6], raw[7],
     )
 
 

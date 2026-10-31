@@ -119,6 +119,90 @@ discard(run())
     assert facts.discard_calls == (1, 2)
 
 
+def test_top_level_def_facts_recognize_abc_and_protocol_classes() -> None:
+    facts = extract(
+        """\
+from abc import ABC, ABCMeta
+import abc
+from typing import Protocol
+
+class ViaBase(ABC):
+    pass
+
+class ViaDottedBase(abc.ABC):
+    pass
+
+class ViaProtocol(Protocol):
+    def run(self) -> None: ...
+
+class ViaMetaclass(metaclass=ABCMeta):
+    pass
+
+class Concrete:
+    pass
+
+class InheritsConcrete(Concrete):
+    def run(self) -> None: ...
+"""
+    )
+    by_name = {d.name: d for d in facts.top_level_defs}
+    assert by_name["ViaBase"].is_abstract
+    assert by_name["ViaDottedBase"].is_abstract
+    assert by_name["ViaProtocol"].is_abstract
+    assert by_name["ViaMetaclass"].is_abstract
+    assert not by_name["Concrete"].is_abstract
+    assert not by_name["InheritsConcrete"].is_abstract  # a concrete base makes it concrete, stub methods or not
+    assert all(d.is_class for d in by_name.values())
+
+
+def test_top_level_def_facts_recognize_stub_functions() -> None:
+    facts = extract(
+        '''\
+def ellipsis_stub() -> None: ...
+
+def pass_stub() -> None:
+    pass
+
+def docstring_only_stub() -> None:
+    """Docs, no body."""
+    ...
+
+def raises_not_implemented() -> None:
+    raise NotImplementedError
+
+def concrete_function() -> int:
+    return 1 + 1
+
+def _private_concrete() -> int:
+    return 2
+'''
+    )
+    by_name = {d.name: d for d in facts.top_level_defs}
+    assert by_name["ellipsis_stub"].is_abstract
+    assert by_name["pass_stub"].is_abstract
+    assert by_name["docstring_only_stub"].is_abstract
+    assert by_name["raises_not_implemented"].is_abstract
+    assert not by_name["concrete_function"].is_abstract
+    assert not by_name["_private_concrete"].is_abstract
+    assert all(not d.is_class for d in by_name.values())
+
+
+def test_top_level_def_facts_ignore_nested_and_empty_modules() -> None:
+    assert extract("X = 1\n").top_level_defs == ()
+    facts = extract(
+        """\
+class Outer:
+    class Inner:
+        pass
+
+    def method(self) -> None:
+        def nested() -> None:
+            return None
+"""
+    )
+    assert [d.name for d in facts.top_level_defs] == ["Outer"]
+
+
 def test_arbor_ring_facts_extract_literal_ring() -> None:
     facts = extract('__arbor__ = {"ring": "domain"}\n')
 
@@ -242,7 +326,7 @@ def test_fact_cache_round_trips_suppressions_and_discard_calls(tmp_path: Path) -
         tmp_path,
         {
             **MINI_FILES,
-            "app/domain.py": 'import os  # noqa: F401\ndiscard(task(), reason="legacy")\n',
+            "app/domain.py": 'import os  # noqa: F401\ndiscard(task(), reason="legacy")\n\n\nclass Port:\n    pass\n',
         },
     )
     cache = tmp_path / ".cache"
@@ -254,3 +338,5 @@ def test_fact_cache_round_trips_suppressions_and_discard_calls(tmp_path: Path) -
     assert first.parsed > 0 and warm.parsed == 0
     assert warm.modules["app.domain"].facts.suppressions == ((1, "noqa-coded"),)
     assert warm.modules["app.domain"].facts.discard_calls == (2,)
+    assert warm.modules["app.domain"].facts.top_level_defs == first.modules["app.domain"].facts.top_level_defs
+    assert [d.name for d in warm.modules["app.domain"].facts.top_level_defs] == ["Port"]
