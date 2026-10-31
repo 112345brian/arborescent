@@ -65,6 +65,7 @@ class Options:
     require_tools: bool = False  # a missing engine is a failure, not a skip
     use_baseline: bool = True
     require_profile: bool = False
+    require_modularity: bool = False  # fail unless the policy keeps `modularity = "ready"` and no package gap is open
     growth_against: str | None = None
     no_cache: bool = False
 
@@ -93,6 +94,8 @@ class CheckReport:
     discard_counts: dict[str, int] = field(default_factory=lambda: {})
     profile: str | None = None
     profile_failures: tuple[str, ...] = ()
+    modularity_failures: tuple[str, ...] = ()
+    modularity_certified: bool = False
     partial: bool = False
     seconds: float = 0.0
     tool_checks_enabled: bool = True
@@ -100,7 +103,7 @@ class CheckReport:
     @property
     def ok(self) -> bool:
         engines_ok = all(e.status != "fail" for e in self.engines)
-        return engines_ok and not self.profile_failures and (self.ratchet is None or self.ratchet.ok)
+        return engines_ok and not self.profile_failures and not self.modularity_failures and (self.ratchet is None or self.ratchet.ok)
 
     @property
     def configured_ok(self) -> bool:
@@ -153,6 +156,34 @@ def run_own(
 def blocking(found: Iterable[Violation]) -> list[Violation]:
     """The findings that can fail a check or enter the baseline (information is reported, never recorded)."""
     return [v for v in found if v.rule not in INFORMATIONAL_RULES]
+
+
+def _is_package_gap(violation: Violation) -> bool:
+    return str(violation.rule).startswith("package-")
+
+
+def _apply_modularity(policy: Policy, report: CheckReport, found: Sequence[Violation], opts: Options, complete: bool) -> list[Violation]:
+    """The blocking findings after the ``modularity`` mode: ``report`` moves package gaps to the notes (shown, never failing;
+    ``run_own``'s list is untouched, so the selftest still probes the rules). Also records ``--require-modularity``."""
+    gaps = [v for v in blocking(found) if _is_package_gap(v)]
+    if opts.require_modularity:
+        report.modularity_failures = _modularity_failures(policy, gaps, complete)
+        report.modularity_certified = not report.modularity_failures
+    if policy.modularity != "report":
+        return blocking(found)
+    report.notes += gaps
+    return [v for v in blocking(found) if not _is_package_gap(v)]
+
+
+def _modularity_failures(policy: Policy, gaps: Sequence[Violation], complete: bool) -> tuple[str, ...]:
+    """Why the repository is not certified modularity-ready; empty when it is. A cut list is not a gap and is allowed."""
+    if policy.package_catalog is None:
+        return ("no `package_catalog` is set: package ownership is not declared",)
+    if policy.modularity != "ready":
+        return (f"`modularity` is {policy.modularity!r}: package gaps are only reported, not enforced",)
+    if not complete:
+        return ("package gaps are a whole-repository fact and are not evaluated in --changed mode",)
+    return tuple(f"open package gap: {v.render()}" for v in gaps)
 
 
 def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:
@@ -293,6 +324,7 @@ def _child_arbor_command(config_path: Path, opts: Options) -> list[str]:
         (not opts.tools, "--no-tools"),
         (opts.require_tools, "--require-tools"),
         (opts.require_profile, "--require-profile"),
+        (opts.require_modularity, "--require-modularity"),
         (not opts.use_baseline, "--no-baseline"),
         (opts.no_cache, "--no-cache"),
     )
@@ -404,7 +436,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
         report.engines += engine_runs
         report.notes = [v for v in found if v.rule in INFORMATIONAL_RULES]
-        report.violations = blocking(found) + [v for run in engine_runs for v in run.violations]
+        report.violations = _apply_modularity(policy, report, found, opts, only is None) + [v for run in engine_runs for v in run.violations]
         base: set[str] = ratchet_mod.load(services.fs, root / policy.baseline) if opts.use_baseline else set()
         ruff_skipped = any(run.name == "ruff" and run.status in {"skipped", "disabled"} for run in engine_runs)
         if not opts.tools or ruff_skipped:

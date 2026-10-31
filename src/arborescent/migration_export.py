@@ -19,7 +19,7 @@ def migration_arguments_of(policy: Policy, root: Path, fs: FileSystem, scan: Sca
     """The arguments for the policy's ``package_catalog``; the export has nothing to say without one."""
     context = load_package_context(policy, root, fs, scan)
     if context is None:
-        raise PolicyError("packages export needs package_catalog in the policy (strict preset): it names the catalog to export")
+        raise PolicyError("packages export needs package_catalog in the policy: it names the catalog to export")
     arguments = build_migration_arguments(context.catalog, context.facts)
     if not policy.package_pyproject:
         return arguments

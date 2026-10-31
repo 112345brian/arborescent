@@ -121,6 +121,11 @@ def _parser() -> argparse.ArgumentParser:
         help="require Arborescent minimum profile v1",
     )
     c.add_argument(
+        "--require-modularity",
+        action="store_true",
+        help="fail unless `modularity` is \"ready\" with a package_catalog and no package gap is open",
+    )
+    c.add_argument(
         "--no-baseline",
         action="store_true",
         help="ignore the baseline: report every violation",
@@ -449,6 +454,7 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         require_tools=args.require_tools,
         use_baseline=not args.no_baseline,
         require_profile=args.require_profile,
+        require_modularity=args.require_modularity,
         growth_against=args.growth_against,
         no_cache=args.no_cache,
     )

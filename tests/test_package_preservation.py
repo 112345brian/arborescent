@@ -128,9 +128,9 @@ def test_the_parts_key_needs_a_catalog() -> None:
         mini_policy(package_parts=["parts/core"])
 
 
-def test_the_parts_key_needs_the_strict_preset() -> None:
-    with pytest.raises(PolicyError, match="strict"):
-        mini_policy(package_catalog="packages.toml", package_parts=["parts/core"], preset="relaxed")
+def test_the_parts_key_works_with_a_relaxed_lint_preset() -> None:
+    policy = mini_policy(package_catalog="packages.toml", package_parts=["parts/core"], preset="relaxed")
+    assert policy.package_parts == ("parts/core",)
 
 
 @pytest.mark.parametrize("value", [["../core"], ["/abs"], [""], ["a", "a"], "parts/core", [5]])

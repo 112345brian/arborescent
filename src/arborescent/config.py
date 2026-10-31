@@ -141,6 +141,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         package_catalog=_package_catalog(raw),
         package_parts=_package_parts(raw),
         package_pyproject=_package_pyproject(raw),
+        modularity=_modularity(raw),
         children=_child_arbors(raw),
         preset=PRESETS[preset_name],
         io_modules=frozenset(io_modules),
@@ -152,6 +153,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
+    "modularity",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "io_modules", "groups",
@@ -424,4 +426,11 @@ def _package_pyproject(raw: Mapping[str, Any]) -> bool:
     value = raw.get("package_pyproject", False)
     if not isinstance(value, bool):
         raise PolicyError("`package_pyproject` must be a boolean")
+    return value
+
+
+def _modularity(raw: Mapping[str, Any]) -> str:
+    value = raw.get("modularity", "ready")
+    if not isinstance(value, str):
+        raise PolicyError("`modularity` must be \"ready\" or \"report\"")
     return value

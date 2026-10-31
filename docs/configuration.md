@@ -39,7 +39,8 @@ settings. The two forms cannot be mixed.
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
-| `package_catalog` | unset | Opt-in, strict preset only: path of a `packages.toml`. Every module and asset must belong to exactly one package (see [Package assignment](#package-assignment)). |
+| `modularity` | `"ready"` | Needs `package_catalog` for `"report"`. `"ready"`: every package gap fails `check`. `"report"`: gaps are shown as notes and never fail. Independent of `preset`; `--require-modularity` certifies it (see [Strict linting and strict modularity](#strict-linting-and-strict-modularity)). |
+| `package_catalog` | unset | Opt-in, any preset: path of a `packages.toml`. Every module and asset must belong to exactly one package (see [Package assignment](#package-assignment)). |
 | `package_parts` | `[]` | Opt-in, needs `package_catalog`: relative paths, inside the repository, of extracted part trees to check against the catalog (see [Annotation preservation](#annotation-preservation-across-a-split)). |
 
 | `package_pyproject` | `false` | Opt-in, needs `package_catalog`: derive each package's `pyproject.toml` fields from the annotations (see [Package pyproject.toml](#package-pyprojecttoml)). |
@@ -266,7 +267,7 @@ customization is active, or `customised rules: ...` with the changes that apply.
 
 ### Package assignment
 
-Set `package_catalog = "packages.toml"` (strict preset only; any other preset is a policy error) and `arborescent check`
+Set `package_catalog = "packages.toml"` (any lint preset) and `arborescent check`
 reports, by rule id, every first-party module and every asset that does not belong to exactly one package. It reuses the
 `packages.toml` above: a package claims a file by listing it, or a folder above it, in `paths`. The catalog is only
 parsed for this check, so a double claim that `packages validate` refuses outright is reported as a finding naming the
@@ -357,11 +358,23 @@ generated file that is out of date as drift. The engines' output is not ratchete
 The same edges are also reported by Arborescent's own `package-undeclared-dependency` (#52) and `package-private-import`
 (#55) rules, which need no engine installed; a test keeps the contracts and those rules from disagreeing.
 
+### Strict linting and strict modularity
+
+Two independent questions with two independent keys. `preset` (`strict`, `standard`, `relaxed`) is how strictly the
+code is linted. `modularity` is whether the repository is ready to be split: with `package_catalog` set, `ready` (the
+default) fails `check` on every open package gap, `report` shows them as `NOTE` lines and never fails. A `relaxed`
+repository can be modularity-ready and a `strict` one can be not.
+
+`arborescent check --require-modularity` certifies it: it fails (`MODULARITY FAIL ...`) when no `package_catalog` is
+set, when `modularity` is `report`, when an error-severity `package-*` gap is open, or under `--changed` (gaps are a
+whole-repository fact). A non-empty cut list (`package-spans-rings`) is information and is allowed. On success it
+prints `CERTIFIED modularity ready`. `--require-profile` is unrelated: it certifies lint and tool versions only.
+
 ### Annotation preservation across a split
 
 After a split by other tools, the question for Arborescent is whether the annotations survived, not whether the graph
 or the tests did (grimp, import-linter, tach and each part's own suite judge those). Two opt-in inputs, both needing
-`package_catalog` and the strict preset:
+`package_catalog` (any lint preset):
 
 - A package may declare `public = ["app.api", "app.api.*"]` in `packages.toml`: the dotted module globs other packages
   may import (the same matching as a scope's `public`). Without `public`, a package has no declared surface and nothing

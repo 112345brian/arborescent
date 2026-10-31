@@ -223,9 +223,11 @@ class Policy:
     package_catalog: str | None = None  # opt-in: packages.toml path; every module and asset must belong to one package
     package_parts: tuple[str, ...] = ()  # opt-in: extracted part trees (inside the repository) checked against the catalog
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
+    modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
 
     def __post_init__(self) -> None:
-        _validate_package_catalog(self.package_catalog, self.preset.name)
+        _validate_package_catalog(self.package_catalog)
+        _validate_modularity(self.modularity, self.package_catalog)
         _validate_package_parts(self.package_parts, self.package_catalog)
         if self.package_pyproject and self.package_catalog is None:
             raise PolicyError("`package_pyproject` derives from the packages in `package_catalog`, which is not set")
@@ -406,14 +408,22 @@ class Policy:
         return all(self.allowed_rings(r.name) == frozenset(x.name for x in self.rings[: i + 1]) for i, r in enumerate(self.rings))
 
 
-def _validate_package_catalog(value: str | None, preset: str) -> None:
+def _validate_package_catalog(value: str | None) -> None:
     if value is None:
         return
     path = PurePosixPath(value)
     if not value or path.is_absolute() or ".." in path.parts or "\\" in value:
         raise PolicyError(f"`package_catalog` must be a relative path inside the repository, got {value!r}")
-    if preset != DEFAULT_PRESET:
-        raise PolicyError(f"`package_catalog` requires the {DEFAULT_PRESET} preset, not {preset!r}")
+
+
+MODULARITY_MODES: tuple[str, ...] = ("ready", "report")
+
+
+def _validate_modularity(value: str, catalog: str | None) -> None:
+    if value not in MODULARITY_MODES:
+        raise PolicyError(f"`modularity` must be one of {list(MODULARITY_MODES)}, got {value!r}")
+    if value == "report" and catalog is None:
+        raise PolicyError("`modularity = \"report\"` needs `package_catalog`: there are no package gaps to report without one")
 
 
 def _validate_package_parts(parts: tuple[str, ...], catalog: str | None) -> None:

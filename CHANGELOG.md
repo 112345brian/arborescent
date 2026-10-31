@@ -5,6 +5,12 @@
 ## Unreleased
 
 ### Added
+- `modularity = "ready" | "report"` and `check --require-modularity`: strict modularity is now separate from strict linting.
+  `package_catalog` no longer requires the `strict` preset (a `standard` or `relaxed` repository can be modularity-ready).
+  `report` shows package gaps as notes instead of failing; `--require-modularity` fails without a catalog, in `report`
+  mode, under `--changed`, or while an error-severity package gap is open (`MODULARITY FAIL`, `CERTIFIED modularity ready`).
+  `--require-profile` stays lint and tool-version certification only. Behavior change: a policy that was rejected for
+  `package_catalog` with a non-strict preset is now accepted.
 - `packages migrate` takes its target directory from `--target` or from a git-ignored local config (`[targets]` in `.arborescent/local.toml`, found through `ARBORESCENT_LOCAL_CONFIG`, a `.env`, or that default) and prints which source supplied it. Where a repository is checked out is machine-specific, so the config is read by this command only and never reaches the catalog, the export, derived files or contracts; `home.repository` stays the committed remote identity.
 
 - `arborescent packages migrate PACKAGE_ID --target DIR`: the migration driver (#67). It supplies a dedicated migration
@@ -18,7 +24,7 @@
   touched) when a `from <old> import <module>` statement is present, because LibCST's output could then still parse while
   naming an unbound name, and fails loudly on any import still naming an old module. The annotation layer cannot import the driver: `module_forbid_imports` in Arborescent's own policy, now
   probed by `selftest` for every configured pattern. `docs/migration-driver.md`.
-- Opt-in `package_catalog = "packages.toml"` (strict preset only): every first-party module and asset must belong to
+- Opt-in `package_catalog = "packages.toml"` (any preset): every first-party module and asset must belong to
   exactly one package. New rule ids `package-unassigned-module`, `package-multiply-assigned-module`,
   `package-unowned-asset`, `package-multiply-assigned-asset` and `package-undeclared-dependency` fail the check;
   `package-spans-rings` is information (a `NOTE` line, never failing, never baselined). Assets are claimed by package

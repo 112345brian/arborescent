@@ -88,9 +88,9 @@ def test_the_check_is_off_unless_a_catalog_is_configured(tmp_path: Path) -> None
     assert not {v.rule for v in found} & PACKAGE_RULES
 
 
-def test_the_catalog_key_needs_the_strict_preset() -> None:
-    with pytest.raises(PolicyError, match="strict"):
-        mini_policy(package_catalog="packages.toml", preset="relaxed")
+@pytest.mark.parametrize("preset", ["strict", "standard", "relaxed"])
+def test_the_catalog_key_works_with_every_lint_preset(preset: str) -> None:
+    assert mini_policy(package_catalog="packages.toml", preset=preset).package_catalog == "packages.toml"
 
 
 @pytest.mark.parametrize("value", [5, "", "/abs/packages.toml", "../packages.toml"])
