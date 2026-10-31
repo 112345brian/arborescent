@@ -12,9 +12,12 @@ from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner, SystemCl
 from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .cli_install import _install_tools, _setup_install_command
+from .cli_migrate import add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
 from .domain import Policy, PolicyError
+from .driver_filter_repo import FilterRepo
+from .driver_port import MigrationLibrary
 from .engine import (
     EngineRun,
     Options,
@@ -174,6 +177,7 @@ def _parser() -> argparse.ArgumentParser:
         help="exit 1 when the export still has an annotation gap of severity error",
     )
     _ = package_actions.add_parser("schema", help="print the JSON Schema the export validates against")
+    add_migrate_parser(package_actions)
     extract = package_actions.add_parser("extract")
     extract.add_argument("package_id")
     extract.add_argument(
@@ -211,7 +215,7 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Sequence[str] | None = None, services: Services | None = None) -> int:
+def main(argv: Sequence[str] | None = None, services: Services | None = None, library: MigrationLibrary | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command == "check" and args.yes and not args.install_tools:
@@ -227,7 +231,7 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
             extracted = load_extracted_package(fs, args.extracted)
             print(f"valid: extracted {extracted.semantics.id} ({len(extracted.paths)} paths)")
             return 0
-        if args.command == "packages" and args.package_action != "export":
+        if args.command == "packages" and args.package_action not in ("export", "migrate"):
             root = (
                 args.config.parent
                 if args.config
@@ -240,7 +244,7 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
             cache=not getattr(args, "no_cache", False),
             output_dir=policy.output_dir,
         )
-        return _dispatch(args, policy, root, svc)
+        return _dispatch(args, policy, root, svc, library or FilterRepo(svc.runner, svc.fs))
     except PolicyError as exc:
         print(f"arborescent: {exc}", file=sys.stderr)
         return 2
@@ -259,7 +263,7 @@ def _find_catalog_root(fs: FileSystem, start: Path, catalog_path: str) -> Path:
 
 
 def _dispatch(
-    args: argparse.Namespace, policy: Policy, root: Path, svc: Services
+    args: argparse.Namespace, policy: Policy, root: Path, svc: Services, library: MigrationLibrary
 ) -> int:
     if args.command == "generate":
         return _generate(policy, root, svc)
@@ -273,6 +277,8 @@ def _dispatch(
         return _annotate(args, policy, root, svc)
     if args.command == "selftest":
         return _selftest(policy, root, svc)
+    if args.command == "packages" and args.package_action == "migrate":
+        return run_migrate(args, policy, root, svc, library)
     if args.command == "packages":
         return _export(args, policy, root, svc)
     return _check(args, policy, root, svc)

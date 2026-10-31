@@ -15,7 +15,7 @@ uses `pathlib.PurePosixPath` only for lexical path validation; it does not acces
 |---|---|---|---|
 | domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types (including declared child-arbor paths), rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
-| application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction, package assignment gaps |
+| application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction, package assignment gaps, the driver's translation of migration arguments into a library request |
 | adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time`, `sysconfig`, `tomllib` | focused file-system, scanner, clock, subprocess, engine and type-checker adapters |
 | composition | everything | `argparse`, `pathlib`, `os`, `shlex` | the command line: wires adapters to use cases and presents reports |
 
@@ -39,6 +39,23 @@ them, and a stable export, including the typed arguments a monorepo-to-polyrepo 
 reimplement what those tools do. The boundary, the wrapper rules, the tool landscape and the status of the existing
 `packages extract` are in `docs/superpowers/specs/2026-10-31-monorepo-split-annotations-design.md`.
 
+The driver is five modules, one per ring, and the annotation layer never imports any of them:
+
+- domain, `driver_request`: `MigrationRequest` (one package's path renames and module renames, plus where from and to) and `MigrationOutcome`.
+- ports, `driver_port`: the `MigrationLibrary` protocol (availability, the arguments it cannot apply, the exact arguments, `supply`).
+- application, `driver_plan`: `plan_supply` turns a `PackageArguments` into a request, refusing while an error gap of the package is open and for a workspace member (it keeps its history where it is); `supply` calls the port.
+- adapters, `driver_filter_repo`: git filter-repo behind the port, reached through `ToolRunner`.
+- composition, `cli_migrate`: `arborescent packages migrate`; `cli` binds the adapter.
+
+The constraint "the annotation layer must not import the driver" is `module_forbid_imports` in Arborescent's own policy,
+so `check` enforces it and `selftest` injects the forbidden import (`module_forbid_probes`). Adapters do not import the
+application ring (the ring rules and their probes), and the application imports no adapter.
+
+git filter-repo is the first library because it keeps history, takes explicit path selection and renames, reads one
+repository and writes another (the monorepo is never modified) and installs from PyPI (`arborescent[filterrepo]`). It
+does not rewrite imports, so the module renames of a request are reported as not applied; an import-rewriting library
+would be a second adapter over the same port.
+
 ## Modules
 
 | module | scope | ring |
@@ -57,7 +74,9 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 | `arborescent.package_assignment` | `single` | domain |
 | `arborescent.migration_arguments` | `single` | domain |
 | `arborescent.migration_json` | `single` | domain |
+| `arborescent.driver_request` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
+| `arborescent.driver_port` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
 | `arborescent.bench` | `single` | application |
@@ -78,6 +97,8 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 | `arborescent.package_gaps` | `single` | application |
 | `arborescent.package_probes` | `single` | application |
 | `arborescent.migration_export` | `single` | application |
+| `arborescent.driver_plan` | `single` | application |
+| `arborescent.module_forbid_probes` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |
@@ -85,12 +106,14 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 | `arborescent.scanner` | `single` | adapters |
 | `arborescent.tool_runner` | `single` | adapters |
 | `arborescent.engines` | `single` | adapters |
+| `arborescent.driver_filter_repo` | `single` | adapters |
 | `arborescent.testing` | `single` | adapters |
 | `arborescent.typecheckers` | `single` | adapters |
 | `arborescent.__main__` | `single` | composition |
 | `arborescent.cli` | `single` | composition |
 | `arborescent.cli_install` | `single` | composition |
 | `arborescent.cli_report` | `single` | composition |
+| `arborescent.cli_migrate` | `single` | composition |
 
 ## Data flow of `arborescent check`
 
