@@ -13,12 +13,14 @@ from arborescent.certification import (
     _tach_canary_modules,
     _tach_canary_modules_by_scope,
     _tach_probes,
+    certify,
     tach_multi_root_note,
 )
 from arborescent.config import policy_from_mapping
 from arborescent.engine import Options, run_check
 from arborescent.generate import tach
 from arborescent.installer_adapter import _toml_array_close
+from arborescent.testing import FakeToolRunner
 
 
 def test_toml_array_scanner_skips_brackets_inside_strings_and_comments() -> None:
@@ -150,3 +152,25 @@ def test_check_reports_multi_root_tach_limitation_as_advisory_drift(repo: Path) 
     assert any(line.startswith("tach: ") and "#41" in line for line in report.drift)
     single = run_check(mini_policy(), repo, services(), Options(tools=True))
     assert not any("#41" in line for line in single.drift)
+
+
+def test_minimum_profile_accepts_disabled_tach_only_when_import_linter_stays_on(tmp_path: Path) -> None:
+    write_files(tmp_path, MINI_FILES)
+    scan = FsScanner().scan(mini_policy(), tmp_path)
+
+    only_tach = _native_minimum(mini_policy(disabled_tools=["tach"]), scan)
+    assert not any("tach" in failure for failure in only_tach)
+    both = _native_minimum(mini_policy(disabled_tools=["tach", "import-linter"]), scan)
+    assert "required profile tool tach is disabled by policy" in both
+
+
+def test_disabled_tach_requires_installed_import_linter(tmp_path: Path) -> None:
+    write_files(tmp_path, MINI_FILES)
+    policy = mini_policy(disabled_tools=["tach", "ruff"])
+    scan = FsScanner().scan(policy, tmp_path)
+
+    missing = certify(tmp_path, policy, scan, FakeToolRunner(set()), LocalFileSystem())
+    assert "import-linter is not installed; it is required when tach is disabled" in missing
+    present = certify(tmp_path, policy, scan, FakeToolRunner({"lint-imports"}), LocalFileSystem())
+    assert "import-linter is not installed; it is required when tach is disabled" not in present
+    assert not any("Tach" in failure or "tach" in failure for failure in present if "disabled by policy" not in failure)

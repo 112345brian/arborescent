@@ -194,6 +194,10 @@ the environment), `docs-sync` (the architecture doc's `| module | ring |` table 
 ## Speed
 
 Engines run concurrently; Arborescent parses each file once (AST), caches facts by content hash in `.arborescent/`, and
+tach is optional: `disabled_tools = ["tach"]` still passes the minimum profile when import-linter stays enabled and installed.
+import-linter enforces the generated ring contracts and the native engine enforces external allow-lists. Prefer this for
+multi-`source_roots` workspaces (uv/Cargo/npm style), where tach cannot resolve cross-root imports and `check` warns.
+
 `--changed` limits Arborescent, Ruff, and the type checker to changed files. import-linter, `tach check`, and `tach check-external`
 are graph-wide, so Arborescent skips them and reports that reason in the engine results. See the repository CHANGELOG for measured numbers; `arborescent bench` reproduces them.
 

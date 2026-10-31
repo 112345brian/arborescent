@@ -7,8 +7,9 @@
 ### Added
 
 - `classify_from = "tach.toml"` (top level or per scope) derives `classify` from tach layers; explicit entries win.
-- `check` now warns (advisory) when tach is enabled and the policy spans several distinct `source_roots`, a case tach
-  cannot enforce across; minimum-profile canary failures name the limitation (#41).
+- tach is optional for the minimum profile: `disabled_tools = ["tach"]` passes when import-linter stays enabled and
+  installed. `check` warns (advisory) when tach is enabled over several distinct `source_roots`, where tach cannot
+  enforce cross-root edges, and the minimum profile then skips tach's layer canary if import-linter is enabled (#41).
 
 ## 0.3.0 — 2026-10-30
 

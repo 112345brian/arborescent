@@ -46,6 +46,8 @@ def certify(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunner, fs
         failures.extend(_ruff_probes(root, policy.source_roots, runner, fs))
     if "tach" not in policy.disabled_tools:
         failures.extend(_tach_probes(root, policy, scan, runner, fs))
+    elif "import-linter" not in policy.disabled_tools and not runner.available("lint-imports"):
+        failures.append("import-linter is not installed; it is required when tach is disabled")
     return tuple(failures)
 
 
@@ -55,11 +57,9 @@ def _native_minimum(policy: Policy, scan: object) -> list[str]:
     if any(not local_policy.forbid_circular_imports for _, local_policy in local_policies):
         suffix = " in every scope" if policy.scopes else ""
         failures.append(f"minimum profile requires `forbid_circular_imports = true`{suffix}")
-    failures.extend(
-        f"required profile tool {tool} is disabled by policy"
-        for tool in ("ruff", "tach")
-        if tool in policy.disabled_tools
-    )
+    # tach is optional when import-linter enforces the generated ring contracts and the native engine the allow-lists.
+    required = ("ruff",) if "import-linter" not in policy.disabled_tools else ("ruff", "tach")
+    failures.extend(f"required profile tool {tool} is disabled by policy" for tool in required if tool in policy.disabled_tools)
     if "arbor-annotations" in policy.disabled_tools:
         failures.append("minimum profile requires `__arbor__` annotations to be enabled")
     for scope_name, local_policy in local_policies:
@@ -137,8 +137,8 @@ def _ruff_probes(root: Path, sources: tuple[str, ...], runner: ToolRunner, fs: F
 
 TACH_MULTI_ROOT_NOTE = (
     "tach does not resolve imports across several separate `source_roots` (uv/Cargo/npm-style workspaces), so its "
-    "boundary checks can pass despite forbidden edges; rely on arborescent's own ring engine and import-linter for "
-    "cross-package enforcement (see issue #41)"
+    "boundary checks can pass despite forbidden edges; set `disabled_tools = [\"tach\"]` and rely on import-linter and "
+    "arborescent's own ring engine, which both handle this layout (see issue #41)"
 )
 
 
@@ -167,7 +167,12 @@ def _tach_probes(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunne
             if failures:
                 return failures
             for scope_name, (source_module, outer_modules) in canaries.items():
-                failures.extend(_tach_scope_probe(temp, (scope_name, source_module, outer_modules), runner, fs))
+                failures.extend(
+                    _tach_scope_probe(
+                        temp, (scope_name, source_module, outer_modules), runner, fs,
+                        layers=tach_multi_root_note(policy) is None or "import-linter" in policy.disabled_tools,
+                    )
+                )
             note = tach_multi_root_note(policy)
             if failures and note is not None:
                 failures.append(f"note: {note}")
@@ -178,6 +183,7 @@ def _tach_probes(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunne
 
 def _tach_scope_probe(
     temp: Path, canary: tuple[str, ModuleInfo | None, tuple[str, ...]], runner: ToolRunner, fs: FileSystem,
+    *, layers: bool = True,
 ) -> list[str]:
     scope_name, source_module, outer_modules = canary
     if source_module is None:
@@ -186,7 +192,7 @@ def _tach_scope_probe(
     if not fs.is_file(source_path):
         return [f"Tach canary source is unavailable in the isolated project: {source_module.path}"]
     failures = []
-    if not _tach_layer_probe(temp, source_module, outer_modules, runner, fs):
+    if layers and not _tach_layer_probe(temp, source_module, outer_modules, runner, fs):
         failures.append(
             f"Tach layer canary is not effective in scope {scope_name!r}: "
             f"{source_module.name} may import every outermost module"
