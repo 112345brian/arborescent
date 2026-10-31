@@ -9,6 +9,7 @@ How much of each recipe was run:
 
 | Recipe | Status |
 |---|---|
+| `arborescent packages migrate` (the driver, draft PR #69) | run on the worked example from the branch head `93bd9c5`: dry run, real run, and each refusal |
 | git filter-repo paths file (repository home and workspace member) | run on the worked example below, git-filter-repo `a40bce548d2c` |
 | `git subtree split` | run on the worked example, git 2.43.0 |
 | leaf-first order with `tsort` | run on the worked example |
@@ -30,8 +31,9 @@ Arborescent has two layers.
   extraction, import rewriting and everything else is done inside the library or tool. The annotation layer never depends
   on the driver, and the arguments stay usable by any tool. The boundary is recorded in
   [the design note](superpowers/specs/2026-10-31-monorepo-split-annotations-design.md) and in
-  [architecture.md](architecture.md). **No driver ships on this branch**; until it does, the recipes below are how you
-  supply the same arguments by hand.
+  [architecture.md](architecture.md). The driver is the command `arborescent packages migrate`, described
+  [below](#the-driver-packages-migrate). It is in draft PR #69, **not in the base of the pull request this page is part
+  of**; the recipes further down are how you supply the same arguments by hand, for any tool, with or without it.
 
 The migration arguments are tool-neutral value objects in `arborescent.migration_arguments`, serialised by
 `arborescent.migration_json`:
@@ -219,7 +221,68 @@ All history-rewriting tools below change commit hashes. From
 A package with `home.kind = "workspace-member"` exports no history or pin information, because it stays in the same
 repository.
 
+## The driver: `packages migrate`
+
+`arborescent packages migrate` supplies a migration library with one package's arguments. **It does not migrate**: history
+extraction happens inside the library, and the driver holds no migration logic. It is an explicit command; `check` and
+`generate` never call it, and the annotation layer never depends on it. The full description is in
+[migration-driver.md](migration-driver.md) (arrives with draft PR #69; this page does not repeat it). What was run here:
+
+```sh
+arborescent packages migrate core --target ../core            # dry run (the default): prints the arguments, supplies nothing
+arborescent packages migrate core --target ../core --yes      # supplies the library
+arborescent packages migrate core --target ../core --branch release   # the history to carry over (default: main)
+```
+
+**What it supplies.** For the package, from its migration arguments: the owned `path_renames` and the `module_renames`,
+plus the source (the repository root), the new `--target` and the branch. Nothing else is added. The only library today is
+[git filter-repo](https://github.com/newren/git-filter-repo/blob/main/Documentation/git-filter-repo.txt), installed with the
+`arborescent[filterrepo]` extra (`git-filter-repo>=2.38`); the adapter runs `git init` for the target and then
+`git-filter-repo --source <repo> --target <new repo> --refs <branch>` with a `--path` and a `--path-rename` per owned path,
+so the monorepo is never modified and only the named branch is carried over. An import-rewriting adapter (rope) is not part of
+#69 as it stands; use the rope recipe below.
+
+**The dry run** prints the exact arguments, from the same code path as `--yes`. On the worked example (directory names
+shortened):
+
+```text
+migrate core: dry run: nothing is supplied; pass --yes to supply the library
+library: git filter-repo
+source:  /work/shop
+target:  /work/core
+branch:  main
+path renames:
+  src/shop/core -> src/shop_core
+module renames:
+  shop.core -> shop_core
+NOT APPLIED  module renames (git filter-repo does not rewrite imports)
+arguments: git-filter-repo --source /work/shop --target /work/core --refs main --path src/shop/core --path-rename src/shop/core:src/shop_core
+```
+
+`NOT APPLIED` is the point of the boundary: filter-repo cannot rewrite imports, so the driver reports the module rename it
+cannot apply and does not do it itself. `--yes` on the example (with `--branch master`, the example repository's branch)
+wrote a repository holding `src/shop_core/{__init__,_ids,models}.py` and the package's two commits, and printed
+`ok: history of core written to <target>`.
+
+**What it refuses or does nothing for**, each seen on the example:
+
+| Situation | Result |
+|---|---|
+| unknown package id | `unknown package 'nope'; the catalog has: billing, core, web`, exit 2 |
+| an open annotation gap of severity `error` for this package (or for no package in particular) | the gaps are listed (`blocked: 1 open annotation gap(s) of severity error`, then `[package-undeclared-home] billing: ...`), nothing is supplied, exit 1, with or without `--yes` |
+| a gap of another package, or an informational one | does not block |
+| the package is a workspace member | `stays: workspace member at packages/web: it stays in this repository, so there is no history to extract`, nothing supplied, exit 0 |
+| the library is not installed | `SETUP  missing migration library: git-filter-repo; install with ...`; the dry run still prints the arguments and exits 0, `--yes` exits 1 |
+| the target already exists | `FAILED: <target> exists; the new repository must not`, exit 1 |
+
+Because the driver refuses on an error gap, a gap in the export blocks the hand-over before any tool runs. It does not catch
+what the export does not flag as a gap, such as an open private-import edge (gap 11 in the ledger below): `ready` and the
+driver both treat that package as clear.
+
 ## Recipes
+
+Everything below supplies the same arguments by hand, to the tools the driver does not cover and to filter-repo when you want
+a different invocation.
 
 ### git filter-repo: paths file
 
@@ -237,10 +300,11 @@ id=core
 git clone . "../$id" && cd "../$id" && git filter-repo --paths-from-file "../paths-$id.txt"
 ```
 
-This uses the per-file `modules` and `assets` entries, not the directory-level `path_renames`, because a package follows
-module sets and not folders: when a folder is shared between packages, only the file-level lists select the right files.
-(`path_renames` is shorter and fine for a package that owns whole folders; [migration-export.md](migration-export.md)
-shows that form.) On the example, `core` ends up with `src/shop_core/{__init__,_ids,models}.py` and its two commits.
+This uses the per-file `modules` and `assets` entries. `path_renames` selects the same files, because it lists the paths the
+catalog assigns to the package (a folder, or single files when the package owns only some of a folder), and it is shorter;
+[migration-export.md](migration-export.md) shows that form, and the driver below uses it. The per-file form is useful when
+you also want to see exactly which files will move. On the example, `core` ends up with
+`src/shop_core/{__init__,_ids,models}.py` and its two commits.
 
 For `web` (a workspace member with an asset) the same commands give `packages/web/src/web/{__init__.py,views.py,templates/index.html}`.
 The result is a rewritten repository whose history holds only that package, at the path it will have inside the workspace.
@@ -374,7 +438,7 @@ Arborescent did not give them. Sources are explicit.
 | 7 | **`policy` and `pyproject` are `null` in the export of this branch.** | release policy, `package_pyproject`; #57 | A consumer cannot read history, pin or derived `pyproject.toml` fields from the export, and #57's fixture could not exercise those slots. **Fixed in #62** (`policy`: `{ history, release, unmanaged }`, `null` for a workspace member, with a `package-release-policy-missing` gap) **and in #63** (`pyproject`: path, `requires_python`, dependencies, sources, workspace members, source roots, root packages, only when `package_pyproject` is set), once they merge. |
 | 8 | **Preservation results are not in the export.** `package_parts` (#55) is a `check`-time verification of already-extracted parts. | #55 | The export is read before the split; verification after the split comes from `check`. |
 | 9 | **No cut list.** Which imports to remove comes from the engines' violation output (#53), not the export. | by design | The export alone cannot tell you how to unblock a package, only that a bypass exists. |
-| 10 | **The workspace-member join is not described.** Where a rewritten package's history enters the workspace repository is not an annotation. | filter-repo run | The final merge step is yours and was not run for this page. |
+| 10 | **The workspace-member join is not described.** Where a rewritten package's history enters the workspace repository is not an annotation. | filter-repo run; driver | The final merge step is yours and was not run for this page. The driver supplies nothing for a workspace member either (it says the package stays in the repository). |
 | 11 | **`ready` is `true` while a blocking private-import edge is open.** The edge shows only as `surface.bypasses`; no gap entry is raised. | #57 | A consumer that refuses on `ready` or on a gap code lets a split through that the engine contracts would break. It has to test `bypasses` separately. |
 | 12 | **No per-module ring in `owned.modules[]`.** | #57 | A harness re-reads the monorepo policy to write each part's `classify` or `__arbor__`. |
 | 13 | **No part manifest or policy in the export.** #55 compares a part with `.arborescent-package.toml` and a shipped policy. The export carries neither, nor the origin `repository` and `root`, `extraction_status`, each path's `role` and `metadata`, or which `[[assets]]` directory a file came from (assets are exported per file; the catalog and the manifest key them by directory). | #57 | The harness hand-writes the manifest and the policy for every part. |
