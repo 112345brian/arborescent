@@ -22,7 +22,8 @@ from .domain import (
     Violation,
 )
 from .generate import generate
-from .package_gaps import package_gap_violations
+from .package_gaps import load_package_context, package_gap_violations
+from .package_pyproject_gaps import derived_projects, pyproject_files
 from .ports import (
     Clock,
     Engine,
@@ -185,6 +186,20 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
             continue
         services.fs.mkdir(path.parent)
         services.fs.write_text(path, text)
+        written.append(rel)
+    return written + _write_package_projects(policy, root, services, scan)
+
+
+def _write_package_projects(policy: Policy, root: Path, services: Services, scan: ScanResult) -> list[str]:
+    """Create each missing package ``pyproject.toml`` from the annotations; an existing one is never touched."""
+    context = load_package_context(policy, root, services.fs, scan)
+    if context is None or not policy.package_pyproject:
+        return []
+    projects = derived_projects(policy, scan, context.catalog, context.facts)
+    written: list[str] = []
+    for rel, text in sorted(pyproject_files(services.fs, root, projects).items()):
+        services.fs.mkdir((root / rel).parent)
+        services.fs.write_text(root / rel, text)
         written.append(rel)
     return written
 

@@ -80,6 +80,7 @@ class Rule(StrEnum):
     PACKAGE_MULTIPLY_ASSIGNED_ASSET = "package-multiply-assigned-asset"
     PACKAGE_SPANS_RINGS = "package-spans-rings"
     PACKAGE_UNDECLARED_DEPENDENCY = "package-undeclared-dependency"
+    PACKAGE_PYPROJECT_DRIFT = "package-pyproject-drift"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {
@@ -95,7 +96,8 @@ EFFECT_RULES: Mapping[str, Rule] = {
 }
 
 # Findings that are reported but never fail a check and never enter the baseline: a package spanning rings is normal.
-INFORMATIONAL_RULES: frozenset[Rule] = frozenset({Rule.PACKAGE_SPANS_RINGS})
+# A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
+INFORMATIONAL_RULES: frozenset[Rule] = frozenset({Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT})
 
 
 class PolicyError(ValueError):
@@ -207,9 +209,12 @@ class Policy:
     require_arbor_annotations: bool = False
     require_arbor_annotations_exclude: tuple[str, ...] = ()
     package_catalog: str | None = None  # opt-in: packages.toml path; every module and asset must belong to one package
+    package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
 
     def __post_init__(self) -> None:
         _validate_package_catalog(self.package_catalog, self.preset.name)
+        if self.package_pyproject and self.package_catalog is None:
+            raise PolicyError("`package_pyproject` derives from the packages in `package_catalog`, which is not set")
         _validate_rings(self.rings, self.classify, bool(self.scopes))
         for pattern, targets in self.module_forbid_imports:
             if not pattern or not targets:

@@ -19,6 +19,13 @@
   tool-specific emitter ships; `docs/migration-export.md` has a `git filter-repo` recipe and the comparison with
   blinkered's `blinkered.toml` (#54).
 
+- Opt-in `package_pyproject = true` (needs `package_catalog`): `arborescent generate` creates each missing package
+  `pyproject.toml` with the fields the annotations determine (dependencies from the rings' `external` allow-lists through
+  the `dependencies` mapping, plus `depends_on`; `[tool.uv.sources]` per sibling; the root `[tool.uv.workspace]
+  members`; `source_roots` and `root_packages` tables) and a minimal template; an existing file is never rewritten.
+  New information rule `package-pyproject-drift` (a `NOTE`, never failing, never baselined) names a derived field that
+  disagrees with the annotations. `selftest` probes it (#60).
+
 ### Changed
 
 - `packages.py` is split into cohesive `package_*` modules; behaviour and the `arborescent.packages` names are unchanged,

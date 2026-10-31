@@ -9,6 +9,11 @@ from .domain import Policy, Violation
 from .facts import resolve_targets
 from .package_assignment import RepositoryFacts, assignment_violations
 from .package_model import CatalogDocument
+from .package_pyproject_gaps import (
+    derived_projects,
+    existing_derived_paths,
+    pyproject_violations,
+)
 from .package_tree import is_generated
 from .packages import read_catalog
 from .path_exclusion import excluded_by_policy
@@ -29,19 +34,27 @@ class PackageContext:
 
     catalog: CatalogDocument
     facts: RepositoryFacts
+    derived: tuple[str, ...] = ()  # derived package pyproject files that exist (the drift probe edits one)
 
 
 def load_package_context(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> PackageContext | None:
     """``None`` when the policy does not set ``package_catalog``."""
     if policy.package_catalog is None:
         return None
-    return PackageContext(load_package_catalog(fs, root, policy), repository_facts(policy, root, fs, scan))
+    catalog, facts = load_package_catalog(fs, root, policy), repository_facts(policy, root, fs, scan)
+    derived = existing_derived_paths(fs, root, derived_projects(policy, scan, catalog, facts)) if policy.package_pyproject else ()
+    return PackageContext(catalog, facts, derived)
 
 
 def package_gap_violations(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> list[Violation]:
     """Findings for the configured catalog; empty when the policy does not set ``package_catalog``."""
     context = load_package_context(policy, root, fs, scan)
-    return [] if context is None else assignment_violations(context.catalog, context.facts)
+    if context is None:
+        return []
+    found = assignment_violations(context.catalog, context.facts)
+    if policy.package_pyproject:
+        found += pyproject_violations(fs, root, derived_projects(policy, scan, context.catalog, context.facts))
+    return found
 
 
 def repository_facts(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> RepositoryFacts:

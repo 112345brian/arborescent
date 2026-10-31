@@ -139,6 +139,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         customization_labels=customizations,
         practices=dict(raw.get("practices", {})),
         package_catalog=_package_catalog(raw),
+        package_pyproject=_package_pyproject(raw),
         children=_child_arbors(raw),
         preset=PRESETS[preset_name],
         io_modules=frozenset(io_modules),
@@ -149,7 +150,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
     "scan_vendors",
     "child_policy_mode",
-    "ruff", "practices", "exclude", "package_catalog",
+    "ruff", "practices", "exclude", "package_catalog", "package_pyproject",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "io_modules", "groups",
@@ -409,4 +410,11 @@ def _package_catalog(raw: Mapping[str, Any]) -> str | None:
     value = raw.get("package_catalog")
     if value is not None and not isinstance(value, str):
         raise PolicyError("`package_catalog` must be a relative path to a packages.toml file")
+    return value
+
+
+def _package_pyproject(raw: Mapping[str, Any]) -> bool:
+    value = raw.get("package_pyproject", False)
+    if not isinstance(value, bool):
+        raise PolicyError("`package_pyproject` must be a boolean")
     return value

@@ -40,6 +40,7 @@ settings. The two forms cannot be mixed.
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
 | `package_catalog` | unset | Opt-in, strict preset only: path of a `packages.toml`. Every module and asset must belong to exactly one package (see [Package assignment](#package-assignment)). |
+| `package_pyproject` | `false` | Opt-in, needs `package_catalog`: derive each package's `pyproject.toml` fields from the annotations (see [Package pyproject.toml](#package-pyprojecttoml)). |
 
 ## Multi-scope configuration
 
@@ -316,6 +317,35 @@ All four keys are optional; a missing one is a named gap in the export when it m
 [migration-export.md](migration-export.md) for the document, the schema, the gap codes, a `git filter-repo` recipe and the
 comparison with blinkered's `blinkered.toml`.
 
+### Package `pyproject.toml`
+
+Set `package_pyproject = true` (needs `package_catalog`) and `arborescent generate` creates, for every package in the
+catalog, the `pyproject.toml` at `<root>/pyproject.toml` when it does not exist. **An existing file is never rewritten.**
+Each package therefore needs its own `root`; two packages sharing one is an error that names both.
+
+Derived from the annotations (the only fields `check` compares):
+
+| field | derived from |
+|---|---|
+| `[project].dependencies` | the third-party names in the `external` allow-lists of the rings of the package's modules, mapped to distributions through the policy's `dependencies` table (`bs4 = "beautifulsoup4"`), plus the `id` of every package in `depends_on` (a package's distribution name is its `id`). Version specifiers are not compared. |
+| `[tool.uv.sources]` | one entry per sibling in `depends_on`: `{ workspace = true }` when the sibling's `repository` equals the consumer's, otherwise `{ git = "<the sibling's repository>" }`. The pin (`rev`, `tag`, an `index`) is yours and is not compared. An extra `workspace = true` entry for a package that is not a dependency is drift. |
+| `[tool.uv.workspace].members` | the `root` of every package in the workspace repository (the repository holding most packages). Written into the root `pyproject.toml`, which is created only when no package is rooted at `.`. |
+| `[tool.arborescent]` and `[tool.tach]` `source_roots` | the policy's source roots that contain the package's modules, relative to the package root |
+| `[tool.importlinter].root_packages` | the top-level packages of the package's modules |
+
+A new file also gets a template: `name` (the package `id`), `description` (its `summary`), `version = "0.0.0"` and
+`requires-python` from the policy's `python`. The template adds no build backend, classifiers or other packaging
+configuration. A `[project]` that lists `dependencies` as `dynamic` is not compared; the three `source_roots` and
+`root_packages` tables are compared only when the file has them.
+
+`check` reports a differing derived field as `package-pyproject-drift`, naming the file, the field, both values and the
+annotation it disagrees with. Like generated-preset drift it is advisory: a `NOTE` line that neither fails the check nor
+enters the baseline, and the file is left as it is. A missing file is not drift (`generate` creates it).
+Workspace member versus own repository is today decided by comparing `repository` values, in one function
+(`source_of` in `package_pyproject.py`); the `home` annotation of the export (#54) replaces that comparison, and changing
+it changes only the `sources` entries and the member list. `selftest` probes the rule by appending a workspace source for
+a non-dependency to a derived file; with no derived file on disk the probe is listed as skipped with the reason.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:
@@ -453,6 +483,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `package-multiply-assigned-asset` | an asset is under one package's path and also matched by another package's `[[assets]]` glob |
 | `package-spans-rings` | information only (never fails, never baselined): a package has modules in several rings, so a split must follow module sets, not folders |
 | `package-undeclared-dependency` | a module imports a module of another package that its own package does not list in `depends_on` |
+| `package-pyproject-drift` | information only (never fails, never baselined): `package_pyproject` is set and a derived field of an existing package `pyproject.toml` disagrees with the annotations |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
 `getattr`, variables, or wrappers. A test patch is checked against the target module's ring and is considered only when
