@@ -7,11 +7,14 @@ from pathlib import Path
 
 import pytest
 from arborescent_helpers import mini_policy, services, write_files
+from jsonschema import Draft202012Validator, ValidationError
 
 import arborescent.engine as engine
 from arborescent.adapters import FsScanner, LocalFileSystem
 from arborescent.domain import INFORMATIONAL_RULES, PolicyError, Rule
 from arborescent.engine import Options, run_check, run_own, write_generated
+from arborescent.migration_export import migration_arguments_of
+from arborescent.migration_json import SCHEMA, export_document
 from arborescent.package_gaps import load_package_context
 from arborescent.package_model import CatalogError
 from arborescent.practices import undeclared_imports
@@ -36,6 +39,9 @@ kind = "library"
 repository = "example/mono"
 root = "core"
 summary = "the domain"
+[packages.home]
+kind = "workspace-member"
+path = "core"
 [[packages.paths]]
 path = "core"
 role = "source"
@@ -48,6 +54,9 @@ repository = "example/mono"
 root = "shell"
 summary = "adapters"
 depends_on = ["core"]
+[packages.home]
+kind = "workspace-member"
+path = "shell"
 [[packages.paths]]
 path = "shell"
 role = "source"
@@ -179,9 +188,14 @@ def test_a_dynamic_dependency_list_is_not_compared(tmp_path: Path) -> None:
     assert [s for s, _ in drift(tmp_path) if "dependencies" in s] == []
 
 
+CORE_ELSEWHERE = "https://example.test/core.git"
+
+
 def catalog_with_core_elsewhere() -> str:
-    head, tail = CATALOG.split('[[packages]]\nid = "shell"')
-    return head.replace('repository = "example/mono"', 'repository = "https://example.test/core.git"') + '[[packages]]\nid = "shell"' + tail
+    """The same catalog with only core's ``home`` flipped from a workspace member to its own repository."""
+    old = '[packages.home]\nkind = "workspace-member"\npath = "core"\n'
+    assert old in CATALOG
+    return CATALOG.replace(old, f'[packages.home]\nkind = "repository"\nrepository = "{CORE_ELSEWHERE}"\n')
 
 
 def derived_sources(root: Path, catalog: str) -> dict[str, dict[str, object]]:
@@ -190,24 +204,36 @@ def derived_sources(root: Path, catalog: str) -> dict[str, dict[str, object]]:
     return {rel: load(root, rel) for rel in ("core/pyproject.toml", "shell/pyproject.toml", "pyproject.toml") if (root / rel).exists()}
 
 
-def test_changing_a_packages_repository_changes_only_the_sources_entries_and_the_member_list(tmp_path: Path) -> None:
+def test_changing_a_packages_home_changes_only_its_consumers_sources_and_the_member_list(tmp_path: Path) -> None:
     mono = derived_sources(tmp_path / "mono", CATALOG)
     split = derived_sources(tmp_path / "split", catalog_with_core_elsewhere())
     assert mono["shell/pyproject.toml"]["tool"]["uv"]["sources"] == {"core": {"workspace": True}}  # type: ignore[index]
-    assert split["shell/pyproject.toml"]["tool"]["uv"]["sources"] == {"core": {"git": "https://example.test/core.git"}}  # type: ignore[index]
-    for rel in ("core/pyproject.toml", "shell/pyproject.toml"):
-        for tables in (mono, split):
-            tables[rel]["tool"].get("uv", {}).pop("sources", None)  # type: ignore[attr-defined]
-    assert mono["core/pyproject.toml"] == split["core/pyproject.toml"]
+    assert split["shell/pyproject.toml"]["tool"]["uv"]["sources"] == {"core": {"git": CORE_ELSEWHERE}}  # type: ignore[index]
+    assert mono["core/pyproject.toml"] == split["core/pyproject.toml"], "the flipped package's own file does not change"
+    del mono["shell/pyproject.toml"]["tool"]["uv"]["sources"]  # type: ignore[attr-defined]
+    del split["shell/pyproject.toml"]["tool"]["uv"]["sources"]  # type: ignore[attr-defined]
     assert mono["shell/pyproject.toml"] == split["shell/pyproject.toml"]
     assert mono["pyproject.toml"]["tool"]["uv"]["workspace"]["members"] == ["core", "shell"]  # type: ignore[index]
     assert split["pyproject.toml"]["tool"]["uv"]["workspace"]["members"] == ["shell"]  # type: ignore[index]  # core left the workspace
 
 
+def test_a_sibling_without_a_home_gets_no_source_entry(tmp_path: Path) -> None:
+    repo(tmp_path, CATALOG.replace('[packages.home]\nkind = "workspace-member"\npath = "core"\n', ""))
+    write_generated(policy(), tmp_path, services())
+    assert "uv" not in load(tmp_path, "shell/pyproject.toml")["tool"]  # type: ignore[operator]
+    assert drift(tmp_path) == []
+
+
+def test_the_member_list_is_the_home_path_not_the_current_root(tmp_path: Path) -> None:
+    repo(tmp_path, CATALOG.replace('path = "shell"\n[[packages.paths]]', 'path = "packages/shell"\n[[packages.paths]]'))
+    write_generated(policy(), tmp_path, services())
+    assert load(tmp_path, "pyproject.toml")["tool"]["uv"]["workspace"]["members"] == ["core", "packages/shell"]  # type: ignore[index]
+
+
 def test_an_own_repository_source_checks_the_git_url_but_not_the_pin(tmp_path: Path) -> None:
     repo(tmp_path, catalog_with_core_elsewhere(), {
         "shell/pyproject.toml": '[project]\nname = "shell"\ndependencies = ["beautifulsoup4", "core"]\n'
-        '[tool.uv.sources]\ncore = { git = "https://example.test/core.git", rev = "abc123" }\n'})
+        f'[tool.uv.sources]\ncore = {{ git = "{CORE_ELSEWHERE}", rev = "abc123" }}\n'})
     assert [s for s, _ in drift(tmp_path) if "sources" in s] == []
     write_files(tmp_path, {"shell/pyproject.toml": '[project]\nname = "shell"\ndependencies = ["beautifulsoup4", "core"]\n'
                            '[tool.uv.sources]\ncore = { workspace = true }\n'})
@@ -285,3 +311,36 @@ def test_selftest_survives_when_the_drift_check_is_removed(tmp_path: Path, monke
     monkeypatch.setattr(engine, "package_gap_violations", lambda *args, **kwargs: [])
     report = selftest(policy(), tmp_path, services())
     assert any(entry.startswith(f"[{Rule.PACKAGE_PYPROJECT_DRIFT}]") for entry in report.survived)
+
+
+def exported(root: Path, **overrides: object) -> dict[str, dict[str, object]]:
+    chosen = policy(**overrides)
+    document = export_document(migration_arguments_of(chosen, root, FS, FsScanner().scan(chosen, root)), "packages.toml")
+    return {item["id"]: item["pyproject"] for item in document["packages"]}
+
+
+def test_the_export_carries_the_derived_fields_in_its_pyproject_slot(tmp_path: Path) -> None:
+    repo(tmp_path)
+    assert exported(tmp_path)["shell"] == {
+        "path": "shell/pyproject.toml", "requires_python": ">=3.11", "dependencies": ["beautifulsoup4", "core"],
+        "sources": {"core": {"workspace": True}}, "workspace_members": [], "source_roots": ["src"],
+        "root_packages": ["shell"],
+    }
+
+
+def test_the_export_slot_stays_null_without_the_key(tmp_path: Path) -> None:
+    repo(tmp_path)
+    assert set(exported(tmp_path, package_pyproject=False).values()) == {None}
+
+
+def test_the_export_with_the_slot_filled_validates_against_the_published_schema(tmp_path: Path) -> None:
+    repo(tmp_path)
+    chosen = policy()
+    document = export_document(migration_arguments_of(chosen, tmp_path, FS, FsScanner().scan(chosen, tmp_path)), "packages.toml")
+    Draft202012Validator(SCHEMA).validate(document)
+    assert document["packages"][1]["pyproject"] is not None
+    slot = SCHEMA["properties"]["packages"]["items"]["properties"]["pyproject"]
+    assert slot["type"] == ["object", "null"], "still object | null: no schema version bump"
+    document["packages"][1]["pyproject"]["dependencies"] = "core"
+    with pytest.raises(ValidationError):
+        Draft202012Validator(SCHEMA).validate(document)

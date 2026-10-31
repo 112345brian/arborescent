@@ -328,8 +328,8 @@ Derived from the annotations (the only fields `check` compares):
 | field | derived from |
 |---|---|
 | `[project].dependencies` | the third-party names in the `external` allow-lists of the rings of the package's modules, mapped to distributions through the policy's `dependencies` table (`bs4 = "beautifulsoup4"`), plus the `id` of every package in `depends_on` (a package's distribution name is its `id`). Version specifiers are not compared. |
-| `[tool.uv.sources]` | one entry per sibling in `depends_on`: `{ workspace = true }` when the sibling's `repository` equals the consumer's, otherwise `{ git = "<the sibling's repository>" }`. The pin (`rev`, `tag`, an `index`) is yours and is not compared. An extra `workspace = true` entry for a package that is not a dependency is drift. |
-| `[tool.uv.workspace].members` | the `root` of every package in the workspace repository (the repository holding most packages). Written into the root `pyproject.toml`, which is created only when no package is rooted at `.`. |
+| `[tool.uv.sources]` | one entry per sibling in `depends_on`, from the sibling's `[packages.home]`: `{ workspace = true }` for a workspace member, `{ git = "<home.repository>" }` for a package in its own repository (write a URL uv accepts), no entry when the sibling has no `home` (the export reports that gap). The pin (`rev`, `tag`, an `index`) is yours and is not compared. An extra `workspace = true` entry for a package that is not a dependency is drift. |
+| `[tool.uv.workspace].members` | the `home.path` of every workspace-member package. Written into the root `pyproject.toml` (the file of the package rooted at `.`, or a new one when there is none). |
 | `[tool.arborescent]` and `[tool.tach]` `source_roots` | the policy's source roots that contain the package's modules, relative to the package root |
 | `[tool.importlinter].root_packages` | the top-level packages of the package's modules |
 
@@ -341,9 +341,11 @@ configuration. A `[project]` that lists `dependencies` as `dynamic` is not compa
 `check` reports a differing derived field as `package-pyproject-drift`, naming the file, the field, both values and the
 annotation it disagrees with. Like generated-preset drift it is advisory: a `NOTE` line that neither fails the check nor
 enters the baseline, and the file is left as it is. A missing file is not drift (`generate` creates it).
-Workspace member versus own repository is today decided by comparing `repository` values, in one function
-(`source_of` in `package_pyproject.py`); the `home` annotation of the export (#54) replaces that comparison, and changing
-it changes only the `sources` entries and the member list. `selftest` probes the rule by appending a workspace source for
+Changing one package's `home` changes only its consumers' `sources` entries and the member list. The files are written at
+each package's current `root`, while `members` lists `home.path`, the post-migration location; they are the same in a
+repository that already has the target layout. With `package_pyproject` set, `packages export` fills each package's
+`pyproject` object (path, `requires_python`, dependencies, sources, workspace members, source roots, root packages) with
+the same derived values; it is `null` otherwise. `selftest` probes the rule by appending a workspace source for
 a non-dependency to a derived file; with no derived file on disk the probe is listed as skipped with the reason.
 
 ## Module ring annotations: `__arbor__`

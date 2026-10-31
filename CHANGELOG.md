@@ -24,7 +24,9 @@
   the `dependencies` mapping, plus `depends_on`; `[tool.uv.sources]` per sibling; the root `[tool.uv.workspace]
   members`; `source_roots` and `root_packages` tables) and a minimal template; an existing file is never rewritten.
   New information rule `package-pyproject-drift` (a `NOTE`, never failing, never baselined) names a derived field that
-  disagrees with the annotations. `selftest` probes it (#60).
+  disagrees with the annotations. `selftest` probes it. Where a sibling comes from is its `[packages.home]` (#54), and
+  `packages export` fills each package's `pyproject` object with the same derived fields (still `object | null`, no
+  schema version bump) (#60).
 
 ### Changed
 

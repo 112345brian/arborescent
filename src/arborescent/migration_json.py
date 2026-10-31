@@ -77,7 +77,7 @@ def _package(item: PackageArguments) -> dict[str, Any]:
             "external": None if item.externals is None else list(item.externals),
         },
         "policy": None,
-        "pyproject": None,
+        "pyproject": None if item.pyproject is None else dict(item.pyproject),
     }
 
 
@@ -97,6 +97,19 @@ _NULLABLE_STRING: dict[str, Any] = {"type": ["string", "null"]}
 _STRINGS = _array(_STRING)
 _NULLABLE_STRINGS: dict[str, Any] = {"type": ["array", "null"], "items": _STRING}
 _RESERVED: dict[str, Any] = {"type": ["object", "null"], "description": "reserved: null until its issue lands"}
+_PYPROJECT: dict[str, Any] = {
+    **_object({
+        "path": _STRING,
+        "requires_python": _STRING,
+        "dependencies": _NULLABLE_STRINGS,
+        "sources": {"type": "object", "additionalProperties": {"type": "object"}},
+        "workspace_members": _STRINGS,
+        "source_roots": _STRINGS,
+        "root_packages": _STRINGS,
+    }),
+    "type": ["object", "null"],
+    "description": "the derivable pyproject.toml fields (#60); null unless package_pyproject is set",
+}
 
 _PACKAGE = _object(
     {
@@ -129,7 +142,7 @@ _PACKAGE = _object(
         ),
         "dependencies": _object({"packages": _STRINGS, "external": _NULLABLE_STRINGS}),
         "policy": {**_RESERVED, "description": "release, pin and history policy (#56); never set for a workspace member"},
-        "pyproject": {**_RESERVED, "description": "derivable pyproject.toml fields (#60)"},
+        "pyproject": _PYPROJECT,
     },
     all_of=[
         {

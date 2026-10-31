@@ -4,15 +4,16 @@ Derived: ``[project].dependencies`` (third-party distributions the rings of the 
 import-name to distribution mapping, plus the sibling packages it declares in ``depends_on``), ``[tool.uv.sources]`` for each
 sibling, the workspace ``members`` of the root, and the ``source_roots`` / ``root_packages`` tables of Arborescent, tach and
 import-linter. Not derived, and never compared: name, description, version, classifiers, build backend and the pin values
-(``rev``, ``tag``, version specifiers). A sibling in the same repository is a workspace member; any other is a git
-requirement on that sibling's repository. That is the one place a package's ``home`` (#54) will plug in: ``source_of``.
+(``rev``, ``tag``, version specifiers). Where a sibling comes from is its ``home`` (#54): a workspace member is
+``{ workspace = true }``, a package in its own repository is a git requirement on that repository, and a package
+without a ``home`` gets no entry (the migration export reports the missing annotation). The workspace ``members`` are the
+``home.path`` of the workspace-member packages. That is the one place ``home`` is read: ``source_of`` and ``derive_projects``.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -58,16 +59,14 @@ def pyproject_path(package: PackageDescriptor) -> str:
     return ROOT_FILE if package.root in (".", "") else f"{package.root}/{ROOT_FILE}"
 
 
-def source_of(consumer: PackageDescriptor, sibling: PackageDescriptor) -> dict[str, object]:
-    """How ``consumer`` obtains ``sibling``: from the workspace when they share a repository, else from the sibling's own."""
-    if sibling.repository == consumer.repository:
+def source_of(sibling: PackageDescriptor) -> dict[str, object] | None:
+    """How a dependent obtains ``sibling``, from the sibling's ``home``; ``None`` when ``home`` is not annotated."""
+    home = sibling.home
+    if home is None:
+        return None
+    if home.kind == "workspace-member":
         return {"workspace": True}
-    return {"git": sibling.repository}
-
-
-def _workspace_repository(catalog: CatalogDocument) -> str:
-    counts = Counter(package.repository for package in catalog.packages)
-    return min(counts, key=lambda repository: (-counts[repository], repository))
+    return None if home.repository is None else {"git": home.repository}
 
 
 def _check_roots(catalog: CatalogDocument) -> None:
@@ -108,9 +107,9 @@ def derive_projects(catalog: CatalogDocument, facts: ProjectFacts) -> tuple[Deri
     """One derived project per package, plus the workspace root when it lists members and is no package's file."""
     _check_roots(catalog)
     by_id = {package.id: package for package in catalog.packages}
-    workspace = _workspace_repository(catalog)
     members = tuple(sorted({
-        package.root for package in catalog.packages if package.repository == workspace and package.root not in (".", "")
+        path for package in catalog.packages
+        if package.home is not None and package.home.kind == "workspace-member" and (path := package.home.path) is not None
     }))
     out: list[DerivedProject] = []
     for package in catalog.packages:
@@ -118,16 +117,29 @@ def derive_projects(catalog: CatalogDocument, facts: ProjectFacts) -> tuple[Deri
         allowed = {name for module in modules for name in facts.externals.get(module, ())}
         third_party = {facts.distributions[name] for name in allowed if name in facts.distributions}
         names = sorted({*third_party, *package.depends_on}, key=dist_name)
-        sources = {dep: source_of(package, by_id[dep]) for dep in package.depends_on if dep in by_id}
+        sources = {dep: entry for dep in package.depends_on if dep in by_id and (entry := source_of(by_id[dep])) is not None}
         roots = _own_source_roots(package, modules, facts)
         out.append(DerivedProject(
             pyproject_path(package), package, tuple(names), sources,
-            members if pyproject_path(package) == ROOT_FILE and package.repository == workspace else (),
+            members if pyproject_path(package) == ROOT_FILE else (),
             roots, tuple(sorted({module.split(".")[0] for module in modules})), f">={facts.python}",
         ))
     if members and not any(project.path == ROOT_FILE for project in out):
         out.append(DerivedProject(ROOT_FILE, None, members=members, requires_python=f">={facts.python}"))
     return tuple(out)
+
+
+def export_of(project: DerivedProject) -> dict[str, object]:
+    """The derived fields as the ``pyproject`` object of the migration export (#54); keys and order are stable."""
+    return {
+        "path": project.path,
+        "requires_python": project.requires_python,
+        "dependencies": None if project.dependencies is None else list(project.dependencies),
+        "sources": {name: dict(entry) for name, entry in sorted(project.sources.items())},
+        "workspace_members": list(project.members),
+        "source_roots": list(project.source_roots),
+        "root_packages": list(project.root_packages),
+    }
 
 
 def _q(value: str) -> str:
@@ -210,7 +222,7 @@ def drift_violations(project: DerivedProject, data: Mapping[str, Any]) -> list[V
     members = _table(data, "tool.uv.workspace").get("members")
     if project.members and _strings(members) != set(project.members):
         out.append(_drift(project.path, "tool.uv.workspace.members", sorted(_strings(members)), list(project.members),
-                          "the roots of the packages that share the workspace repository"))
+                          "the `home.path` of the workspace-member packages"))
     for table in _SOURCE_ROOT_TABLES:
         out += _present_list(project, f"{table}.source_roots", data, project.source_roots, "the policy's source roots under the package root")
     out += _present_list(project, "tool.importlinter.root_packages", data, project.root_packages, "the top-level packages of the package's modules")
@@ -237,7 +249,7 @@ def _source_drift(project: DerivedProject, package: PackageDescriptor, actual: M
         )
         if not agrees:
             out.append(_drift(project.path, "tool.uv.sources", f"{key} = {value or 'missing'}", f"{name} = {dict(entry)}",
-                              f"{package.id!r} `depends_on` {name!r}, and their repositories decide workspace or own repository"))
+                              f"{package.id!r} `depends_on` {name!r}, and {name!r}'s `home` decides workspace or own repository"))
     for key, value in sorted(actual.items()):
         if dist_name(key) not in {dist_name(n) for n in project.sources} and isinstance(value, dict) and value.get("workspace") is True:  # pyright: ignore[reportUnknownMemberType]
             out.append(_drift(project.path, "tool.uv.sources", f"{key} = a workspace source", "none", f"{package.id!r} does not list {key!r} in `depends_on`"))

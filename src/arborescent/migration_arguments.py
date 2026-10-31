@@ -118,6 +118,7 @@ class PackageArguments:
     bypasses: tuple[Bypass, ...]
     depends_on: tuple[str, ...]
     externals: tuple[str, ...] | None  # None: not annotated
+    pyproject: Mapping[str, object] | None = None  # the derived pyproject.toml fields (#60); None: ``package_pyproject`` is off
 
 
 @dataclass(frozen=True, slots=True)

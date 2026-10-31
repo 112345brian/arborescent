@@ -54,8 +54,12 @@ reported as a gap, never guessed.
   job.
 - **`surface.bypasses[]`** lists the modules of *other* packages that import a module of this package which is not on
   its public surface (`module`, importing `package`, the module it `imports`). A package that declares no surface has none.
-- **`policy` and `pyproject` are reserved** (release, pin and history policy: #56; derivable `pyproject.toml` fields:
-  #60). They are always `null` in version 1 and typed `object | null`, so they can be filled without a version bump. The
+- **`pyproject`** is `null` unless the policy sets `package_pyproject` (#60); then it holds the derived fields:
+  `path`, `requires_python`, `dependencies` (distribution names; version specifiers are not derived), `sources`
+  (`{ workspace = true }` or `{ git = <home.repository> }` per sibling), `workspace_members` (only on the file that is the
+  workspace root), `source_roots` and `root_packages`. Pins are not part of it.
+- **`policy` is reserved** (release, pin and history policy: #56). It is always `null` in version 1 and typed
+  `object | null`, so it can be filled without a version bump. The
   schema already requires `policy` to be `null` for a workspace member: a workspace member exports no history or pin
   information.
 - **Gaps are named entries.** `ready` is `true` when no gap has severity `error`; a consumer can refuse on `ready` or on
