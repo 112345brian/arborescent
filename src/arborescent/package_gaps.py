@@ -48,19 +48,17 @@ def repository_facts(policy: Policy, root: Path, fs: FileSystem, scan: ScanResul
     context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
     tops = {name.split(".")[0] for name in scan.known}
     imports: dict[str, tuple[str, ...]] = {}
+    externals: dict[str, tuple[str, ...]] = {}
     for name, info in scan.modules.items():
-        targets = {
-            target
-            for imp in info.facts.imports
-            for target in resolve_targets(name, info.is_package, imp, scan.known, tops)[0]
-            if target in scan.known and target != name
-        }
-        imports[name] = tuple(sorted(targets))
+        resolved = [resolve_targets(name, info.is_package, imp, scan.known, tops) for imp in info.facts.imports]
+        imports[name] = tuple(sorted({t for internal, _, _ in resolved for t in internal if t in scan.known and t != name}))
+        externals[name] = tuple(sorted({t for _, outside, _ in resolved for t in outside if t not in policy.stdlib}))
     return RepositoryFacts(
         dict(scan.paths),
         {name: context.resolve_ring(name) for name in scan.paths},
         imports,
         asset_paths(policy, root, fs),
+        externals,
     )
 
 

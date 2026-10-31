@@ -134,6 +134,7 @@ arborescent bench DIR…   # cold/warm timings of every engine on prepared codeb
 arborescent packages validate
 arborescent packages list
 arborescent packages extract PACKAGE_ID --output DIR
+arborescent packages export --output migration.json   # read-only JSON for migration tools; see docs/migration-export.md
 ```
 
 Documentation: [CLI commands, configuration and rules](docs/configuration.md) and

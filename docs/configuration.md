@@ -293,6 +293,29 @@ package claiming an owned file, a glob contradicting a path owner, a package spa
 packages with no declared dependency. A probe that cannot be built for the catalog is listed with the reason.
 This adds no behaviour to `packages extract`, which is unchanged.
 
+### Migration annotations and export
+
+A package entry can also say where it will live and what it exposes, and `arborescent packages export` publishes all of
+it as one versioned JSON document for external migration tools (it converts nothing and migrates nothing):
+
+```toml
+[[packages]]
+id = "core"
+# ... id, name, kind, repository, root, summary, depends_on, paths as above
+public = ["app.core.api", "app.core.models.*"]   # the public surface (module-name globs)
+externals = ["pydantic"]                          # third-party import names it may use
+[packages.home]                                   # kind = "repository", repository = "org/core"
+kind = "workspace-member"                         # ... or a member of a workspace in the same repository
+path = "packages/core"
+[[packages.module_renames]]                       # module names that change in the target
+from = "app.core"
+to = "core"
+```
+
+All four keys are optional; a missing one is a named gap in the export, never a guess. See
+[migration-export.md](migration-export.md) for the document, the schema, the gap codes, a `git filter-repo` recipe and the
+comparison with blinkered's `blinkered.toml`.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:

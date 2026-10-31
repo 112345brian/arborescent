@@ -27,6 +27,8 @@ from .engine import (
     write_generated,
 )
 from .engines import default_engines
+from .migration_export import migration_arguments_of
+from .migration_json import export_document, render_export, render_schema
 from .packages import PackageCatalog, load_extracted_package
 from .ports import FileSystem, ScanResult
 from .rules import RuleContext
@@ -162,6 +164,16 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="validate an extracted package directory instead of the repository catalog",
     )
+    export = package_actions.add_parser(
+        "export", help="write the read-only migration export (JSON) for the policy's package_catalog"
+    )
+    export.add_argument("--output", type=Path, help="file to write (default: standard output)")
+    export.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="exit 1 when the export still has an annotation gap of severity error",
+    )
+    _ = package_actions.add_parser("schema", help="print the JSON Schema the export validates against")
     extract = package_actions.add_parser("extract")
     extract.add_argument("package_id")
     extract.add_argument(
@@ -208,11 +220,14 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
         if args.command == "bench":
             return run_bench(args.dirs, args.checkers, default_services)
         fs = services.fs if services else LocalFileSystem()
+        if args.command == "packages" and args.package_action == "schema":
+            sys.stdout.write(render_schema())
+            return 0
         if args.command == "packages" and getattr(args, "extracted", None) is not None:
             extracted = load_extracted_package(fs, args.extracted)
             print(f"valid: extracted {extracted.semantics.id} ({len(extracted.paths)} paths)")
             return 0
-        if args.command == "packages":
+        if args.command == "packages" and args.package_action != "export":
             root = (
                 args.config.parent
                 if args.config
@@ -259,7 +274,7 @@ def _dispatch(
     if args.command == "selftest":
         return _selftest(policy, root, svc)
     if args.command == "packages":
-        return _packages(args, root, svc.fs)
+        return _export(args, policy, root, svc)
     return _check(args, policy, root, svc)
 
 
@@ -280,6 +295,19 @@ def _packages(args: argparse.Namespace, root: Path, fs: FileSystem) -> int:
     )
     print(f"extracted {args.package_id} to {destination}")
     return 0
+
+
+def _export(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    arguments = migration_arguments_of(policy, root, svc.fs, svc.scanner.scan(policy, root))
+    text = render_export(export_document(arguments, policy.package_catalog or "packages.toml"))
+    if args.output is None:
+        sys.stdout.write(text)
+    else:
+        destination = args.output if args.output.is_absolute() else root / args.output
+        svc.fs.mkdir(destination.parent)
+        svc.fs.write_text(destination, text)
+        print(f"wrote {destination}")
+    return 1 if args.require_ready and not arguments.ready else 0
 
 
 def _generate(policy: Policy, root: Path, svc: Services) -> int:

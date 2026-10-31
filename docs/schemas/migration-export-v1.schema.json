@@ -1,0 +1,391 @@
+{
+  "$id": "urn:arborescent:migration-export:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Read-only annotation data for external migration tools; carries unresolved annotation gaps as named entries.",
+  "properties": {
+    "catalog": {
+      "type": "string"
+    },
+    "edges": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "depends_on",
+              "imports"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "source",
+          "target"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "gaps": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "package": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "info"
+            ]
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "package",
+          "severity",
+          "subject"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "packages": {
+      "items": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "home": {
+                  "properties": {
+                    "kind": {
+                      "const": "workspace-member"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "home"
+              ]
+            },
+            "then": {
+              "properties": {
+                "policy": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ],
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "dependencies": {
+            "additionalProperties": false,
+            "properties": {
+              "external": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "packages": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "external",
+              "packages"
+            ],
+            "type": "object"
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "home": {
+            "description": "where the package lives after the migration; null while not annotated (see gaps)",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "repository",
+                      "workspace-member"
+                    ]
+                  },
+                  "path": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "repository": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "path",
+                  "repository"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owned": {
+            "additionalProperties": false,
+            "properties": {
+              "assets": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "target_path": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "target_path"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "module_renames": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "target"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "modules": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "module": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "target_module": {
+                      "type": "string"
+                    },
+                    "target_path": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "module",
+                    "path",
+                    "target_module",
+                    "target_path"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "path_renames": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "target"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "assets",
+              "module_renames",
+              "modules",
+              "path_renames"
+            ],
+            "type": "object"
+          },
+          "policy": {
+            "description": "release, pin and history policy (#56); never set for a workspace member",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "pyproject": {
+            "description": "derivable pyproject.toml fields (#60)",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "surface": {
+            "additionalProperties": false,
+            "properties": {
+              "bypasses": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "imports": {
+                      "type": "string"
+                    },
+                    "module": {
+                      "type": "string"
+                    },
+                    "package": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "imports",
+                    "module",
+                    "package"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "public": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "bypasses",
+              "public"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "capabilities",
+          "dependencies",
+          "domain",
+          "home",
+          "id",
+          "kind",
+          "name",
+          "owned",
+          "policy",
+          "pyproject",
+          "summary",
+          "surface"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "ready": {
+      "description": "true when no gap has severity error",
+      "type": "boolean"
+    },
+    "schema": {
+      "const": "arborescent-migration-export"
+    },
+    "version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "catalog",
+    "edges",
+    "gaps",
+    "packages",
+    "ready",
+    "schema",
+    "version"
+  ],
+  "title": "Arborescent migration export",
+  "type": "object"
+}

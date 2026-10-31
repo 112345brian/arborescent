@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
 from .package_copy import claim_destination, copy_owned_path
+from .package_fields import extraction_target
 from .package_manifest import load_extracted_package
 from .package_model import (
     MANIFEST_NAME,
@@ -20,7 +21,7 @@ from .package_model import (
 from .package_parse import parse_catalog
 from .package_render import render_manifest
 from .package_tree import check_module_identity
-from .package_validation import extraction_target, validate_catalog
+from .package_validation import validate_catalog
 from .ports import FileSystem
 
 # The deliberate public surface of this module; the vocabulary and the readers live in the ``package_*`` modules.
