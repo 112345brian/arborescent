@@ -49,6 +49,7 @@ class DerivedProject:
     package: PackageDescriptor | None  # None: a workspace root that is not itself a package
     dependencies: tuple[str, ...] | None = None
     sources: Mapping[str, Mapping[str, object]] = field(default_factory=lambda: {})
+    unresolved: Mapping[str, str] = field(default_factory=lambda: {})  # sibling -> the non-URL value its git source would use
     members: tuple[str, ...] = ()
     source_roots: tuple[str, ...] = ()
     root_packages: tuple[str, ...] = ()
@@ -81,15 +82,14 @@ def is_git_url(value: object) -> bool:
 
 
 def source_notes(project: DerivedProject) -> list[Violation]:
-    """A git source built from a value that is not a URL: reported, never replaced by a guessed URL."""
+    """A git source that would be built from a value that is not a URL: reported, left out, never given a guessed host."""
     return [
         Violation(
             Rule.PACKAGE_PYPROJECT_DRIFT, f"{project.path}:tool.uv.sources",
-            f"{name} would use git = {entry['git']!r}, which is not a git URL; the repository it comes from (`home.repository`, "
-            "or the catalog `repository` of a workspace member) must be one",
+            f"{name} would use git = {value!r}, which is not a git URL, so no source is derived; the repository it comes from "
+            "(`home.repository`, or the catalog `repository` of a workspace member) must be one",
         )
-        for name, entry in sorted(project.sources.items())
-        if "git" in entry and not is_git_url(entry["git"])
+        for name, value in sorted(project.unresolved.items())
     ]
 
 
@@ -141,12 +141,15 @@ def derive_projects(catalog: CatalogDocument, facts: ProjectFacts) -> tuple[Deri
         allowed = {name for module in modules for name in facts.externals.get(module, ())}
         third_party = {facts.distributions[name] for name in allowed if name in facts.distributions}
         names = sorted({*third_party, *package.depends_on}, key=dist_name)
-        sources = {dep: entry for dep in package.depends_on if dep in by_id and (entry := source_of(package, by_id[dep])) is not None}
+        entries = {dep: entry for dep in package.depends_on if dep in by_id and (entry := source_of(package, by_id[dep])) is not None}
+        sources = {dep: entry for dep, entry in entries.items() if "git" not in entry or is_git_url(entry["git"])}
+        unresolved = {dep: str(entry["git"]) for dep, entry in entries.items() if dep not in sources}
         roots = _own_source_roots(package, modules, facts)
         out.append(DerivedProject(
-            pyproject_path(package), package, tuple(names), sources,
-            members if pyproject_path(package) == ROOT_FILE else (),
-            roots, tuple(sorted({module.split(".")[0] for module in modules})), f">={facts.python}",
+            pyproject_path(package), package, dependencies=tuple(names), sources=sources, unresolved=unresolved,
+            members=members if pyproject_path(package) == ROOT_FILE else (),
+            source_roots=roots, root_packages=tuple(sorted({module.split(".")[0] for module in modules})),
+            requires_python=f">={facts.python}",
         ))
     if members and not any(project.path == ROOT_FILE for project in out):
         out.append(DerivedProject(ROOT_FILE, None, members=members, requires_python=f">={facts.python}"))

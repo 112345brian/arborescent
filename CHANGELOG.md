@@ -34,7 +34,7 @@
   disagrees with the annotations. `selftest` probes it. Where a sibling comes from is its `[packages.home]` (#54), and
   `packages export` fills each package's `pyproject` object with the same derived fields (still `object | null`, no
   schema version bump). A source is `{ workspace = true }` only between two workspace members; otherwise a git source
-  (with `subdirectory` for a workspace member), and a git value that is not a URL is reported, never guessed (#60).
+  (with `subdirectory` for a workspace member), and a git value that is not a URL gets no entry and is reported, never guessed (#60).
 
 ### Changed
 

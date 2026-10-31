@@ -375,13 +375,22 @@ def test_the_subdirectory_of_a_git_source_is_compared(tmp_path: Path) -> None:
     assert [s for s, _ in drift(tmp_path) if "sources" in s] == ["shell/pyproject.toml:tool.uv.sources"]
 
 
-def test_a_git_source_built_from_a_value_that_is_not_a_url_is_reported_without_guessing_a_url(tmp_path: Path) -> None:
-    repo(tmp_path, catalog_with_shell_in_its_own_repository(monorepo="example/mono"))  # no pyproject.toml exists yet
+def test_a_git_source_from_a_value_that_is_not_a_url_is_reported_and_left_out_without_guessing_a_host(tmp_path: Path) -> None:
+    repo(tmp_path, catalog_with_shell_in_its_own_repository(monorepo="org/name"))  # no pyproject.toml exists yet
     notes = [(s, d) for s, d in drift(tmp_path) if "not a git URL" in d]
     assert [s for s, _ in notes] == ["shell/pyproject.toml:tool.uv.sources"]
-    assert "example/mono" in notes[0][1]
+    assert "org/name" in notes[0][1]
     write_generated(policy(), tmp_path, services())
-    assert 'git = "example/mono"' in (tmp_path / "shell/pyproject.toml").read_text(encoding="utf-8"), "the value is written as given"
+    text = (tmp_path / "shell/pyproject.toml").read_text(encoding="utf-8")
+    assert "org/name" not in text and "github" not in text, "no entry, and no host guessed or the value rewritten"
+    assert "uv" not in load(tmp_path, "shell/pyproject.toml")["tool"]  # type: ignore[operator]  # no sources table at all
+
+
+def test_an_existing_source_for_a_value_that_is_not_a_url_is_not_compared(tmp_path: Path) -> None:
+    repo(tmp_path, catalog_with_shell_in_its_own_repository(monorepo="org/name"), {
+        "shell/pyproject.toml": '[project]\nname = "shell"\ndependencies = ["beautifulsoup4", "core"]\n'
+        '[tool.uv.sources]\ncore = { git = "https://example.test/chosen.git" }\n'})
+    assert [s for s, d in drift(tmp_path) if "sources" in s and "not a git URL" not in d] == []
 
 
 def test_urls_are_not_reported(tmp_path: Path) -> None:
