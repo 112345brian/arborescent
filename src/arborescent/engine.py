@@ -145,7 +145,7 @@ def run_own(
     if only is None:  # ownership is a whole-repository fact; the selftest needs it whether or not practices run
         checks = package_checks(policy, services)
         if checks is not None:
-            found += checks.violations(policy, root, services.fs, scan, services.scanner)
+            found += checks.gap_violations(policy, root, services.fs, scan, services.scanner)
     return found, scan
 
 

@@ -121,7 +121,7 @@ class PackageChecks(Protocol):
     the policy and nothing bound the engine refuses to run, so a missing binding cannot read as a clean result.
     """
 
-    def violations(
+    def gap_violations(
         self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult, scanner: ModuleScanner
     ) -> list[Violation]: ...
 

@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 from arborescent_helpers import MINI_FILES, mini_policy, services, write_files
 
-import arborescent.engine as engine
+import arborescent.package_checks as package_checks
 from arborescent.adapters import FsScanner, LocalFileSystem
 from arborescent.domain import Rule
 from arborescent.engine import Options, run_check, run_own
-from arborescent.package_gaps import load_package_context
+from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_model import CatalogError, PackageDescriptor, ReleasePolicy
 from arborescent.package_parse import PACKAGE_KEYS, parse_catalog
 from arborescent.selftest import plan, selftest
@@ -171,7 +171,7 @@ def test_the_rule_is_off_without_a_catalog(tmp_path: Path) -> None:
 def mutated_rules(root: Path) -> set[Rule]:
     policy = policy_with_catalog()
     scan = FsScanner().scan(policy, root)
-    context = load_package_context(policy, root, FS, scan)
+    context = AnnotationPackageChecks().probes(policy, root, FS, scan, FsScanner())
     return {m.rule for m in plan(policy, scan, context)[0]}
 
 
@@ -190,9 +190,9 @@ def test_selftest_kills_the_policy_mutation(tmp_path: Path) -> None:
 def test_selftest_survives_when_the_policy_check_is_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The guard against rule removal: with only the policy rule stubbed out, its probe must report a survivor."""
     repo(tmp_path)
-    original = engine.package_gap_violations
+    original = package_checks.package_gap_violations
     monkeypatch.setattr(
-        engine,
+        package_checks,
         "package_gap_violations",
         lambda *a, **k: [v for v in original(*a, **k) if v.rule != Rule.PACKAGE_RELEASE_POLICY_MISSING],
     )

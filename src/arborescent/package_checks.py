@@ -42,7 +42,7 @@ class _Probes:
 
 @dataclass(frozen=True)
 class AnnotationPackageChecks:
-    def violations(
+    def gap_violations(
         self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult, scanner: ModuleScanner
     ) -> list[Violation]:
         return package_gap_violations(policy, root, fs, scan, scanner)

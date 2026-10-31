@@ -10,7 +10,7 @@ import pytest
 from arborescent_helpers import MINI_FILES, mini_policy, services, write_files
 from test_package_gaps import CATALOG, policy_with_catalog, repo
 
-import arborescent.engine as engine
+import arborescent.package_checks as package_checks
 import arborescent.package_contracts as package_contracts
 from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from arborescent.config import policy_from_mapping
@@ -25,8 +25,9 @@ from arborescent.generate import (
     tach,
 )
 from arborescent.package_assignment import RepositoryFacts, assignment_violations
+from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_contracts import PackageLayout, layout_of
-from arborescent.package_gaps import load_package_context, package_layout
+from arborescent.package_gaps import package_layout
 from arborescent.package_model import CatalogError
 from arborescent.package_parse import parse_catalog
 from arborescent.package_preservation import preservation_violations
@@ -308,14 +309,14 @@ def test_the_private_import_has_a_selftest_probe_when_a_package_keeps_part_of_it
     repo(tmp_path, {"packages.toml": PUBLIC_CATALOG})
     policy = policy_with_catalog()
     scan = FsScanner().scan(policy, tmp_path)
-    assert Rule.PACKAGE_PRIVATE_IMPORT in {m.rule for m in plan(policy, scan, load_package_context(policy, tmp_path, FS, scan))[0]}
+    assert Rule.PACKAGE_PRIVATE_IMPORT in {m.rule for m in plan(policy, scan, AnnotationPackageChecks().probes(policy, tmp_path, FS, scan, FsScanner()))[0]}
 
 
 def test_the_private_import_probe_says_why_it_is_skipped_when_every_module_is_public(tmp_path: Path) -> None:
     repo(tmp_path)  # no `public` anywhere
     policy = policy_with_catalog()
     scan = FsScanner().scan(policy, tmp_path)
-    mutations, skipped = plan(policy, scan, load_package_context(policy, tmp_path, FS, scan))
+    mutations, skipped = plan(policy, scan, AnnotationPackageChecks().probes(policy, tmp_path, FS, scan, FsScanner()))
     assert Rule.PACKAGE_PRIVATE_IMPORT not in {m.rule for m in mutations}
     assert any(line.startswith(Rule.PACKAGE_PRIVATE_IMPORT) for line in skipped)
 
@@ -334,6 +335,6 @@ def test_selftest_survives_when_the_private_import_rule_is_disabled(tmp_path: Pa
     repo(tmp_path, {"packages.toml": PUBLIC_CATALOG})
     write_files(tmp_path, {"app/adapters.py": MINI_FILES["app/adapters.py"].replace("from . import domain, ports", "from . import domain")
                            .replace(", ports.PORT_VALUE", "")})
-    monkeypatch.setattr(engine, "package_gap_violations", lambda *args, **kwargs: [])
+    monkeypatch.setattr(package_checks, "package_gap_violations", lambda *args, **kwargs: [])
     report = selftest(policy_with_catalog(), tmp_path, services())
     assert any(entry.startswith(f"[{Rule.PACKAGE_PRIVATE_IMPORT}]") for entry in report.survived)
