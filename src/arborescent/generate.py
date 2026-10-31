@@ -8,12 +8,19 @@ from __future__ import annotations
 
 import fnmatch
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
 
 from .domain import ALL, NOISE_DIRS, Policy
-from .ports import TypeChecker
+from .package_contracts import (
+    Allowance,
+    PackageLayout,
+    boundary_contracts,
+    external_contracts,
+)
+from .ports import ScanResult, TypeChecker
 from .rules import RuleContext
 
-__all__ = ["IMPORT_LINTER_FILE", "TACH_FILE", "generate", "tops_of"]
+__all__ = ["IMPORT_LINTER_FILE", "TACH_FILE", "generate", "generate_for_scan", "tops_of"]
 
 IMPORT_LINTER_FILE = "arborescent-importlinter.toml"
 TACH_FILE = "tach.toml"
@@ -63,10 +70,10 @@ def _list(items: Sequence[str], indent: str = "") -> str:
 
 def import_linter(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
-    scope_by_module: Mapping[str, str] = {},
+    scope_by_module: Mapping[str, str] = {}, packages: PackageLayout | None = None,
 ) -> str:
     if policy.scopes:
-        return _scoped_import_linter(policy, names, arbor_index, scope_by_module)
+        return _scoped_import_linter(policy, names, arbor_index, scope_by_module, packages)
     by_ring: dict[str, list[str]] = {r.name: [] for r in policy.rings}
     graph = set(tops_of(names))
     for n in leaves(names):
@@ -112,12 +119,13 @@ def import_linter(
             "allow_indirect_imports = true",
             "",
         ]
+    lines += _package_contracts(policy, names, arbor_index, scope_by_module, packages)
     return "\n".join(lines).rstrip() + "\n"
 
 
 def _scoped_import_linter(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
-    scope_by_module: Mapping[str, str],
+    scope_by_module: Mapping[str, str], packages: PackageLayout | None,
 ) -> str:
     ring_modules: dict[tuple[str, str], list[str]] = {
         (scope.name, ring.name): [] for scope in policy.scopes for ring in scope.policy.rings
@@ -135,6 +143,7 @@ def _scoped_import_linter(
         lines += _scoped_ring_contracts(scope.name, scope.policy, ring_modules)
         lines += _scope_forbid_everywhere(scope.name, scope.policy, module_leaves, scope_by_module)
         lines += _scope_boundary_contract(policy, scope.name, scope.depends_on, module_leaves, scope_by_module)
+    lines += _package_contracts(policy, names, arbor_index, scope_by_module, packages)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -187,6 +196,29 @@ def _scope_boundary_contract(
     return []
 
 
+def _package_contracts(
+    policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+    scope_by_module: Mapping[str, str], packages: PackageLayout | None,
+) -> list[str]:
+    """The package assignment as import-linter contracts: the engine's own broken-contract output is the cut list."""
+    if packages is None:
+        return []
+    module_leaves = leaves(names)
+    context = RuleContext(policy, arbor_index, scope_by_module)
+
+    def allowance(module: str) -> Allowance | None:
+        ring, local = context.resolve_ring(module), context.policy_for(module) or policy
+        if ring is None:
+            return None
+        universe = {*(local.io_modules if local.preset.bans_io else ()), *local.dependencies}
+        return frozenset(universe), local.ring(ring).external
+
+    lines: list[str] = []
+    for name, sources, forbidden in (*boundary_contracts(packages, module_leaves), *external_contracts(packages, module_leaves, allowance)):
+        lines += _forbidden_contract(name, sources, forbidden)
+    return lines
+
+
 def _forbidden_contract(name: str, sources: Sequence[str], forbidden: Sequence[str]) -> list[str]:
     return [
         "[[tool.importlinter.contracts]]", f"name = {_q(name)}", 'type = "forbidden"',
@@ -197,11 +229,11 @@ def _forbidden_contract(name: str, sources: Sequence[str], forbidden: Sequence[s
 
 def tach(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
-    scope_by_module: Mapping[str, str] = {},
+    scope_by_module: Mapping[str, str] = {}, packages: PackageLayout | None = None,
 ) -> str:
     if policy.scopes:
-        return _scoped_tach(policy, names, arbor_index, scope_by_module)
-    explicit = not policy.expressible_by_layers()
+        return _scoped_tach(policy, names, arbor_index, scope_by_module, packages)
+    explicit = packages is not None or not policy.expressible_by_layers()  # package boundaries are per-module depends_on
     layers = [r.name for r in reversed(policy.rings)]  # tach: outermost first
     output_dir = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/")
     relative = "../" * len([part for part in output_dir.split("/") if part and part != "."])
@@ -227,7 +259,7 @@ def tach(
         lines += ["[[modules]]", f"path = {_q(name)}", f"layer = {_q(ring)}"]
         if explicit:
             allowed = policy.allowed_rings(ring)
-            deps = [{"path": other} for other, r in classified if r in allowed and other != name]
+            deps = [{"path": other} for other, r in classified if r in allowed and other != name and (packages is None or packages.allows(name, other))]
             lines.append("depends_on = [" + ", ".join("{ path = " + _q(d["path"]) + " }" for d in deps) + "]")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -235,7 +267,7 @@ def tach(
 
 def _scoped_tach(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
-    scope_by_module: Mapping[str, str],
+    scope_by_module: Mapping[str, str], packages: PackageLayout | None,
 ) -> str:
     output_dir = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/")
     relative = "../" * len([part for part in output_dir.split("/") if part and part != "."])
@@ -272,7 +304,7 @@ def _scoped_tach(
             public_dependency = other_scope_name in scope.depends_on and any(
                 fnmatch.fnmatchcase(other, pattern) for pattern in policy.scope(other_scope_name).public
             )
-            if same_scope_inner or public_dependency:
+            if (same_scope_inner or public_dependency) and (packages is None or packages.allows(name, other)):
                 dependencies.append(other)
         lines.append("depends_on = [" + ", ".join("{ path = " + _q(other) + " }" for other in sorted(dependencies)) + "]")
         lines.append("")
@@ -345,17 +377,37 @@ def ruff(
     return "\n".join(lines) + "\n"
 
 
+@dataclass(frozen=True)
+class _Facts:
+    names: Sequence[str]
+    arbor_index: Mapping[str, tuple[str | None, str | None]]
+    scope_by_module: Mapping[str, str]
+    packages: PackageLayout | None = None
+
+
 def generate(
     policy: Policy, names: Sequence[str], checkers: Sequence[TypeChecker],
     arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
     scope_by_module: Mapping[str, str] = {},
 ) -> dict[str, str]:
     """Every generated file, keyed by posix path relative to the policy root."""
+    return _generate(policy, _Facts(names, arbor_index, scope_by_module), checkers)
+
+
+def generate_for_scan(
+    policy: Policy, scan: ScanResult, checkers: Sequence[TypeChecker], packages: PackageLayout | None = None,
+) -> dict[str, str]:
+    """``generate`` for a scanned repository; ``packages`` adds the package assignment to the import-linter and tach files."""
+    return _generate(policy, _Facts(sorted(scan.known), scan.arbor_index, scan.scope_by_module, packages), checkers)
+
+
+def _generate(policy: Policy, facts: _Facts, checkers: Sequence[TypeChecker]) -> dict[str, str]:
     prefix = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/") + "/"
     paths = sorted(set(policy.sources))
+    names, arbor_index, scope_by_module = facts.names, facts.arbor_index, facts.scope_by_module
     files = {
-        prefix + IMPORT_LINTER_FILE: import_linter(policy, names, arbor_index, scope_by_module),
-        prefix + TACH_FILE: tach(policy, names, arbor_index, scope_by_module),
+        prefix + IMPORT_LINTER_FILE: import_linter(policy, names, arbor_index, scope_by_module, facts.packages),
+        prefix + TACH_FILE: tach(policy, names, arbor_index, scope_by_module, facts.packages),
         prefix + "ruff.toml": ruff(policy, names, arbor_index, scope_by_module),
     }
     for checker in checkers:

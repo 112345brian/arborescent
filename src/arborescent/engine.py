@@ -21,8 +21,8 @@ from .domain import (
     ToolResult,
     Violation,
 )
-from .generate import generate
-from .package_gaps import package_gap_violations
+from .generate import generate_for_scan
+from .package_gaps import package_gap_violations, package_layout
 from .ports import (
     Clock,
     Engine,
@@ -178,7 +178,8 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     _, scan = run_own(policy, root, services, practices=False)
     wanted = [c for c in services.checkers if c.name in policy.type_checkers and not tool_is_disabled(policy, c)]
     written: list[str] = []
-    generated = sorted(generate(policy, sorted(scan.known), wanted, scan.arbor_index, scan.scope_by_module).items())
+    packages = package_layout(policy, root, services.fs, scan)
+    generated = sorted(generate_for_scan(policy, scan, wanted, packages).items())
     for rel, text in generated:
         path = root / rel
         if services.fs.exists(path):
@@ -193,7 +194,8 @@ def drift(
     fs: FileSystem, policy: Policy, root: Path, scan: ScanResult, checkers: Sequence[TypeChecker],
 ) -> list[str]:
     out: list[str] = []
-    for rel, expected in sorted(generate(policy, sorted(scan.known), checkers, scan.arbor_index, scan.scope_by_module).items()):
+    packages = package_layout(policy, root, fs, scan)
+    for rel, expected in sorted(generate_for_scan(policy, scan, checkers, packages).items()):
         path = root / rel
         if fs.is_file(path):
             current = fs.read_text(path)

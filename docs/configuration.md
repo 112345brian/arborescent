@@ -294,6 +294,31 @@ package claiming an owned file, a glob contradicting a path owner, a package spa
 packages with no declared dependency. A probe that cannot be built for the catalog is listed with the reason.
 This adds no behaviour to `packages extract`, which is unchanged.
 
+#### Package contracts for the engines: the cut list
+
+With `package_catalog` set, `arborescent generate` also compiles the assignment into the engines' own config, so what
+import-linter and tach report for a package **is** its cut list; Arborescent walks no import graph for it. A package's
+interface is its `public` list (see "Annotation preservation across a split"); a package without one is open.
+
+- **import-linter**: one `forbidden` contract per package, `package <id> imports only declared packages' public modules`.
+  Its sources are the package's modules, its forbidden modules every module of another package that the package does
+  not list in `depends_on`, plus every non-public module of a package it does list. Contracts use
+  `allow_indirect_imports = true`, so the output is the list of direct edges to cut.
+- **tach**: a `[[modules]]` entry per module as before, now with an explicit `depends_on` that is the ring rule
+  intersected with the same package rule (own package, a declared package's public modules). Setting `package_catalog`
+  therefore switches tach to `layers_explicit_depends_on`, whose lists grow with the number of modules.
+- **third-party names**: one `package <id> imports no I/O or third-party package its rings do not list` contract per
+  package, forbidding the names that none of its modules' rings list. The ring contracts already imply this for a
+  classified module; it names the package and also covers a module that has no ring. A package with a ring that allows
+  every external package (`"*"`) gets no such contract.
+
+A module claimed by no package or by several is left out of these contracts (those are the gap findings above). A package
+that is allowed to import everything has no boundary contract. A package whose rings and edges produce no violation, and
+that has no gap, can leave the monorepo. `check` reports a contract failure as the engine's own failure and flags a
+generated file that is out of date as drift. The engines' output is not ratcheted through the baseline: only Ruff's is.
+The same edges are also reported by Arborescent's own `package-undeclared-dependency` (#52) and `package-private-import`
+(#55) rules, which need no engine installed; a test keeps the contracts and those rules from disagreeing.
+
 ### Annotation preservation across a split
 
 After a split by other tools, the question for Arborescent is whether the annotations survived, not whether the graph

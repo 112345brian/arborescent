@@ -56,6 +56,7 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 | `arborescent.path_exclusion` | `single` | domain |
 | `arborescent.package_assignment` | `single` | domain |
 | `arborescent.package_preservation` | `single` | domain |
+| `arborescent.package_contracts` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
