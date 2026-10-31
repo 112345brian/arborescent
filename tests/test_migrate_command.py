@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 from pathlib import Path
 
@@ -53,7 +54,8 @@ def test_arguments_the_library_cannot_apply_are_named(tmp_path: Path, capsys: py
 
 def test_open_gaps_refuse_even_with_yes_and_are_listed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     library = FakeMigrationLibrary()
-    no_home = CLI_CATALOG.replace('[packages.home]\nkind = "repository"\nrepository = "example/core"\n', "")
+    no_home = re.sub(r"\[packages\.home\]\n(?:[a-z_]+ = [^\n]*\n)+", "", CLI_CATALOG)  # whatever the home's keys are
+    assert "packages.home" not in no_home
     assert run(tmp_path, library, "--yes", catalog=no_home) == 1
     assert library.supplied == []
     assert "package-undeclared-home" in capsys.readouterr().out
