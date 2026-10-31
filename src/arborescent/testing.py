@@ -126,6 +126,9 @@ class FakeFileSystem:
     def is_dir(self, path: Path) -> bool:
         return self._key(path) in self._all_dirs()
 
+    def resolve(self, path: Path) -> Path:
+        return Path(self._key(path))
+
     def glob(self, root: Path, pattern: str) -> list[Path]:
         base = self._key(root).rstrip("/")
         want = pattern.split("/")

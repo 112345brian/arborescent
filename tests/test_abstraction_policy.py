@@ -14,7 +14,7 @@ from arborescent.rules import check_modules
 def run(root: Path, **overrides: Any) -> list[Any]:
     policy = mini_policy(**overrides)
     scan = FsScanner().scan(policy, root)
-    return check_modules(policy, scan.modules, scan.known, scan.entry_deps)
+    return check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
 
 
 def ports_findings(found: list[Any]) -> set[tuple[str, str]]:

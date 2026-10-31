@@ -7,18 +7,34 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import time
+import tomllib
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import mini_policy, write_files
+from arborescent_helpers import MINI, mini_policy, write_files
 
 import arborescent.selftest as selftest_mod
 from arborescent import baseline
-from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.adapters import (
+    FsScanner,
+    LocalFileSystem,
+    SubprocessToolRunner,
+    SystemClock,
+)
+from arborescent.bench import bench_one
 from arborescent.cli import main
+from arborescent.config import policy_from_mapping
 from arborescent.domain import PolicyError, ToolResult, Violation
-from arborescent.engine import Options, Services, pick_checker, run_check, run_own
+from arborescent.engine import (
+    Options,
+    Services,
+    pick_checker,
+    run_check,
+    run_own,
+    write_generated,
+)
 from arborescent.engines import default_engines
 from arborescent.generate import generate
 from arborescent.selftest import selftest
@@ -211,6 +227,19 @@ def test_warm_run_parses_nothing_and_an_edit_parses_one_file(repo: Path, tmp_pat
     assert run_own(policy, repo, svc, practices=False)[1].parsed == 1
 
 
+def test_invalid_annotation_outside_sources_reports_invalid_and_unclassified(repo: Path) -> None:
+    write_files(repo, {"outside.py": '__arbor__ = {"ring": 42}\n'})
+    policy = mini_policy(sources=["app"])
+
+    findings, scan = run_own(policy, repo, services(), practices=False)
+
+    assert "outside" not in scan.modules
+    assert {(finding.rule, finding.subject) for finding in findings} >= {
+        ("invalid-arbor-annotation", "outside"),
+        ("unclassified", "outside"),
+    }
+
+
 def test_cache_is_keyed_by_content_not_by_mtime(repo: Path, tmp_path: Path) -> None:
     svc = services(cache=tmp_path / "c")
     policy = mini_policy()
@@ -232,14 +261,14 @@ def test_old_fact_cache_schema_is_discarded(repo: Path, tmp_path: Path) -> None:
     cache.mkdir()
     source = (repo / "app/domain.py").read_bytes()
     digest = hashlib.blake2b(source, digest_size=16).hexdigest()
-    # Version 2 stored only os_uses; version 4 also carries effect, suppression and discard facts.
+    # Version 2 stored only os_uses; version 5 also carries annotation facts.
     (cache / "scan.json").write_text(
         json.dumps({"v": 2, "files": {"app/domain.py": [digest, [[], [[1, "os.name"]], None]]}}),
         encoding="utf-8",
     )
     scan = run_own(mini_policy(), repo, services(cache=cache), practices=False)[1]
     assert scan.parsed == 5
-    assert json.loads((cache / "scan.json").read_text(encoding="utf-8"))["v"] == 5
+    assert json.loads((cache / "scan.json").read_text(encoding="utf-8"))["v"] == 6
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
@@ -402,3 +431,131 @@ def test_no_caller_discards_the_result_of_a_check() -> None:
                 if name in watched:
                     bad.append(f"{path.name}:{node.lineno} discards {name}()")
     assert not bad, bad
+
+
+def test_generate_and_drift_use_scanned_annotation_rings(repo: Path) -> None:
+    policy = mini_policy(classify={})
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "domain"}\n', "app/main.py": '__arbor__ = {"ring": "composition"}\n'})
+    svc = services()
+    write_generated(policy, repo, svc)
+
+    tach = tomllib.loads((repo / "tach.toml").read_text(encoding="utf-8"))
+    assert [(module["path"], module["layer"]) for module in tach["modules"]] == [
+        ("app.domain", "domain"), ("app.main", "composition"),
+    ]
+    assert run_check(policy, repo, svc, Options(tools=False)).drift == []
+    write_files(repo, {"app/main.py": '__arbor__ = {"ring": "domain"}\n'})
+    assert "tach.toml: differs from the policy; run `arborescent generate`" in run_check(
+        policy, repo, svc, Options(tools=False),
+    ).drift
+
+
+def test_discover_groups_modules_by_scope_and_suggests_local_outer_ring(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    write_files(repo, {
+        "arborescent.toml": (
+            "[scopes.alpha]\n"
+            'sources = ["libs/alpha/src/alpha"]\nsource_roots = ["libs/alpha/src"]\n'
+            'rings = ["domain", "adapters"]\n'
+            "[scopes.alpha.classify]\n\"alpha.core\" = \"domain\"\n"
+            "[scopes.beta]\n"
+            'sources = ["libs/beta/src/beta"]\nsource_roots = ["libs/beta/src"]\n'
+            'rings = ["domain", "composition"]\n'
+            "[scopes.beta.classify]\n\"beta.core\" = \"domain\"\n"
+        ),
+        "libs/alpha/src/alpha/unclassified.py": "VALUE = 1\n",
+        "libs/beta/src/beta/unclassified.py": "VALUE = 2\n",
+    })
+
+    assert main(["--config", str(repo / "arborescent.toml"), "discover"], services()) == 0
+    output = capsys.readouterr().out
+
+    assert "alpha" in output and "suggested ring: adapters" in output
+    assert "beta" in output and "suggested ring: composition" in output
+
+
+def test_bench_accepts_scoped_policy(repo: Path) -> None:
+    write_files(repo, {
+        "arborescent.toml": (
+            "[scopes.alpha]\n"
+            'sources = ["libs/alpha/src/alpha"]\nsource_roots = ["libs/alpha/src"]\n'
+            'rings = ["domain"]\n'
+            "[scopes.alpha.classify]\n\"alpha.core\" = \"domain\"\n"
+        ),
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+    })
+
+    rows = bench_one(repo, ["ty"], lambda _: services())
+
+    assert any("WHOLE check" in row for row in rows)
+    tach_text = (repo / "tach.toml").read_text(encoding="utf-8")
+    assert 'path = "alpha.core"' in tach_text
+    assert 'layer = "alpha__domain"' in tach_text
+
+
+def test_child_arbor_failure_fails_parent_check(repo: Path) -> None:
+    child = repo / "packages" / "core"
+    child.mkdir(parents=True)
+    (child / "arborescent.toml").write_text('rings = ["domain"]\nsources = ["src"]\n', encoding="utf-8")
+    runner = FakeToolRunner({sys.executable}, {sys.executable: ToolResult(1, "child failed", "")})
+    policy = policy_from_mapping({**MINI, "children": ["packages/core"]})
+
+    report = run_check(policy, repo, services(runner), Options(tools=False))
+
+    child_run = next(engine for engine in report.engines if engine.name == "child arbor packages/core")
+    assert child_run.status == "fail"
+    assert "child failed" in child_run.lines
+    assert not report.ok and not report.configured_ok
+
+
+def test_child_arbor_receives_parent_profile_requirement(repo: Path) -> None:
+    child = repo / "packages" / "core"
+    child.mkdir(parents=True)
+    (child / "arborescent.toml").write_text('rings = ["domain"]\nsources = ["src"]\n', encoding="utf-8")
+    runner = FakeToolRunner({sys.executable})
+    policy = policy_from_mapping({**MINI, "children": ["packages/core"]})
+
+    _ = run_check(policy, repo, services(runner), Options(tools=False, require_profile=True))
+
+    command = next(call for call in runner.calls if call[0] == sys.executable)
+    assert "--require-profile" in command
+    assert command[command.index("--config") + 1] == str(child / "arborescent.toml")
+
+
+def test_parent_child_policy_mode_skips_nested_checks(repo: Path) -> None:
+    child = repo / "packages" / "core"
+    child.mkdir(parents=True)
+    (child / "arborescent.toml").write_text('rings = ["domain"]\nsources = ["src"]\n', encoding="utf-8")
+    runner = FakeToolRunner({sys.executable})
+    policy = policy_from_mapping({**MINI, "children": ["packages/core"], "child_policy_mode": "parent"})
+
+    report = run_check(policy, repo, services(runner), Options(tools=False))
+
+    assert not any(engine.name == "child arbor packages/core" for engine in report.engines)
+    assert not any(call[0] == sys.executable for call in runner.calls)
+
+
+def test_nested_child_arbor_failure_fails_parent_recursively(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_files(repo, {"app/domain.py": "VALUE = 1\n"})
+    write_files(repo, {
+        "packages/core/arborescent.toml": (
+            'rings = ["domain"]\nsources = ["src"]\nsource_roots = ["src"]\n'
+            'children = ["nested"]\n[classify]\n"core" = "domain"\n'
+        ),
+        "packages/core/src/core.py": "VALUE = 2\n",
+        "packages/core/nested/arborescent.toml": (
+            'rings = ["domain"]\nsources = ["src"]\nsource_roots = ["src"]\n'
+        ),
+        "packages/core/nested/src/leaf.py": "VALUE = 3\n",
+    })
+    policy = policy_from_mapping({**MINI, "children": ["packages/core"]})
+    source_root = Path(__file__).resolve().parents[1] / "src"
+    monkeypatch.setenv("PYTHONPATH", str(source_root))
+    runner = SubprocessToolRunner()
+    svc = Services(FsScanner(), runner, CHECKERS, LocalFileSystem(), SystemClock(), default_engines())
+
+    report = run_check(policy, repo, svc, Options(tools=False, use_baseline=False))
+
+    child_run = next(engine for engine in report.engines if engine.name == "child arbor packages/core")
+    assert child_run.status == "fail"
+    assert any("unclassified" in line for line in child_run.lines)
+    assert not report.ok

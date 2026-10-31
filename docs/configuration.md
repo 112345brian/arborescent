@@ -5,30 +5,230 @@ upwards from the current folder (or use `arborescent --config PATH ...`); the fo
 repository root. A malformed or self-contradicting policy exits with code 2 and a one-line reason; nothing is repaired
 silently.
 
-## Top-level keys
+## Single-scope top-level keys
+
+The keys below define the legacy single-scope form. It remains supported as written. For a repository with independently
+governed libraries, use `[tool.arborescent.scopes.<name>]` instead; the root retains only shared tool and repository
+settings. The two forms cannot be mixed.
 
 | key | default | meaning |
 |---|---|---|
 | `rings` | required | Distinct ring names, **innermost first**. |
-| `classify` | required in practice | Table of glob -> ring. Globs match the dotted module name and `*` crosses dots. The first match wins. Every module must match one (`unclassified`). |
+| `classify` | `{}` | Table of glob -> ring, used when a module has no valid `__arbor__` annotation. Globs match the dotted module name and `*` crosses dots. The first match wins. Every module needs a ring from an annotation or a matching glob (`unclassified`). |
 | `sources` | `["."]` | Folders or single files to scan. A single `.py` file is an entry script, not a package. |
 | `source_roots` | `["."]` | Folders that module names are relative to (`src` for a `src/app` layout). Also handed to tach. |
 | `exclude` | `[]` | Globs matched against a path or a file/folder name to skip while scanning. Excluded Python files are counted by folder on every `check`. |
+| `children` | `[]` | Explicit nested package roots to inspect for a direct Arborescent policy. In `certify` mode, roots with their own policy are checked recursively; roots without one remain in the parent scan. |
+| `child_policy_mode` | `"certify"` | `"certify"` respects direct child policies and includes their results in parent certification. `"parent"` overrides child policies: listed roots stay in the parent scan and are not checked separately. |
+| `scan_vendors` | `false` | Include convention-named `vendor`, `vendored`, `third_party` and `site-packages` folders in the parent scan. This lets parent rules govern vendored code; declared child roots with their own policy are still separated in `certify` mode. |
 | `module_forbid_imports` | `{}` | Module glob -> internal module/package names this module may not import, in addition to ring rules. |
 | `preset` | `"strict"` | How much of the external and OS rules applies: `strict`, `standard` or `relaxed` (see below). |
 | `io_modules` | built-in set | Stdlib modules that count as I/O, process or OS. Replaces the default set; `[]` means none. |
 | `groups` | `{}` | Named lists, used as `"@name"` inside any `may_import` or `external` list. |
 | `dependencies` | `{}` | Import name -> distribution name, where they differ (`yaml = "pyyaml"`). Used for entry-script and manifest checks. |
+| `tach_external_exclude` | `[]` | Package names written to the generated Tach `[external] exclude`: optional extras imported lazily, or transitive dependencies the project does not declare. Tach reads only the base dependencies and matches distribution names where they differ from import names (`google-genai`, `pyyaml`). |
 | `forbid_everywhere` | `[]` | Packages no module may import, in any ring (one global import-linter contract). |
 | `forbid_circular_imports` | `true` | Rejects cycles in the first-party module import graph, including lazy and `TYPE_CHECKING` imports. Set to `false` only to opt out; the Arborescent minimum profile requires `true`. |
+| `require_arbor_annotations` | `false` | Makes a module that resolves its ring only through `classify` (no valid `__arbor__` annotation) a hard failure (`unannotated-module`), instead of a silent fallback. See "Requiring annotations" below. |
+| `require_arbor_annotations_exclude` | `[]` | `classify`-style module-name globs exempt from `require_arbor_annotations`, for modules that cannot carry an annotation (vendored, read-only, generated). Has no effect unless `require_arbor_annotations` is set. |
 | `entry_scripts` | `[]` | Dotted names of PEP 723 single-file scripts. Each must declare, in its `# /// script` block, every third-party distribution the project code imports. |
 | `type_checkers` | `["ty"]` | `pyright`, `basedpyright`, `ty` and/or `pyrefly`. The first one runs by default; `check --type-checker` overrides it. A config file is generated for each one listed. |
-| `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. |
+| `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
+
+## Multi-scope configuration
+
+In `[tool.arborescent]` or `arborescent.toml`, add a `[scopes.<name>]` table for each application, library or shared
+repository component. Each scope requires non-empty `sources`, `source_roots` and `rings`.
+
+| scope key | default | meaning |
+|---|---|---|
+| `sources` | required | Literal repository-relative source paths owned by this scope. Source paths cannot overlap. Each Python file has one owner. |
+| `source_roots` | required | Paths used to derive dotted module names for this scope. Two scopes may use the same local ring names and module names, but duplicate derived module names are an error. |
+| `rings` | required | This scope's distinct rings, innermost first. |
+| `classify` | `{}` | This scope's module glob -> local ring table. |
+| `ring` | `{}` | Per-ring `may_import`, `external`, `os_branching` and `forbid` tables, local to this scope. |
+| `public` | `[]` | Dotted module patterns consumers may import from this scope. |
+| `depends_on` | `[]` | Scope names this scope may import. Each cross-scope import must target a declared dependency and match its `public` patterns. |
+| `preset`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
+| `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
+
+Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
+`ruff`, `practices`, `exclude` and `children` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
+`source_roots`, `classify`, `ring`, `preset`, `io_modules`, `groups` and the other architecture settings) are rejected
+when `scopes` is present. Scope names and dependencies must be unique and known, and the dependency graph must be
+acyclic.
+
+## Nested package arbors
+
+Use `children` to configure package roots that may have their own architecture policy. Each path is relative to the
+parent policy root, unique and non-overlapping. In the default `child_policy_mode = "certify"`, a direct child
+`arborescent.toml` or `pyproject.toml` with `[tool.arborescent]` gives that package its own policy; Arborescent checks
+it recursively and excludes its source from the parent scan. If no direct policy is declared, the package remains
+part of the parent scan. Arborescent never searches upward for a child policy.
+
+```toml
+[tool.arborescent]
+children = ["packages/collection_core"]
+child_policy_mode = "certify"
+```
+
+To apply the parent policy to a listed package even when it has its own config, set `child_policy_mode = "parent"`.
+The parent then scans the entire configured source tree, and no child checks run. To include convention-named vendor
+directories in that scan, set `scan_vendors = true`; normal `exclude` rules still apply.
+
+With `child_policy_mode = "certify"`, other packages and source directories stay under the parent's own integrated
+policy unless they have their own direct policy and are listed as children. `arborescent check` invokes each such child
+from its own root, so it uses its own rings, baseline, and native tool configs; nested children are checked recursively.
+The parent's `CONSISTENT` status requires its configured checks and every child's configured checks to pass. With
+`--require-profile`, the parent passes that requirement to every child and prints `CERTIFIED` only when the parent and
+all children meet the minimum profile. A declared path without its own policy remains parent-owned; a discovered child
+with an invalid or failing policy makes the parent check fail.
+
+Arborescent does not rewrite project-owned Tach, Ruff, or type-checker configuration. When those parent tools should
+only govern parent source, exclude each independently certified child path in their native config as well. The child invocation runs those tools
+from the child root with the child's native configuration.
+
+For example, libraries with different core layers can share one repository-owned binary parser:
+
+```toml
+[tool.arborescent]
+python = "3.12"
+
+[tool.arborescent.scopes.packet_archive]
+sources = ["packages/packet-archive/src/packet_archive"]
+source_roots = ["packages/packet-archive/src"]
+rings = ["domain", "adapters"]
+public = ["packet_archive.api*"]
+depends_on = ["binary_parser"]
+
+[tool.arborescent.scopes.packet_archive.classify]
+"packet_archive.domain*" = "domain"
+"packet_archive.adapters*" = "adapters"
+
+[tool.arborescent.scopes.catalog]
+sources = ["packages/catalog/src/catalog"]
+source_roots = ["packages/catalog/src"]
+rings = ["core", "use_cases", "adapters"]
+public = ["catalog.api*"]
+depends_on = ["binary_parser"]
+
+[tool.arborescent.scopes.catalog.classify]
+"catalog.core*" = "core"
+"catalog.use_cases*" = "use_cases"
+"catalog.adapters*" = "adapters"
+
+[tool.arborescent.scopes.binary_parser]
+sources = ["packages/binary-parser/src/binary_parser"]
+source_roots = ["packages/binary-parser/src"]
+rings = ["domain", "adapters"]
+public = ["binary_parser.reader"]
+
+[tool.arborescent.scopes.binary_parser.classify]
+"binary_parser*" = "domain"
+```
+
+`binary_parser.reader` has one source owner and one local policy; both libraries can import it because they declare the
+dependency and the module is public. The libraries keep their independent ring hierarchies. A shared helper is never
+duplicated to satisfy scope ownership. Scope metadata stays centralized in the root config; extracting a library later
+uses the package metadata and extraction tools below.
+
+## Package metadata and extraction
+
+Repository package ownership and extraction metadata live in a root `packages.toml` file. Arborescent owns the schema,
+validation, and extraction command; the repository declares stable package identities and the paths/roles it owns. Each
+path can carry string metadata that follows it when copied, such as the import package name or the relative path to an
+independent `arborescent.toml`.
+
+```toml
+[[packages]]
+id = "collection-core"
+name = "Shared Collection Core"
+kind = "shared-core"
+repository = "org/repo"
+root = "packages/collection-core"
+summary = "Domain-neutral run lifecycle and source execution."
+capabilities = ["source-runner", "health-aggregation"]
+depends_on = []
+extraction_status = "experimental"
+
+[[packages.paths]]
+path = "packages/collection-core/src/collection_core"
+role = "source"
+metadata = { import = "collection_core", arborescent_config = "arborescent.toml" }
+
+[[packages.paths]]
+path = "packages/collection-core/tests/test_collection_core"
+role = "tests"
+destination = "tests/test_collection_core"
+```
+
+The package root and every owned path must stay inside the repository. Package IDs are stable lowercase slugs, path
+ownership cannot overlap, and declared dependencies must form an acyclic graph. Extraction copies declared paths into a
+new destination and writes `.arborescent-package.toml` (see "Extraction manifest" below). A package with its own
+direct Arborescent policy is copied with that policy when it is listed as a configuration path; the child policy remains
+independently usable after extraction.
+
+Generated local output below a declared path is not copied: `__pycache__`, `*.pyc`, `.venv`, `venv`, `node_modules`,
+`.git` (directory or worktree pointer file), `.arborescent`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache`, `.tox`,
+`build`, `dist` and `.DS_Store` (the noise directories Arborescent already ignores, plus build output). A directory with
+one of those names is treated as generated output unless it is a real Python package (it contains `__init__.py`), so a
+package such as `pkg/build/__init__.py` is copied. A namespace package without `__init__.py` that is named like build
+output is skipped; give it an `__init__.py` or rename it. A declared path itself is always copied, even when it is named
+`build`, and symlinks inside skipped directories do not abort extraction. Special files (named pipes, devices) and
+symlinks elsewhere are rejected.
+
+```sh
+arborescent packages validate
+arborescent packages list
+arborescent packages extract collection-core --output /tmp/collection-core
+arborescent packages extract collection-core --output /tmp/collection-core --with-dependencies
+```
+
+Dependencies are included only when explicitly requested and are placed under `dependencies/<package-id>/`. The
+destination must not already exist. Extraction does not rewrite imports or invent build configuration; the package
+metadata declares the layout and the package owns its build and architecture files.
+
+### Extraction manifest
+
+`.arborescent-package.toml` (`manifest_version = 2`) keeps what a package *is* apart from where it *is* and what
+extraction *did*:
+
+| Table | Holds | Changes on extraction? |
+|---|---|---|
+| `[package]` | `id`, `name`, `kind`, `domain`, `summary`, `capabilities`, `depends_on` | never |
+| `[[paths]]` `role`, `metadata` | per-path meaning: role plus custom metadata (import name, boundary, `arborescent_config`, scope) | never |
+| `[origin]` | `repository`, `root` and `extraction_status` as declared in the catalog | no; kept for traceability |
+| `[[paths]]` `origin_path` | the path in the origin repository | no; kept for traceability |
+| `[location]` | the current `repository` (defaults to the origin; `--repository` sets another) and `root` (`.`) | yes |
+| `[[paths]]` `current_path` | where the path lives inside the extracted tree | yes |
+| `[extraction]` | `status = "extracted"` and `included_packages` | yes; describes the operation |
+| `[[dependencies]]` | the same stable fields for each included dependency, plus its origin and `current_root` | as above |
+
+Module identity is never rewritten. Extraction copies `arborescent.toml`, `classify` globs and in-file `__arbor__`
+annotations byte for byte. Extraction then compares, for every shipped `arborescent.toml`, the module name the policy
+derives for each copied file (from its `sources` and `source_roots`) before and after the move. A `destination` that
+renames a module, or moves it out of the policy's `sources`, fails with `would change module identity` (for example
+`core -> renamed`) and the partial extraction is removed. Files that merely become newly visible to a policy, such as
+tests moved under a `sources = "."` policy, add modules and are allowed. `arborescent_config` metadata is relative to
+the package's current root and must be shipped as a declared path.
+
+The manifest is a provenance snapshot taken at extraction, not an integrity seal: an extracted package is expected to
+evolve, so its files are not hashed.
+
+`arborescent packages validate --extracted DIR` re-validates an extracted tree (extraction runs the same structural
+check): the manifest must be well formed (stable lowercase package ids, status `extracted`, normalized origin paths, at
+least one path, each path inside its package's current root, no duplicate dependencies); current paths
+must resolve inside the tree; no symlink may leave it (generated directories such as `.venv` are ignored);
+`included_packages` must match the package and its dependencies; and every shipped policy, whether
+`arborescent.toml` or a `pyproject.toml` with `[tool.arborescent]` and wherever it was placed, must load and find its
+`sources` and `source_roots`. The module-identity comparison (also applied to `pyproject.toml` policies) needs the origin tree, so it
+runs only during extraction. Files outside a policy's `sources` are not part of that comparison. A parent policy (`children`, `child_policy_mode`) is neither read nor changed by extracting
+a child; the child keeps governing itself.
 
 `suggestion_threshold` controls a report-only hint for large files. The metric counts lines containing code tokens and
 ignores blank lines, comments, module/class/function docstrings, and multi-line literal-only data tables. Suggestions
@@ -53,6 +253,10 @@ configured type checker active.
 skipped checks do not receive this label. `CERTIFIED` is printed only when the minimum profile also passes. A project
 can therefore be consistent with its own policy while remaining uncertified because it disabled required profile tools.
 
+`disabled_tools = ["arbor-annotations"]` opts out of annotation handling: all ring assignments come from `classify`,
+and `invalid-arbor-annotation` findings are not emitted. Other architecture checks still apply. This opt-out prevents
+minimum-profile certification, even when the remaining enabled checks pass and the project is `CONSISTENT`.
+
 `[tool.arborescent.ruff]` composes overrides over the optional generated Ruff preset; it never replaces that preset. It accepts
 `extend-select`, `ignore`, `per-file-ignores`, `max-complexity`, `max-args`, `max-branches`, and `max-statements`.
 The base includes correctness, typing, security, modernization, path, and performance rule families in addition to
@@ -61,7 +265,73 @@ tests remain idiomatic and real process adapters can declare their deliberate su
 because it conflicts with strict type inference for container factories. `check` prints `standard rules (baseline vN)` when no rule
 customization is active, or `customised rules: ...` with the changes that apply.
 
-## Rings: `[tool.arborescent.ring.<name>]`
+## Module ring annotations: `__arbor__`
+
+A module can declare its own ring with a module-level assignment to a literal dictionary:
+
+```python
+__arbor__ = {"ring": "domain"}
+```
+
+The `ring` value must be a string naming one of the policy's configured `rings` (the owning scope's rings in
+multi-scope mode); `ring` is the only legal key today, and any other key reports `invalid-arbor-annotation`.
+Arborescent reads the assignment statically, without importing or executing the module. Only direct module-level
+assignments count; assignments inside functions or classes are ignored (they are not module-level annotations at
+all). An assignment inside conditional code at module level (`if`, `try`, `for`, `while` or `with`) is not ignored:
+it reports `invalid-arbor-annotation`, because a ring that depends on control flow cannot be resolved statically. If
+there are multiple unconditional direct assignments, the last one wins.
+
+A module whose valid `__arbor__` ring disagrees with the ring its first matching `classify` glob would have assigned
+reports `arbor-ring-mismatch`; the annotation still wins for enforcement (see resolution order below), but the
+disagreement is surfaced so a stale `classify` entry or annotation gets noticed and reconciled.
+
+Ring resolution follows this order while annotations are enabled (the default):
+
+1. A valid `__arbor__` annotation takes precedence over every `classify` glob, and can classify a module even when no
+   glob matches it.
+2. If the annotation is absent, the first matching `classify` glob supplies the ring.
+3. If the annotation is malformed or names an unknown ring, Arborescent reports `invalid-arbor-annotation` and still
+   uses the first matching `classify` glob for enforcement. If no glob matches, it also reports `unclassified`.
+
+For example, if `"app.domain" = "domain"` appears in `classify`, adding `__arbor__ = {"ring": 42}` to that module
+reports `invalid-arbor-annotation`. Its imports, effects and OS branching are still checked under the `domain` ring;
+the invalid annotation does not create a gap in those checks. A valid `__arbor__ = {"ring": "adapters"}` instead
+assigns that module to `adapters`, regardless of the glob. Ring annotations are validated against the owning scope,
+so scopes may reuse ring names without sharing a hierarchy.
+
+Annotations apply to individual Python modules. An annotation in `__init__.py` assigns the package module's own
+ring; it does not assign rings to its descendants. Scope boundaries are configured separately through `sources`,
+`public` and `depends_on`; package extraction is separately invoked through `arborescent packages extract`.
+
+### Requiring annotations
+
+`classify` remains supported indefinitely: resolution order 2 above is not deprecated, and most projects never need
+to change it. `require_arbor_annotations = true` is an opt-in ratchet for a project (or one scope of a multi-scope
+project) that wants to finish its migration to annotations and catch regressions afterward: once set, a module that
+resolves its ring only through `classify` — no annotation at all, or an invalid one that falls back — reports
+`unannotated-module` and fails the check, instead of silently relying on resolution order 2 or 3. This changes
+nothing about *which* source wins; it only removes the option to rely on the fallback.
+
+The flag is a per-scope architecture setting, like `forbid_circular_imports`: a repository can require annotations
+in one newly-written scope while a legacy scope keeps classifying as before. `require_arbor_annotations_exclude`
+takes `classify`-style globs on the dotted module name for modules that cannot carry an annotation at all — a
+vendored, read-only or generated subtree — without forcing them into a separate scope; an excluded module still
+resolves its ring normally (by `classify`, or by an annotation if it happens to have a valid one) and is simply not
+required to have one. Setting `require_arbor_annotations = true` together with
+`disabled_tools = ["arbor-annotations"]` is a contradiction — you cannot require what you have turned off — and is
+rejected as a policy error.
+
+Migrating an existing classify-only project:
+
+1. Run `arborescent annotate` (dry-run by default) to see what it would insert; `arborescent annotate --yes` writes
+   `__arbor__ = {"ring": ...}` into every module `classify` currently resolves but that has no existing annotation.
+   It is idempotent: a second run reports already-annotated files and writes nothing.
+2. Run `arborescent discover` and `arborescent check` and confirm nothing is left relying on `classify` alone (add
+   `require_arbor_annotations_exclude` entries for anything that genuinely cannot be annotated).
+3. Set `require_arbor_annotations = true`. From then on, a new module that lands without an annotation fails
+   `check` immediately rather than silently inheriting a `classify` glob.
+
+## Rings: `[tool.arborescent.ring.<name>]` or `[tool.arborescent.scopes.<scope>.ring.<name>]`
 
 | key | default | meaning |
 |---|---|---|
@@ -99,7 +369,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 
 | rule | fires when |
 |---|---|
-| `unclassified` | a module matches no `classify` pattern |
+| `unclassified` | a module has neither a valid enabled `__arbor__` annotation nor a matching `classify` pattern |
 | `noise-dir-code` | a tracked `.py` file appears below a skipped directory such as `.venv`, `.tox` or `node_modules` |
 | `vendor-folder` | a convention-named vendor folder is excluded and fingerprinted in the baseline |
 | `wildcard-ring` | a non-outermost ring uses `*` in `external` or `may_import` (one finding per ring and axis) |
@@ -116,11 +386,16 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
+| `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
+| `scope-effect-leak` | a module imports another scope's declared-`public` module, and that module uses an effect the importing ring forbids (one hop, not transitive) |
 | `circular-import` | when `forbid_circular_imports` is enabled, first-party modules form a circular import dependency, including cycles made only of lazy or `TYPE_CHECKING` imports |
 | `external-import` | a ring imports an external package missing from its `external` list (scope set by the preset) |
 | `os-branching` | a ring not marked `os_branching` reads `os.name` or `sys.platform` |
 | `bad-import` | a relative import that points above the package root |
 | `undeclared-entry-dependency` | an entry script lacks a `# /// script` block, or omits a third-party distribution the project imports |
+| `invalid-arbor-annotation` | a module's `__arbor__` annotation is malformed or names an unknown ring |
+| `arbor-ring-mismatch` | a valid `__arbor__` ring disagrees with the ring the first matching `classify` glob would assign |
+| `unannotated-module` | `require_arbor_annotations` is enabled and a module resolves its ring only through `classify`, with no valid `__arbor__` annotation |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
 `getattr`, variables, or wrappers. A test patch is checked against the target module's ring and is considered only when
@@ -199,9 +474,9 @@ intentional baseline growth and its reason.
 
 ### `arborescent discover`
 
-List in-scope Python files that still lack a ring classification, grouped by folder with the outermost ring suggested.
-Add matching `classify` patterns or explicitly exclude files that should not be scanned. Git-tracked Python files under
-noise directories are reported separately by `check`.
+List Python files that still lack a ring classification, grouped by scope and folder with that scope's outermost ring suggested.
+Add valid `__arbor__` ring annotations, matching `classify` patterns, or explicitly exclude files that should not be
+scanned. Git-tracked Python files under noise directories are reported separately by `check`.
 
 ### `arborescent selftest`
 

@@ -80,6 +80,8 @@ class SourceFacts:
     suppressions: tuple[tuple[int, str], ...] = ()  # (line, kind); comments only, not strings
     discard_calls: tuple[int, ...] = ()  # `discard(value, reason=...)`; no type-aware Result claim
     top_level_defs: tuple[TopLevelDef, ...] = ()  # module-level classes and functions only
+    arbor_ring: str | None = None
+    arbor_error: str | None = None
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -275,6 +277,68 @@ def _top_level_defs(tree: ast.AST, aliases: dict[str, str]) -> tuple[TopLevelDef
     return tuple(out)
 
 
+_ARBOR_LEGAL_KEYS = frozenset({"ring"})
+_CONDITIONAL_CONTAINERS = (ast.If, ast.Try, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith)
+
+
+def _is_arbor_target(stmt: ast.stmt) -> bool:
+    is_assignment = isinstance(stmt, ast.Assign) and any(
+        isinstance(target, ast.Name) and target.id == "__arbor__" for target in stmt.targets
+    )
+    is_annotated_assignment = (
+        isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "__arbor__"
+    )
+    return is_assignment or is_annotated_assignment
+
+
+def _conditional_bodies(stmt: ast.stmt) -> list[list[ast.stmt]]:
+    if isinstance(stmt, ast.If):
+        return [stmt.body, stmt.orelse]
+    if isinstance(stmt, ast.Try):
+        return [stmt.body, stmt.orelse, stmt.finalbody, *(handler.body for handler in stmt.handlers)]
+    if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+        return [stmt.body, stmt.orelse]
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        return [stmt.body]
+    return []
+
+
+def _find_arbor_assignments(stmts: list[ast.stmt], conditional: bool) -> list[tuple[ast.expr | None, bool]]:
+    found: list[tuple[ast.expr | None, bool]] = []
+    for stmt in stmts:
+        if _is_arbor_target(stmt):
+            value = stmt.value if isinstance(stmt, (ast.Assign, ast.AnnAssign)) else None
+            found.append((value, conditional))
+        elif isinstance(stmt, _CONDITIONAL_CONTAINERS):
+            for body in _conditional_bodies(stmt):
+                found += _find_arbor_assignments(body, True)
+    return found
+
+
+def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None]:
+    found = _find_arbor_assignments(list(tree.body), False)
+    if not found:
+        return None, None
+    if any(conditional for _, conditional in found):
+        return None, "__arbor__ must not be assigned inside conditional code"
+    value = found[-1][0]
+    try:
+        annotation = ast.literal_eval(value) if value is not None else None
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return None, "__arbor__ must be a literal dictionary"
+    if not isinstance(annotation, dict):
+        return None, "__arbor__ must be a dictionary"
+    unknown = sorted(set(annotation) - _ARBOR_LEGAL_KEYS)
+    if unknown:
+        return None, f"__arbor__ has unknown key(s): {', '.join(map(repr, unknown))}"
+    if "ring" not in annotation:
+        return None, '__arbor__ dictionary is missing "ring"'
+    ring = annotation["ring"]
+    if not isinstance(ring, str):
+        return None, '__arbor__."ring" must be a string'
+    return ring, None
+
+
 def _script_deps(source: str) -> tuple[str, ...] | None:
     if "# /// script" not in source:
         return None
@@ -295,6 +359,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     imports: list[RawImport] = []
     _walk(tree, False, False, imports)
+    arbor_ring, arbor_error = _arbor_ring(tree)
     return SourceFacts(
         tuple(imports),
         _effect_uses(tree),
@@ -302,6 +367,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _suppression_comments(source),
         _discard_call_lines(tree),
         _top_level_defs(tree, _aliases(tree)),
+        arbor_ring,
+        arbor_error,
     )
 
 

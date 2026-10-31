@@ -13,10 +13,12 @@ import pytest
 from arborescent_helpers import mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
+from arborescent.config import policy_from_mapping
 from arborescent.practices import (
     crlf,
     docs_sync,
     gitignore_shadow,
+    run_practices,
     secrets_guard,
     sibling_versions,
     undeclared_imports,
@@ -107,21 +109,96 @@ def test_tests_that_can_read_real_secrets_need_a_conftest_guard(tmp_path: Path) 
     assert secrets_guard(FS, tmp_path, "tests") == []
 
 
+def test_docs_sync_uses_each_scope_ring(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+        "libs/beta/src/beta/api.py": "VALUE = 2\n",
+        "architecture.md": (
+            "| module | scope | ring |\n|---|---|---|\n"
+            "| `alpha.core` | `alpha` | `domain` |\n| `beta.api` | `beta` | `adapters` |\n"
+        ),
+    })
+    policy = policy_from_mapping({
+        "practices": {"docs-sync": "architecture.md"},
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain", "adapters"], "classify": {"alpha.core": "domain"},
+            },
+            "beta": {
+                "sources": ["libs/beta/src/beta"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain", "adapters"], "classify": {"beta.api": "domain"},
+            },
+        },
+    })
+    scan = FsScanner().scan(policy, tmp_path)
+
+    found = docs_sync(FS, tmp_path, "architecture.md", policy, scan)
+
+    assert [(item.subject, item.rule) for item in found] == [("beta.api", "docs-sync")]
+
+
+def test_docs_sync_checks_scope_ownership_when_documented(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+        "architecture.md": "| `alpha.core` | `beta` | `domain` |\n",
+    })
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "classify": {"alpha.core": "domain"},
+            },
+            "beta": {
+                "sources": ["libs/beta/src/beta"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain"], "classify": {"beta.api": "domain"},
+            },
+        },
+    })
+    scan = FsScanner().scan(policy, tmp_path)
+
+    found = docs_sync(FS, tmp_path, "architecture.md", policy, scan)
+
+    assert "scope 'beta'" in found[0].detail
+
+
 def test_docs_that_drift_from_the_policy_are_caught(repo: Path) -> None:
     """Real bug: the architecture doc, the tach config and the tests disagreed about a module's layer."""
     policy = mini_policy()
-    known = FsScanner().scan(policy, repo).known
+    scan = FsScanner().scan(policy, repo)
+    known = scan.known
     table = "| module | ring |\n|---|---|\n" + "".join(
         f"| `{m}` | {policy.ring_of(m)} |\n" for m in sorted(known)
     )
     write_files(repo, {"docs/architecture.md": table})
-    assert docs_sync(FS, repo, "docs/architecture.md", policy, known) == []
+    assert docs_sync(FS, repo, "docs/architecture.md", policy, scan) == []
     drifted = table.replace("| `app.adapters` | adapters |", "| `app.adapters` | ports |").replace("| `app.main` | composition |\n", "") + "| `app.gone` | domain |\n"
     write_files(repo, {"docs/architecture.md": drifted})
-    details = sorted(v.detail for v in docs_sync(FS, repo, "docs/architecture.md", policy, known))
+    details = sorted(v.detail for v in docs_sync(FS, repo, "docs/architecture.md", policy, scan))
     assert any("says ring 'ports'" in d for d in details)
     assert any("does not exist" in d for d in details)
     assert any("not in the docs/architecture.md table" in d for d in details)
+
+
+@pytest.mark.parametrize("documented_ring", ["domain", "ports"])
+def test_docs_sync_uses_the_annotation_ring(tmp_path: Path, documented_ring: str) -> None:
+    write_files(
+        tmp_path,
+        {
+            "app/model.py": '__arbor__ = {"ring": "ports"}\n',
+            "docs/architecture.md": f"| `app.model` | {documented_ring} |\n",
+        },
+    )
+    policy = mini_policy(classify={"app.model": "domain"}, practices={"docs-sync": "docs/architecture.md"})
+    scan = FsScanner().scan(policy, tmp_path)
+
+    found = run_practices(policy, tmp_path, SubprocessToolRunner(), FS, scan)
+
+    if documented_ring == "ports":
+        assert found == []
+    else:
+        assert [(v.rule, v.subject) for v in found] == [("docs-sync", "app.model")]
+        assert "says ring 'domain' but the policy says 'ports'" in found[0].detail
 
 
 def test_generated_scripts_with_crlf_are_caught(tmp_path: Path) -> None:
@@ -143,5 +220,22 @@ def test_imports_of_undeclared_dependencies_are_caught(repo: Path) -> None:
 def test_import_name_to_distribution_mapping_is_honoured(repo: Path) -> None:
     write_files(repo, {"app/adapters.py": "import yaml\n", "pyproject.toml": _dist("app", "1", ["PyYAML"])})
     policy = mini_policy(dependencies={"yaml": "pyyaml"})
+    scan = FsScanner().scan(policy, repo)
+    assert undeclared_imports(FS, repo, policy, scan.modules, scan.known, "pyproject.toml") == []
+
+
+def test_scope_import_name_to_distribution_mapping_is_honoured(repo: Path) -> None:
+    write_files(repo, {
+        "libs/alpha/src/alpha/core.py": "import yaml\n",
+        "pyproject.toml": _dist("app", "1", ["PyYAML"]),
+    })
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "dependencies": {"yaml": "pyyaml"},
+            },
+        },
+    })
     scan = FsScanner().scan(policy, repo)
     assert undeclared_imports(FS, repo, policy, scan.modules, scan.known, "pyproject.toml") == []

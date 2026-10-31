@@ -21,7 +21,7 @@ NAMES = ["app", "app.domain", "app.ports", "app.adapters", "app.main"]
 def found_rules(root: Path, **overrides: Any) -> set[tuple[str, str]]:
     policy = mini_policy(**overrides)
     scan = FsScanner().scan(policy, root)
-    return {(v.subject, v.rule) for v in check_modules(policy, scan.modules, scan.known, scan.entry_deps)}
+    return {(v.subject, v.rule) for v in check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)}
 
 
 def linter_text(**overrides: Any) -> str:
@@ -136,3 +136,9 @@ def test_malformed_io_modules_is_an_error(bad: object) -> None:
 
 def test_policy_without_a_preset_key_still_loads() -> None:
     assert policy_from_mapping(MINI).preset.name == "strict"
+
+
+def test_tach_external_exclude_land_in_the_tach_external_exclude() -> None:
+    files = generate(mini_policy(tach_external_exclude=["livekit", "sentry_sdk"]), NAMES, [])
+    assert 'exclude = ["livekit", "sentry_sdk"]' in files["tach.toml"]
+    assert "exclude = []" in generate(mini_policy(), NAMES, [])["tach.toml"]

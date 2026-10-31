@@ -29,6 +29,7 @@ from arborescent.practices import (
     sibling_versions,
     undeclared_imports,
 )
+from arborescent.scanner import ScanData
 from arborescent.selftest import selftest
 from arborescent.testing import FakeToolRunner
 from arborescent.typecheckers import all_checkers, by_name
@@ -171,14 +172,15 @@ def test_docs_sync_edge_inputs(env: Env) -> None:
     fs, root = env
     policy = mini_policy()
     known = frozenset({"app", "app.domain"})
-    assert [v.rule for v in docs_sync(fs, root, "docs/a.md", policy, known)] == ["docs-sync"]  # missing file
+    scan = ScanData(known=known, modules={}, entry_deps={}, paths={})
+    assert [v.rule for v in docs_sync(fs, root, "docs/a.md", policy, scan)] == ["docs-sync"]  # missing file
     put(fs, root, {"docs/a.md": ""})
-    assert {v.subject for v in docs_sync(fs, root, "docs/a.md", policy, known)} == known  # empty file: nothing listed
+    assert {v.subject for v in docs_sync(fs, root, "docs/a.md", policy, scan)} == known  # empty file: nothing listed
     put(fs, root, {"docs/a.md": b"| `app` | domain |\r\n| `app.domain` | domain |\r\n"})
-    assert docs_sync(fs, root, "docs/a.md", policy, known) == []  # CRLF table
+    assert docs_sync(fs, root, "docs/a.md", policy, scan) == []  # CRLF table
     put(fs, root, {"docs/a.md": b"\xff"})
     with pytest.raises(UnicodeDecodeError):
-        docs_sync(fs, root, "docs/a.md", policy, known)
+        docs_sync(fs, root, "docs/a.md", policy, scan)
 
 
 def test_crlf_ignores_noise_directories_and_non_matching_names(env: Env) -> None:
@@ -206,13 +208,14 @@ def test_drift_reports_missing_differing_and_crlf_files(env: Env) -> None:
     policy = mini_policy()
     names = ["app", "app.domain", "app.ports", "app.adapters", "app.main"]
     checkers = by_name(["pyright"])
+    scan = ScanData(known=frozenset(names), modules={}, entry_deps={}, paths={})
     expected = generate(policy, names, checkers)
-    assert drift(fs, policy, root, names, checkers) == []  # optional presets need not exist
+    assert drift(fs, policy, root, scan, checkers) == []  # optional presets need not exist
     put(fs, root, dict(expected))
-    assert drift(fs, policy, root, names, checkers) == []
+    assert drift(fs, policy, root, scan, checkers) == []
     rel = next(iter(expected))
     put(fs, root, {rel: expected[rel].replace("\n", "\r\n")})  # CRLF is drift: the content is compared exactly
-    assert len(drift(fs, policy, root, names, checkers)) == 1
+    assert len(drift(fs, policy, root, scan, checkers)) == 1
 
 
 # --- selftest and bench (they need the real scanner, so the real disk) -----------------------------------------
