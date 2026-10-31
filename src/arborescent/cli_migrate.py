@@ -62,6 +62,8 @@ def _print_plan(plan: DriverPlan, library: MigrationLibrary, *, dry_run: bool) -
         print(f"{plan.status}: {plan.reason}")
         for gap in plan.gaps:
             print(f"  [{gap.code}] {gap.subject}: {gap.detail}")
+        for bypass in plan.bypasses:
+            print(f"  [private-import] {bypass.module} (package {bypass.package}) imports {bypass.imports}, which is not on the public surface of {plan.package}")
         return
     request = plan.request
     if request is None:

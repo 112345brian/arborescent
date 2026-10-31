@@ -28,6 +28,7 @@ cannot differ from the real run.
 |---|---|
 | unknown package id | exit 2 |
 | the package (or no package in particular) has an open annotation gap of severity `error` | the gaps are listed, nothing is supplied, exit 1 (with or without `--yes`) |
+| other packages still import a module of this one that is not on its `public` surface (a bypass edge), or a first-party dependency is undeclared | the edges or gaps are listed (`[private-import]`, `[package-undeclared-dependency]`), nothing is supplied, exit 1; there is no flag to override it, because the packages left behind would import something that is no longer there |
 | `home` is a workspace member | it stays in this repository, so there is no history to extract: stated, nothing supplied, exit 0 |
 | the library is not installed | a `SETUP` line with the install command; a dry run still prints the arguments and exits 0, `--yes` exits 1 |
 | the target already exists | the library adapter refuses (the new repository must not exist); exit 1 |
@@ -53,6 +54,14 @@ import-rewriting library (rope, LibCST) would be a second adapter over the same 
 How the arguments become filter-repo's: the adapter creates the target with `git init`, then runs `git-filter-repo
 --source <repo> --target <new repo> --refs <branch>` with, per owned path, `--path <path>` and
 `--path-rename <path>:<new path>` (to the root: `<path>/:`). Only the branch you name is carried over.
+
+## Known limits
+
+- **Tags are not carried.** Only the branch you name is written to the new repository (`--refs <branch>`).
+- **Workspace members are not moved.** They stay in this repository; the driver states so and supplies nothing.
+- **Asset folders with a destination are not exercised end to end.** The real-tool test moves a source folder to the
+  new repository's root; renames of asset folders are checked only as arguments.
+- **Imports are not rewritten.** Module renames are printed as not applied; see above.
 
 ## Layout
 

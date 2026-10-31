@@ -92,3 +92,71 @@ def test_check_and_generate_never_call_the_library(tmp_path: Path) -> None:
     _ = main(["--config", config, "check", "--no-tools"], services(FakeToolRunner()), library=library)
     _ = main(["--config", config, "generate"], services(FakeToolRunner()), library=library)
     assert library.supplied == []
+
+
+# -- a package whose private modules other packages still import ----------------------------------------------------
+
+TWO_PACKAGES = """
+[[packages]]
+id = "core"
+name = "Core"
+kind = "library"
+repository = "example/mono"
+root = "src/app/core"
+summary = "domain"
+public = ["app.core.api"]
+externals = []
+[packages.home]
+kind = "repository"
+repository = "https://github.com/example/core.git"
+[[packages.paths]]
+path = "src/app/core"
+role = "source"
+
+[[packages]]
+id = "web"
+name = "Web"
+kind = "application"
+repository = "example/mono"
+root = "src/app/web"
+summary = "http"
+depends_on = ["core"]
+externals = []
+[packages.home]
+kind = "workspace-member"
+path = "packages/web"
+[[packages.paths]]
+path = "src/app/web"
+role = "source"
+"""
+
+
+def two_package_repo(root: Path, web_imports: str) -> None:
+    write_files(root, {
+        "src/app/core/__init__.py": "", "src/app/core/api.py": "VALUE = 1\n", "src/app/core/internal.py": "HIDDEN = 2\n",
+        "src/app/web/__init__.py": "", "src/app/web/views.py": f"{web_imports}\n",
+        "packages.toml": TWO_PACKAGES,
+        "arborescent.toml": 'package_catalog = "packages.toml"\nsources = ["src/app"]\nsource_roots = ["src"]\nrings = ["domain"]\npreset = "strict"\n'
+                            '[ring.domain]\nexternal = ["*"]\n[classify]\n"app*" = "domain"\n',
+    })
+
+
+def migrate_core(root: Path, library: FakeMigrationLibrary) -> int:
+    argv = ["--config", str(root / "arborescent.toml"), "packages", "migrate", "core", "--target", str(root / "out"), "--yes"]
+    return main(argv, services(FakeToolRunner()), library=library)
+
+
+def test_a_private_import_by_another_package_refuses_the_split_and_lists_the_edge(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    two_package_repo(tmp_path, "from app.core.internal import HIDDEN")
+    library = FakeMigrationLibrary()
+    assert migrate_core(tmp_path, library) == 1
+    out = capsys.readouterr().out
+    assert library.supplied == []
+    assert "[private-import] app.web.views (package web) imports app.core.internal" in out
+
+
+def test_the_same_repository_proceeds_when_only_the_public_surface_is_imported(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    two_package_repo(tmp_path, "from app.core.api import VALUE")
+    library = FakeMigrationLibrary()
+    assert migrate_core(tmp_path, library) == 0, capsys.readouterr().out
+    assert len(library.supplied) == 1  # so the refusal above is caused by the private import and nothing else

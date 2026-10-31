@@ -9,8 +9,9 @@
 - `arborescent packages migrate PACKAGE_ID --target DIR`: the migration driver (#67). It supplies a dedicated migration
   library with one package's migration arguments through a port and does not migrate itself. The library is git
   filter-repo (optional extra `arborescent[filterrepo]`); a missing one prints a `SETUP` line with the install command.
-  A dry run (default) prints the exact arguments; `--yes` supplies them. It refuses while the package has an open error
-  gap and does nothing for a workspace member. Module renames are reported as not applied (filter-repo does not rewrite
+  A dry run (default) prints the exact arguments; `--yes` supplies them. It refuses, with no override, while the package
+  has an open error gap, an undeclared first-party dependency, or private modules that other packages still import, and
+  does nothing for a workspace member. Module renames are reported as not applied (filter-repo does not rewrite
   imports). The annotation layer cannot import the driver: `module_forbid_imports` in Arborescent's own policy, now
   probed by `selftest` for every configured pattern. `docs/migration-driver.md`.
 - Opt-in `package_catalog = "packages.toml"` (strict preset only): every first-party module and asset must belong to
