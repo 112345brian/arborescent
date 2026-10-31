@@ -35,6 +35,11 @@
   `public`, `externals`, `module_renames`. `release`/`pin`/`history` (#56) and `pyproject` (#60) are reserved slots. No
   tool-specific emitter ships; `docs/migration-export.md` has a `git filter-repo` recipe and the comparison with
   blinkered's `blinkered.toml` (#54).
+- Acceptance test for the migration annotations (`tests/test_split_acceptance.py`, fixture `tests/split_fixture.py`): a
+  synthetic four-package monorepo (one own-repository package, one workspace member, one package spanning three rings,
+  one with an assets folder, one deliberate blocking edge) is split with `git filter-repo` driven only by the JSON export;
+  the cut list is the generated import-linter and tach output, and the parts are checked with the preservation rules. It
+  skips with a reason where `git filter-repo`, import-linter or tach is not installed; Arborescent does not migrate (#57).
 
 ### Changed
 

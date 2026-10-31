@@ -180,6 +180,7 @@ docs-sync = "docs/architecture.md"
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
 addopts = "-q"
+markers = ["external_tools: needs an external tool (git filter-repo, import-linter, tach); skipped with a reason where it is not installed"]
 
 # Contract that lived in the launch-runner root pyproject: the core and the ports stay free of process/file/network modules.
 # (`lint-imports` reads this table; the generated arborescent-importlinter.toml is checked by `arborescent check`.)
