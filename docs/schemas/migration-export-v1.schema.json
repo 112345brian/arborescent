@@ -357,7 +357,58 @@
             ]
           },
           "pyproject": {
-            "description": "derivable pyproject.toml fields (#60)",
+            "additionalProperties": false,
+            "description": "the derivable pyproject.toml fields (#60); null unless package_pyproject is set",
+            "properties": {
+              "dependencies": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "requires_python": {
+                "type": "string"
+              },
+              "root_packages": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "source_roots": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "sources": {
+                "additionalProperties": {
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "workspace_members": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "dependencies",
+              "path",
+              "requires_python",
+              "root_packages",
+              "source_roots",
+              "sources",
+              "workspace_members"
+            ],
             "type": [
               "object",
               "null"

@@ -26,6 +26,15 @@
   and cannot declare one); `selftest` probes it. The policy fills the `policy` slot of the migration export and the gap
   appears in its `gaps`. Any unknown key on a `[[packages]]` entry is now rejected. Data and checks only: nothing is
   released, pinned or rewritten (#56).
+- Opt-in `package_pyproject = true` (needs `package_catalog`): `arborescent generate` creates each missing package
+  `pyproject.toml` with the fields the annotations determine (dependencies from the rings' `external` allow-lists through
+  the `dependencies` mapping, plus `depends_on`; `[tool.uv.sources]` per sibling; the root `[tool.uv.workspace]
+  members`; `source_roots` and `root_packages` tables) and a minimal template; an existing file is never rewritten.
+  New information rule `package-pyproject-drift` (a `NOTE`, never failing, never baselined) names a derived field that
+  disagrees with the annotations. `selftest` probes it. Where a sibling comes from is its `[packages.home]` (#54), and
+  `packages export` fills each package's `pyproject` object with the same derived fields (still `object | null`, no
+  schema version bump). A source is `{ workspace = true }` only between two workspace members; otherwise a git source
+  (with `subdirectory` for a workspace member), and a git value that is not a URL is reported, never guessed (#60).
 
 ### Changed
 

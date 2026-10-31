@@ -48,6 +48,7 @@ def package_mutations(
     out += _second_claims(catalog_file, context, sole, skipped)
     out += _ring_span(RuleContext(policy, arbor_index, scope_by_module).resolve_ring, catalog_file, context, sole, skipped)
     out += _undeclared_import(context, sole, skipped)
+    out += _pyproject_drift(context, skipped)
     return out, skipped
 
 
@@ -124,3 +125,14 @@ def _undeclared_import(context: PackageContext, sole: dict[str, str], skipped: l
             )]
     skipped.append(f"{Rule.PACKAGE_UNDECLARED_DEPENDENCY}: no two packages without a declared dependency to import across")
     return []
+
+
+def _pyproject_drift(context: PackageContext, skipped: list[str]) -> list[Mutation]:
+    """A workspace source for a package nobody depends on, appended to an existing derived file."""
+    if not context.derived:
+        skipped.append(f"{Rule.PACKAGE_PYPROJECT_DRIFT}: package_pyproject is off or no derived pyproject.toml exists to edit")
+        return []
+    return [Mutation(
+        Rule.PACKAGE_PYPROJECT_DRIFT, f"a workspace source for a non-dependency in {context.derived[0]}",
+        context.derived[0], f"[tool.uv.sources.{_PROBE_ID}]\nworkspace = true",
+    )]

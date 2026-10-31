@@ -66,6 +66,7 @@ def test_rule_id_strings_never_change() -> None:
             "package-spans-rings",
             "package-undeclared-dependency",
             "package-release-policy-missing",
+            "package-pyproject-drift",
         ]
     )
 
