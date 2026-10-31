@@ -125,3 +125,30 @@ def test_tach_canaries_accept_enforced_profile_and_catch_disabled_checks(tmp_pat
     assert any("Tach layer canary" in failure for failure in failures)
     assert any("Tach external-dependency canary" in failure for failure in failures)
     assert (tmp_path / "app/domain.py").read_text(encoding="utf-8") == MINI_FILES["app/domain.py"]
+
+
+def test_tach_multi_root_note_covers_multi_root_and_multi_scope_policies() -> None:
+    from arborescent.certification import tach_multi_root_note
+
+    assert tach_multi_root_note(mini_policy()) is None
+    assert tach_multi_root_note(mini_policy(source_roots=["src", "src/"])) is None
+    note = tach_multi_root_note(mini_policy(source_roots=["packages/a/src", "packages/b/src"]))
+    assert note is not None and "#41" in note
+    scoped = policy_from_mapping({
+        "scopes": {
+            name: {"sources": [f"{name}/src/{name}"], "source_roots": [f"{name}/src"], "rings": ["domain"]}
+            for name in ("alpha", "beta")
+        },
+    })
+    assert tach_multi_root_note(scoped) is not None
+
+
+def test_check_reports_multi_root_tach_limitation_as_advisory_drift(repo: Path) -> None:
+    from arborescent.engine import Options, run_check
+    from test_engine import services  # type: ignore[import-not-found]
+
+    policy = mini_policy(source_roots=[".", "app"])
+    report = run_check(policy, repo, services(), Options(tools=True))
+    assert any(line.startswith("tach: ") and "#41" in line for line in report.drift)
+    single = run_check(mini_policy(), repo, services(), Options(tools=True))
+    assert not any("#41" in line for line in single.drift)

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from . import baseline as ratchet_mod
-from .certification import PROFILE, certify
+from .certification import PROFILE, certify, tach_multi_root_note
 from .config import find_child_policy
 from .domain import Policy, PolicyError, Rule, ToolResult, Violation
 from .generate import generate
@@ -344,6 +344,8 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
                 if c.name in {*policy.type_checkers, checker.name} and not tool_is_disabled(policy, c)
             ],
         )
+        if opts.tools and "tach" not in policy.disabled_tools and (note := tach_multi_root_note(policy)) is not None:
+            report.drift.append(f"tach: {note}")
         engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
         report.engines += engine_runs
         report.violations = found + [v for run in engine_runs for v in run.violations]

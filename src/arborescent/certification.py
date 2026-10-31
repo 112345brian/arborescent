@@ -135,6 +135,20 @@ def _ruff_probes(root: Path, sources: tuple[str, ...], runner: ToolRunner, fs: F
     return failures
 
 
+TACH_MULTI_ROOT_NOTE = (
+    "tach does not resolve imports across several separate `source_roots` (uv/Cargo/npm-style workspaces), so its "
+    "boundary checks can pass despite forbidden edges; rely on arborescent's own ring engine and import-linter for "
+    "cross-package enforcement (see issue #41)"
+)
+
+
+def tach_multi_root_note(policy: Policy) -> str | None:
+    """Explain the known tach blind spot when the policy spans more than one distinct source root."""
+    local_policies = tuple(scope.policy for scope in policy.scopes) if policy.scopes else (policy,)
+    roots = {root.strip("/") or "." for local in local_policies for root in local.source_roots}
+    return TACH_MULTI_ROOT_NOTE if len(roots) > 1 else None
+
+
 def _tach_probes(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunner, fs: FileSystem) -> list[str]:
     """Prove active Tach config rejects a forbidden ring edge and undeclared external import."""
     if not runner.available("tach"):
@@ -154,6 +168,9 @@ def _tach_probes(root: Path, policy: Policy, scan: ScanResult, runner: ToolRunne
                 return failures
             for scope_name, (source_module, outer_modules) in canaries.items():
                 failures.extend(_tach_scope_probe(temp, (scope_name, source_module, outer_modules), runner, fs))
+            note = tach_multi_root_note(policy)
+            if failures and note is not None:
+                failures.append(f"note: {note}")
     except (OSError, UnicodeDecodeError) as exc:
         failures.append(f"could not create Tach profile canaries: {exc}")
     return failures
