@@ -32,6 +32,7 @@ forbidden_modules = [
     "arborescent.driver_port",
     "arborescent.ports",
     "arborescent.annotate",
+    "arborescent.architecture_contracts",
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
@@ -128,6 +129,7 @@ type = "forbidden"
 source_modules = ["arborescent.driver_port", "arborescent.ports"]
 forbidden_modules = [
     "arborescent.annotate",
+    "arborescent.architecture_contracts",
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
@@ -203,6 +205,7 @@ name = "application ring imports only ['application', 'domain', 'ports']"
 type = "forbidden"
 source_modules = [
     "arborescent.annotate",
+    "arborescent.architecture_contracts",
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
@@ -256,6 +259,7 @@ name = "application ring imports no I/O or third-party package it does not list"
 type = "forbidden"
 source_modules = [
     "arborescent.annotate",
+    "arborescent.architecture_contracts",
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
@@ -322,6 +326,7 @@ source_modules = [
 ]
 forbidden_modules = [
     "arborescent.annotate",
+    "arborescent.architecture_contracts",
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
@@ -470,6 +475,7 @@ type = "forbidden"
 source_modules = [
     "arborescent.adapters",
     "arborescent.annotate",
+    "arborescent.architecture_contracts",
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
@@ -641,6 +647,7 @@ type = "forbidden"
 source_modules = [
     "arborescent.adapters",
     "arborescent.annotate",
+    "arborescent.architecture_contracts",
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",

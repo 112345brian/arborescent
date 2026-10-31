@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import mini_policy, write_files
+from arborescent_helpers import generate, mini_policy, write_files
 
 from arborescent import scanner
 from arborescent.adapters import (
@@ -21,7 +21,6 @@ from arborescent.adapters import (
 from arborescent.config import load_policy
 from arborescent.engine import Options, Services, run_check, run_own
 from arborescent.engines import default_engines
-from arborescent.generate import generate
 from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.typecheckers import all_checkers
 

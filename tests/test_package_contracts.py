@@ -7,7 +7,16 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import MINI_FILES, mini_policy, services, write_files
+from arborescent_helpers import (
+    MINI_FILES,
+    generate,
+    generate_for_scan,
+    import_linter,
+    mini_policy,
+    services,
+    tach,
+    write_files,
+)
 from test_package_gaps import CATALOG, policy_with_catalog, repo
 
 import arborescent.package_checks as package_checks
@@ -16,14 +25,7 @@ from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunne
 from arborescent.config import policy_from_mapping
 from arborescent.domain import Policy, Rule
 from arborescent.engine import drift, run_own, write_generated
-from arborescent.generate import (
-    IMPORT_LINTER_FILE,
-    TACH_FILE,
-    generate,
-    generate_for_scan,
-    import_linter,
-    tach,
-)
+from arborescent.generated_config import IMPORT_LINTER_FILE, TACH_FILE
 from arborescent.package_assignment import RepositoryFacts, assignment_violations
 from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_contracts import PackageLayout, layout_of

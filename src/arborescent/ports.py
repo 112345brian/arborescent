@@ -5,13 +5,21 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
-from .domain import Allowance, Contract, Mutation, Policy, ToolResult, Violation
+from .domain import (
+    Allowance,
+    ArchitectureContracts,
+    Contract,
+    Mutation,
+    Policy,
+    ToolResult,
+    Violation,
+)
 from .facts import ModuleInfo
 
 __all__ = [
-    "Clock", "Engine", "FileSystem", "ModuleScanner", "PackageBoundaries", "PackageChecks", "PackageProbes", "RootAwareEngine",
+    "Clock", "ContractRenderer", "Engine", "FileSystem", "ModuleScanner", "PackageBoundaries", "PackageChecks", "PackageProbes", "RootAwareEngine",
     "ScanResult", "ToolRunner", "TypeChecker", "ViolationEngine",
 ]
 
@@ -95,6 +103,16 @@ class RootAwareEngine(Protocol):
     """
 
     def command_in(self, files: Sequence[str], root: Path, fs: FileSystem) -> list[str]: ...
+
+
+@runtime_checkable
+class ContractRenderer(Protocol):
+    """An engine that is configured from the neutral contracts: it writes its own file format and nothing else does."""
+
+    @property
+    def config_file(self) -> str: ...  # relative to the generated-files directory
+
+    def render_contracts(self, contracts: ArchitectureContracts) -> str: ...
 
 
 class PackageBoundaries(Protocol):

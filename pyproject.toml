@@ -121,6 +121,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.generated_config" = "domain"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
+"arborescent.architecture_contracts" = "application"
 "arborescent.baseline" = "application"
 "arborescent.config" = "application"
 "arborescent.engine" = "application"

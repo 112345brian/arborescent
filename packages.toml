@@ -21,6 +21,10 @@ path = "src/arborescent/adapters.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/architecture_contracts.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/annotate.py"
 role = "source"
 

@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import tomllib
 
-from arborescent_helpers import mini_policy
+from arborescent_helpers import generate, mini_policy
 
 from arborescent.config import policy_from_mapping
-from arborescent.generate import generate
 from arborescent.typecheckers import Pyright
 
 

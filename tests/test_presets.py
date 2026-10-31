@@ -6,12 +6,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from arborescent_helpers import MINI, mini_policy, ring_with, write_files
+from arborescent_helpers import MINI, generate, mini_policy, ring_with, write_files
 
 from arborescent.adapters import FsScanner
 from arborescent.config import policy_from_mapping
 from arborescent.domain import PolicyError
-from arborescent.generate import generate
 from arborescent.presets import IO_MODULES, PRESETS
 from arborescent.rules import check_modules
 

@@ -25,6 +25,7 @@ from .generate import generate_for_scan
 from .generated_config import GENERATED_MARKER
 from .ports import (
     Clock,
+    ContractRenderer,
     Engine,
     FileSystem,
     ModuleScanner,
@@ -42,7 +43,7 @@ from .suggestions import Suggestion, file_size_suggestions
 if TYPE_CHECKING:
     from .facts import ModuleInfo
 
-__all__ = ["CheckReport", "EngineRun", "Options", "Services", "blocking", "changed_files", "drift", "package_checks", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
+__all__ = ["CheckReport", "EngineRun", "Options", "Services", "blocking", "changed_files", "contract_renderers", "drift", "package_checks", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
 
 
 @dataclass(frozen=True)
@@ -185,7 +186,7 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     written: list[str] = []
     checks = package_checks(policy, services)
     boundaries = None if checks is None else checks.boundaries(policy, root, services.fs, scan)
-    generated = sorted(generate_for_scan(policy, scan, wanted, boundaries).items())
+    generated = sorted(generate_for_scan(policy, scan, wanted, contract_renderers(services), boundaries).items())
     for rel, text in generated:
         path = root / rel
         if services.fs.exists(path):
@@ -200,6 +201,11 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
         services.fs.write_text(root / rel, text)
         written.append(rel)
     return written
+
+
+def contract_renderers(services: Services) -> list[ContractRenderer]:
+    """The bound engines that are configured from the neutral contracts."""
+    return [engine for engine in services.engines if isinstance(engine, ContractRenderer)]
 
 
 def package_checks(policy: Policy, services: Services) -> PackageChecks | None:
@@ -232,7 +238,7 @@ def _drift_report(policy: Policy, root: Path, services: Services, scan: ScanResu
     checkers = [
         c for c in services.checkers if c.name in {*policy.type_checkers, checker.name} and not tool_is_disabled(policy, c)
     ]
-    expected = generate_for_scan(policy, scan, checkers, boundaries)
+    expected = generate_for_scan(policy, scan, checkers, contract_renderers(services), boundaries)
     return _tach_notes(policy, opts) + drift(services.fs, root, expected)
 
 

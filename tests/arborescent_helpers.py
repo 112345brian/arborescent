@@ -10,10 +10,14 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.architecture_contracts import compile_contracts
 from arborescent.config import policy_from_mapping
 from arborescent.domain import Policy
 from arborescent.engine import Services
-from arborescent.engines import default_engines
+from arborescent.engines import ImportLinter, Tach, default_engines
+from arborescent.generate import GraphFacts
+from arborescent.generate import generate as _generate
+from arborescent.generate import generate_for_scan as _generate_for_scan
 from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.testing import FakeToolRunner
 from arborescent.typecheckers import all_checkers
@@ -76,3 +80,23 @@ def services(runner: FakeToolRunner | None = None, cache: Path | None = None) ->
     return Services(
         FsScanner(cache), runner or FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines(), AnnotationPackageChecks()
     )
+
+
+RENDERERS = [ImportLinter(), Tach()]
+
+
+def generate(policy, names, checkers, arbor_index=None, scope_by_module=None):  # type: ignore[no-untyped-def]
+    """``arborescent.generate.generate`` with import-linter and tach bound, as the entrypoint binds them."""
+    return _generate(policy, GraphFacts(names, arbor_index or {}, scope_by_module or {}), checkers, RENDERERS)
+
+
+def generate_for_scan(policy, scan, checkers, packages=None):  # type: ignore[no-untyped-def]
+    return _generate_for_scan(policy, scan, checkers, RENDERERS, packages)
+
+
+def import_linter(policy, names, arbor_index=None, scope_by_module=None, packages=None) -> str:  # type: ignore[no-untyped-def]
+    return ImportLinter().render_contracts(compile_contracts(policy, names, arbor_index or {}, scope_by_module or {}, packages))
+
+
+def tach(policy, names, arbor_index=None, scope_by_module=None, packages=None) -> str:  # type: ignore[no-untyped-def]
+    return Tach().render_contracts(compile_contracts(policy, names, arbor_index or {}, scope_by_module or {}, packages))
