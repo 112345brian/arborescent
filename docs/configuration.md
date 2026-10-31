@@ -329,7 +329,7 @@ arguments; none is named in them.
 
 The *auxiliary driver* is a separate layer on top. Its only job is to supply a dedicated migration library with the
 arguments it needs, through a port; it does not migrate, and the annotation layer never depends on it. The command is
-`arborescent packages migrate` (draft PR #69; its page, `migration-driver.md`, arrives with it).
+`arborescent packages migrate` ([migration-driver.md](migration-driver.md)).
 [migration-recipes.md](migration-recipes.md) describes it and shows, with a worked example and the caveats found by running
 each tool, how to supply the same arguments by hand to git filter-repo, `git subtree split`, rope, deptry, Copybara and
 Josh. Those recipes are documentation, not commands Arborescent ships.

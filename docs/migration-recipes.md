@@ -9,13 +9,13 @@ How much of each recipe was run:
 
 | Recipe | Status |
 |---|---|
-| `arborescent packages migrate` (the driver, draft PR #69) | run on the worked example from the branch head `93bd9c5`: dry run, real run, and each refusal |
+| `arborescent packages migrate` (the driver, PR #69, head `5ac63c3`) | run on the worked example: dry run, real run with the import rewrite, and the refusals shown below |
 | git filter-repo paths file (repository home and workspace member) | run on the worked example below, git-filter-repo `a40bce548d2c` |
 | `git subtree split` | run on the worked example, git 2.43.0 |
 | leaf-first order with `tsort` | run on the worked example |
 | rope module rename | run on the worked example, rope 1.15.0, with the caveat below |
 | deptry | run on the split `web` tree, deptry 0.25.1 |
-| LibCST | **not shipped**: see [LibCST](#libcst-and-the-module-name-map) |
+| LibCST | run through the driver (its `RenameCommand`, once per renamed module); one idiom is mishandled and refused: see [LibCST](#libcst-and-the-module-name-map) |
 | Copybara, Josh | **not run**: the commands are taken from each tool's reference and are starting points |
 
 ## The layers: what supplies what
@@ -32,8 +32,8 @@ Arborescent has two layers.
   on the driver, and the arguments stay usable by any tool. The boundary is recorded in
   [the design note](superpowers/specs/2026-10-31-monorepo-split-annotations-design.md) and in
   [architecture.md](architecture.md). The driver is the command `arborescent packages migrate`, described
-  [below](#the-driver-packages-migrate). It is in draft PR #69, **not in the base of the pull request this page is part
-  of**; the recipes further down are how you supply the same arguments by hand, for any tool, with or without it.
+  [below](#the-driver-packages-migrate) and in [migration-driver.md](migration-driver.md). The recipes further down are how you
+  supply the same arguments by hand, for any tool, with or without it.
 
 The migration arguments are tool-neutral value objects in `arborescent.migration_arguments`, serialised by
 `arborescent.migration_json`:
@@ -223,27 +223,32 @@ repository.
 
 ## The driver: `packages migrate`
 
-`arborescent packages migrate` supplies a migration library with one package's arguments. **It does not migrate**: history
-extraction happens inside the library, and the driver holds no migration logic. It is an explicit command; `check` and
-`generate` never call it, and the annotation layer never depends on it. The full description is in
-[migration-driver.md](migration-driver.md) (arrives with draft PR #69; this page does not repeat it). What was run here:
+`arborescent packages migrate` supplies migration libraries with one package's arguments. **It does not migrate**: history
+extraction happens inside git filter-repo and import rewriting inside LibCST, each behind its own port, and the driver
+holds no migration logic. It is an explicit command; `check` and `generate` never call it, and the annotation layer never
+depends on it. [migration-driver.md](migration-driver.md) is the full description; this page does not repeat it. What was
+run here, on the worked example:
 
 ```sh
 arborescent packages migrate core --target ../core            # dry run (the default): prints the arguments, supplies nothing
-arborescent packages migrate core --target ../core --yes      # supplies the library
+arborescent packages migrate core --target ../core --yes      # supplies the libraries
 arborescent packages migrate core --target ../core --branch release   # the history to carry over (default: main)
 ```
 
 **What it supplies.** For the package, from its migration arguments: the owned `path_renames` and the `module_renames`,
-plus the source (the repository root), the new `--target` and the branch. Nothing else is added. The only library today is
-[git filter-repo](https://github.com/newren/git-filter-repo/blob/main/Documentation/git-filter-repo.txt), installed with the
-`arborescent[filterrepo]` extra (`git-filter-repo>=2.38`); the adapter runs `git init` for the target and then
-`git-filter-repo --source <repo> --target <new repo> --refs <branch>` with a `--path` and a `--path-rename` per owned path,
-so the monorepo is never modified and only the named branch is carried over. An import-rewriting adapter (rope) is not part of
-#69 as it stands; use the rope recipe below.
+plus the source (the repository root), the new `--target` and the branch. Nothing else is added.
+
+- **History:** [git filter-repo](https://github.com/newren/git-filter-repo/blob/main/Documentation/git-filter-repo.txt),
+  installed with the `arborescent[filterrepo]` extra. The adapter runs `git init` for the target and then
+  `git-filter-repo --source <repo> --target <new repo> --refs <branch>` with a `--path` and a `--path-rename` per owned
+  path, so the monorepo is never modified and only the named branch is carried over.
+- **Imports:** [LibCST](https://libcst.readthedocs.io/en/latest/codemods.html), installed with the `arborescent[libcst]`
+  extra, and only when a module changes its name. After the history is written the driver runs LibCST's own
+  `RenameCommand` once per renamed module, longest name first, **on the new repository only**. The rewrite is left as an
+  uncommitted change there (`git diff` shows it).
 
 **The dry run** prints the exact arguments, from the same code path as `--yes`. On the worked example (directory names
-shortened):
+shortened, the LibCST command lines abbreviated):
 
 ```text
 migrate core: dry run: nothing is supplied; pass --yes to supply the library
@@ -255,14 +260,19 @@ path renames:
   src/shop/core -> src/shop_core
 module renames:
   shop.core -> shop_core
-NOT APPLIED  module renames (git filter-repo does not rewrite imports)
 arguments: git-filter-repo --source /work/shop --target /work/core --refs main --path src/shop/core --path-rename src/shop/core:src/shop_core
+import rewrite (on the new repository only, after the library ran):
+  with: LibCST rename
+  shop.core.models -> shop_core.models
+  shop.core._ids -> shop_core._ids
+  shop.core -> shop_core
+  commands:
+    python -I -m libcst.tool codemod --external --hide-progress --no-format libcst.codemod.commands.rename.RenameCommand ...
 ```
 
-`NOT APPLIED` is the point of the boundary: filter-repo cannot rewrite imports, so the driver reports the module rename it
-cannot apply and does not do it itself. `--yes` on the example (with `--branch master`, the example repository's branch)
-wrote a repository holding `src/shop_core/{__init__,_ids,models}.py` and the package's two commits, and printed
-`ok: history of core written to <target>`.
+`--yes` on a variant where `core.models` contains `from shop.core._ids import NEXT` (branch `master`) wrote a repository with
+`src/shop_core/` and the package's three commits, and left one uncommitted change: that line became
+`from shop_core._ids import NEXT`.
 
 **What it refuses or does nothing for**, each seen on the example:
 
@@ -270,14 +280,22 @@ wrote a repository holding `src/shop_core/{__init__,_ids,models}.py` and the pac
 |---|---|
 | unknown package id | `unknown package 'nope'; the catalog has: billing, core, web`, exit 2 |
 | an open annotation gap of severity `error` for this package (or for no package in particular) | the gaps are listed (`blocked: 1 open annotation gap(s) of severity error`, then `[package-undeclared-home] billing: ...`), nothing is supplied, exit 1, with or without `--yes` |
+| another package imports a module of this one that is not on its `public` surface (a **bypass edge**), or a first-party dependency is undeclared | `blocked: 2 import(s) of its private modules by other packages (a split would break them)`, then one `[private-import]` line per edge (or `[package-undeclared-dependency]`), exit 1. There is no flag to override it |
+| a renamed module and a `from <old> import <module>` statement in the package's own files | `blocked: 1 import statement(s) the rewriter cannot rewrite safely; nothing was created or modified`, then `[unsupported-import-form] src/shop/core/other.py:1: from shop.core import models as m`, exit 1. Checked on the monorepo's files before the library runs |
+| any other import that still names an old module after the rewrite | the run fails and names the file |
 | a gap of another package, or an informational one | does not block |
 | the package is a workspace member | `stays: workspace member at packages/web: it stays in this repository, so there is no history to extract`, nothing supplied, exit 0 |
-| the library is not installed | `SETUP  missing migration library: git-filter-repo; install with ...`; the dry run still prints the arguments and exits 0, `--yes` exits 1 |
+| a library is not installed | a `SETUP` line per missing tool with the install command, before anything is created; the dry run still prints the arguments and exits 0, `--yes` exits 1 |
 | the target already exists | `FAILED: <target> exists; the new repository must not`, exit 1 |
 
-Because the driver refuses on an error gap, a gap in the export blocks the hand-over before any tool runs. It does not catch
-what the export does not flag as a gap, such as an open private-import edge (gap 11 in the ledger below): `ready` and the
-driver both treat that package as clear.
+The bypass-edge row is the case the export alone does not stop (gap 11): `ready` stays `true`, but the driver refuses,
+because the packages left behind would import something that is no longer there. On the original example, migrating `core`
+is refused for exactly the two `web.views` edges shown above.
+
+**Known limits** (from [migration-driver.md](migration-driver.md)): tags are not carried (only the named branch is written);
+workspace members are not moved; asset folders with a `destination` are checked only as arguments, not end to end; and only
+the new repository's imports are rewritten, so the packages that stay behind are not changed and nothing adds their
+dependency on the new repository (gap 17).
 
 ## Recipes
 
@@ -357,15 +375,38 @@ Caveats found by running it:
   an `__init__.py` in `src/shop/` (added only in the working copy for the run), every import was rewritten. The export
   cannot tell you which parents are namespace packages (see the gap list).
 - rope moves files itself: run it in a working copy, as its own commit, and treat the result as the migrated tree.
+- This is rope applied **before** extraction, inside the monorepo, where it can still resolve every name. The driver's
+  rewrite runs **after** filter-repo has moved the files, and [migration-driver.md](migration-driver.md) records that rope
+  could not do that (its rename acted only on the first segment of a name it could no longer resolve), which is why the driver
+  uses LibCST.
 
 ### LibCST and the module-name map
 
-[LibCST](https://libcst.readthedocs.io/en/latest/codemods_tutorial.html) codemods can use the same map: each
-`{source, target}` pair is an old and a new dotted prefix. This page does **not** ship a LibCST command. The built-in
-`rename.RenameCommand` (`--old_name`, `--new_name`) is documented as renaming "a local or imported object"; applied to the
-package prefixes (`shop.core` to `shop_core`) it left the example tree unchanged and reported failures to parse two
-files under the default parser version. A working LibCST pass would be a small custom codemod over `ImportFrom` and
-`Import` nodes driven by `owned.module_renames`; write it against your code base.
+[LibCST](https://libcst.readthedocs.io/en/latest/codemods_tutorial.html) takes the same map: each `{source, target}` pair is
+an old and a new dotted module name. The driver uses LibCST's built-in `rename.RenameCommand`
+(`--old_name`, `--new_name`) and runs it **once per renamed module, longest name first**. That granularity matters: an
+earlier attempt for this page, one run per *package prefix* (`shop.core` to `shop_core` over the example tree), left the
+tree unchanged and reported failures to parse two files, so the page shipped no LibCST command. The driver's per-module
+runs on the new repository do work (the `from shop.core._ids import NEXT` line above became `from shop_core._ids import NEXT`).
+
+One import idiom is rewritten **wrongly**, and the driver refuses it. `from <old package> import <module>` (also with `as`,
+with several names, and `from app import core` for the module `app.core`) makes `RenameCommand` drop the import and leave
+a use of a name nothing binds, and the file still parses, so a syntax check cannot catch it. Reproduced here on LibCST 1.9.0
+with the self-contained case from [issue #71](https://github.com/112345brian/arborescent/issues/71) (tracked under #59):
+
+```text
+core/use.py before                      after: RenameCommand --old_name app.core.api --new_name core.api
+import app.core.api                     import core.api
+import app.core.api as alias            import core.api
+from app.core import api as api2        (dropped)
+from app.core.api import f              from core.api import f
+X = app.core.api.f() + alias.f()        X = core.api.f() + core.api.f() + api.f() + f()
+    + api2.f() + f()                        # nothing binds "api"
+```
+
+`import M`, `import M as a`, `from M import name` and `from M import *` are rewritten correctly. If you drive LibCST yourself
+instead of through the driver, scan for the refused form first (with LibCST's parser, not a regular expression) and rewrite
+those lines by hand.
 
 ### deptry: declared dependencies of the new package
 
@@ -419,7 +460,7 @@ Arborescent did not give them. Sources are explicit.
 - **Built from:** the synthetic `shop` example on this page; the schema in `docs/schemas/migration-export-v1.schema.json`;
   the sibling branches #55, #56, #60, #53 as they stand; and the synthetic acceptance fixture of #57 (draft PR #70), which
   drove a split from the export alone with git filter-repo and the #55 checks. Rows 11 to 16 and the extra detail in rows 2
-  and 7 come from that fixture.
+  and 7 come from that fixture. Row 17 comes from running the driver (PR #69).
 - **Not recorded:** results from a real downstream application. #57's real-application case study (about 1,400 modules) was
   not attempted, because it needs a private repository and this one is public. Every gap here therefore comes from synthetic
   inputs, and the real application may show more. No downstream paths or data are published here. When that study is done,
@@ -439,9 +480,10 @@ Arborescent did not give them. Sources are explicit.
 | 8 | **Preservation results are not in the export.** `package_parts` (#55) is a `check`-time verification of already-extracted parts. | #55 | The export is read before the split; verification after the split comes from `check`. |
 | 9 | **No cut list.** Which imports to remove comes from the engines' violation output (#53), not the export. | by design | The export alone cannot tell you how to unblock a package, only that a bypass exists. |
 | 10 | **The workspace-member join is not described.** Where a rewritten package's history enters the workspace repository is not an annotation. | filter-repo run; driver | The final merge step is yours and was not run for this page. The driver supplies nothing for a workspace member either (it says the package stays in the repository). |
-| 11 | **`ready` is `true` while a blocking private-import edge is open.** The edge shows only as `surface.bypasses`; no gap entry is raised. | #57 | A consumer that refuses on `ready` or on a gap code lets a split through that the engine contracts would break. It has to test `bypasses` separately. |
+| 11 | **`ready` is `true` while a blocking private-import edge is open.** The edge shows only as `surface.bypasses`; no gap entry is raised. | #57 | A consumer that refuses on `ready` or on a gap code lets a split through that the engine contracts would break. It has to test `bypasses` separately. The driver does (it refuses a package with an open bypass edge). |
 | 12 | **No per-module ring in `owned.modules[]`.** | #57 | A harness re-reads the monorepo policy to write each part's `classify` or `__arbor__`. |
 | 13 | **No part manifest or policy in the export.** #55 compares a part with `.arborescent-package.toml` and a shipped policy. The export carries neither, nor the origin `repository` and `root`, `extraction_status`, each path's `role` and `metadata`, or which `[[assets]]` directory a file came from (assets are exported per file; the catalog and the manifest key them by directory). | #57 | The harness hand-writes the manifest and the policy for every part. |
 | 14 | **List order.** The export sorts `public`, but `package-semantics-drift` (#55) compares `public` as an ordered tuple. | #57 | A part built from the export differs from a catalog whose `public` is not sorted. #57's fixture writes `public` sorted. |
 | 15 | **Workspace-member parts.** The export's `target_path`s include `home.path`, but a part's tree and its manifest `current_path`s are relative to the member folder. | #57 | The harness strips the `home.path` prefix by hand. |
 | 16 | **#55 assumes stable module names.** A package with `module_renames` cannot be checked as a part. | #57 | The preservation check and the module-name map cannot be used together. |
+| 17 | **Packages that stay behind are not updated.** The export names who depends on whom (`edges`, `dependencies.packages`), but nothing applies it: the driver rewrites only the new repository, so the remaining packages keep importing the old module names and have no dependency on the new repository. | the driver's known limits | After a split the consumers need a manual change; the information to drive it is in the export. |
