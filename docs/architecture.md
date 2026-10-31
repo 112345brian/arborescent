@@ -15,7 +15,7 @@ uses `pathlib.PurePosixPath` only for lexical path validation; it does not acces
 |---|---|---|---|
 | domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types (including declared child-arbor paths), rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
-| application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction |
+| application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction, package assignment gaps |
 | adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time`, `sysconfig`, `tomllib` | focused file-system, scanner, clock, subprocess, engine and type-checker adapters |
 | composition | everything | `argparse`, `pathlib`, `os`, `shlex` | the command line: wires adapters to use cases and presents reports |
 
@@ -31,6 +31,14 @@ pool; it still forbids every other effect category under the strict preset.
 Adapters do **not** import `application`. Use cases receive adapters through the ports (`Services` in `engine.py`), and
 only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 
+## Migration: supply the arguments, do not reimplement the tools
+
+Arborescent supplies annotations, the checks that they are complete and consistent, engine contracts compiled from
+them, and a stable export, including the typed arguments a monorepo-to-polyrepo migration needs. An auxiliary driver on top supplies those arguments to a dedicated migration library
+(history extraction, import rewriting) through ports with adapters; it does not migrate, as it drives import-linter and tach. It does not
+reimplement what those tools do. The boundary, the wrapper rules, the tool landscape and the status of the existing
+`packages extract` are in `docs/superpowers/specs/2026-10-31-monorepo-split-annotations-design.md`.
+
 ## Modules
 
 | module | scope | ring |
@@ -41,6 +49,12 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.stdlib` | `single` | domain |
 | `arborescent.presets` | `single` | domain |
 | `arborescent.rules` | `single` | domain |
+| `arborescent.package_model` | `single` | domain |
+| `arborescent.package_fields` | `single` | domain |
+| `arborescent.package_parse` | `single` | domain |
+| `arborescent.package_render` | `single` | domain |
+| `arborescent.path_exclusion` | `single` | domain |
+| `arborescent.package_assignment` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
@@ -54,6 +68,13 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.selftest` | `single` | application |
 | `arborescent.suggestions` | `single` | application |
 | `arborescent.packages` | `single` | application |
+| `arborescent.package_tree` | `single` | application |
+| `arborescent.package_manifest` | `single` | application |
+| `arborescent.package_validation` | `single` | application |
+| `arborescent.package_copy` | `single` | application |
+| `arborescent.mutation` | `single` | application |
+| `arborescent.package_gaps` | `single` | application |
+| `arborescent.package_probes` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |

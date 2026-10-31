@@ -41,8 +41,7 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
         print(f"CERTIFIED meets Arborescent minimum profile {report.profile} (Ruff 0.17.2, Tach 0.35.3)")
     for line in report.drift:
         print(f"DRIFT  {line}")
-    for suggestion in report.suggestions:
-        print(f"SUGGEST {suggestion.message}")
+    _print_hints(report)
     _print_inventories(report)
     shown = report.ratchet.new if report.ratchet and not args.no_baseline else report.violations
     for v in shown:
@@ -56,6 +55,14 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
             print("\n".join("        " + ln for ln in e.lines))
     _print_setup_hint(report, setup_command)
     _print_summary(report)
+
+
+def _print_hints(report: CheckReport) -> None:
+    """Report-only lines: size suggestions and informational findings. Neither fails a check."""
+    for suggestion in report.suggestions:
+        print(f"SUGGEST {suggestion.message}")
+    for note in report.notes:
+        print(f"NOTE   {note.render()}")
 
 
 def _print_consistency(report: CheckReport) -> None:

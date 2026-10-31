@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+### Added
+
+- Opt-in `package_catalog = "packages.toml"` (strict preset only): every first-party module and asset must belong to
+  exactly one package. New rule ids `package-unassigned-module`, `package-multiply-assigned-module`,
+  `package-unowned-asset`, `package-multiply-assigned-asset` and `package-undeclared-dependency` fail the check;
+  `package-spans-rings` is information (a `NOTE` line, never failing, never baselined). Assets are claimed by package
+  `paths` or ordered `[[assets]]` globs, first match wins. `selftest` probes each rule when the key is set (#52).
+
+### Changed
+
+- `packages.py` is split into cohesive `package_*` modules; behaviour and the `arborescent.packages` names are unchanged,
+  and `packages extract` is untouched (#50).
+
 ### Fixed
 
 - With tach disabled, the minimum profile now also requires import-linter to have contracts configured (it does not

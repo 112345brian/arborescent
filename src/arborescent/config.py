@@ -138,6 +138,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         ruff_overrides=ruff_overrides,
         customization_labels=customizations,
         practices=dict(raw.get("practices", {})),
+        package_catalog=_package_catalog(raw),
         children=_child_arbors(raw),
         preset=PRESETS[preset_name],
         io_modules=frozenset(io_modules),
@@ -148,7 +149,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
     "scan_vendors",
     "child_policy_mode",
-    "ruff", "practices", "exclude",
+    "ruff", "practices", "exclude", "package_catalog",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "io_modules", "groups",
@@ -401,4 +402,11 @@ def _suggestion_threshold(raw: Mapping[str, Any]) -> int:
     value = raw.get("suggestion_threshold", 300)
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise PolicyError("`suggestion_threshold` must be a positive integer")
+    return value
+
+
+def _package_catalog(raw: Mapping[str, Any]) -> str | None:
+    value = raw.get("package_catalog")
+    if value is not None and not isinstance(value, str):
+        raise PolicyError("`package_catalog` must be a relative path to a packages.toml file")
     return value
