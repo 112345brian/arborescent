@@ -5,23 +5,37 @@ The library is an in-memory fake (``arborescent.testing.FakeMigrationLibrary``);
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from test_migration_arguments import CATALOG, build, package
+from test_migration_arguments import CATALOG, FACTS, package
 
 from arborescent.domain import PolicyError
 from arborescent.driver_plan import BLOCKED, READY, STAYS, plan_supply, supply
 from arborescent.driver_request import MigrationOutcome, MigrationSite
-from arborescent.migration_arguments import Gap
+from arborescent.migration_arguments import (
+    Gap,
+    MigrationArguments,
+    build_migration_arguments,
+)
+from arborescent.package_parse import parse_catalog
 from arborescent.testing import FakeMigrationLibrary
+
+# The shared fixture has web import a private module of core; the driver refuses that, so the ready cases use this one.
+CLEAN = replace(FACTS, imports={"app.web.views": ("app.core.api",), "app.web.routes": ("app.core.api", "app.web.views")})
+
+
+def build(text: str = CATALOG, facts=CLEAN) -> MigrationArguments:
+    return build_migration_arguments(parse_catalog(tomllib.loads(text)), facts)
+
 
 SITE = MigrationSite(Path("/mono"), Path("/out/core"), "main")
 
 
-def core_plan(library: FakeMigrationLibrary, text: str = CATALOG):
-    return plan_supply(build(text), "core", library, SITE)
+def core_plan(library: FakeMigrationLibrary, text: str = CATALOG, facts=CLEAN):
+    return plan_supply(build(text, facts), "core", library, SITE)
 
 
 def test_a_ready_package_becomes_a_request_made_only_of_its_migration_arguments() -> None:
@@ -110,3 +124,27 @@ def test_a_missing_library_is_a_failed_outcome_not_a_call() -> None:
     outcome = supply(core_plan(library), library)
     assert outcome.ok is False
     assert library.supplied == []
+
+
+# -- private-import bypasses and undeclared dependencies -----------------------------------------------------------
+
+def test_modules_of_other_packages_importing_a_private_module_block_the_split() -> None:
+    library = FakeMigrationLibrary()
+    result = core_plan(library, facts=FACTS)  # web.routes imports app.core.internal, which is not on core's public surface
+    assert result.status == BLOCKED
+    assert result.request is None
+    assert [(b.module, b.package, b.imports) for b in result.bypasses] == [("app.web.routes", "web", "app.core.internal")]
+    assert supply(result, library).ok is False
+    assert library.supplied == []
+
+
+def test_the_same_package_is_ready_once_the_private_import_is_gone() -> None:
+    assert core_plan(FakeMigrationLibrary()).status == READY
+
+
+def test_an_undeclared_first_party_dependency_blocks_the_split_of_either_side() -> None:
+    undeclared = CATALOG.replace('depends_on = ["core"]\n', "")  # web imports core without listing it
+    for package_id in ("core", "web"):
+        result = plan_supply(build(undeclared), package_id, FakeMigrationLibrary(), SITE)
+        assert result.status == BLOCKED
+        assert {gap.code for gap in result.gaps} == {"package-undeclared-dependency"}

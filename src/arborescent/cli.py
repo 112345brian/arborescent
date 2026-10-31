@@ -12,12 +12,13 @@ from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner, SystemCl
 from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .cli_install import _install_tools, _setup_install_command
-from .cli_migrate import add_migrate_parser, run_migrate
+from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
 from .domain import Policy, PolicyError
 from .driver_filter_repo import FilterRepo
-from .driver_port import MigrationLibrary
+from .driver_libcst import LibCstRename
+from .driver_port import ImportRewriter, MigrationLibrary
 from .engine import (
     EngineRun,
     Options,
@@ -215,7 +216,10 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Sequence[str] | None = None, services: Services | None = None, library: MigrationLibrary | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None, services: Services | None = None, library: MigrationLibrary | None = None,
+    rewriter: ImportRewriter | None = None,
+) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command == "check" and args.yes and not args.install_tools:
@@ -244,7 +248,7 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None, li
             cache=not getattr(args, "no_cache", False),
             output_dir=policy.output_dir,
         )
-        return _dispatch(args, policy, root, svc, library or FilterRepo(svc.runner, svc.fs))
+        return _dispatch(args, policy, root, svc, MigrationTools(library or FilterRepo(svc.runner, svc.fs), rewriter or LibCstRename(svc.runner)))
     except PolicyError as exc:
         print(f"arborescent: {exc}", file=sys.stderr)
         return 2
@@ -263,7 +267,7 @@ def _find_catalog_root(fs: FileSystem, start: Path, catalog_path: str) -> Path:
 
 
 def _dispatch(
-    args: argparse.Namespace, policy: Policy, root: Path, svc: Services, library: MigrationLibrary
+    args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: MigrationTools
 ) -> int:
     if args.command == "generate":
         return _generate(policy, root, svc)
@@ -278,7 +282,7 @@ def _dispatch(
     if args.command == "selftest":
         return _selftest(policy, root, svc)
     if args.command == "packages" and args.package_action == "migrate":
-        return run_migrate(args, policy, root, svc, library)
+        return run_migrate(args, policy, root, svc, tools)
     if args.command == "packages":
         return _export(args, policy, root, svc)
     return _check(args, policy, root, svc)

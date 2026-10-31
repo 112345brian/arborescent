@@ -21,7 +21,10 @@ from arborescent.selftest import plan
 from arborescent.testing import FakeToolRunner
 
 ROOT = Path(__file__).resolve().parents[1]
-DRIVER = {"arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_filter_repo", "arborescent.cli_migrate"}
+DRIVER = {
+    "arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo",
+    "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate",
+}
 ANNOTATION = {
     "arborescent.package_model", "arborescent.package_fields", "arborescent.package_parse", "arborescent.package_render",
     "arborescent.path_exclusion", "arborescent.package_assignment", "arborescent.migration_arguments", "arborescent.migration_json",
