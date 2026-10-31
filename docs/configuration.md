@@ -350,6 +350,8 @@ import across packages without a declared dependency remains `package-undeclared
 
 ### Migration annotations and export
 
+(The [migration driver](migration-driver.md), `arborescent packages migrate`, hands one package's arguments to a migration library.)
+
 A package entry can also say where it will live and what it exposes, and `arborescent packages export` publishes all of
 it as one versioned JSON document for external migration tools (it converts nothing and migrates nothing):
 

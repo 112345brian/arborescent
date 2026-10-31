@@ -10,8 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .domain import ToolResult
+from .driver_request import MigrationOutcome, MigrationRequest
 
-__all__ = ["FakeClock", "FakeFileSystem", "FakeToolRunner"]
+__all__ = ["FakeClock", "FakeFileSystem", "FakeMigrationLibrary", "FakeToolRunner"]
 
 
 @dataclass
@@ -30,6 +31,32 @@ class FakeToolRunner:
         if argv[0] not in self.installed:
             return ToolResult(None, "", f"{argv[0]}: not installed")
         return self.results.get(argv[0], ToolResult(0, "ok", ""))
+
+
+@dataclass
+class FakeMigrationLibrary:
+    """A ``MigrationLibrary`` that records the requests it is supplied with and migrates nothing."""
+
+    name: str = "fake library"
+    executable: str = "fake-migrate"
+    requirement: str = "fake-library>=1"
+    installed: bool = True
+    unapplied: tuple[str, ...] = ()
+    outcome: MigrationOutcome = field(default_factory=lambda: MigrationOutcome(True, "supplied"))
+    supplied: list[MigrationRequest] = field(default_factory=lambda: [])
+
+    def available(self) -> bool:
+        return self.installed
+
+    def unsupported(self, request: MigrationRequest) -> tuple[str, ...]:
+        return self.unapplied
+
+    def arguments(self, request: MigrationRequest) -> tuple[str, ...]:
+        return (self.executable, request.package, str(request.target))
+
+    def supply(self, request: MigrationRequest) -> MigrationOutcome:
+        self.supplied.append(request)
+        return self.outcome
 
 
 @dataclass
