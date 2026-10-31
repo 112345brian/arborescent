@@ -140,6 +140,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         practices=dict(raw.get("practices", {})),
         package_catalog=_package_catalog(raw),
         package_parts=_package_parts(raw),
+        package_pyproject=_package_pyproject(raw),
         children=_child_arbors(raw),
         preset=PRESETS[preset_name],
         io_modules=frozenset(io_modules),
@@ -150,7 +151,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
     "scan_vendors",
     "child_policy_mode",
-    "ruff", "practices", "exclude", "package_catalog", "package_parts",
+    "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "io_modules", "groups",
@@ -418,3 +419,9 @@ def _package_parts(raw: Mapping[str, Any]) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise PolicyError("`package_parts` must be a list of relative paths to extracted part trees")
     return tuple(item for item in value if isinstance(item, str))
+
+def _package_pyproject(raw: Mapping[str, Any]) -> bool:
+    value = raw.get("package_pyproject", False)
+    if not isinstance(value, bool):
+        raise PolicyError("`package_pyproject` must be a boolean")
+    return value

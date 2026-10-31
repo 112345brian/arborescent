@@ -16,6 +16,7 @@ uses `pathlib.PurePosixPath` only for lexical path validation; it does not acces
 | domain | nothing | stdlib basics, no I/O | vocabulary and pure rules: the validated policy value types (including declared child-arbor paths), rule ids (`Rule`), violations, facts about a parsed module, presets |
 | ports | domain | `pathlib`, `contextlib` | the protocols the world must satisfy |
 | application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction, package assignment gaps, annotation preservation across extracted parts |
+| application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction, package assignment gaps, derived package pyproject.toml fields |
 | adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time`, `sysconfig`, `tomllib` | focused file-system, scanner, clock, subprocess, engine and type-checker adapters |
 | composition | everything | `argparse`, `pathlib`, `os`, `shlex` | the command line: wires adapters to use cases and presents reports |
 
@@ -60,6 +61,7 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 | `arborescent.migration_json` | `single` | domain |
 | `arborescent.package_preservation` | `single` | domain |
 | `arborescent.package_contracts` | `single` | domain |
+| `arborescent.package_pyproject` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
@@ -83,6 +85,7 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 | `arborescent.migration_export` | `single` | application |
 | `arborescent.package_parts` | `single` | application |
 | `arborescent.package_part_probes` | `single` | application |
+| `arborescent.package_pyproject_gaps` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |

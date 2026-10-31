@@ -62,9 +62,11 @@ reported as a gap, never guessed.
   `{ history: null, release: null, unmanaged: true }`. The schema requires `null` for a workspace member, which has no
   history or pin of its own, and the catalog refuses a policy on one. Arborescent releases and pins nothing; these are
   the values the tools that do receive.
-- **`pyproject` is reserved** (derivable `pyproject.toml` fields: #60). It is always `null` in version 1 and typed
-  `object | null`, so it can be filled without a version bump. `policy` was filled the same way: it was typed
-  `object | null` and always `null` before, so no existing document stops validating.
+- **`pyproject`** is `null` unless the policy sets `package_pyproject` (#60); then it holds the derived fields:
+  `path`, `requires_python`, `dependencies` (distribution names; version specifiers are not derived), `sources`
+  (`{ workspace = true }`, `{ git = <url> }` or `{ git = <url>, subdirectory = <path> }` per sibling), `workspace_members`
+  (only on the file that is the workspace root), `source_roots` and `root_packages`. Pins are not part of it. It is typed
+  `object | null` and was always `null` before, so no existing document stops validating.
 - **Gaps are named entries.** `ready` is `true` when no gap has severity `error`; a consumer can refuse on `ready` or on
   a code it cares about. Codes are the package-assignment rule ids (`package-unassigned-module`,
   `package-multiply-assigned-module`, `package-unowned-asset`, `package-multiply-assigned-asset`,

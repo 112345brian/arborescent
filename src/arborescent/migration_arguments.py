@@ -123,6 +123,7 @@ class PackageArguments:
     release: ReleasePolicy | None = None  # release/pin/history policy (#56); a workspace member exports none
     history: str | None = None
     unmanaged: bool = False
+    pyproject: Mapping[str, object] | None = None  # the derived pyproject.toml fields (#60); None: ``package_pyproject`` is off
 
 
 @dataclass(frozen=True, slots=True)
