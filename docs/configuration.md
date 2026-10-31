@@ -348,6 +348,29 @@ both show. Rings that disagree between `__arbor__` and `classify` inside one tre
 import across packages without a declared dependency remains `package-undeclared-dependency`; neither is repeated here.
 `selftest` probes each rule that applies (one needs parts) and lists a probe it cannot build with the reason.
 
+### Migration annotations and export
+
+A package entry can also say where it will live and what it exposes, and `arborescent packages export` publishes all of
+it as one versioned JSON document for external migration tools (it converts nothing and migrates nothing):
+
+```toml
+[[packages]]
+id = "core"
+# ... id, name, kind, repository, root, summary, depends_on, paths as above
+public = ["app.core.api", "app.core.models.*"]   # the public surface (module-name globs)
+externals = ["pydantic"]                          # third-party import names it may use
+[packages.home]                                   # kind = "repository", repository = "org/core"
+kind = "workspace-member"                         # ... or a member of a workspace in the same repository
+path = "packages/core"
+[[packages.module_renames]]                       # module names that change in the target
+from = "app.core"
+to = "core"
+```
+
+All four keys are optional; a missing one is a named gap in the export when it matters (`public` only when another package imports the package), never a guess. See
+[migration-export.md](migration-export.md) for the document, the schema, the gap codes, a `git filter-repo` recipe and the
+comparison with blinkered's `blinkered.toml`.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:

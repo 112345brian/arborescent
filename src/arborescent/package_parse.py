@@ -3,16 +3,27 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import PurePosixPath
 from typing import Any
 
-from .package_fields import glob_pattern, optional, relative_path, required, strings
+from .package_fields import (
+    glob_pattern,
+    optional,
+    relative_path,
+    required,
+    strings,
+    within,
+)
 from .package_model import (
+    HOME_KINDS,
     MANIFEST_NAME,
     AssetRule,
     CatalogDocument,
     CatalogError,
     ExtractedPath,
+    ModuleRename,
     PackageDescriptor,
+    PackageHome,
     PackagePath,
     PackageSemantics,
 )
@@ -27,6 +38,7 @@ def parse_catalog(data: Mapping[str, Any]) -> CatalogDocument:
     known = {package.id for package in packages}
     if len(known) != len(packages):
         raise CatalogError("package ids must be unique")
+    _check_workspace_members(packages)
     raw_assets: object = data.get("assets", [])
     if not isinstance(raw_assets, list):
         raise CatalogError("assets must be an array of tables")
@@ -84,7 +96,55 @@ def parse_package(value: object, index: int) -> PackageDescriptor:
         public=strings(value.get("public", []), "public"),
         extraction_status=str(value.get("extraction_status", "in-repository")),
         paths=tuple(paths),
+        home=_home(value),
+        externals=_optional_strings(value, "externals"),
+        module_renames=_module_renames(value),
     )
+
+
+def _optional_strings(value: Mapping[str, Any], key: str) -> tuple[str, ...] | None:
+    """``None`` when the key is absent (not annotated yet), the list, possibly empty, when it is set."""
+    return None if key not in value else strings(value[key], key)
+
+
+def _home(value: Mapping[str, Any]) -> PackageHome | None:
+    raw: object = value.get("home")
+    name = f"package {value.get('id', '?')} home"
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise CatalogError(f"{name} must be a table")
+    kind = required(raw, "kind")
+    if kind not in HOME_KINDS:
+        raise CatalogError(f"{name} kind must be one of {', '.join(HOME_KINDS)}: {kind!r}")
+    repository, path = optional(raw, "repository"), optional(raw, "path")
+    if kind == "repository":
+        if repository is None:
+            raise CatalogError(f"{name} of kind repository requires a repository")
+        if path is not None:
+            raise CatalogError(f"{name} of kind repository takes no path")
+        return PackageHome(kind, repository=repository)
+    if path is None:
+        raise CatalogError(f"{name} of kind workspace-member requires a path")
+    if repository is not None:
+        raise CatalogError(f"{name} of kind workspace-member takes no repository")
+    return PackageHome(kind, path=relative_path(path, f"{name} path").as_posix())
+
+
+def _module_renames(value: Mapping[str, Any]) -> tuple[ModuleRename, ...]:
+    raw: object = value.get("module_renames", [])
+    if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+        raise CatalogError(f"package {value.get('id', '?')} module_renames must be an array of tables")
+    return tuple(ModuleRename(required(item, "from"), required(item, "to")) for item in raw)
+
+
+def _check_workspace_members(packages: tuple[PackageDescriptor, ...]) -> None:
+    """Two workspace members cannot share a folder or sit inside each other: each is its own distribution root."""
+    members = [(PurePosixPath(p.home.path), p.id) for p in packages if p.home is not None and p.home.path is not None]
+    for index, (path, owner) in enumerate(members):
+        for other, other_owner in members[index + 1 :]:
+            if within(path, other) or within(other, path):
+                raise CatalogError(f"workspace members {owner!r} and {other_owner!r} share or nest folders ({path}, {other})")
 
 
 def manifest_table(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:

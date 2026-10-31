@@ -32,6 +32,24 @@ def module_imports(modules: Mapping[str, ModuleInfo], known: Collection[str]) ->
     return out
 
 
+def module_externals(modules: Mapping[str, ModuleInfo], known: Collection[str], stdlib: Collection[str]) -> dict[str, tuple[str, ...]]:
+    """Module -> the third-party top-level names (not in ``stdlib``) it imports."""
+    tops = {name.split(".")[0] for name in known}
+    return {
+        name: tuple(
+            sorted(
+                {
+                    outside_name
+                    for imp in info.facts.imports
+                    for outside_name in resolve_targets(name, info.is_package, imp, known, tops)[1]
+                    if outside_name not in stdlib
+                }
+            )
+        )
+        for name, info in modules.items()
+    }
+
+
 def public_symbols(modules: Mapping[str, ModuleInfo]) -> dict[str, frozenset[str]]:
     """Module -> its top-level classes and functions whose names do not start with an underscore."""
     return {

@@ -5,23 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
-from .package_fields import is_slug, relative_path, within
+from .package_fields import extraction_target, is_slug, relative_path, within
 from .package_model import MANIFEST_NAME, CatalogError, PackageDescriptor, PackagePath
 from .ports import FileSystem
-
-
-def extraction_target(package: PackageDescriptor, item: PackagePath) -> PurePosixPath:
-    """Where an owned path lands inside an extracted tree (``destination``, else its place below the package root)."""
-    if item.destination is not None:
-        return relative_path(item.destination, f"package {package.id} destination")
-    root = PurePosixPath(package.root)
-    source = PurePosixPath(item.path)
-    if not within(source, root):
-        raise CatalogError(
-            f"package {package.id} path {item.path!r} is outside root {package.root!r}; set destination"
-        )
-    parts = source.parts[len(root.parts) :]
-    return PurePosixPath(*parts) if parts else PurePosixPath()
 
 
 def validate_catalog(fs: FileSystem, root: Path, packages: Sequence[PackageDescriptor]) -> None:

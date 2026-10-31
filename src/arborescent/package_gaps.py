@@ -9,7 +9,7 @@ from .domain import Policy, Violation
 from .package_assignment import RepositoryFacts, assignment_violations
 from .package_contracts import PackageLayout, layout_of
 from .package_model import CatalogDocument, CatalogError
-from .package_parts import load_parts, module_imports, public_symbols
+from .package_parts import load_parts, module_externals, module_imports, public_symbols
 from .package_preservation import PartFacts, preservation_violations
 from .package_tree import is_generated
 from .packages import read_catalog
@@ -77,7 +77,8 @@ def repository_facts(policy: Policy, root: Path, fs: FileSystem, scan: ScanResul
         {name: context.resolve_ring(name) for name in scan.paths},
         module_imports(scan.modules, scan.known),
         asset_paths(policy, root, fs),
-        public_symbols(scan.modules),
+        symbols=public_symbols(scan.modules),
+        externals=module_externals(scan.modules, scan.known, policy.stdlib),
     )
 
 
