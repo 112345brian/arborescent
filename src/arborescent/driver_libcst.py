@@ -61,8 +61,8 @@ class LibCstRename:
             if done.returncode != 0 or (failed is not None and int(failed.group(1)) > 0):
                 old = command[command.index("--old_name") + 1]
                 files = [_relative(name, request.root) for name in re.findall(r"^Failed to codemod (\S.*)$", done.stdout + done.stderr, re.MULTILINE)]
-                where = f" in {', '.join(files)}" if files else f" ({((done.stderr or done.stdout).strip().splitlines() or ['no output'])[-1]})"
-                return MigrationOutcome(False, f"LibCST failed renaming {old}{where}; files renamed so far stay changed")
+                where = f" in {', '.join(files)}" if files else ""
+                return MigrationOutcome(False, f"LibCST failed renaming {old}{where} ({_cause(done.stdout + done.stderr)}); files renamed so far stay changed")
         left = self._scan("remaining", request)
         if left:
             return MigrationOutcome(False, f"{len(left)} import(s) naming an old module were left unrewritten (the files already changed stay changed):\n{_listing(left)}")
@@ -81,6 +81,13 @@ class LibCstRename:
             return tuple(RewriteFinding(str(item["file"]), int(item["line"]), str(item["text"])) for item in items)
         except (ValueError, KeyError, TypeError) as exc:
             return (RewriteFinding("", 0, f"could not check the import statements ({exc}); nothing was rewritten"),)  # fail closed
+
+
+def _cause(output: str) -> str:
+    """The last lines LibCST printed before it named the failing file: the exception, which its summary line leaves out."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    marker = next((i for i, line in enumerate(lines) if line.startswith("Failed to codemod ")), len(lines))
+    return " | ".join(lines[max(0, marker - 4):marker]) or "no output"
 
 
 def _relative(name: str, root: Path) -> str:

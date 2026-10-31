@@ -30,8 +30,8 @@ HAVE_LIBCST = SubprocessToolRunner().run([sys.executable, "-I", "-c", "import li
 class Scripted:
     """A ``ToolRunner`` that answers by what is asked: availability, the scanner's two modes, the rename command."""
 
-    def __init__(self, *, installed: bool = True, forms: Sequence[dict[str, object]] = (), remaining: Sequence[dict[str, object]] = (), rename_rc: int = 0) -> None:
-        self.installed, self.forms, self.remaining, self.rename_rc = installed, list(forms), list(remaining), rename_rc
+    def __init__(self, *, installed: bool = True, forms: Sequence[dict[str, object]] = (), remaining: Sequence[dict[str, object]] = (), rename_rc: int = 0, rename_err: str = "boom") -> None:
+        self.installed, self.forms, self.remaining, self.rename_rc, self.rename_err = installed, list(forms), list(remaining), rename_rc, rename_err
         self.calls: list[list[str]] = []
 
     def available(self, executable: str) -> bool:
@@ -43,7 +43,7 @@ class Scripted:
             return ToolResult(0 if self.installed else 1, "", "")
         if argv[3] == "arborescent.driver_libcst_scan":
             return ToolResult(0, json.dumps(self.forms if argv[4] == "forms" else self.remaining), "")
-        return ToolResult(self.rename_rc, "", "boom" if self.rename_rc else "")
+        return ToolResult(self.rename_rc, "", self.rename_err if self.rename_rc else "")
 
 
 def adapter(runner: Scripted | None = None) -> tuple[LibCstRename, Scripted]:
@@ -107,6 +107,12 @@ def test_references_left_behind_are_a_failure_and_are_listed() -> None:
     library, _ = adapter(Scripted(remaining=[{"file": "src/core/y.py", "line": 2, "text": "from app.core import f"}]))
     outcome = library.apply(REQUEST)
     assert outcome.ok is False and "src/core/y.py:2" in outcome.detail and "left" in outcome.detail
+
+
+def test_a_failing_rename_reports_the_exception_libcst_printed_not_just_the_file() -> None:
+    err = "Codemodding /new/src/core/x.py\nTraceback (most recent call last):\n  File \"a.py\", line 1, in f\nValueError: no such thing\n\nFailed to codemod /new/src/core/x.py\n"
+    outcome = adapter(Scripted(rename_rc=1, rename_err=err))[0].apply(REQUEST)
+    assert outcome.ok is False and "ValueError: no such thing" in outcome.detail and "src/core/x.py" in outcome.detail
 
 
 def test_a_failing_rename_stops_the_run() -> None:
