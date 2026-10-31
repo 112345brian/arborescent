@@ -43,7 +43,7 @@ def test_it_satisfies_the_port() -> None:
 
 def test_the_exact_arguments_select_each_owned_path_and_rename_it() -> None:
     assert adapter().arguments(request(RENAMES)) == (
-        EXECUTABLE, "--source", "/mono", "--target", "/out/core", "--refs", "main",
+        EXECUTABLE, "--source", str(SOURCE), "--target", str(TARGET), "--refs", "main",
         "--path", "src/app/core/api.py", "--path-rename", "src/app/core/api.py:api.py",
         "--path", "src/app/core/schema", "--path-rename", "src/app/core/schema:data/schema",
         "--path", "src/app/core", "--path-rename", "src/app/core/:",  # filter-repo spells "to the root" as an empty new name with a slash
@@ -64,7 +64,7 @@ def test_supplying_creates_the_target_repository_and_runs_filter_repo_from_the_s
     runner = FakeToolRunner(installed={EXECUTABLE, "git"})
     outcome = adapter(runner).supply(request(RENAMES))
     assert outcome.ok is True
-    assert runner.calls == [["git", "init", "--quiet", "--initial-branch", "main", "/out/core"], list(adapter().arguments(request(RENAMES)))]
+    assert runner.calls == [["git", "init", "--quiet", "--initial-branch", "main", str(TARGET)], list(adapter().arguments(request(RENAMES)))]
 
 
 def test_an_existing_target_is_refused_and_nothing_runs() -> None:
@@ -72,7 +72,7 @@ def test_an_existing_target_is_refused_and_nothing_runs() -> None:
     fs.add(Path("/out/core/keep.txt"), "x")
     outcome = adapter(runner, fs).supply(request(RENAMES))
     assert outcome.ok is False
-    assert "/out/core" in outcome.detail
+    assert str(TARGET) in outcome.detail
     assert runner.calls == []
 
 

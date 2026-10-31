@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,7 @@ def test_the_default_is_a_dry_run_that_prints_the_exact_arguments_and_supplies_n
     out = capsys.readouterr().out
     assert library.supplied == []
     assert "dry run" in out
-    assert f"fake-migrate core {tmp_path / 'out'}" in out  # the library's own rendering of the exact arguments
+    assert shlex.join(["fake-migrate", "core", str(tmp_path / "out")]) in out  # the library's own rendering of the exact arguments
     assert "app -> ." in out  # the path rename that would be supplied
     assert "--yes" in out
 
