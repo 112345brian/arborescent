@@ -24,7 +24,7 @@ reported as a gap, never guessed.
 
 | Key | Meaning |
 |---|---|
-| `[packages.home]` | Where the package lives after the migration. `kind = "repository"` with `repository = "org/name"` (its own repository), or `kind = "workspace-member"` with `path = "packages/x"` (a member of a workspace in the same repository). Workspace members may not share or nest folders. |
+| `[packages.home]` | Where the package lives after the migration. `kind = "repository"` with `repository = "https://github.com/org/name.git"` (its own repository; a git URL, `https://`, `ssh://` or `git@host:path`, because it is used verbatim as a git source; `org/name` is refused), or `kind = "workspace-member"` with `path = "packages/x"` (a member of a workspace in the same repository). Workspace members may not share or nest folders. |
 | `public = [...]` | Dotted module globs (`fnmatch`) other packages may import: the public surface. The same key `package_parts` checks (#55); absent or empty means no declared surface, so nothing of the package counts as private. |
 | `externals = [...]` | Top-level third-party import names the package may use. `[]` means none. |
 | `[[packages.module_renames]]` | `from`/`to` dotted-module prefixes that change name in the target; the longest matching prefix wins. |

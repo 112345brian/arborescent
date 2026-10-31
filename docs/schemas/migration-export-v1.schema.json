@@ -162,6 +162,8 @@
                     ]
                   },
                   "repository": {
+                    "description": "a git URL (https://, ssh:// or git@host:path), used verbatim as a git source",
+                    "pattern": "^(?:https://|ssh://)[^\\s/]+[^\\s]*$|^git@[^\\s:@/]+:[^\\s]+$",
                     "type": [
                       "string",
                       "null"
