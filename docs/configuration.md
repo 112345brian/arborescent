@@ -330,7 +330,7 @@ id = "core"
 # ... name, kind, repository, root, summary, paths as above
 [packages.home]
 kind = "repository"
-repository = "org/core"
+repository = "https://github.com/org/core.git"
 history = "preserve"               # "preserve" or "fresh": keep the package's history, or start a new one
 [packages.release]
 pin = "tag"                        # "tag" or "sha": how dependents pin this package
