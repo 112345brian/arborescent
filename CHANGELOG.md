@@ -56,6 +56,18 @@
   `packages export` fills each package's `pyproject` object with the same derived fields (still `object | null`, no
   schema version bump). A source is `{ workspace = true }` only between two workspace members; otherwise a git source
   (with `subdirectory` for a workspace member), and a git value that is not a URL is reported, never guessed (#60).
+- `arborescent packages export`: one read-only, versioned JSON export of the migration arguments of every package
+  (identity and `home`, owned modules and assets with target paths and target module names, public surface and bypassing
+  modules, declared dependencies, open annotation gaps as named entries) with a published JSON Schema
+  (`docs/schemas/migration-export-v1.schema.json`, `arborescent packages schema`). New optional catalog keys: `home`,
+  `public`, `externals`, `module_renames`. `release`/`pin`/`history` (#56) and `pyproject` (#60) are reserved slots. No
+  tool-specific emitter ships; `docs/migration-export.md` has a `git filter-repo` recipe and the comparison with
+  blinkered's `blinkered.toml` (#54).
+- Acceptance test for the migration annotations (`tests/test_split_acceptance.py`, fixture `tests/split_fixture.py`): a
+  synthetic four-package monorepo (one own-repository package, one workspace member, one package spanning three rings,
+  one with an assets folder, one deliberate blocking edge) is split with `git filter-repo` driven only by the JSON export;
+  the cut list is the generated import-linter and tach output, and the parts are checked with the preservation rules. It
+  skips with a reason where `git filter-repo`, import-linter or tach is not installed; Arborescent does not migrate (#57).
 
 ### Changed
 
