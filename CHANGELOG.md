@@ -19,6 +19,12 @@
   tool-specific emitter ships; `docs/migration-export.md` has a `git filter-repo` recipe and the comparison with
   blinkered's `blinkered.toml` (#54).
 
+- Annotation preservation across a split: a package may declare `public` module globs, and the opt-in
+  `package_parts` lists extracted part trees (#27) to compare with the catalog. New rule ids
+  `package-semantics-drift`, `package-membership-drift`, `package-ring-drift`, `package-public-symbol-dropped` and
+  `package-private-import` (the last also runs on the origin without parts). No graph comparison and no test runs;
+  `selftest` probes each rule (#55).
+
 ### Changed
 
 - `packages.py` is split into cohesive `package_*` modules; behaviour and the `arborescent.packages` names are unchanged,

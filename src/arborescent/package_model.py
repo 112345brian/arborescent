@@ -54,10 +54,10 @@ class PackageDescriptor:
     domain: str | None = None
     capabilities: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
+    public: tuple[str, ...] = ()  # dotted module globs other packages may import; empty = no declared surface
     extraction_status: str = "in-repository"
     paths: tuple[PackagePath, ...] = ()
     home: PackageHome | None = None  # None: not annotated yet (a gap in the migration export)
-    public: tuple[str, ...] = ()  # dotted module globs other packages may import; empty = no declared surface
     externals: tuple[str, ...] | None = None  # top-level external import names the package may use; None: not annotated
     module_renames: tuple[ModuleRename, ...] = ()
 
@@ -73,6 +73,7 @@ class PackageSemantics:
     domain: str | None = None
     capabilities: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
+    public: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +125,7 @@ def semantics_of(package: PackageDescriptor) -> PackageSemantics:
         package.domain,
         package.capabilities,
         package.depends_on,
+        package.public,
     )
 
 

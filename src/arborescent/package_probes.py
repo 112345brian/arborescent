@@ -15,6 +15,7 @@ from .mutation import Mutation
 from .package_assignment import owners_of
 from .package_fields import glob_match
 from .package_gaps import PackageContext
+from .package_part_probes import part_mutations
 from .rules import RuleContext
 
 __all__ = ["package_mutations"]
@@ -44,7 +45,8 @@ def package_mutations(
     out += _second_claims(catalog_file, context, sole, skipped)
     out += _ring_span(RuleContext(policy, arbor_index, scope_by_module).resolve_ring, catalog_file, context, sole, skipped)
     out += _undeclared_import(context, sole, skipped)
-    return out, skipped
+    preservation, not_planned = part_mutations(context)
+    return out + preservation, skipped + not_planned
 
 
 def _join(folder: str, name: str) -> str:

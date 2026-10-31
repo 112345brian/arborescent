@@ -378,7 +378,7 @@ def _abstraction_mutations(policy: Policy, ring: str, host: str) -> list[Mutatio
 def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     services = replace(services, scanner=services.scanner.uncached())  # mutated copies must not touch the real cache
     _, scan = run_own(policy, root, services, practices=False)
-    mutations, skipped = plan(policy, scan, load_package_context(policy, root, services.fs, scan))
+    mutations, skipped = plan(policy, scan, load_package_context(policy, root, services.fs, scan, services.scanner))
     report = SelfTestReport([], [], skipped)
     fs = services.fs
     with fs.temporary_directory("arborescent-selftest-") as tmp:

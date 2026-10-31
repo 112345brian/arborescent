@@ -25,6 +25,7 @@ class RepositoryFacts:
     imports: Mapping[str, tuple[str, ...]]  # module -> first-party modules it imports
     assets: Sequence[str]  # non-Python files below the policy's sources, repository-relative
     externals: Mapping[str, tuple[str, ...]] = field(default_factory=dict)  # module -> third-party top-level names it imports
+    symbols: Mapping[str, frozenset[str]] = field(default_factory=dict)  # module -> public top-level class/function names
 
 
 def owners_of(catalog: CatalogDocument, path: str, *, asset: bool = False) -> tuple[str, ...]:
