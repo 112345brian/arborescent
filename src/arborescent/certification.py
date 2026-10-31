@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .ports import FileSystem, ScanResult, ToolRunner
 
 from .domain import NOISE_DIRS, ToolResult
+from .generated_config import has_own_importlinter_config, is_generated
 
 PROFILE = "v1"
 RUFF_VERSION = "0.17.2"
@@ -56,13 +57,13 @@ def _import_linter_authority(root: Path, runner: ToolRunner, fs: FileSystem) -> 
     failures: list[str] = []
     if not runner.available("lint-imports"):
         failures.append("import-linter is not installed; it is required when tach is disabled")
-    # `lint-imports` reads only these files; the generated arborescent-importlinter.toml is not discovered by default.
-    configured = fs.is_file(root / ".importlinter") or any(
-        fs.is_file(root / name) and marker in fs.read_text(root / name)
-        for name, marker in (("pyproject.toml", "[tool.importlinter"), ("setup.cfg", "[importlinter"), ("tox.ini", "[importlinter"))
-    )
+    # The project's own config, or Arborescent's generated file: `check` reads the latter when nothing else is configured.
+    configured = has_own_importlinter_config(fs, root) or is_generated(fs, root / "arborescent-importlinter.toml")
     if not configured:
-        failures.append("import-linter has no contracts configured (.importlinter, pyproject.toml, setup.cfg or tox.ini); it is required when tach is disabled")
+        failures.append(
+            "import-linter has no contracts configured (run `arborescent generate`, or add .importlinter, pyproject.toml, "
+            "setup.cfg or tox.ini); it is required when tach is disabled"
+        )
     return failures
 
 

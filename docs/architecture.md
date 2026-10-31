@@ -83,6 +83,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.package_pyproject` | `single` | domain |
 | `arborescent.driver_request` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
+| `arborescent.generated_config` | `single` | domain |
 | `arborescent.driver_port` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |

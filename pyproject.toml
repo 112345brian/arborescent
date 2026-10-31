@@ -59,6 +59,7 @@ arborescent = ["py.typed"]
 [tool.arborescent]
 python = "3.11"
 sources = ["src/arborescent"]
+package_catalog = "packages.toml"
 source_roots = ["src"]
 exclude = ["__pycache__", "tests", "tools"]
 forbid_circular_imports = true
@@ -117,6 +118,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.driver_request" = "domain"
 "arborescent.driver_port" = "ports"
 "arborescent.ports" = "ports"
+"arborescent.generated_config" = "domain"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
 "arborescent.baseline" = "application"
@@ -192,25 +194,6 @@ testpaths = ["tests"]
 pythonpath = ["src", "tests"]
 addopts = "-q"
 markers = ["external_tools: needs an external tool (git filter-repo, import-linter, tach); skipped with a reason where it is not installed"]
-
-# Contract that lived in the launch-runner root pyproject: the core and the ports stay free of process/file/network modules.
-# (`lint-imports` reads this table; the generated arborescent-importlinter.toml is checked by `arborescent check`.)
-[tool.importlinter]
-root_packages = ["arborescent"]
-include_external_packages = true
-
-[[tool.importlinter.contracts]]
-name = "arborescent core and ports must not import adapters, the engines or process/file/network modules"
-type = "forbidden"
-source_modules = ["arborescent.domain", "arborescent.facts", "arborescent.presets", "arborescent.stdlib", "arborescent.rules", "arborescent.ports",
-    "arborescent.package_model", "arborescent.package_fields", "arborescent.package_parse", "arborescent.package_render",
-    "arborescent.path_exclusion", "arborescent.package_assignment", "arborescent.package_preservation", "arborescent.package_contracts", "arborescent.package_policy", "arborescent.package_pyproject",
-    "arborescent.migration_arguments", "arborescent.migration_json", "arborescent.driver_request", "arborescent.driver_port"]
-forbidden_modules = [
-    "arborescent.adapters", "arborescent.tool_runner", "arborescent.typecheckers", "arborescent.engines", "arborescent.engine", "arborescent.cli", "subprocess", "shutil", "tempfile",
-    "socket", "urllib",
-]
-allow_indirect_imports = true
 
 [tool.ruff.lint]
 # PIE807 asks for container factories, but Pyright strict reports the field type as

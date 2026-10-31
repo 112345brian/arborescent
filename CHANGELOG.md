@@ -71,14 +71,19 @@
   skips with a reason where `git filter-repo`, import-linter or tach is not installed; Arborescent does not migrate (#57).
 
 ### Changed
+- `check` now runs import-linter with the generated `arborescent-importlinter.toml` (it was written and drift-checked but never
+  read, so a hand-written copy of the contracts had to be kept beside it). The file is used only when it carries the
+  generated header and the project has no import-linter configuration of its own; a project's own config always wins and
+  `generate` still never changes an existing file. Arborescent's own hand-written contract is removed: the generated ones
+  (10 here, including the package contract) are a strict superset of it. New optional port extension `RootAwareEngine`.
 
 - `packages.py` is split into cohesive `package_*` modules; behaviour and the `arborescent.packages` names are unchanged,
   and `packages extract` is untouched (#50).
 
 ### Fixed
 
-- With tach disabled, the minimum profile now also requires import-linter to have contracts configured (it does not
-  auto-discover the generated `arborescent-importlinter.toml`).
+- With tach disabled, the minimum profile now also requires import-linter to have contracts configured: the project's own
+  config, or the generated `arborescent-importlinter.toml`.
 - Scope-path normalization no longer caches every scanned file path.
 
 ## 0.3.0 — 2026-10-31

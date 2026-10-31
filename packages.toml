@@ -1,0 +1,18 @@
+# Arborescent's own package catalog. It is one distribution, so it is one package: the catalog exists so the package
+# checks (ownership, policy, preservation) run on this repository too, not to split it.
+
+[[packages]]
+id = "arborescent"
+name = "Arborescent"
+kind = "library"
+repository = "112345brian/arborescent"
+root = "src/arborescent"
+summary = "One architecture policy that generates import-linter, tach and type-checker configs, then enforces more."
+externals = []                  # no runtime dependencies; the engines are optional extras run as subprocesses
+history = "preserve"
+[packages.home]
+kind = "repository"
+repository = "https://github.com/112345brian/arborescent"
+[[packages.paths]]
+path = "src/arborescent"
+role = "source"

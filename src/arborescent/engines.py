@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .domain import ToolResult, Violation
+from .generated_config import has_own_importlinter_config, is_generated
 from .ports import Engine, FileSystem
 
 __all__ = ["ImportLinter", "Ruff", "Tach", "TachExternal", "default_engines"]
@@ -18,11 +19,17 @@ __all__ = ["ImportLinter", "Ruff", "Tach", "TachExternal", "default_engines"]
 class ImportLinter:
     name: str = "import-linter"
     executable: str = "lint-imports"
-    config_file: str = "arborescent-importlinter.toml"  # retained for optional preset generation
+    config_file: str = "arborescent-importlinter.toml"  # what `generate` writes; import-linter does not discover it by itself
     supports_changed: bool = False
 
     def command(self, files: Sequence[str]) -> list[str]:
         return [self.executable]
+
+    def command_in(self, files: Sequence[str], root: Path, fs: FileSystem) -> list[str]:
+        """Read the generated contracts, but never over a configuration the project wrote itself."""
+        if has_own_importlinter_config(fs, root) or not is_generated(fs, root / self.config_file):
+            return self.command(files)
+        return [self.executable, "--config", self.config_file]
 
     def passed(self, result: ToolResult) -> bool:
         return result.returncode == 0

@@ -200,6 +200,13 @@ tach is optional: `disabled_tools = ["tach"]` still passes the minimum profile w
 import-linter enforces the generated ring contracts and the native engine enforces external allow-lists. Prefer this for
 multi-`source_roots` workspaces (uv/Cargo/npm style), where tach cannot resolve cross-root imports and `check` warns.
 
+**Your own configuration always wins.** `check` runs import-linter with the generated `arborescent-importlinter.toml`
+(`lint-imports --config ...`) only when that file carries the generated header and the project has no import-linter
+configuration of its own (`.importlinter`, or an `[importlinter]` / `[tool.importlinter]` section in `setup.cfg`,
+`tox.ini` or `pyproject.toml`). With a config of your own, the command is unchanged and the generated file is only
+drift-checked, so nothing you wrote is ignored; a hand-written file that happens to share the generated name is never
+adopted. `generate` itself only creates missing files and never changes an existing one.
+
 `--changed` limits Arborescent, Ruff, and the type checker to changed files. import-linter, `tach check`, and `tach check-external`
 are graph-wide, so Arborescent skips them and reports that reason in the engine results. See the repository CHANGELOG for measured numbers; `arborescent bench` reproduces them.
 

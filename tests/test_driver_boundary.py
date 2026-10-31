@@ -51,7 +51,8 @@ def test_the_policy_rule_bites_on_the_real_source(tmp_path: Path) -> None:
     copy = tmp_path / "copy"
     target = copy / "src" / "arborescent"
     target.mkdir(parents=True)
-    _ = (copy / "pyproject.toml").write_text((ROOT / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8")
+    for name in ("pyproject.toml", "packages.toml"):  # the policy opts into its own package catalog
+        _ = (copy / name).write_text((ROOT / name).read_text(encoding="utf-8"), encoding="utf-8")
     for source in (ROOT / "src" / "arborescent").glob("*.py"):
         _ = (target / source.name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     victim = target / "package_gaps.py"

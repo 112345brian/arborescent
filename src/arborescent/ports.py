@@ -83,6 +83,17 @@ class Engine(Protocol):
     def passed(self, result: ToolResult) -> bool: ...
 
 
+class RootAwareEngine(Protocol):
+    """Optional extension for an engine whose command depends on the project it runs in.
+
+    import-linter does not discover the file ``generate`` writes for it; this lets the adapter add ``--config`` only when
+    that file is Arborescent's and the project has no import-linter configuration of its own. Separate from ``Engine`` so
+    existing and user-supplied adapters are unaffected.
+    """
+
+    def command_in(self, files: Sequence[str], root: Path, fs: FileSystem) -> list[str]: ...
+
+
 class ViolationEngine(Protocol):
     """Optional extension implemented by engines whose diagnostics feed Arborescent's violation baseline.
 
