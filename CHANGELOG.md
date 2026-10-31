@@ -2,7 +2,7 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
-## Unreleased
+## 0.3.0 — 2026-10-30
 
 ### Added
 
@@ -16,6 +16,16 @@
   Each scope has its own sources, roots, rings, classifications and public import patterns; cross-scope imports require
   an explicit dependency and a public target. Shared repository code has one source owner, and single-scope policies
   keep their existing meaning.
+- `require_arbor_annotations`: an opt-in, per-scope policy flag that turns an unannotated, classify-only module into
+  a hard failure (`unannotated-module`) instead of the silent, permanent `classify` fallback. `require_arbor_annotations_exclude`
+  exempts module-name globs (vendored or read-only code) without needing a separate scope. `classify` itself is
+  unchanged and stays the default, indefinitely supported path; `arborescent annotate` remains the migration tool.
+
+### Fixed
+
+- Generated `tach.toml` now writes `[external] exclude` from `tach_external_exclude` (lazily-imported optional
+  extras tach can't see from base dependencies) in both the single-scope and multi-scope generators; the multi-scope
+  path previously always wrote an empty exclude list.
 
 ## 0.2.0 — 2026-10-26
 
