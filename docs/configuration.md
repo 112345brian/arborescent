@@ -316,6 +316,21 @@ All four keys are optional; a missing one is a named gap in the export when it m
 [migration-export.md](migration-export.md) for the document, the schema, the gap codes, a `git filter-repo` recipe and the
 comparison with blinkered's `blinkered.toml`.
 
+**Two layers.** The *annotation layer* is everything on this page that describes the code: the `__arbor__` ring
+annotations ([below](#module-ring-annotations-__arbor__)), the package catalog and its keys above, and the checks that
+report a missing or contradictory annotation by rule id. From it Arborescent builds the *migration arguments*: typed,
+tool-neutral objects (`arborescent.migration_arguments`: `MigrationArguments`, `PackageArguments`, `OwnedModule`,
+`OwnedAsset`, `PathRename`, `Bypass`, `Edge`, `Gap`) that carry, per package, its identity and `home`, the modules and
+assets it owns with their target paths, the module-name map, its public surface and the modules that bypass it, its
+declared dependencies and the open gaps. `packages export` is those objects serialised as JSON. Any tool can consume the
+arguments; none is named in them.
+
+The *auxiliary driver* is a separate layer on top. Its only job is to supply a dedicated migration library with the
+arguments it needs, through a port; it does not migrate, and the annotation layer never depends on it. No driver ships yet.
+[migration-recipes.md](migration-recipes.md) shows, with a worked example and the caveats found by running each tool, how
+to supply the same arguments by hand to git filter-repo, `git subtree split`, rope, deptry, Copybara and Josh. Those
+recipes are documentation, not commands Arborescent ships.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:

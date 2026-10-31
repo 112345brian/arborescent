@@ -77,7 +77,8 @@ The export-only codes exist only in the export; they are not `check` rules, so t
 
 ## Recipe: a git filter-repo paths file
 
-No emitter ships in Arborescent; this is the whole conversion. `--paths-from-file` needs the paths to keep *and* the
+More recipes (rope, deptry, Copybara, Josh), the leaf-first order, history-rewriting caveats and a worked example are in
+[migration-recipes.md](migration-recipes.md). No emitter ships in Arborescent; this is the whole conversion. `--paths-from-file` needs the paths to keep *and* the
 renames (a rename line alone does not select a path), so the file lists both:
 
 ```sh
