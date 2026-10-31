@@ -144,7 +144,8 @@ def test_import_linter_lists_the_blocking_edge_of_the_blocked_package_and_nothin
 def test_tach_names_the_same_edge(monorepo: Path) -> None:
     broken = run(["tach", "check", "--dependencies"], monorepo, check=False)
     assert broken.returncode != 0
-    assert "app/orders/service.py" in broken.stdout + broken.stderr and "app.billing.internal" in broken.stdout + broken.stderr
+    said = (broken.stdout + broken.stderr).replace("\\", "/")  # tach prints native separators: app\\orders\\service.py on Windows
+    assert "app/orders/service.py" in said and "app.billing.internal" in said
 
 
 @needs_import_linter
