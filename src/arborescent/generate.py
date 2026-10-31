@@ -11,6 +11,7 @@ from collections.abc import Collection, Mapping, Sequence
 
 from .domain import ALL, NOISE_DIRS, Policy
 from .ports import TypeChecker
+from .rules import RuleContext
 
 __all__ = ["IMPORT_LINTER_FILE", "TACH_FILE", "generate", "tops_of"]
 
@@ -41,10 +42,7 @@ def _resolve_ring(
     policy: Policy, name: str, arbor_index: Mapping[str, tuple[str | None, str | None]],
     scope_by_module: Mapping[str, str],
 ) -> str | None:
-    if not policy.scopes:
-        return policy.resolve_ring(arbor_index, name)
-    scope_name = scope_by_module.get(name)
-    return policy.resolve_scope_ring(scope_name, arbor_index, name) if scope_name is not None else None
+    return RuleContext(policy, arbor_index, scope_by_module).resolve_ring(name)
 
 
 def _scope_ring(scope_name: str, ring: str) -> str:

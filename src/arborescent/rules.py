@@ -57,6 +57,8 @@ class RuleContext:
         policy = self.policy_for(name)
         if policy is not None:
             return policy.annotation_violation(self.arbor_index, name)
+        if "arbor-annotations" in self.policy.disabled_tools:
+            return None
         annotation = self.arbor_index.get(name)
         return annotation[1] if annotation is not None else None
 

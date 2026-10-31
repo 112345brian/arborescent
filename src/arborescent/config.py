@@ -160,6 +160,12 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
         entry_scripts=tuple(script for scope in scopes for script in scope.policy.entry_scripts),
         dependencies={},
         forbid_everywhere=(),
+        tach_external_exclude=(),
+        require_arbor_annotations=False,
+        require_arbor_annotations_exclude=(),
+        customization_labels=tuple(sorted({
+            label for scope in scopes for label in scope.policy.customization_labels
+        })),
         children=_child_arbors(raw),
         scan_vendors=_boolean_option(raw, "scan_vendors", False),
         child_policy_mode=_child_policy_mode(raw),

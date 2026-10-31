@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .domain import Policy
 from .ports import FileSystem, ScanResult
+from .rules import RuleContext
 
 __all__ = ["AnnotatePlan", "apply_annotations", "insert_annotation", "plan_annotations"]
 
@@ -25,6 +26,7 @@ class AnnotatePlan:
 
 
 def plan_annotations(policy: Policy, scan: ScanResult) -> AnnotatePlan:
+    indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
     to_annotate: list[tuple[str, str, str]] = []
     already_annotated: list[str] = []
     unmatched: list[str] = []
@@ -35,7 +37,7 @@ def plan_annotations(policy: Policy, scan: ScanResult) -> AnnotatePlan:
         if ring is not None or error is not None:
             already_annotated.append(rel)
             continue
-        classified = policy.ring_of(module)
+        classified = indexes.resolve_ring(module)
         if classified is None:
             unmatched.append(rel)
             continue

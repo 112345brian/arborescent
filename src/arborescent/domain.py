@@ -265,12 +265,9 @@ class Policy:
 
     def resolve_ring(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
         """Resolve a module's annotated ring, falling back to ``classify`` when unavailable or invalid."""
-        if "arbor-annotations" not in self.disabled_tools:
-            annotation = arbor_index.get(name)
-            if annotation is not None:
-                ring, violation = annotation
-                if violation is None and ring is not None and any(rule.name == ring for rule in self.rings):
-                    return ring
+        if self._has_valid_annotation(arbor_index, name):
+            ring, _ = arbor_index[name]
+            return ring
         return self.ring_of(name)
 
     def annotation_violation(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
