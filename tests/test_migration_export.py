@@ -61,7 +61,7 @@ def test_the_export_is_versioned_and_names_what_it_was_read_from() -> None:
 def test_open_gaps_are_named_entries_and_flip_ready() -> None:
     clean = document()
     assert clean["ready"] is True and clean["gaps"] == [{"code": "package-spans-rings", "detail": clean["gaps"][0]["detail"], "package": None, "severity": "info", "subject": "web"}]
-    broken = document(CATALOG.replace('[packages.home]\nkind = "repository"\nrepository = "https://github.com/example/core.git"\n', ""))
+    broken = document(CATALOG.replace('[packages.home]\nkind = "repository"\nrepository = "example/core"\n', ""))
     assert broken["ready"] is False
     assert any(g["code"] == "package-undeclared-home" and g["package"] == "core" and g["severity"] == "error" for g in broken["gaps"])
 
@@ -80,11 +80,11 @@ def test_a_workspace_member_exports_no_history_or_pin_information() -> None:
     VALIDATOR.validate(own)  # a package with its own repository may carry policy (#56 fills it in)
 
 
-def test_the_schema_requires_a_git_url_for_a_repository_home() -> None:
-    data = document()
-    next(p for p in data["packages"] if p["id"] == "core")["home"]["repository"] = "example/core"
-    with pytest.raises(ValidationError):
-        VALIDATOR.validate(data)
+@pytest.mark.parametrize("repository", ["example/core", "https://github.com/example/core.git"])
+def test_the_home_repository_is_exported_unchanged_and_valid(repository: str) -> None:
+    data = document(CATALOG.replace('repository = "example/core"\n[[packages.module_renames]]', f'repository = "{repository}"\n[[packages.module_renames]]'))
+    assert next(p for p in data["packages"] if p["id"] == "core")["home"]["repository"] == repository
+    VALIDATOR.validate(data)
 
 
 @pytest.mark.parametrize(
@@ -142,7 +142,7 @@ public = ["app", "app.domain"]
 externals = ["pydantic"]
 [packages.home]
 kind = "repository"
-repository = "https://github.com/example/core.git"
+repository = "example/core"
 [[packages.paths]]
 path = "app"
 role = "source"
@@ -168,7 +168,7 @@ def test_the_export_command_prints_to_stdout_without_output(tmp_path: Path, caps
 
 
 def test_require_ready_refuses_while_an_error_gap_is_open(tmp_path: Path) -> None:
-    _repo(tmp_path, CLI_CATALOG.replace('[packages.home]\nkind = "repository"\nrepository = "https://github.com/example/core.git"\n', ""))
+    _repo(tmp_path, CLI_CATALOG.replace('[packages.home]\nkind = "repository"\nrepository = "example/core"\n', ""))
     out = tmp_path / "export.json"
     args = ["--config", str(tmp_path / "arborescent.toml"), "packages", "export", "--output", str(out)]
     assert main(args) == 0  # the export itself is always written: the gaps are its content
