@@ -473,6 +473,28 @@ def test_discover_groups_modules_by_scope_and_suggests_local_outer_ring(repo: Pa
     assert "beta" in output and "suggested ring: composition" in output
 
 
+def test_discover_lists_orphans_as_unowned_and_each_module_once(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    write_files(repo, {
+        "arborescent.toml": (
+            "[scopes.alpha]\n"
+            'sources = ["libs/alpha/src/alpha"]\nsource_roots = ["libs/alpha/src"]\n'
+            'rings = ["domain"]\n'
+            "[scopes.alpha.classify]\n\"alpha.core\" = \"domain\"\n"
+        ),
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+        "libs/alpha/src/alpha/loose.py": "VALUE = 2\n",
+        "scripts/orphan.py": "VALUE = 3\n",
+    })
+
+    assert main(["--config", str(repo / "arborescent.toml"), "discover"], services()) == 0
+    lines = capsys.readouterr().out.splitlines()
+
+    assert sum(line.strip() == "libs/alpha/src/alpha/loose.py" for line in lines) == 1
+    assert sum(line.strip() == "scripts/orphan.py" for line in lines) == 1
+    assert any(line.startswith("unowned: scripts/") and "none (unowned)" in line for line in lines)
+    assert not any("core.py" in line for line in lines)
+
+
 def test_bench_accepts_scoped_policy(repo: Path) -> None:
     write_files(repo, {
         "arborescent.toml": (

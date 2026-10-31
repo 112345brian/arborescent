@@ -464,3 +464,21 @@ def test_require_arbor_annotations_is_independent_per_scope() -> None:
     assert policy.scope("shared").policy.require_arbor_annotations is False
     assert policy.scope_annotation_required_violation("alpha", {}, "alpha.core") is not None
     assert policy.scope_annotation_required_violation("shared", {}, "shared.parser") is None
+
+
+def test_unclassified_detail_hints_when_a_glob_names_only_the_parent_package() -> None:
+    p = policy_from_mapping({"rings": ["domain"], "classify": {"pkg": "domain"}})
+    assert p.ring_of("pkg.sub.leaf") is None
+    detail = p.unclassified_detail("pkg.sub.leaf")
+    assert "did you mean 'pkg*'" in detail
+    assert "did you mean" not in p.unclassified_detail("other.mod")
+    assert "did you mean" not in p.unclassified_detail("pkg")
+
+
+def test_scope_path_normalization_is_memoized_across_lookups() -> None:
+    from arborescent import domain
+
+    domain._NORMALIZED_SOURCE_PATHS.clear()
+    assert domain._normalized_source_path("./libs/alpha/src/") == "libs/alpha/src"
+    assert domain._NORMALIZED_SOURCE_PATHS == {"./libs/alpha/src/": "libs/alpha/src"}
+    assert domain._normalized_source_path("./libs/alpha/src/") == "libs/alpha/src"

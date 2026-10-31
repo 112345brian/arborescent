@@ -28,6 +28,7 @@ from .engine import (
 from .engines import default_engines
 from .packages import PackageCatalog, load_extracted_package
 from .ports import FileSystem, ScanResult
+from .rules import RuleContext
 from .selftest import selftest
 from .typecheckers import all_checkers
 
@@ -344,12 +345,10 @@ def _discover(policy: Policy, root: Path, svc: Services) -> int:
 def _discover_scoped(policy: Policy, scan: ScanResult) -> int:
     by_scope_folder: dict[tuple[str, str], list[str]] = {}
     candidates = dict(scan.unclassified)
+    indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
     for module, path in scan.paths.items():
-        scope_name = scan.scope_by_module.get(module)
-        if (
-            scope_name is not None
-            and policy.resolve_scope_ring(scope_name, scan.arbor_index, module) is None
-        ):
+        # Scope-owned modules whose scope assigns no ring; orphans are already in `scan.unclassified`.
+        if indexes.scope_name(module) is not None and indexes.resolve_ring(module) is None:
             candidates[module] = path
     for module, path in candidates.items():
         scope_name = scan.scope_by_module.get(module) or "unowned"

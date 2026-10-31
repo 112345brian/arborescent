@@ -269,7 +269,7 @@ def check_modules(
             out.append(Violation(Rule.ARBOR_RING_MISMATCH, name, mismatch))
         ring = context.resolve_ring(name)
         if ring is None:
-            out.append(Violation(Rule.UNCLASSIFIED, name, "module matches no [classify] pattern; every module needs a ring"))
+            out.append(Violation(Rule.UNCLASSIFIED, name, (context.policy_for(name) or context.policy).unclassified_detail(name)))
             continue
         required = context.annotation_required_violation(name)
         if required is not None:

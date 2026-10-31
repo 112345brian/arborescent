@@ -263,6 +263,16 @@ class Policy:
                 return ring
         return None
 
+    def unclassified_detail(self, module: str) -> str:
+        """Explain a missing ring, hinting at ``pkg*`` when a `classify` glob names only a parent package."""
+        detail = "module matches no [classify] pattern; every module needs a ring"
+        parts = module.split(".")
+        parents = {".".join(parts[:end]) for end in range(1, len(parts))}
+        hint = next((pattern for pattern, _ in self.classify if pattern in parents), None)
+        if hint is None:
+            return detail
+        return f"{detail}; `classify` matches whole module names, so {hint!r} does not cover submodules (did you mean {hint + '*'!r}?)"
+
     def resolve_ring(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
         """Resolve a module's annotated ring, falling back to ``classify`` when unavailable or invalid."""
         if "arbor-annotations" not in self.disabled_tools:
@@ -387,9 +397,15 @@ def _validate_rings(rings: tuple[RingRule, ...], classify: tuple[tuple[str, str]
             raise PolicyError(f"classify {pattern!r} names unknown ring {ring!r}")
 
 
+_NORMALIZED_SOURCE_PATHS: dict[str, str] = {}
+
+
 def _normalized_source_path(value: str) -> str:
-    path = PurePosixPath(value)
-    return path.as_posix().removeprefix("./").rstrip("/") or "."
+    """Normalize a repository-relative path; memoized because scope lookups repeat it per file per scope."""
+    cached = _NORMALIZED_SOURCE_PATHS.get(value)
+    if cached is None:
+        cached = _NORMALIZED_SOURCE_PATHS[value] = PurePosixPath(value).as_posix().removeprefix("./").rstrip("/") or "."
+    return cached
 
 
 def _path_contains(source: str, path: str) -> bool:

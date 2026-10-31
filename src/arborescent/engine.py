@@ -117,7 +117,7 @@ def run_own(
         if (detail := _annotation_violation(policy, scan.arbor_index, scan.scope_by_module, module)) is not None
     ]
     found += [
-        Violation(Rule.UNCLASSIFIED, module, "module matches no [classify] pattern; every module needs a ring")
+        Violation(Rule.UNCLASSIFIED, module, (indexes.policy_for(module) or policy).unclassified_detail(module))
         for module, _ in scan.unclassified
     ]
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
