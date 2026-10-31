@@ -10,8 +10,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .domain import ToolResult
+from .driver_request import (
+    MigrationOutcome,
+    MigrationRequest,
+    RewriteFinding,
+    RewriteRequest,
+)
 
-__all__ = ["FakeClock", "FakeFileSystem", "FakeToolRunner"]
+__all__ = ["FakeClock", "FakeFileSystem", "FakeImportRewriter", "FakeMigrationLibrary", "FakeToolRunner"]
 
 
 @dataclass
@@ -30,6 +36,62 @@ class FakeToolRunner:
         if argv[0] not in self.installed:
             return ToolResult(None, "", f"{argv[0]}: not installed")
         return self.results.get(argv[0], ToolResult(0, "ok", ""))
+
+
+@dataclass
+class FakeMigrationLibrary:
+    """A ``MigrationLibrary`` that records the requests it is supplied with and migrates nothing."""
+
+    name: str = "fake library"
+    executable: str = "fake-migrate"
+    requirement: str = "fake-library>=1"
+    installed: bool = True
+    unapplied: tuple[str, ...] = ()
+    outcome: MigrationOutcome = field(default_factory=lambda: MigrationOutcome(True, "supplied"))
+    supplied: list[MigrationRequest] = field(default_factory=lambda: [])
+    log: list[str] = field(default_factory=lambda: [])  # share one list with a FakeImportRewriter to see the order
+
+    def available(self) -> bool:
+        return self.installed
+
+    def unsupported(self, request: MigrationRequest) -> tuple[str, ...]:
+        return self.unapplied
+
+    def arguments(self, request: MigrationRequest) -> tuple[str, ...]:
+        return (self.executable, request.package, str(request.target))
+
+    def supply(self, request: MigrationRequest) -> MigrationOutcome:
+        self.supplied.append(request)
+        self.log.append("supply")
+        return self.outcome
+
+
+@dataclass
+class FakeImportRewriter:
+    """An ``ImportRewriter`` that records the requests it is applied to and rewrites nothing."""
+
+    name: str = "fake rewriter"
+    executable: str = "fake-rewrite"
+    requirement: str = "fake-rewriter>=1"
+    installed: bool = True
+    findings: tuple[RewriteFinding, ...] = ()
+    outcome: MigrationOutcome = field(default_factory=lambda: MigrationOutcome(True, "rewritten"))
+    applied: list[RewriteRequest] = field(default_factory=lambda: [])
+    log: list[str] = field(default_factory=lambda: [])
+
+    def available(self) -> bool:
+        return self.installed
+
+    def unsupported(self, request: RewriteRequest) -> tuple[RewriteFinding, ...]:
+        return self.findings
+
+    def commands(self, request: RewriteRequest) -> tuple[tuple[str, ...], ...]:
+        return tuple((self.executable, rename.source, rename.target) for rename in request.renames)
+
+    def apply(self, request: RewriteRequest) -> MigrationOutcome:
+        self.applied.append(request)
+        self.log.append("rewrite")
+        return self.outcome
 
 
 @dataclass
