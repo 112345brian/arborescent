@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -167,7 +168,7 @@ def test_the_export_reports_the_edge_as_a_bypass_of_billings_surface(monorepo: P
 def test_the_export_validates_against_its_published_schema(monorepo: Path) -> None:
     jsonschema = pytest.importorskip("jsonschema")
     schema = json.loads(subprocess.run(
-        [os.sys.executable, "-m", "arborescent", "--config", str(monorepo / "arborescent.toml"), "packages", "schema"],
+        [sys.executable, "-m", "arborescent", "--config", str(monorepo / "arborescent.toml"), "packages", "schema"],
         capture_output=True, text=True, check=True).stdout)
     jsonschema.Draft202012Validator(schema).validate(export(monorepo))
 
@@ -290,3 +291,56 @@ def test_the_preservation_checks_catch_a_part_that_reaches_a_private_module(spli
     service.write_text(service.read_text(encoding="utf-8").replace(fixture.CLEAN_IMPORT, fixture.BLOCKING_IMPORT), encoding="utf-8", newline="\n")
     assert (Rule.PACKAGE_PRIVATE_IMPORT, "app.orders.service") in own_findings(monorepo, parts=locations)
 
+
+
+# --- the driver: `packages migrate` supplies git filter-repo with the export's arguments --------------------------------
+
+
+def migrate(root: Path, pid: str, target: Path, *flags: str) -> subprocess.CompletedProcess[str]:
+    """The CLI as a user runs it, in a hermetic git environment, from the monorepo (the driver's source is the working directory)."""
+    argv = [sys.executable, "-m", "arborescent", "--config", str(root / "arborescent.toml"), "packages", "migrate", pid,
+            "--target", str(target), *flags]
+    return run(argv, root, check=False)
+
+
+@needs_filter_repo
+def test_the_driver_dry_run_prints_the_arguments_and_creates_nothing(monorepo: Path, tmp_path: Path) -> None:
+    remove_the_blocking_edge(monorepo)
+    target = tmp_path / "orders-dry"
+    done = migrate(monorepo, "orders", target)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "dry run" in done.stdout and "--path-rename app/orders/service.py:app/orders/service.py" in done.stdout
+    assert not target.exists()
+
+
+@needs_filter_repo
+@pytest.mark.parametrize("pid", ["kernel", "orders", "shell"])
+def test_the_driver_extracts_each_own_repository_package_with_its_history(monorepo: Path, tmp_path: Path, pid: str) -> None:
+    remove_the_blocking_edge(monorepo)
+    package = by_id(export(monorepo))[pid]
+    target = tmp_path / f"{pid}-repo"
+    done = migrate(monorepo, pid, target, "--yes")
+    assert done.returncode == 0, done.stdout + done.stderr
+    expected = {item["target_path"] for item in package["owned"]["modules"]} | {item["target_path"] for item in package["owned"]["assets"]}
+    assert set(run(["git", "ls-files"], target).stdout.split()) == expected
+    history = run(["git", "log", "--format=%s"], target).stdout.split("\n")[:-1]
+    assert "initial monorepo" in history
+    if pid == "orders":
+        assert history[0] == "orders: use billing's public api"  # a commit that touched only its files
+
+
+@needs_filter_repo
+def test_the_driver_leaves_a_workspace_member_where_it_is(monorepo: Path, tmp_path: Path) -> None:
+    remove_the_blocking_edge(monorepo)
+    target = tmp_path / "billing-repo"
+    done = migrate(monorepo, "billing", target, "--yes")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "stays" in done.stdout and not target.exists()  # no history to extract: it remains a member of this repository
+
+
+@needs_filter_repo
+def test_the_driver_and_the_export_driven_recipe_keep_the_same_files(split_monorepo: Any, tmp_path: Path) -> None:
+    monorepo, _, works, _ = split_monorepo
+    target = tmp_path / "orders-driver"
+    assert migrate(monorepo, "orders", target, "--yes").returncode == 0
+    assert set(run(["git", "ls-files"], target).stdout.split()) == set(run(["git", "ls-files"], works["orders"]).stdout.split())
