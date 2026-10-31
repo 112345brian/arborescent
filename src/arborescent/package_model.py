@@ -24,6 +24,8 @@ class PackagePath:
 
 
 HOME_KINDS = ("repository", "workspace-member")
+# A home repository is used verbatim as a git source, so it must be a URL: https://, ssh:// or scp-style git@host:path.
+GIT_URL_PATTERN = r"^(?:https://|ssh://)[^\s/]+[^\s]*$|^git@[^\s:@/]+:[^\s]+$"
 
 
 @dataclass(frozen=True, slots=True)

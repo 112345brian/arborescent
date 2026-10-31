@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Any
@@ -15,6 +16,7 @@ from .package_fields import (
     within,
 )
 from .package_model import (
+    GIT_URL_PATTERN,
     HOME_KINDS,
     MANIFEST_NAME,
     AssetRule,
@@ -121,6 +123,10 @@ def _home(value: Mapping[str, Any]) -> PackageHome | None:
     if kind == "repository":
         if repository is None:
             raise CatalogError(f"{name} of kind repository requires a repository")
+        if re.fullmatch(GIT_URL_PATTERN, repository) is None:
+            raise CatalogError(
+                f"{name} repository must be a git URL (https://, ssh:// or git@host:path), not {repository!r}"
+            )
         if path is not None:
             raise CatalogError(f"{name} of kind repository takes no path")
         return PackageHome(kind, repository=repository)
