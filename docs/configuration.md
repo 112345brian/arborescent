@@ -316,6 +316,49 @@ All four keys are optional; a missing one is a named gap in the export when it m
 [migration-export.md](migration-export.md) for the document, the schema, the gap codes, a `git filter-repo` recipe and the
 comparison with blinkered's `blinkered.toml`.
 
+### Release, pin and history policy
+
+Some inputs to a split cannot be derived from the code: how dependents pin a package, whether its history is kept, which
+merge style keeps pinned SHAs reachable. They are decisions, so a package entry in `packages.toml` records them.
+Arborescent stores and validates them and carries them in the `policy` field of the migration export; it releases, tags,
+pins and rewrites nothing. The tools that do receive these values as arguments.
+
+```toml
+[[packages]]
+id = "core"
+# ... name, kind, repository, root, summary, paths as above
+[packages.home]
+kind = "repository"
+repository = "https://github.com/org/core.git"
+history = "preserve"               # "preserve" or "fresh": keep the package's history, or start a new one
+[packages.release]
+pin = "tag"                        # "tag" or "sha": how dependents pin this package
+merge = "merge-commit"             # only "merge-commit": squash or rebase would orphan pinned SHAs
+tag_before_branch_delete = true    # true or false: tag the release before its branch is deleted
+
+[[packages]]
+id = "scratch"
+# ...
+unmanaged = true                   # explicitly outside release, pin and history policy
+```
+
+Every field is optional. Values are checked when the catalog is read: a value outside the lists above, a wrong type, an
+unknown key under `[packages.release]`, `unmanaged = true` together with a policy, or a policy on a workspace member is an
+error naming the package (a hard error like any other malformed catalog, not a baselinable finding). Any key a
+`[[packages]]` entry does not know is rejected the same way, so a typo such as `histroy` cannot pass silently. `unmanaged`
+can only be `true`; omit it to declare a policy.
+
+A package that declares neither a policy (`history` or a `[packages.release]` table, even an empty one) nor
+`unmanaged = true` is a named gap, reported as `package-release-policy-missing`; it fails the check like the other
+assignment gaps, can be baselined, and appears in the export's `gaps`. A workspace member is exempt: it stays in the
+repository, so it has no history or pin of its own, and its exported `policy` is always `null`. `selftest` probes the
+rule by adding a package with no policy.
+
+In the export, `policy` is `null` when nothing is declared, and otherwise
+`{ history, release: { pin, merge, tag_before_branch_delete } | null, unmanaged }`, with `null` for each field that is
+not set. An unmanaged package exports `{ history: null, release: null, unmanaged: true }`.
+
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:
@@ -449,6 +492,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `unannotated-module` | `require_arbor_annotations` is enabled and a module resolves its ring only through `classify`, with no valid `__arbor__` annotation |
 | `package-unassigned-module` | `package_catalog` is set and a first-party module lies under no package's owned `paths` |
 | `package-multiply-assigned-module` | a module lies under the paths of two or more packages (the message names the module and every claiming package) |
+| `package-release-policy-missing` | `package_catalog` is set and a package declares no `history`, no `[packages.release]` table and not `unmanaged = true` |
 | `package-unowned-asset` | a non-Python file below the policy's `sources` is under no package path and matches no `[[assets]]` glob |
 | `package-multiply-assigned-asset` | an asset is under one package's path and also matched by another package's `[[assets]]` glob |
 | `package-spans-rings` | information only (never fails, never baselined): a package has modules in several rings, so a split must follow module sets, not folders |

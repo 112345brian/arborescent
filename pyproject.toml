@@ -99,6 +99,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.package_model" = "domain"
 "arborescent.package_fields" = "domain"
 "arborescent.package_parse" = "domain"
+"arborescent.package_policy" = "domain"
 "arborescent.package_render" = "domain"
 "arborescent.path_exclusion" = "domain"
 "arborescent.package_assignment" = "domain"
@@ -169,7 +170,7 @@ name = "arborescent core and ports must not import adapters, the engines or proc
 type = "forbidden"
 source_modules = ["arborescent.domain", "arborescent.facts", "arborescent.presets", "arborescent.stdlib", "arborescent.rules", "arborescent.ports",
     "arborescent.package_model", "arborescent.package_fields", "arborescent.package_parse", "arborescent.package_render",
-    "arborescent.path_exclusion", "arborescent.package_assignment"]
+    "arborescent.path_exclusion", "arborescent.package_assignment", "arborescent.package_policy"]
 forbidden_modules = [
     "arborescent.adapters", "arborescent.tool_runner", "arborescent.typecheckers", "arborescent.engines", "arborescent.engine", "arborescent.cli", "subprocess", "shutil", "tempfile",
     "socket", "urllib",

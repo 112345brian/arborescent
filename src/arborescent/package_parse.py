@@ -29,6 +29,13 @@ from .package_model import (
     PackagePath,
     PackageSemantics,
 )
+from .package_policy import check_member_policy, parse_policy
+
+# every key a ``[[packages]]`` entry may carry; a test ties this to the ``PackageDescriptor`` fields
+PACKAGE_KEYS = (
+    "id", "name", "kind", "repository", "root", "summary", "domain", "capabilities", "depends_on", "extraction_status",
+    "paths", "home", "public", "externals", "module_renames", "release", "history", "unmanaged",
+)
 
 
 def parse_catalog(data: Mapping[str, Any]) -> CatalogDocument:
@@ -85,8 +92,17 @@ def parse_package(value: object, index: int) -> PackageDescriptor:
                 metadata,
             )
         )
+    package_id = required(value, "id")
+    unknown = sorted(set(value) - set(PACKAGE_KEYS))
+    if unknown:
+        raise CatalogError(
+            f"package {package_id!r} has unknown key(s) {', '.join(map(repr, unknown))}; allowed: {', '.join(PACKAGE_KEYS)}"
+        )
+    release, history, unmanaged = parse_policy(value, package_id)
+    home = _home(value)
+    check_member_policy(home, release, history, package_id)
     return PackageDescriptor(
-        id=required(value, "id"),
+        id=package_id,
         name=required(value, "name"),
         kind=required(value, "kind"),
         repository=required(value, "repository"),
@@ -97,7 +113,10 @@ def parse_package(value: object, index: int) -> PackageDescriptor:
         depends_on=strings(value.get("depends_on", []), "depends_on"),
         extraction_status=str(value.get("extraction_status", "in-repository")),
         paths=tuple(paths),
-        home=_home(value),
+        release=release,
+        history=history,
+        unmanaged=unmanaged,
+        home=home,
         public=strings(value.get("public", []), "public"),
         externals=_optional_strings(value, "externals"),
         module_renames=_module_renames(value),
