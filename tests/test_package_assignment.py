@@ -131,13 +131,15 @@ def test_imports_inside_a_package_and_into_unowned_modules_are_not_dependencies(
     assert found(two_packages(), data, Rule.PACKAGE_UNDECLARED_DEPENDENCY) == []
 
 
-def test_one_finding_per_importing_module_and_target_package() -> None:
+def test_every_undeclared_import_is_reported_not_one_per_target_package() -> None:
+    """import-linter reports every offending edge; stopping at the first per package pair hid most of a cut list."""
     data = facts(
         {"app.a": "src/app/a.py", "lib.b": "src/lib/b.py", "lib.c": "src/lib/c.py"},
         imports={"app.a": ("lib.c", "lib.b")},
     )
-    [violation] = found(two_packages(), data, Rule.PACKAGE_UNDECLARED_DEPENDENCY)
-    assert "lib.b" in violation.detail  # the alphabetically first target is the stable example
+    violations = found(two_packages(), data, Rule.PACKAGE_UNDECLARED_DEPENDENCY)
+    assert [v.subject for v in violations] == ["app.a", "app.a"]
+    assert ["lib.b" in v.detail for v in violations] == [True, False] and "lib.c" in violations[1].detail  # sorted by target
 
 
 @pytest.mark.parametrize(
