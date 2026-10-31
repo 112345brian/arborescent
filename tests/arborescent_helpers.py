@@ -9,8 +9,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
 from arborescent.config import policy_from_mapping
 from arborescent.domain import Policy
+from arborescent.engine import Services
+from arborescent.engines import default_engines
+from arborescent.testing import FakeToolRunner
+from arborescent.typecheckers import all_checkers
 
 PURE = ["__future__", "dataclasses", "typing", "collections"]
 
@@ -61,3 +66,10 @@ def write_files(root: Path, files: Mapping[str, str]) -> None:
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         _ = path.write_text(text, encoding="utf-8", newline="\n")
+
+
+CHECKERS = list(all_checkers().values())
+
+
+def services(runner: FakeToolRunner | None = None, cache: Path | None = None) -> Services:
+    return Services(FsScanner(cache), runner or FakeToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines())

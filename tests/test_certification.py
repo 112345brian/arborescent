@@ -4,8 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import MINI_FILES, mini_policy, write_files
-from test_engine import services
+from arborescent_helpers import MINI_FILES, mini_policy, services, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from arborescent.certification import (
