@@ -26,12 +26,27 @@ from .package_model import (
     PIN_KINDS,
     CatalogDocument,
     CatalogError,
+    PackageHome,
     ReleasePolicy,
 )
 
-__all__ = ["parse_policy", "policy_violations"]
+__all__ = ["check_member_policy", "is_workspace_member", "parse_policy", "policy_violations"]
 
 _RELEASE_KEYS = ("pin", "merge", "tag_before_branch_delete")
+
+
+def is_workspace_member(home: PackageHome | None) -> bool:
+    """A workspace member stays in the repository, so it has no history of its own to keep and no pin to declare."""
+    return home is not None and home.kind == "workspace-member"
+
+
+def check_member_policy(home: PackageHome | None, release: ReleasePolicy | None, history: str | None, package: str) -> None:
+    """A workspace member cannot declare release or history policy: the export carries none for it, so it would be lost."""
+    if is_workspace_member(home) and (release is not None or history is not None):
+        raise CatalogError(
+            f"package {package!r} is a workspace member, which has no release or history of its own; "
+            "remove its release/history policy or give it its own repository home"
+        )
 
 
 def _choice(value: object, kinds: tuple[str, ...], name: str, package: str) -> str:
@@ -76,7 +91,7 @@ def _release(raw: object, package: str) -> ReleasePolicy | None:
 
 
 def policy_violations(catalog: CatalogDocument) -> list[Violation]:
-    """One finding per package that declares neither a policy nor ``unmanaged = true``."""
+    """One finding per package that declares neither a policy nor ``unmanaged = true``; workspace members are exempt."""
     return [
         Violation(
             Rule.PACKAGE_RELEASE_POLICY_MISSING, package.id,
@@ -84,4 +99,5 @@ def policy_violations(catalog: CatalogDocument) -> list[Violation]:
         )
         for package in catalog.packages
         if package.release is None and package.history is None and not package.unmanaged
+        and not is_workspace_member(package.home)
     ]

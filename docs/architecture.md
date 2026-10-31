@@ -31,6 +31,14 @@ pool; it still forbids every other effect category under the strict preset.
 Adapters do **not** import `application`. Use cases receive adapters through the ports (`Services` in `engine.py`), and
 only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 
+## Migration: supply the arguments, do not reimplement the tools
+
+Arborescent supplies annotations, the checks that they are complete and consistent, engine contracts compiled from
+them, and a stable export, including the typed arguments a monorepo-to-polyrepo migration needs. An auxiliary driver on top supplies those arguments to a dedicated migration library
+(history extraction, import rewriting) through ports with adapters; it does not migrate, as it drives import-linter and tach. It does not
+reimplement what those tools do. The boundary, the wrapper rules, the tool landscape and the status of the existing
+`packages extract` are in `docs/superpowers/specs/2026-10-31-monorepo-split-annotations-design.md`.
+
 ## Modules
 
 | module | scope | ring |
@@ -48,6 +56,8 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.package_render` | `single` | domain |
 | `arborescent.path_exclusion` | `single` | domain |
 | `arborescent.package_assignment` | `single` | domain |
+| `arborescent.migration_arguments` | `single` | domain |
+| `arborescent.migration_json` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
@@ -68,6 +78,7 @@ only `cli.py` knows both sides. Only `adapters` may branch on the OS.
 | `arborescent.mutation` | `single` | application |
 | `arborescent.package_gaps` | `single` | application |
 | `arborescent.package_probes` | `single` | application |
+| `arborescent.migration_export` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |

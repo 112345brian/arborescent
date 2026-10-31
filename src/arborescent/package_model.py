@@ -37,6 +37,26 @@ class ReleasePolicy:
     tag_before_branch_delete: bool | None = None
 
 
+HOME_KINDS = ("repository", "workspace-member")
+
+
+@dataclass(frozen=True, slots=True)
+class PackageHome:
+    """Where a package lives after the migration: its own repository, or a member of a workspace in the same repository."""
+
+    kind: str  # one of HOME_KINDS
+    repository: str | None = None  # kind "repository": the new repository
+    path: str | None = None  # kind "workspace-member": the member's folder, repository-relative
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleRename:
+    """A dotted-module prefix that changes name in the target (``app.core`` -> ``core``); the longest matching prefix wins."""
+
+    source: str
+    target: str
+
+
 @dataclass(frozen=True, slots=True)
 class PackageDescriptor:
     id: str
@@ -53,6 +73,10 @@ class PackageDescriptor:
     release: ReleasePolicy | None = None
     history: str | None = None
     unmanaged: bool = False  # explicitly outside release, pin and history policy
+    home: PackageHome | None = None  # None: not annotated yet (a gap in the migration export)
+    public: tuple[str, ...] = ()  # dotted module globs other packages may import; empty = no declared surface
+    externals: tuple[str, ...] | None = None  # top-level external import names the package may use; None: not annotated
+    module_renames: tuple[ModuleRename, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

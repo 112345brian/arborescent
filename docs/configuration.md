@@ -293,17 +293,43 @@ package claiming an owned file, a glob contradicting a path owner, a package spa
 packages with no declared dependency. A probe that cannot be built for the catalog is listed with the reason.
 This adds no behaviour to `packages extract`, which is unchanged.
 
+### Migration annotations and export
+
+A package entry can also say where it will live and what it exposes, and `arborescent packages export` publishes all of
+it as one versioned JSON document for external migration tools (it converts nothing and migrates nothing):
+
+```toml
+[[packages]]
+id = "core"
+# ... id, name, kind, repository, root, summary, depends_on, paths as above
+public = ["app.core.api", "app.core.models.*"]   # the public surface (module-name globs)
+externals = ["pydantic"]                          # third-party import names it may use
+[packages.home]                                   # kind = "repository", repository = "org/core"
+kind = "workspace-member"                         # ... or a member of a workspace in the same repository
+path = "packages/core"
+[[packages.module_renames]]                       # module names that change in the target
+from = "app.core"
+to = "core"
+```
+
+All four keys are optional; a missing one is a named gap in the export when it matters (`public` only when another package imports the package), never a guess. See
+[migration-export.md](migration-export.md) for the document, the schema, the gap codes, a `git filter-repo` recipe and the
+comparison with blinkered's `blinkered.toml`.
+
 ### Release, pin and history policy
 
 Some inputs to a split cannot be derived from the code: how dependents pin a package, whether its history is kept, which
 merge style keeps pinned SHAs reachable. They are decisions, so a package entry in `packages.toml` records them.
-Arborescent stores and validates them; it releases, tags, pins and rewrites nothing. The tools that do receive these
-values as arguments.
+Arborescent stores and validates them and carries them in the `policy` field of the migration export; it releases, tags,
+pins and rewrites nothing. The tools that do receive these values as arguments.
 
 ```toml
 [[packages]]
 id = "core"
 # ... name, kind, repository, root, summary, paths as above
+[packages.home]
+kind = "repository"
+repository = "org/core"
 history = "preserve"               # "preserve" or "fresh": keep the package's history, or start a new one
 [packages.release]
 pin = "tag"                        # "tag" or "sha": how dependents pin this package
@@ -317,11 +343,21 @@ unmanaged = true                   # explicitly outside release, pin and history
 ```
 
 Every field is optional. Values are checked when the catalog is read: a value outside the lists above, a wrong type, an
-unknown key under `[packages.release]`, or `unmanaged = true` together with a policy is an error naming the package
-(a hard error like any other malformed catalog, not a baselinable finding). `unmanaged` can only be `true`; omit it to
-declare a policy. A package that declares neither a policy (`history` or a `[packages.release]` table, even an empty
-one) nor `unmanaged = true` is a named gap, reported as `package-release-policy-missing`; it fails the check like the
-other assignment gaps and can be baselined. `selftest` probes it by adding a package with no policy.
+unknown key under `[packages.release]`, `unmanaged = true` together with a policy, or a policy on a workspace member is an
+error naming the package (a hard error like any other malformed catalog, not a baselinable finding). Any key a
+`[[packages]]` entry does not know is rejected the same way, so a typo such as `histroy` cannot pass silently. `unmanaged`
+can only be `true`; omit it to declare a policy.
+
+A package that declares neither a policy (`history` or a `[packages.release]` table, even an empty one) nor
+`unmanaged = true` is a named gap, reported as `package-release-policy-missing`; it fails the check like the other
+assignment gaps, can be baselined, and appears in the export's `gaps`. A workspace member is exempt: it stays in the
+repository, so it has no history or pin of its own, and its exported `policy` is always `null`. `selftest` probes the
+rule by adding a package with no policy.
+
+In the export, `policy` is `null` when nothing is declared, and otherwise
+`{ history, release: { pin, merge, tag_before_branch_delete } | null, unmanaged }`, with `null` for each field that is
+not set. An unmanaged package exports `{ history: null, release: null, unmanaged: true }`.
+
 
 ## Module ring annotations: `__arbor__`
 

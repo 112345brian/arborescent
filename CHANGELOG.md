@@ -11,12 +11,21 @@
   `package-unowned-asset`, `package-multiply-assigned-asset` and `package-undeclared-dependency` fail the check;
   `package-spans-rings` is information (a `NOTE` line, never failing, never baselined). Assets are claimed by package
   `paths` or ordered `[[assets]]` globs, first match wins. `selftest` probes each rule when the key is set (#52).
+- `arborescent packages export`: one read-only, versioned JSON export of the migration arguments of every package
+  (identity and `home`, owned modules and assets with target paths and target module names, public surface and bypassing
+  modules, declared dependencies, open annotation gaps as named entries) with a published JSON Schema
+  (`docs/schemas/migration-export-v1.schema.json`, `arborescent packages schema`). New optional catalog keys: `home`,
+  `public`, `externals`, `module_renames`. `release`/`pin`/`history` (#56) and `pyproject` (#60) are reserved slots. No
+  tool-specific emitter ships; `docs/migration-export.md` has a `git filter-repo` recipe and the comparison with
+  blinkered's `blinkered.toml` (#54).
 
 - Per-package release, pin and history policy in `packages.toml`: `release.pin` (`tag` or `sha`), `release.merge`
   (`merge-commit` only), `release.tag_before_branch_delete`, `history` (`preserve` or `fresh`) and an explicit
   `unmanaged = true`. Values are validated and unknown `release` keys rejected. New rule
-  `package-release-policy-missing` names a package with neither a policy nor the marker; `selftest` probes it. Data and
-  checks only: nothing is released, pinned or rewritten (#56).
+  `package-release-policy-missing` names a package with neither a policy nor the marker (workspace members are exempt
+  and cannot declare one); `selftest` probes it. The policy fills the `policy` slot of the migration export and the gap
+  appears in its `gaps`. Any unknown key on a `[[packages]]` entry is now rejected. Data and checks only: nothing is
+  released, pinned or rewritten (#56).
 
 ### Changed
 

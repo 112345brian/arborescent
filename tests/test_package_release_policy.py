@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
@@ -13,8 +14,8 @@ from arborescent.adapters import FsScanner, LocalFileSystem
 from arborescent.domain import Rule
 from arborescent.engine import Options, run_check, run_own
 from arborescent.package_gaps import load_package_context
-from arborescent.package_model import CatalogError, ReleasePolicy
-from arborescent.package_parse import parse_catalog
+from arborescent.package_model import CatalogError, PackageDescriptor, ReleasePolicy
+from arborescent.package_parse import PACKAGE_KEYS, parse_catalog
 from arborescent.selftest import plan, selftest
 
 FS = LocalFileSystem()
@@ -197,3 +198,54 @@ def test_selftest_survives_when_the_policy_check_is_removed(tmp_path: Path, monk
     )
     report = selftest(policy_with_catalog(), tmp_path, services())
     assert any(entry.startswith(f"[{Rule.PACKAGE_RELEASE_POLICY_MISSING}]") for entry in report.survived)
+
+
+# ---- the whole-entry key check and workspace members (with #54's `home`) ------------------------------------
+
+
+def test_the_allowed_package_keys_are_exactly_the_descriptor_fields() -> None:
+    """A new descriptor field must be accepted by the catalog, and no key may be accepted without a field."""
+    assert set(PACKAGE_KEYS) == {field.name for field in fields(PackageDescriptor)}
+
+
+@pytest.mark.parametrize("key", ["histroy", "releases", "owner"])
+def test_an_unknown_package_key_is_rejected_and_named(key: str) -> None:
+    with pytest.raises(CatalogError, match=f"unknown key.*'{key}'"):
+        parsed(f'{key} = "x"\n')
+
+
+def test_every_known_package_key_is_still_accepted() -> None:
+    package = parsed(
+        'domain = "d"\ncapabilities = ["c"]\ndepends_on = []\nextraction_status = "in-repository"\npublic = ["app.*"]\n'
+        'externals = []\nunmanaged = true\n[packages.home]\nkind = "repository"\nrepository = "org/core"\n'
+    )
+    assert package.home is not None and package.unmanaged
+
+
+MEMBER = '[packages.home]\nkind = "workspace-member"\npath = "packages/core"\n'
+
+
+def test_a_workspace_member_cannot_declare_release_or_history() -> None:
+    with pytest.raises(CatalogError, match="workspace member"):
+        parsed('history = "preserve"\n' + MEMBER)
+    with pytest.raises(CatalogError, match="workspace member"):
+        parsed('[packages.release]\npin = "tag"\n' + MEMBER)
+
+
+def test_a_workspace_member_may_be_marked_unmanaged_or_carry_no_policy() -> None:
+    assert parsed("unmanaged = true\n" + MEMBER).unmanaged
+    assert parsed(MEMBER).release is None
+
+
+def test_a_repository_home_may_carry_a_policy() -> None:
+    package = parsed('history = "fresh"\n[packages.home]\nkind = "repository"\nrepository = "org/core"\n')
+    assert package.history == "fresh"
+
+
+def test_the_gap_check_exempts_workspace_members_only(tmp_path: Path) -> None:
+    member = f'[[packages]]\n{HEAD}{MEMBER}[[packages.paths]]\npath = "app"\nrole = "source"\n'
+    repo(tmp_path, member)
+    assert gaps(tmp_path) == []
+    own = member.replace(MEMBER, '[packages.home]\nkind = "repository"\nrepository = "org/core"\n')
+    repo(tmp_path, own)
+    assert gaps(tmp_path) == ["core"]

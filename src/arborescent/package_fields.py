@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Any
 
-from .package_model import CatalogError
+from .package_model import CatalogError, PackageDescriptor, PackagePath
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
@@ -88,3 +88,17 @@ def _match(pattern: tuple[str, ...], parts: tuple[str, ...]) -> bool:
             return bool(parts)
         return any(_match(rest, parts[skip:]) for skip in range(len(parts) + 1))
     return bool(parts) and fnmatch.fnmatchcase(parts[0], head) and _match(rest, parts[1:])
+
+
+def extraction_target(package: PackageDescriptor, item: PackagePath) -> PurePosixPath:
+    """Where an owned path lands inside an extracted tree (``destination``, else its place below the package root)."""
+    if item.destination is not None:
+        return relative_path(item.destination, f"package {package.id} destination")
+    root = PurePosixPath(package.root)
+    source = PurePosixPath(item.path)
+    if not within(source, root):
+        raise CatalogError(
+            f"package {package.id} path {item.path!r} is outside root {package.root!r}; set destination"
+        )
+    parts = source.parts[len(root.parts) :]
+    return PurePosixPath(*parts) if parts else PurePosixPath()
