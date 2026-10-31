@@ -55,6 +55,8 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 | `arborescent.package_render` | `single` | domain |
 | `arborescent.path_exclusion` | `single` | domain |
 | `arborescent.package_assignment` | `single` | domain |
+| `arborescent.migration_arguments` | `single` | domain |
+| `arborescent.migration_json` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
@@ -75,6 +77,7 @@ reimplement what those tools do. The boundary, the wrapper rules, the tool lands
 | `arborescent.mutation` | `single` | application |
 | `arborescent.package_gaps` | `single` | application |
 | `arborescent.package_probes` | `single` | application |
+| `arborescent.migration_export` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |

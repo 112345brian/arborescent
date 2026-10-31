@@ -32,7 +32,7 @@ basedpyright = ["basedpyright>=1.30"]
 ty = ["ty>=0.0.50"]
 pyrefly = ["pyrefly>=0.40"]
 all = ["import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "ty>=0.0.50"]
-dev = ["pytest>=8", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "build"]
+dev = ["pytest>=8", "jsonschema>=4", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "build"]
 
 [project.urls]
 Homepage = "https://github.com/112345brian/arborescent"
@@ -102,6 +102,8 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.package_render" = "domain"
 "arborescent.path_exclusion" = "domain"
 "arborescent.package_assignment" = "domain"
+"arborescent.migration_arguments" = "domain"
+"arborescent.migration_json" = "domain"
 "arborescent.ports" = "ports"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
@@ -122,6 +124,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.mutation" = "application"
 "arborescent.package_gaps" = "application"
 "arborescent.package_probes" = "application"
+"arborescent.migration_export" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
