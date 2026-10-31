@@ -64,6 +64,10 @@ class RuleContext:
         policy = self.policy_for(name)
         return policy.annotation_ring_mismatch(self.arbor_index, name) if policy is not None else None
 
+    def annotation_required_violation(self, name: str) -> str | None:
+        policy = self.policy_for(name)
+        return policy.annotation_required_violation(self.arbor_index, name) if policy is not None else None
+
 
 def _internal_imports(
     context: RuleContext, name: str, ring: str, line: int, targets: Collection[str],
@@ -267,6 +271,9 @@ def check_modules(
         if ring is None:
             out.append(Violation(Rule.UNCLASSIFIED, name, "module matches no [classify] pattern; every module needs a ring"))
             continue
+        required = context.annotation_required_violation(name)
+        if required is not None:
+            out.append(Violation(Rule.UNANNOTATED_MODULE, name, required))
         if local_policy is None:
             continue
         rule = local_policy.ring(ring)

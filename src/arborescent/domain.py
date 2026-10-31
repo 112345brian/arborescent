@@ -70,6 +70,7 @@ class Rule(StrEnum):
     UNDECLARED_IMPORTS = "undeclared-imports"
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
+    UNANNOTATED_MODULE = "unannotated-module"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {
@@ -190,6 +191,8 @@ class Policy:
     disabled_tools: tuple[str, ...] = ()
     scopes: tuple[ArchitectureScope, ...] = ()
     children: tuple[ChildArbor, ...] = ()
+    require_arbor_annotations: bool = False
+    require_arbor_annotations_exclude: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_rings(self.rings, self.classify, bool(self.scopes))
@@ -197,6 +200,10 @@ class Policy:
             if not pattern or not targets:
                 raise PolicyError("`module_forbid_imports` needs non-empty module patterns and target lists")
         _validate_disabled_tools(self.disabled_tools)
+        if self.require_arbor_annotations and "arbor-annotations" in self.disabled_tools:
+            raise PolicyError(
+                "`require_arbor_annotations` cannot be combined with `disabled_tools = [\"arbor-annotations\"]`"
+            )
         _validate_child_arbors(self.children)
         if self.child_policy_mode not in {"certify", "parent"}:
             raise PolicyError("`child_policy_mode` must be 'certify' or 'parent'")
@@ -244,6 +251,12 @@ class Policy:
         """Validate a module annotation against only its owning scope's rings."""
         return self.scope(scope_name).policy.annotation_violation(arbor_index, module)
 
+    def scope_annotation_required_violation(
+        self, scope_name: str, arbor_index: Mapping[str, tuple[str | None, str | None]], module: str,
+    ) -> str | None:
+        """Validate `require_arbor_annotations` against only its owning scope's policy."""
+        return self.scope(scope_name).policy.annotation_required_violation(arbor_index, module)
+
     def ring_of(self, module: str) -> str | None:
         for pattern, ring in self.classify:
             if fnmatch.fnmatchcase(module, pattern):
@@ -288,6 +301,28 @@ class Policy:
         if classify_ring is not None and classify_ring != ring:
             return f"__arbor__ names ring {ring!r}, but `classify` would assign {classify_ring!r}"
         return None
+
+    def _has_valid_annotation(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> bool:
+        if "arbor-annotations" in self.disabled_tools:
+            return False
+        annotation = arbor_index.get(name)
+        if annotation is None:
+            return False
+        ring, violation = annotation
+        return violation is None and ring is not None and any(rule.name == ring for rule in self.rings)
+
+    def annotation_required_violation(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
+        """Return why a module needs, but lacks, a valid `__arbor__` annotation, under `require_arbor_annotations`."""
+        if not self.require_arbor_annotations:
+            return None
+        if any(fnmatch.fnmatchcase(name, pattern) for pattern in self.require_arbor_annotations_exclude):
+            return None
+        if self._has_valid_annotation(arbor_index, name):
+            return None
+        ring = self.ring_of(name)
+        if ring is None:
+            return None  # unclassified's job, not this rule's
+        return f"module has no __arbor__ annotation; `classify` assigns {ring!r} only as a legacy fallback"
 
     def forbidden_imports(self, module: str) -> frozenset[str]:
         """Module-specific internal import restrictions, additive across matching globs."""

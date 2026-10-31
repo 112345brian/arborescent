@@ -442,3 +442,63 @@ def test_public_import_of_an_effect_the_importing_ring_allows_is_not_flagged(tmp
     found = _scope_findings(_scope_boundary_policy(alpha_depends=["beta"]), tmp_path)
 
     assert not [item for item in found if item.rule == Rule.SCOPE_EFFECT_LEAK]
+
+
+# --- require_arbor_annotations: an unannotated classify-only module is a hard failure when opted in ------------
+
+
+def test_require_arbor_annotations_off_by_default_does_not_flag_classify_only_modules(repo: Path) -> None:
+    found = run(repo)
+    assert not [item for item in found if item.rule == Rule.UNANNOTATED_MODULE]
+
+
+def test_require_arbor_annotations_flags_every_classify_only_module(repo: Path) -> None:
+    found = run(repo, require_arbor_annotations=True)
+    assert sorted(item.subject for item in found if item.rule == Rule.UNANNOTATED_MODULE) == [
+        "app", "app.adapters", "app.domain", "app.main", "app.ports",
+    ]
+
+
+def test_require_arbor_annotations_accepts_a_valid_annotation(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"ring": "domain"}\n\nVALUE: int = 1\n'})
+    found = run(repo, require_arbor_annotations=True)
+    assert "app.domain" not in [item.subject for item in found if item.rule == Rule.UNANNOTATED_MODULE]
+
+
+def test_require_arbor_annotations_still_fires_for_an_invalid_annotation(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"bogus": 1}\n\nVALUE: int = 1\n'})
+    found = run(repo, require_arbor_annotations=True)
+    assert [v.rule for v in found if v.subject == "app.domain"] == [Rule.INVALID_ARBOR_ANNOTATION, Rule.UNANNOTATED_MODULE]
+
+
+def test_require_arbor_annotations_exclude_list_exempts_matching_modules(repo: Path) -> None:
+    found = run(repo, require_arbor_annotations=True, require_arbor_annotations_exclude=["app.domain"])
+    subjects = [item.subject for item in found if item.rule == Rule.UNANNOTATED_MODULE]
+    assert "app.domain" not in subjects
+    assert "app.ports" in subjects
+
+
+def test_require_arbor_annotations_is_scope_local(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/core.py": "VALUE = 1\n",
+        "libs/beta/src/api.py": "VALUE = 1\n",
+    })
+    policy = policy_from_mapping({
+        "scopes": {
+            "alpha": {
+                "sources": ["libs/alpha/src"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "classify": {"core": "domain"},
+                "require_arbor_annotations": True,
+            },
+            "beta": {
+                "sources": ["libs/beta/src"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain"], "classify": {"api": "domain"},
+            },
+        },
+    })
+
+    found = _scope_findings(policy, tmp_path)
+
+    assert [(item.rule, item.subject) for item in found if item.rule == Rule.UNANNOTATED_MODULE] == [
+        (Rule.UNANNOTATED_MODULE, "core"),
+    ]
