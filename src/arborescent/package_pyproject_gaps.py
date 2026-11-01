@@ -41,10 +41,11 @@ def derived_projects(
             continue
         rule = (policy.scope(scope).policy if scope is not None else policy).ring(ring)
         externals[module] = frozenset() if ALL in rule.external else rule.external
-    return derive_projects(
+    projects = derive_projects(
         catalog,
         ProjectFacts(owned, facts.modules, externals, distributions, [root for local in (policy, *(s.policy for s in policy.scopes)) for root in local.source_roots], policy.python),
     )
+    return tuple(project for project in projects if project.package is None or not project.package.vendored)
 
 
 def existing_derived_paths(fs: FileSystem, root: Path, projects: tuple[DerivedProject, ...]) -> tuple[str, ...]:

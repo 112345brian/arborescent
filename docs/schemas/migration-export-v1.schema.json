@@ -477,6 +477,10 @@
               "public"
             ],
             "type": "object"
+          },
+          "vendored": {
+            "description": "a read-only copy of code maintained elsewhere: do not extract, rewrite imports in, or release it; its policy is null",
+            "type": "boolean"
           }
         },
         "required": [
@@ -491,7 +495,8 @@
           "policy",
           "pyproject",
           "summary",
-          "surface"
+          "surface",
+          "vendored"
         ],
         "type": "object"
       },

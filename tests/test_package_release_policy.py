@@ -249,3 +249,31 @@ def test_the_gap_check_exempts_workspace_members_only(tmp_path: Path) -> None:
     own = member.replace(MEMBER, '[packages.home]\nkind = "repository"\nrepository = "https://github.com/org/core.git"\n')
     repo(tmp_path, own)
     assert gaps(tmp_path) == ["core"]
+
+
+# ---- vendored (#59) ------------------------------------------------------------------------------------------
+
+
+def test_vendored_is_an_explicit_read_only_marker() -> None:
+    assert parsed("vendored = true\n").vendored
+    assert not parsed().vendored
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        ('vendored = "yes"\n', "vendored must be true"),
+        ("vendored = false\n", "vendored must be true"),
+        ('vendored = true\nhistory = "preserve"\n', "vendored"),
+        ("vendored = true\nunmanaged = true\n", "vendored"),
+        ('vendored = true\n[packages.release]\npin = "tag"\n', "vendored"),
+    ],
+)
+def test_vendored_is_rejected_when_malformed_or_combined_with_a_policy(extra: str, message: str) -> None:
+    with pytest.raises(CatalogError, match=message):
+        parsed(extra)
+
+
+def test_a_vendored_package_needs_no_release_policy(tmp_path: Path) -> None:
+    repo(tmp_path, f'[[packages]]\n{HEAD}vendored = true\n[[packages.paths]]\npath = "app"\nrole = "source"\n')
+    assert gaps(tmp_path) == []
