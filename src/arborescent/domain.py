@@ -151,7 +151,16 @@ class Violation:
 
     def render(self) -> str:
         where = f"{self.subject}:{self.line}" if self.line else self.subject
-        return f"{where}: [{self.rule}] {self.detail}"
+        hint = _RENDER_HINTS.get(self.rule, "")
+        return f"{where}: [{self.rule}] {self.detail}{hint}"
+
+
+_RENDER_HINTS = {
+    Rule.VENDOR_FOLDER: (
+        " (folder excluded from the scan; to govern it list it under `vendor_roots` or set `scan_vendors = true`,"
+        " otherwise first-party imports of it are reported as external)"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -205,6 +214,7 @@ class Policy:
     source_roots: tuple[str, ...] = (".",)
     exclude: tuple[str, ...] = ()
     scan_vendors: bool = False
+    scan_vendor_paths: tuple[str, ...] = ()  # vendor_roots: scanned even when scan_vendors is off
     child_policy_mode: str = "certify"  # "certify" keeps child-owned policy; "parent" overrides it
     module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
