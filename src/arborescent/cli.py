@@ -126,6 +126,11 @@ def _parser() -> argparse.ArgumentParser:
         help="fail unless `modularity` is \"ready\" with a package_catalog and no package gap is open",
     )
     c.add_argument(
+        "--require-visible",
+        action="store_true",
+        help="fail on every run-time import (importlib, __import__) that tach cannot follow",
+    )
+    c.add_argument(
         "--no-baseline",
         action="store_true",
         help="ignore the baseline: report every violation",
@@ -455,6 +460,7 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         use_baseline=not args.no_baseline,
         require_profile=args.require_profile,
         require_modularity=args.require_modularity,
+        require_visible=args.require_visible,
         growth_against=args.growth_against,
         no_cache=args.no_cache,
     )

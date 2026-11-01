@@ -88,6 +88,7 @@ class Rule(StrEnum):
     PACKAGE_DEPENDENCY_CYCLE = "package-dependency-cycle"
     PACKAGE_UNUSED_DEPENDENCY = "package-unused-dependency"
     PACKAGE_OWNS_EVERYTHING = "package-owns-everything"
+    TACH_INVISIBLE_IMPORT = "tach-invisible-import"
     # annotation preservation (`package_parts`): a split part keeps the catalog's annotations and public contracts
     PACKAGE_SEMANTICS_DRIFT = "package-semantics-drift"
     PACKAGE_MEMBERSHIP_DRIFT = "package-membership-drift"
@@ -114,6 +115,7 @@ EFFECT_RULES: Mapping[str, Rule] = {
 # A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING,
+    Rule.TACH_INVISIBLE_IMPORT,
 })
 
 

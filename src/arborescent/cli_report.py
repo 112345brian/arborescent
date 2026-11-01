@@ -67,6 +67,8 @@ def _print_hints(report: CheckReport) -> None:
 
 
 def _print_modularity(report: CheckReport) -> None:
+    for failure in report.visibility_failures:
+        print(f"VISIBILITY FAIL {failure}")
     for failure in report.modularity_failures:
         print(f"MODULARITY FAIL {failure}")
     if report.modularity_certified and report.ok:

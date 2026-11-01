@@ -121,6 +121,10 @@ path = "src/arborescent/selftest.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/tach_visibility.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/stdlib.py"
 role = "source"
 

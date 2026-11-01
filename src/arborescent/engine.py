@@ -39,6 +39,7 @@ from .ports import (
 from .practices import run_practices
 from .rules import RuleContext, check_modules
 from .suggestions import Suggestion, file_size_suggestions
+from .tach_visibility import invisible_import_violations
 
 if TYPE_CHECKING:
     from .facts import ModuleInfo
@@ -65,6 +66,7 @@ class Options:
     require_tools: bool = False  # a missing engine is a failure, not a skip
     use_baseline: bool = True
     require_profile: bool = False
+    require_visible: bool = False  # fail on every dependency tach cannot see (run-time imports) instead of only noting it
     require_modularity: bool = False  # fail unless the policy keeps `modularity = "ready"` and no package gap is open
     growth_against: str | None = None
     no_cache: bool = False
@@ -95,6 +97,7 @@ class CheckReport:
     profile: str | None = None
     profile_failures: tuple[str, ...] = ()
     modularity_failures: tuple[str, ...] = ()
+    visibility_failures: tuple[str, ...] = ()
     modularity_certified: bool = False
     partial: bool = False
     seconds: float = 0.0
@@ -103,7 +106,7 @@ class CheckReport:
     @property
     def ok(self) -> bool:
         engines_ok = all(e.status != "fail" for e in self.engines)
-        return engines_ok and not self.profile_failures and not self.modularity_failures and (self.ratchet is None or self.ratchet.ok)
+        return engines_ok and not self.profile_failures and not self.modularity_failures and not self.visibility_failures and (self.ratchet is None or self.ratchet.ok)
 
     @property
     def configured_ok(self) -> bool:
@@ -144,6 +147,8 @@ def run_own(
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
     found += _inventory_violations(scan.modules)
+    if "tach" not in policy.disabled_tools:
+        found += invisible_import_violations(scan.modules.values())
     if practices and only is None:
         found += run_practices(policy, root, services.runner, services.fs, scan)
     if only is None:  # ownership is a whole-repository fact; the selftest needs it whether or not practices run
@@ -172,13 +177,19 @@ def enforced(policy: Policy, found: Iterable[Violation]) -> tuple[list[Violation
 
 
 def _apply_modularity(policy: Policy, report: CheckReport, found: Sequence[Violation], opts: Options, complete: bool) -> list[Violation]:
-    """The enforced findings. Records the demoted gaps as notes and, for ``--require-modularity``, the certificate result."""
+    """The enforced findings. Records the demoted gaps as notes, the ``--require-modularity`` certificate and the ``--require-visible`` failures."""
     kept, demoted = enforced(policy, found)
     report.notes += demoted
+    report.visibility_failures = _visibility_failures(found) if opts.require_visible else ()
     if opts.require_modularity:
         report.modularity_failures = _modularity_failures(policy, [v for v in blocking(found) if _is_package_gap(v)], complete)
         report.modularity_certified = not report.modularity_failures
     return kept
+
+
+def _visibility_failures(found: Sequence[Violation]) -> tuple[str, ...]:
+    """Why a clean tach run cannot be taken at face value; empty when every dependency is one tach can see."""
+    return tuple(f"tach cannot see: {v.render()}" for v in found if v.rule == Rule.TACH_INVISIBLE_IMPORT)
 
 
 def _modularity_failures(policy: Policy, gaps: Sequence[Violation], complete: bool) -> tuple[str, ...]:
@@ -331,6 +342,7 @@ def _child_arbor_command(config_path: Path, opts: Options) -> list[str]:
         (opts.require_tools, "--require-tools"),
         (opts.require_profile, "--require-profile"),
         (opts.require_modularity, "--require-modularity"),
+        (opts.require_visible, "--require-visible"),
         (not opts.use_baseline, "--no-baseline"),
         (opts.no_cache, "--no-cache"),
     )
