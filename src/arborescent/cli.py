@@ -24,7 +24,7 @@ from .engine import (
     EngineRun,
     Options,
     Services,
-    blocking,
+    enforced,
     pick_checker,
     run_check,
     run_engine,
@@ -318,7 +318,7 @@ def _baseline(
     args: argparse.Namespace, policy: Policy, root: Path, svc: Services
 ) -> int:
     found, _ = run_own(policy, root, svc)
-    found = blocking(found)
+    found, _ = enforced(policy, found)
     engine_names = {item.name for item in (*svc.engines, *svc.checkers)}
     if args.adopt in engine_names:
         found += run_engine(svc, args.adopt, root).violations

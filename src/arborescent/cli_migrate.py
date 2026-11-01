@@ -116,7 +116,7 @@ def _write_manifest(args: argparse.Namespace, policy: Policy, root: Path, svc: S
     """``extract`` only: record what the library extracted, in Arborescent's own manifest, and read it back."""
     context = load_package_context(policy, root, svc.fs, svc.scanner.scan(policy, root))
     if context is None:
-        raise PolicyError("packages extract needs package_catalog in the policy (strict preset)")
+        raise PolicyError("packages extract needs package_catalog in the policy")
     try:
         write_extracted_manifest(svc.fs, context.catalog, args.package_id, site.target, args.repository)
     except CatalogError as exc:

@@ -43,7 +43,7 @@ from .suggestions import Suggestion, file_size_suggestions
 if TYPE_CHECKING:
     from .facts import ModuleInfo
 
-__all__ = ["CheckReport", "EngineRun", "Options", "Services", "blocking", "changed_files", "contract_renderers", "drift", "package_checks", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
+__all__ = ["CheckReport", "EngineRun", "Options", "Services", "blocking", "changed_files", "contract_renderers", "drift", "enforced", "package_checks", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
 
 
 @dataclass(frozen=True)
@@ -162,17 +162,23 @@ def _is_package_gap(violation: Violation) -> bool:
     return str(violation.rule).startswith("package-")
 
 
-def _apply_modularity(policy: Policy, report: CheckReport, found: Sequence[Violation], opts: Options, complete: bool) -> list[Violation]:
-    """The blocking findings after the ``modularity`` mode: ``report`` moves package gaps to the notes (shown, never failing;
-    ``run_own``'s list is untouched, so the selftest still probes the rules). Also records ``--require-modularity``."""
-    gaps = [v for v in blocking(found) if _is_package_gap(v)]
-    if opts.require_modularity:
-        report.modularity_failures = _modularity_failures(policy, gaps, complete)
-        report.modularity_certified = not report.modularity_failures
+def enforced(policy: Policy, found: Iterable[Violation]) -> tuple[list[Violation], list[Violation]]:
+    """``(kept, demoted)``: the blocking findings, with package gaps moved to ``demoted`` under ``modularity = "report"``.
+    Everything that records or compares the baseline must use ``kept``, or a baseline written under ``report`` goes stale."""
+    kept = blocking(found)
     if policy.modularity != "report":
-        return blocking(found)
-    report.notes += gaps
-    return [v for v in blocking(found) if not _is_package_gap(v)]
+        return kept, []
+    return [v for v in kept if not _is_package_gap(v)], [v for v in kept if _is_package_gap(v)]
+
+
+def _apply_modularity(policy: Policy, report: CheckReport, found: Sequence[Violation], opts: Options, complete: bool) -> list[Violation]:
+    """The enforced findings. Records the demoted gaps as notes and, for ``--require-modularity``, the certificate result."""
+    kept, demoted = enforced(policy, found)
+    report.notes += demoted
+    if opts.require_modularity:
+        report.modularity_failures = _modularity_failures(policy, [v for v in blocking(found) if _is_package_gap(v)], complete)
+        report.modularity_certified = not report.modularity_failures
+    return kept
 
 
 def _modularity_failures(policy: Policy, gaps: Sequence[Violation], complete: bool) -> tuple[str, ...]:

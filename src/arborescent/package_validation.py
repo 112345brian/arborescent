@@ -18,7 +18,7 @@ def validate_catalog(fs: FileSystem, root: Path, packages: Sequence[PackageDescr
     owners: list[tuple[PurePosixPath, str]] = []
     for package in packages:
         _validate_package(fs, root, package, by_id, owners)
-    validate_dependencies(by_id, packages)
+    _validate_dependencies(packages)
 
 
 def _validate_package(
@@ -114,9 +114,7 @@ def _validate_owned_path(
         extraction_target(package, item)
 
 
-def validate_dependencies(
-    by_id: Mapping[str, PackageDescriptor], packages: Sequence[PackageDescriptor]
-) -> None:
+def _validate_dependencies(packages: Sequence[PackageDescriptor]) -> None:
     cycle = dependency_cycle({package.id: package.depends_on for package in packages})
     if cycle is not None:
         raise CatalogError(f"package dependency cycle includes {cycle}")

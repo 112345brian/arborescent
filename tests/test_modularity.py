@@ -8,6 +8,7 @@ import pytest
 from arborescent_helpers import mini_policy, services
 from test_package_gaps import repo
 
+from arborescent.cli import main
 from arborescent.domain import PolicyError, Rule
 from arborescent.engine import Options, _child_arbor_command, run_check, run_own  # pyright: ignore[reportPrivateUsage]
 
@@ -128,3 +129,15 @@ def test_a_repository_with_one_all_owning_package_is_noted_and_still_certified(t
     report = run_check(policy(), tmp_path, services(), REQUIRE)
     assert report.modularity_failures == ()
     assert report.ok
+
+
+def test_a_baseline_written_under_report_mode_does_not_go_stale(tmp_path: Path) -> None:
+    """Found by review: `baseline` recorded the demoted gap, so the next `check` reported it STALE (and rerunning loops)."""
+    repo(tmp_path, {"app/static/site.css": "p {}\n"})
+    (tmp_path / "arborescent.toml").write_text(
+        'package_catalog = "packages.toml"\nmodularity = "report"\nsources = ["app"]\nsource_roots = ["."]\nrings = ["domain"]\n'
+        '[ring.domain]\nexternal = ["*"]\n[classify]\n"app*" = "domain"\n', encoding="utf-8")
+    config = str(tmp_path / "arborescent.toml")
+    assert main(["--config", config, "baseline"]) == 0
+    assert "package-unowned-asset" not in (tmp_path / "arborescent-baseline.json").read_text(encoding="utf-8")
+    assert main(["--config", config, "check", "--no-tools"]) == 0

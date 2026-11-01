@@ -36,7 +36,7 @@ def _print_excluded(report: CheckReport) -> None:
 def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: str | None = None) -> None:
     for failure in report.profile_failures:
         print(f"PROFILE FAIL {failure}")
-    _print_certification_failures(report)
+    _print_modularity(report)
     _print_consistency(report)
     if report.profile is not None and report.ok:
         print(f"CERTIFIED meets Arborescent minimum profile {report.profile} (Ruff 0.17.2, Tach 0.35.3)")
@@ -66,7 +66,7 @@ def _print_hints(report: CheckReport) -> None:
         print(f"NOTE   {note.render()}")
 
 
-def _print_certification_failures(report: CheckReport) -> None:
+def _print_modularity(report: CheckReport) -> None:
     for failure in report.modularity_failures:
         print(f"MODULARITY FAIL {failure}")
     if report.modularity_certified and report.ok:
