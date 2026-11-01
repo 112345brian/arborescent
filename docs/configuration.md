@@ -426,6 +426,11 @@ tag_before_branch_delete = true    # true or false: tag the release before its b
 id = "scratch"
 # ...
 unmanaged = true                   # explicitly outside release, pin and history policy
+
+[[packages]]
+id = "text-claims"
+# ...
+vendored = true                    # a read-only copy of code maintained elsewhere
 ```
 
 Every field is optional. Values are checked when the catalog is read: a value outside the lists above, a wrong type, an
@@ -433,6 +438,12 @@ unknown key under `[packages.release]`, `unmanaged = true` together with a polic
 error naming the package (a hard error like any other malformed catalog, not a baselinable finding). Any key a
 `[[packages]]` entry does not know is rejected the same way, so a typo such as `histroy` cannot pass silently. `unmanaged`
 can only be `true`; omit it to declare a policy.
+
+`vendored = true` marks a package whose code is a read-only copy maintained elsewhere (for example under a `vendor_roots`
+folder). It is never edited here, so it declares no release, history or `unmanaged` policy (a catalog error if it does),
+is exempt from `package-release-policy-missing`, and gets no derived `pyproject.toml`. Ownership, `depends_on` and the
+public-surface checks still apply, since other packages must import it correctly. The export carries `vendored: true`, a
+`null` `policy` and no derived `pyproject`, so migration tools leave it alone.
 
 A package that declares neither a policy (`history` or a `[packages.release]` table, even an empty one) nor
 `unmanaged = true` is a named gap, reported as `package-release-policy-missing`; it fails the check like the other

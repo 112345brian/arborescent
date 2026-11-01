@@ -89,6 +89,7 @@ class PackageDescriptor:
     release: ReleasePolicy | None = None
     history: str | None = None
     unmanaged: bool = False  # explicitly outside release, pin and history policy
+    vendored: bool = False  # a read-only copy of code maintained elsewhere: never edited here, so no owner-side policy
     home: PackageHome | None = None  # None: not annotated yet (a gap in the migration export)
     externals: tuple[str, ...] | None = None  # top-level external import names the package may use; None: not annotated
     module_renames: tuple[ModuleRename, ...] = ()

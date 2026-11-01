@@ -134,7 +134,7 @@ def test_the_schema_rejects_malformed_documents(mutate: Any) -> None:
 
 def test_the_export_carries_every_field_a_migration_tool_is_given() -> None:
     core = next(p for p in document()["packages"] if p["id"] == "core")
-    assert set(core) == {"id", "name", "kind", "summary", "domain", "capabilities", "home", "owned", "surface", "dependencies", "policy", "pyproject"}
+    assert set(core) == {"id", "name", "kind", "summary", "domain", "capabilities", "home", "owned", "surface", "dependencies", "vendored", "policy", "pyproject"}
     assert set(core["owned"]) == {"modules", "assets", "path_renames", "module_renames"}
     assert core["owned"]["modules"][0] == {"module": "app.core.api", "path": "src/app/core/api.py", "target_path": "api.py", "target_module": "core.api"}
     assert core["surface"] == {"public": ["app.core.api"], "bypasses": [{"module": "app.web.routes", "package": "web", "imports": "app.core.internal"}]}
@@ -287,3 +287,19 @@ def test_the_export_requires_the_package_catalog_key(tmp_path: Path) -> None:
 def test_the_schema_command_prints_the_published_schema(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["packages", "schema"]) == 0
     assert capsys.readouterr().out == render_schema()
+
+
+def test_a_vendored_package_exports_the_marker_and_no_policy() -> None:
+    data = document(CATALOG.replace('history = "preserve"\n[packages.release]\npin = "tag"\nmerge = "merge-commit"\ntag_before_branch_delete = true\n', "vendored = true\n"))
+    VALIDATOR.validate(data)
+    core = next(p for p in data["packages"] if p["id"] == "core")
+    assert core["vendored"] is True and core["policy"] is None
+    assert not [g for g in data["gaps"] if g["code"] == "package-release-policy-missing"]
+    assert all(p["vendored"] is False for p in data["packages"] if p["id"] != "core")
+
+
+def test_the_schema_requires_the_vendored_flag() -> None:
+    data = document()
+    del data["packages"][0]["vendored"]
+    with pytest.raises(ValidationError):
+        VALIDATOR.validate(data)

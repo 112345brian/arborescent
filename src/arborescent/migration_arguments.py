@@ -123,6 +123,7 @@ class PackageArguments:
     release: ReleasePolicy | None = None  # release/pin/history policy (#56); a workspace member exports none
     history: str | None = None
     unmanaged: bool = False
+    vendored: bool = False  # read-only copy: consumers must not extract, rewrite or release it
     pyproject: Mapping[str, object] | None = None  # the derived pyproject.toml fields (#60); None: ``package_pyproject`` is off
 
 
@@ -217,7 +218,7 @@ def _package_arguments(
         package.id, package.name, package.kind, package.summary, package.domain, package.capabilities, package.home,
         modules, assets, tuple(PathRename(source.as_posix(), _posix(target)) for source, target in placements),
         package.module_renames, surface, bypasses, package.depends_on, externals,
-        package.release, package.history, package.unmanaged,
+        package.release, package.history, package.unmanaged, package.vendored,
     )
 
 
