@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## 0.4.0 — 2026-11-01
+
 ### Added
 - Three package rules found by mutation-testing Arborescent's own boundaries: `package-dependency-cycle` (error: packages
   that list each other in `depends_on`; a catalog edit like this used to be certified by `--require-modularity`, because
