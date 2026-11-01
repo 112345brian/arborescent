@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from arborescent_helpers import mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
 from arborescent.cli import main
-from arborescent.domain import ToolResult
+from arborescent.config import load_policy
+from arborescent.domain import PolicyError, ToolResult, Violation
 from arborescent.engine import Services, run_own
 from arborescent.engines import default_engines
 from arborescent.testing import FakeToolRunner
@@ -102,3 +104,58 @@ def test_check_lists_auto_excluded_vendor_folders(repo: Path, capsys) -> None:  
     output = capsys.readouterr().out
     assert "auto-excluded vendor folders:" in output
     assert "  vendor/" in output
+
+
+def _load(root: Path, text: str):  # type: ignore[no-untyped-def]
+    (root / "arborescent.toml").write_text('rings = ["domain"]\n' + text, encoding="utf-8")
+    return load_policy(LocalFileSystem(), root / "arborescent.toml")[0]
+
+
+def test_vendor_and_library_roots_expand_children_into_source_roots(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "vendor/alpha/src/alpha/__init__.py": "", "vendor/beta/beta/__init__.py": "", "vendor/_private/x.py": "",
+        "vendor/notes.txt": "", "libs/gamma/src/gamma/__init__.py": "",
+    })
+
+    policy = _load(tmp_path, 'sources = ["src"]\nsource_roots = ["src"]\nvendor_roots = ["vendor"]\nlibrary_roots = ["libs"]\n')
+
+    expected = ["src", "vendor/alpha/src", "vendor/beta", "libs/gamma/src"]
+    assert list(policy.sources) == expected
+    assert list(policy.source_roots) == expected
+    assert policy.scan_vendor_paths == ("vendor",)
+    assert policy.scan_vendors is False
+
+
+def test_declared_roots_do_not_duplicate_hand_listed_paths(tmp_path: Path) -> None:
+    write_files(tmp_path, {"vendor/alpha/src/a.py": ""})
+
+    policy = _load(tmp_path, 'sources = ["vendor/alpha/src"]\nsource_roots = ["vendor/alpha/src"]\nvendor_roots = ["vendor"]\n')
+
+    assert policy.sources == ("vendor/alpha/src",)
+    assert policy.source_roots == ("vendor/alpha/src",)
+
+
+def test_declared_root_must_be_a_directory_and_not_combined_with_scopes(tmp_path: Path) -> None:
+    with pytest.raises(PolicyError, match="not a directory"):
+        _load(tmp_path, 'vendor_roots = ["vendor"]\n')
+    (tmp_path / "vendor").mkdir()
+    with pytest.raises(PolicyError, match="scopes"):
+        _load(tmp_path, 'vendor_roots = ["vendor"]\n[scopes.a]\nsources = ["a"]\nsource_roots = ["a"]\nrings = ["r"]\n')
+    with pytest.raises(PolicyError, match="list of non-empty strings"):
+        _load(tmp_path, 'vendor_roots = "vendor"\n')
+
+
+def test_vendor_root_is_scanned_but_other_vendor_folders_stay_excluded(repo: Path) -> None:
+    write_files(repo, {"vendor/lib/src/lib.py": "VALUE = 1\n", "third_party/other.py": "VALUE = 2\n"})
+    files = ["app/__init__.py", "app/domain.py", "vendor/lib/src/lib.py", "third_party/other.py"]
+
+    findings, _ = run_own(mini_policy(vendor_roots=["vendor"]), repo, _services(repo, files), practices=False)
+
+    folders = {v.subject for v in findings if v.rule == "vendor-folder"}
+    assert folders == {"third_party"}
+
+
+def test_vendor_folder_failure_names_the_fix() -> None:
+    text = Violation("vendor-folder", "vendor", "abc").render()
+    assert "vendor_roots" in text and "scan_vendors" in text
+    assert Violation("vendor-folder", "vendor", "abc").key == "vendor-folder|vendor|abc"  # baseline key unchanged

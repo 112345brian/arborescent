@@ -33,7 +33,44 @@ def load_policy(fs: FileSystem, path: Path) -> tuple[Policy, Path]:
     raw = data if path.name == "arborescent.toml" else data.get("tool", {}).get("arborescent")
     if raw is None:
         raise PolicyError(f"{path} has no [tool.arborescent] table")
-    return policy_from_mapping(_with_derived_classify(fs, path.parent, raw)), path.parent
+    derived = _with_derived_roots(fs, path.parent, _with_derived_classify(fs, path.parent, raw))
+    return policy_from_mapping(derived), path.parent
+
+
+_ROOT_KEYS = ("vendor_roots", "library_roots")
+
+
+def _with_derived_roots(fs: FileSystem, root: Path, raw: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Expand `vendor_roots` / `library_roots` into `sources` and `source_roots`.
+
+    Every child folder `X` of a declared root is one package tree: `<root>/X/src` when that exists, else `<root>/X`.
+    Explicit `sources` / `source_roots` entries stay first; derived ones are appended without duplicates.
+    """
+    declared = [key for key in _ROOT_KEYS if key in raw]
+    if not declared:
+        return raw
+    if "scopes" in raw:
+        raise PolicyError(f"`{declared[0]}` cannot be combined with `scopes`; list each scope's source roots instead")
+    derived: list[str] = []
+    for key in declared:
+        for folder in _string_list(raw, key):
+            base = root / folder
+            if not fs.is_dir(base):
+                raise PolicyError(f"`{key}` entry {folder!r} is not a directory")
+            for child in fs.glob(base, "*"):
+                if not fs.is_dir(child) or child.name.startswith((".", "_")):
+                    continue
+                tree = child / "src" if fs.is_dir(child / "src") else child
+                derived.append(tree.relative_to(root).as_posix())
+    merged = {key: _with_paths(raw, key, derived) for key in ("sources", "source_roots")}
+    return {**raw, **merged}
+
+
+def _with_paths(raw: Mapping[str, Any], key: str, extra: list[str]) -> list[str]:
+    explicit = raw.get(key, ["."])
+    if not isinstance(explicit, list):
+        raise PolicyError(f"`{key}` must be a list of paths")
+    return list(dict.fromkeys([*explicit, *extra]))
 
 
 def _with_derived_classify(fs: FileSystem, root: Path, raw: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -120,6 +157,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         source_roots=tuple(raw.get("source_roots", ["."])),
         exclude=tuple(raw.get("exclude", [])),
         scan_vendors=_boolean_option(raw, "scan_vendors", False),
+        scan_vendor_paths=_string_list(raw, "vendor_roots"),
         child_policy_mode=_child_policy_mode(raw),
         module_forbid_imports=tuple((pattern, tuple(targets)) for pattern, targets in raw_module_forbids.items()),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
