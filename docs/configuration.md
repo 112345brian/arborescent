@@ -368,8 +368,7 @@ repository can be modularity-ready and a `strict` one can be not.
 `arborescent check --require-modularity` certifies it: it fails (`MODULARITY FAIL ...`) when no `package_catalog` is
 set, when `modularity` is `report`, when an error-severity `package-*` gap is open, or under `--changed` (gaps are a
 whole-repository fact). A non-empty cut list (`package-spans-rings`) is information and is allowed. One package owning every module
-(`package-owns-everything`) also fails it: a repository with no partition is not certified modular, although plain `check`
-only notes it. On success it
+(`package-owns-everything`) is information too: a package's size says nothing about its quality. On success it
 prints `CERTIFIED modularity ready`. `--require-profile` is unrelated: it certifies lint and tool versions only.
 
 ### Annotation preservation across a split
@@ -615,7 +614,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `package-undeclared-dependency` | a module imports a module of another package that its own package does not list in `depends_on` |
 | `package-dependency-cycle` | packages list each other (directly or through others) in `depends_on`, so none can be split or released first; the same check `packages validate` makes |
 | `package-unused-dependency` | information only: a package lists a package in `depends_on` that none of its modules imports, which widens what it may import unnoticed (a plugin or runtime-loaded dependency can be real without a static import) |
-| `package-owns-everything` | information only: one package owns every module (two or more), so nothing is partitioned and the ownership and dependency checks cannot find a boundary to break. A one-package catalog is legitimate for owning assets, so this never fails |
+| `package-owns-everything` | information only: one package owns every module (two or more), so the ownership and dependency checks have no boundary between packages to check (rings and imports are still enforced). Never fails, here or in `--require-modularity` |
 | `package-semantics-drift` | a part's manifest names a package the catalog lacks, or a semantic field or a path's role or metadata differs from the catalog |
 | `package-membership-drift` | a module of an included package is missing from its part, or a part holds a module the catalog gives elsewhere or nowhere |
 | `package-ring-drift` | a module's effective ring in its part differs from the origin's |

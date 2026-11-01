@@ -9,7 +9,7 @@
   that list each other in `depends_on`; a catalog edit like this used to be certified by `--require-modularity`, because
   `check` only parsed the catalog and the cycle search ran only in `packages validate`, which now shares it),
   `package-unused-dependency` (information: a declared dependency no module imports) and `package-owns-everything`
-  (information: one package owns every module, so nothing is partitioned; #73). `selftest` probes the first two.
+  (information: one package owns every module; never fails, since size says nothing about quality; #73). `selftest` probes the first two.
 - `modularity = "ready" | "report"` and `check --require-modularity`: strict modularity is now separate from strict linting.
   `package_catalog` no longer requires the `strict` preset (a `standard` or `relaxed` repository can be modularity-ready).
   `report` shows package gaps as notes instead of failing; `--require-modularity` fails without a catalog, in `report`

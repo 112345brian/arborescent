@@ -113,8 +113,8 @@ def test_a_declared_package_cycle_fails_require_modularity(tmp_path: Path) -> No
     assert not report.ok
 
 
-def test_a_repository_with_one_all_owning_package_is_not_certified(tmp_path: Path) -> None:
-    """#73: no partition means nothing for the ownership and dependency checks to enforce, so there is nothing to certify."""
+def test_a_repository_with_one_all_owning_package_is_noted_and_still_certified(tmp_path: Path) -> None:
+    """#73: one package may legitimately own everything; it is a note, never a failure, plain or with --require-modularity."""
     repo(tmp_path)
     one = (
         '[[packages]]\nid = "all"\nname = "All"\nkind = "application"\nrepository = "example/repo"\nroot = "app"\n'
@@ -124,7 +124,7 @@ def test_a_repository_with_one_all_owning_package_is_not_certified(tmp_path: Pat
     (tmp_path / "packages.toml").write_text(one, encoding="utf-8")
     plain = run_check(policy(), tmp_path, services(), OPTS)
     assert Rule.PACKAGE_OWNS_EVERYTHING in {n.rule for n in plain.notes}
-    assert plain.ok  # plain `check` only notes it
+    assert plain.ok  # a note
     report = run_check(policy(), tmp_path, services(), REQUIRE)
-    assert any("package-owns-everything" in f for f in report.modularity_failures)
-    assert not report.ok
+    assert report.modularity_failures == ()
+    assert report.ok
