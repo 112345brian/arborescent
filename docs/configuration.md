@@ -593,6 +593,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 |---|---|
 | `unclassified` | a module has neither a valid enabled `__arbor__` annotation nor a matching `classify` pattern |
 | `noise-dir-code` | a tracked `.py` file appears below a skipped directory such as `.venv`, `.tox` or `node_modules` |
+| `tach-invisible-import` | information, never baselined: a scanned module (outside `tests`, `.venv` and other folders tach skips) calls `importlib` or `__import__`, which tach's static graph does not follow. Not reported when `tach` is in `disabled_tools`; `check --require-visible` turns each into `VISIBILITY FAIL` |
 | `vendor-folder` | a convention-named vendor folder is excluded and fingerprinted in the baseline |
 | `wildcard-ring` | a non-outermost ring uses `*` in `external` or `may_import` (one finding per ring and axis) |
 | `suppression` | a `# noqa`, `# ruff: noqa` or `# type: ignore` directive is inventoried by module and kind; each occurrence is ratcheted |
