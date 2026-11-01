@@ -54,6 +54,8 @@ reported as a gap, never guessed.
   job.
 - **`surface.bypasses[]`** lists the modules of *other* packages that import a module of this package which is not on
   its public surface (`module`, importing `package`, the module it `imports`). A package that declares no surface has none.
+- **`vendored`** is `true` for a read-only copy of code maintained elsewhere (`vendored = true` in `packages.toml`). A
+  consumer must not extract, rewrite imports in, or release it; its `policy` is `null` and no gap is raised for that.
 - **`policy`** is the release, pin and history policy annotated in `packages.toml` (see
   [Release, pin and history policy](configuration.md#release-pin-and-history-policy)): `null` when none is declared (the
   export then carries a `package-release-policy-missing` gap), otherwise

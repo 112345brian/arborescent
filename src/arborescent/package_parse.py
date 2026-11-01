@@ -27,12 +27,12 @@ from .package_model import (
     PackagePath,
     PackageSemantics,
 )
-from .package_policy import check_member_policy, parse_policy
+from .package_policy import check_member_policy, parse_policy, parse_vendored
 
 # every key a ``[[packages]]`` entry may carry; a test ties this to the ``PackageDescriptor`` fields
 PACKAGE_KEYS = (
     "id", "name", "kind", "repository", "root", "summary", "domain", "capabilities", "depends_on", "extraction_status",
-    "paths", "home", "public", "externals", "module_renames", "release", "history", "unmanaged",
+    "paths", "home", "public", "externals", "module_renames", "release", "history", "unmanaged", "vendored",
 )
 
 
@@ -97,6 +97,7 @@ def parse_package(value: object, index: int) -> PackageDescriptor:
             f"package {package_id!r} has unknown key(s) {', '.join(map(repr, unknown))}; allowed: {', '.join(PACKAGE_KEYS)}"
         )
     release, history, unmanaged = parse_policy(value, package_id)
+    vendored = parse_vendored(value, package_id, release, history, unmanaged)
     home = _home(value)
     check_member_policy(home, release, history, package_id)
     return PackageDescriptor(
@@ -115,6 +116,7 @@ def parse_package(value: object, index: int) -> PackageDescriptor:
         release=release,
         history=history,
         unmanaged=unmanaged,
+        vendored=vendored,
         home=home,
         externals=_optional_strings(value, "externals"),
         module_renames=_module_renames(value),

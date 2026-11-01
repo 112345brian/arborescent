@@ -30,7 +30,7 @@ from .package_model import (
     ReleasePolicy,
 )
 
-__all__ = ["check_member_policy", "is_workspace_member", "parse_policy", "policy_violations"]
+__all__ = ["check_member_policy", "is_workspace_member", "parse_policy", "parse_vendored", "policy_violations"]
 
 _RELEASE_KEYS = ("pin", "merge", "tag_before_branch_delete")
 
@@ -69,6 +69,20 @@ def parse_policy(value: Mapping[str, object], package: str) -> tuple[ReleasePoli
     return release, history, unmanaged
 
 
+def parse_vendored(value: Mapping[str, object], package: str, release: ReleasePolicy | None, history: str | None, unmanaged: bool) -> bool:
+    """``vendored = true``: a read-only copy, so it has no release or history policy of its own to declare."""
+    if "vendored" not in value:
+        return False
+    if value["vendored"] is not True:
+        raise CatalogError(f"package {package!r} vendored must be true when set; omit it for an editable package")
+    if release is not None or history is not None or unmanaged:
+        raise CatalogError(
+            f"package {package!r} is vendored and also declares a release, history or unmanaged policy; "
+            "a vendored package is read-only and outside that policy"
+        )
+    return True
+
+
 def _release(raw: object, package: str) -> ReleasePolicy | None:
     if raw is None:
         return None
@@ -91,13 +105,13 @@ def _release(raw: object, package: str) -> ReleasePolicy | None:
 
 
 def policy_violations(catalog: CatalogDocument) -> list[Violation]:
-    """One finding per package that declares neither a policy nor ``unmanaged = true``; workspace members are exempt."""
+    """One finding per package that declares neither a policy nor ``unmanaged = true`` or ``vendored = true``; workspace members are exempt."""
     return [
         Violation(
             Rule.PACKAGE_RELEASE_POLICY_MISSING, package.id,
             f"package {package.id!r} declares no release or history policy and is not marked unmanaged",
         )
         for package in catalog.packages
-        if package.release is None and package.history is None and not package.unmanaged
+        if package.release is None and package.history is None and not package.unmanaged and not package.vendored
         and not is_workspace_member(package.home)
     ]

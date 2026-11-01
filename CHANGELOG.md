@@ -5,6 +5,9 @@
 ## Unreleased
 
 ### Added
+- `vendored = true` on a package: a read-only copy of code maintained elsewhere. It is exempt from the release-policy gap and
+  from derived `pyproject.toml` files, may not combine with a release, history or `unmanaged` policy, and the migration
+  export gains a required boolean `vendored` per package (schema v1 updated; `policy` is `null` for such a package) (#59).
 - Three package rules found by mutation-testing Arborescent's own boundaries: `package-dependency-cycle` (error: packages
   that list each other in `depends_on`; a catalog edit like this used to be certified by `--require-modularity`, because
   `check` only parsed the catalog and the cycle search ran only in `packages validate`, which now shares it),

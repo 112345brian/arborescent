@@ -85,6 +85,7 @@ def _package(item: PackageArguments) -> dict[str, Any]:
             "packages": list(item.depends_on),
             "external": None if item.externals is None else list(item.externals),
         },
+        "vendored": item.vendored,
         "policy": _policy(item),
         "pyproject": None if item.pyproject is None else dict(item.pyproject),
     }
@@ -92,7 +93,7 @@ def _package(item: PackageArguments) -> dict[str, Any]:
 
 def _policy(item: PackageArguments) -> dict[str, Any] | None:
     """``None`` when nothing is declared (a gap says so) and always for a workspace member, which has no history or pin."""
-    if is_workspace_member(item.home):
+    if is_workspace_member(item.home) or item.vendored:
         return None
     if item.unmanaged:
         return {"history": None, "release": None, "unmanaged": True}
@@ -211,6 +212,7 @@ _PACKAGE = _object(
             }
         ),
         "dependencies": _object({"packages": _STRINGS, "external": _NULLABLE_STRINGS}),
+        "vendored": {"type": "boolean", "description": "a read-only copy of code maintained elsewhere: do not extract, rewrite imports in, or release it; its policy is null"},
         "policy": _POLICY,
         "pyproject": _PYPROJECT,
     },
