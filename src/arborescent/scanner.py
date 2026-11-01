@@ -128,6 +128,16 @@ def _vendor_parent(rel: str) -> str | None:
     return None
 
 
+def _skipped_vendor(rel: str, policy: Policy) -> str | None:
+    """The auto-excluded vendor folder holding ``rel``, unless vendor scanning (global or per ``vendor_roots``) covers it."""
+    vendor = _vendor_parent(rel)
+    if vendor is None or policy.scan_vendors:
+        return None
+    if any(rel.startswith(root.rstrip("/") + "/") for root in policy.scan_vendor_paths):
+        return None
+    return vendor
+
+
 def _fingerprint_vendors(vendors: dict[str, list[str]], root: Path, excluded: dict[str, int]) -> list[tuple[str, str]]:
     summaries: list[tuple[str, str]] = []
     for folder, contents in sorted(vendors.items()):
@@ -302,8 +312,8 @@ class FsScanner:
                 if rel.endswith(".py"):
                     noise_files.append(rel)
                 continue
-            vendor = _vendor_parent(rel)
-            if vendor is not None and not policy.scan_vendors:
+            vendor = _skipped_vendor(rel, policy)
+            if vendor is not None:
                 vendors.setdefault(vendor, []).append(rel)
 
         vendor_folders = _fingerprint_vendors(vendors, root, excluded)
@@ -313,7 +323,7 @@ class FsScanner:
             if (
                 excluded_by_policy(rel, excluded_paths)
                 or _noise_parent(rel, tracked)
-                or (_vendor_parent(rel) is not None and not policy.scan_vendors)
+                or _skipped_vendor(rel, policy) is not None
             ):
                 continue
             _add_discovered(found, policy, rel)

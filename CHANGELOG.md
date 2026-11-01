@@ -5,6 +5,9 @@
 ## Unreleased
 
 ### Added
+- `vendor_roots` and `library_roots`: declare a folder such as `vendor` or `libs` once and every child package becomes a
+  source root (`sources`, `source_roots`, and so the generated tach and import-linter files). A `vendor_roots` folder is
+  scanned despite its vendor-convention name, and the `[vendor-folder]` failure now names `vendor_roots` and `scan_vendors` (#59).
 - Three package rules found by mutation-testing Arborescent's own boundaries: `package-dependency-cycle` (error: packages
   that list each other in `depends_on`; a catalog edit like this used to be certified by `--require-modularity`, because
   `check` only parsed the catalog and the cycle search ran only in `packages validate`, which now shares it),

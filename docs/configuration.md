@@ -21,6 +21,8 @@ settings. The two forms cannot be mixed.
 | `children` | `[]` | Explicit nested package roots to inspect for a direct Arborescent policy. In `certify` mode, roots with their own policy are checked recursively; roots without one remain in the parent scan. |
 | `child_policy_mode` | `"certify"` | `"certify"` respects direct child policies and includes their results in parent certification. `"parent"` overrides child policies: listed roots stay in the parent scan and are not checked separately. |
 | `scan_vendors` | `false` | Include convention-named `vendor`, `vendored`, `third_party` and `site-packages` folders in the parent scan. This lets parent rules govern vendored code; declared child roots with their own policy are still separated in `certify` mode. |
+| `vendor_roots` | `[]` | Folders whose child folders are vendored packages. Each child `X` becomes a source root (`<root>/X/src` if it exists, else `<root>/X`) added to `sources` and `source_roots`, and the folder is scanned even though its name is a vendor convention, so a vendored package is not reported as external. Other vendor folders stay excluded. Not allowed with `scopes`. |
+| `library_roots` | `[]` | Same expansion for editable in-repo libraries (for example `libs`); the folders are scanned normally. Not allowed with `scopes`. |
 | `module_forbid_imports` | `{}` | Module glob -> internal module/package names this module may not import, in addition to ring rules. |
 | `preset` | `"strict"` | How much of the external and OS rules applies: `strict`, `standard` or `relaxed` (see below). |
 | `io_modules` | built-in set | Stdlib modules that count as I/O, process or OS. Replaces the default set; `[]` means none. |
