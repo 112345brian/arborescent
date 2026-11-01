@@ -4,10 +4,103 @@
 
 ## Unreleased
 
+### Added
+- Three package rules found by mutation-testing Arborescent's own boundaries: `package-dependency-cycle` (error: packages
+  that list each other in `depends_on`; a catalog edit like this used to be certified by `--require-modularity`, because
+  `check` only parsed the catalog and the cycle search ran only in `packages validate`, which now shares it),
+  `package-unused-dependency` (information: a declared dependency no module imports) and `package-owns-everything`
+  (information: one package owns every module; never fails, since size says nothing about quality; #73). `selftest` probes the first two.
+- `modularity = "ready" | "report"` and `check --require-modularity`: strict modularity is now separate from strict linting.
+  `package_catalog` no longer requires the `strict` preset (a `standard` or `relaxed` repository can be modularity-ready).
+  `report` shows package gaps as notes instead of failing; `--require-modularity` fails without a catalog, in `report`
+  mode, under `--changed`, or while an error-severity package gap is open (`MODULARITY FAIL`, `CERTIFIED modularity ready`).
+  `--require-profile` stays lint and tool-version certification only. Behavior change: a policy that was rejected for
+  `package_catalog` with a non-strict preset is now accepted.
+- `packages migrate` takes its target directory from `--target` or from a git-ignored local config (`[targets]` in `.arborescent/local.toml`, found through `ARBORESCENT_LOCAL_CONFIG`, a `.env`, or that default) and prints which source supplied it. Where a repository is checked out is machine-specific, so the config is read by this command only and never reaches the catalog, the export, derived files or contracts; `home.repository` stays the committed remote identity.
+
+- `arborescent packages migrate PACKAGE_ID --target DIR`: the migration driver (#67). It supplies a dedicated migration
+  library with one package's migration arguments through a port and does not migrate itself. The library is git
+  filter-repo (optional extra `arborescent[filterrepo]`); a missing one prints a `SETUP` line with the install command.
+  A dry run (default) prints the exact arguments; `--yes` supplies them. It refuses, with no override, while the package
+  has an open error gap, an undeclared first-party dependency, or private modules that other packages still import, and
+  does nothing for a workspace member. Module renames are reported as not applied (filter-repo does not rewrite
+  imports), unless a second port rewrites them: a LibCST adapter (`arborescent[libcst]`) applies the module-name map to the new
+  repository only, one `RenameCommand` per module, as an uncommitted change. It refuses (exit 1, statements listed, nothing
+  touched) when a `from <old> import <module>` statement is present, because LibCST's output could then still parse while
+  naming an unbound name, and fails loudly on any import still naming an old module. The annotation layer cannot import the driver: `module_forbid_imports` in Arborescent's own policy, now
+  probed by `selftest` for every configured pattern. `docs/migration-driver.md`.
+- Opt-in `package_catalog = "packages.toml"` (any preset): every first-party module and asset must belong to
+  exactly one package. New rule ids `package-unassigned-module`, `package-multiply-assigned-module`,
+  `package-unowned-asset`, `package-multiply-assigned-asset` and `package-undeclared-dependency` fail the check;
+  `package-spans-rings` is information (a `NOTE` line, never failing, never baselined). Assets are claimed by package
+  `paths` or ordered `[[assets]]` globs, first match wins. `selftest` probes each rule when the key is set (#52).
+- `arborescent packages export`: one read-only, versioned JSON export of the migration arguments of every package
+  (identity and `home`, owned modules and assets with target paths and target module names, public surface and bypassing
+  modules, declared dependencies, open annotation gaps as named entries) with a published JSON Schema
+  (`docs/schemas/migration-export-v1.schema.json`, `arborescent packages schema`). New optional catalog keys: `home`,
+  `public`, `externals`, `module_renames`. `release`/`pin`/`history` (#56) and `pyproject` (#60) are reserved slots. No
+  tool-specific emitter ships; `docs/migration-export.md` has a `git filter-repo` recipe and the comparison with
+  blinkered's `blinkered.toml` (#54).
+
+- Annotation preservation across a split: a package may declare `public` module globs, and the opt-in
+  `package_parts` lists extracted part trees (#27) to compare with the catalog. New rule ids
+  `package-semantics-drift`, `package-membership-drift`, `package-ring-drift`, `package-public-symbol-dropped` and
+  `package-private-import` (the last also runs on the origin without parts). No graph comparison and no test runs;
+  `selftest` probes each rule (#55).
+- With `package_catalog` set, `arborescent generate` compiles the package assignment into import-linter (one `forbidden`
+  contract per package for undeclared packages and for modules outside a declared package's `public` list, and one for
+  third-party names its rings do not list) and into tach's per-module `depends_on`, so the engines' own violation output
+  is a package's cut list. Tach switches to explicit `depends_on` when the catalog is set (#53).
+
+- Per-package release, pin and history policy in `packages.toml`: `release.pin` (`tag` or `sha`), `release.merge`
+  (`merge-commit` only), `release.tag_before_branch_delete`, `history` (`preserve` or `fresh`) and an explicit
+  `unmanaged = true`. Values are validated and unknown `release` keys rejected. New rule
+  `package-release-policy-missing` names a package with neither a policy nor the marker (workspace members are exempt
+  and cannot declare one); `selftest` probes it. The policy fills the `policy` slot of the migration export and the gap
+  appears in its `gaps`. Any unknown key on a `[[packages]]` entry is now rejected. Data and checks only: nothing is
+  released, pinned or rewritten (#56).
+- Opt-in `package_pyproject = true` (needs `package_catalog`): `arborescent generate` creates each missing package
+  `pyproject.toml` with the fields the annotations determine (dependencies from the rings' `external` allow-lists through
+  the `dependencies` mapping, plus `depends_on`; `[tool.uv.sources]` per sibling; the root `[tool.uv.workspace]
+  members`; `source_roots` and `root_packages` tables) and a minimal template; an existing file is never rewritten.
+  New information rule `package-pyproject-drift` (a `NOTE`, never failing, never baselined) names a derived field that
+  disagrees with the annotations. `selftest` probes it. Where a sibling comes from is its `[packages.home]` (#54), and
+  `packages export` fills each package's `pyproject` object with the same derived fields (still `object | null`, no
+  schema version bump). A source is `{ workspace = true }` only between two workspace members; otherwise a git source
+  (with `subdirectory` for a workspace member), and a git value that is not a URL gets no entry and is reported, never guessed (#60).
+- `arborescent packages export`: one read-only, versioned JSON export of the migration arguments of every package
+  (identity and `home`, owned modules and assets with target paths and target module names, public surface and bypassing
+  modules, declared dependencies, open annotation gaps as named entries) with a published JSON Schema
+  (`docs/schemas/migration-export-v1.schema.json`, `arborescent packages schema`). New optional catalog keys: `home`,
+  `public`, `externals`, `module_renames`. `release`/`pin`/`history` (#56) and `pyproject` (#60) are reserved slots. No
+  tool-specific emitter ships; `docs/migration-export.md` has a `git filter-repo` recipe and the comparison with
+  blinkered's `blinkered.toml` (#54).
+- Acceptance test for the migration annotations (`tests/test_split_acceptance.py`, fixture `tests/split_fixture.py`): a
+  synthetic four-package monorepo (one own-repository package, one workspace member, one package spanning three rings,
+  one with an assets folder, one deliberate blocking edge) is split with `git filter-repo` driven only by the JSON export;
+  the cut list is the generated import-linter and tach output, and the parts are checked with the preservation rules. It
+  skips with a reason where `git filter-repo`, import-linter or tach is not installed; Arborescent does not migrate (#57).
+
+### Changed
+- `packages extract` is a wrapper: it runs the `migrate` pipeline (a migration library such as git filter-repo, then the import
+  rewriter) and writes `.arborescent-package.toml` afterwards. It takes `--output` as another name for `--target`, is a dry run
+  unless `--yes`, and needs `package_catalog` in the policy. Arborescent no longer copies files itself: `PackageCatalog.extract`,
+  the symlink and generated-output handling, `package_copy` and the extraction-time module-identity comparison are removed, and
+  `--with-dependencies` is refused (a dependency is a separate package). A path move that changes an import name without a
+  declared `module_renames` entry is therefore no longer caught at extraction; nothing checks it yet.
+- `check` now runs import-linter with the generated `arborescent-importlinter.toml` (it was written and drift-checked but never
+  read, so a hand-written copy of the contracts had to be kept beside it). The file is used only when it carries the
+  generated header and the project has no import-linter configuration of its own; a project's own config always wins and
+  `generate` still never changes an existing file. Arborescent's own hand-written contract is removed: the generated ones
+  (10 here, including the package contract) are a strict superset of it. New optional port extension `RootAwareEngine`.
+
+- `packages.py` is split into cohesive `package_*` modules; behaviour and the `arborescent.packages` names are unchanged,
+  and `packages extract` is untouched (#50).
+
 ### Fixed
 
-- With tach disabled, the minimum profile now also requires import-linter to have contracts configured (it does not
-  auto-discover the generated `arborescent-importlinter.toml`).
+- With tach disabled, the minimum profile now also requires import-linter to have contracts configured: the project's own
+  config, or the generated `arborescent-importlinter.toml`.
 - Scope-path normalization no longer caches every scanned file path.
 
 ## 0.3.0 — 2026-10-31

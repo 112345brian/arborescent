@@ -4,8 +4,8 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from extracted_tree import extract_tree
 
-from arborescent.cli import main
 from arborescent.filesystem_adapter import LocalFileSystem
 from arborescent.packages import CatalogError, PackageCatalog
 
@@ -78,7 +78,7 @@ destination = "tests"
 """,
     )
 
-    destination = catalog.extract("collection-core", tmp_path / "out/core")
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core")
 
     assert (destination / "__init__.py").read_text(encoding="utf-8") == "VALUE = 1\n"
     assert (destination / "tests/test_core.py").is_file()
@@ -115,108 +115,6 @@ def _write(root: Path, files: dict[str, str]) -> None:
         path.write_text(text, encoding="utf-8")
 
 
-def test_extraction_omits_generated_artifacts_and_keeps_declared_content(
-    tmp_path: Path,
-) -> None:
-    kept = {
-        "__init__.py": "VALUE = 1\n",
-        "pkg/module.py": "VALUE = 2\n",
-        "tests/test_core.py": "def test_value(): pass\n",
-        "docs/guide.md": "# Guide\n",
-        "arborescent.toml": 'rings = ["domain", "adapters"]\n[ring.domain]\nmay_import = []\nexternal = []\n[ring.adapters]\nmay_import = ["domain"]\nexternal = []\n[classify]\n"*" = "domain"\n',
-        "pyproject.toml": "[project]\nname = 'core'\n",
-        "pkg/data/dist-info.txt": "not a dist directory\n",
-        "pkg/build.py": "VALUE = 3\n",
-    }
-    generated = {
-        "__pycache__/mod.cpython-312.pyc": "x",
-        "pkg/__pycache__/module.cpython-312.pyc": "x",
-        "pkg/stray.pyc": "x",
-        ".venv/lib/site.py": "x",
-        ".ruff_cache/CACHEDIR.TAG": "x",
-        ".mypy_cache/meta.json": "x",
-        ".tox/py/log.txt": "x",
-        "build/lib/pkg.py": "x",
-        "dist/pkg-1.0.tar.gz": "x",
-        "pkg/build/inner.py": "x",
-    }
-    _write(tmp_path / "src/core", {**kept, **generated})
-    catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
-
-    destination = catalog.extract("collection-core", tmp_path / "out/core")
-
-    extracted = {
-        path.relative_to(destination).as_posix()
-        for path in destination.rglob("*")
-        if path.is_file()
-    }
-    assert extracted == {*kept, ".arborescent-package.toml"}
-    assert (
-        tomllib.loads(
-            (destination / ".arborescent-package.toml").read_text(encoding="utf-8")
-        )["package"]["id"]
-        == "collection-core"
-    )
-
-
-def test_extraction_skips_symlinks_inside_generated_directories(
-    tmp_path: Path,
-) -> None:
-    """A virtualenv is full of symlinks; skipping it must not trip the symlink guard."""
-    _write(tmp_path / "src/core", {"__init__.py": "VALUE = 1\n"})
-    venv_bin = tmp_path / "src/core/.venv/bin"
-    venv_bin.mkdir(parents=True)
-    (venv_bin / "python").symlink_to(tmp_path / "missing-interpreter")
-    catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
-
-    destination = catalog.extract("collection-core", tmp_path / "out/core")
-
-    assert (destination / "__init__.py").is_file()
-    assert not (destination / ".venv").exists()
-
-
-def test_extraction_still_rejects_symlinks_outside_generated_directories(
-    tmp_path: Path,
-) -> None:
-    _write(tmp_path / "src/core", {"__init__.py": "VALUE = 1\n"})
-    (tmp_path / "outside.txt").write_text("outside\n", encoding="utf-8")
-    (tmp_path / "src/core/escape").symlink_to(tmp_path / "outside.txt")
-    catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
-
-    with pytest.raises(CatalogError, match="does not copy symlinks"):
-        catalog.extract("collection-core", tmp_path / "out/core")
-
-
-def test_extraction_rejects_a_dangling_symlink_with_a_catalog_error(
-    tmp_path: Path,
-) -> None:
-    """Windows raises FileNotFoundError when resolving a dangling link; that must not escape as a crash."""
-    _write(tmp_path / "src/core", {"__init__.py": "VALUE = 1\n"})
-    (tmp_path / "src/core/dangling").symlink_to(tmp_path / "does-not-exist")
-    catalog = _catalog(tmp_path, _ARTIFACT_PACKAGE)
-
-    with pytest.raises(CatalogError, match="does not copy symlinks"):
-        catalog.extract("collection-core", tmp_path / "out/core")
-
-
-def test_extraction_copies_an_explicitly_declared_path_named_build(
-    tmp_path: Path,
-) -> None:
-    """Only nested artifacts are filtered: a declared path (or a package called `build`) is source."""
-    _write(tmp_path / "src/build", {"__init__.py": "VALUE = 1\n", "dist/old.txt": "x"})
-    catalog = _catalog(
-        tmp_path,
-        _ARTIFACT_PACKAGE.replace('root = "src/core"', 'root = "src/build"').replace(
-            'path = "src/core"', 'path = "src/build"'
-        ),
-    )
-
-    destination = catalog.extract("collection-core", tmp_path / "out/core")
-
-    assert (destination / "__init__.py").is_file()
-    assert not (destination / "dist").exists()
-
-
 def test_catalog_rejects_path_overlap_between_packages(tmp_path: Path) -> None:
     (tmp_path / "src/shared").mkdir(parents=True)
     with pytest.raises(CatalogError, match="more than one package"):
@@ -246,29 +144,6 @@ path = "src/shared"
 role = "source"
 """,
         )
-
-
-def test_extract_rejects_destination_inside_owned_source_tree(tmp_path: Path) -> None:
-    source = tmp_path / "src/core"
-    source.mkdir(parents=True)
-    catalog = _catalog(
-        tmp_path,
-        """
-[[packages]]
-id = "collection-core"
-name = "Collection Core"
-kind = "shared-core"
-repository = "org/repo"
-root = "src/core"
-summary = "Shared source lifecycle."
-[[packages.paths]]
-path = "src/core"
-role = "source"
-""",
-    )
-
-    with pytest.raises(CatalogError, match="destination overlaps package source"):
-        catalog.extract("collection-core", source / "export")
 
 
 def test_extract_includes_declared_dependencies_only_when_requested(
@@ -306,8 +181,7 @@ role = "source"
 """,
     )
 
-    destination = catalog.extract(
-        "collection-core", tmp_path / "out/core", include_dependencies=True
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core", include_dependencies=True
     )
 
     assert (destination / "core.py").is_file()
@@ -361,42 +235,3 @@ role = "source"
         )
 
 
-def test_cli_extracts_package_from_repository_metadata(
-    tmp_path: Path, capsys, monkeypatch
-) -> None:
-    source = tmp_path / "src/core"
-    source.mkdir(parents=True)
-    (source / "__init__.py").write_text("VALUE = 7\n", encoding="utf-8")
-    (tmp_path / "packages.toml").write_text(
-        """
-[[packages]]
-id = "collection-core"
-name = "Collection Core"
-kind = "shared-core"
-repository = "org/repo"
-root = "src/core"
-summary = "Shared source lifecycle."
-[[packages.paths]]
-path = "src/core"
-role = "source"
-""",
-        encoding="utf-8",
-    )
-    destination = tmp_path / "extracted"
-    monkeypatch.chdir(tmp_path)
-
-    assert (
-        main(
-            [
-                "packages",
-                "extract",
-                "collection-core",
-                "--output",
-                str(destination),
-            ]
-        )
-        == 0
-    )
-
-    assert (destination / "__init__.py").read_text(encoding="utf-8") == "VALUE = 7\n"
-    assert "extracted collection-core" in capsys.readouterr().out

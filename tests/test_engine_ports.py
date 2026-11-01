@@ -10,14 +10,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import mini_policy, write_files
+from arborescent_helpers import generate, mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
 from arborescent.cli import main
 from arborescent.domain import PolicyError, ToolResult, Violation
 from arborescent.engine import Options, Services, run_check
 from arborescent.engines import ImportLinter, Tach, default_engines
-from arborescent.generate import generate
 from arborescent.testing import FakeToolRunner
 from arborescent.typecheckers import all_checkers, by_name
 

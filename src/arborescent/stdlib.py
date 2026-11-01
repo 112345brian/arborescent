@@ -89,6 +89,11 @@ _CHANGES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
             }
         ),
     ),
+    # Derived from 3.15.0b4 and checked by CI's 3.15 leg; re-check when 3.15 is final.
+    "3.15": (
+        frozenset({"_math_integer", "profiling"}),
+        frozenset({"sre_compile", "sre_constants", "sre_parse"}),
+    ),
 }
 
 SUPPORTED_PYTHONS: tuple[str, ...] = ("3.11", *_CHANGES)

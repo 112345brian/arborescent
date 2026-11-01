@@ -14,8 +14,16 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .config import load_policy
-from .engine import Options, Services, pick_checker, run_check, run_own, write_generated
-from .generate import generate
+from .engine import (
+    Options,
+    Services,
+    contract_renderers,
+    pick_checker,
+    run_check,
+    run_own,
+    write_generated,
+)
+from .generate import GraphFacts, generate
 from .ports import FileSystem
 
 __all__ = ["run_bench"]
@@ -57,7 +65,7 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
     chosen = [c for c in svc.checkers if c.name in names]
     twice(
         "generate (in memory)",
-        lambda: f"{len(generate(policy, sorted(scan.known), chosen, scan.arbor_index, scan.scope_by_module))} files",
+        lambda: f"{len(generate(policy, GraphFacts(sorted(scan.known), scan.arbor_index, scan.scope_by_module), chosen, contract_renderers(svc)))} files",
     )
     _ = write_generated(policy, root, svc)
 

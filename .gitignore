@@ -8,3 +8,6 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# Local, machine-specific configuration; never committed (the migration local config may be pointed at from here).
+.env

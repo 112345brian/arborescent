@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
-from .domain import Policy, ToolResult, Violation
+from .domain import (
+    Allowance,
+    ArchitectureContracts,
+    Contract,
+    Mutation,
+    Policy,
+    ToolResult,
+    Violation,
+)
 from .facts import ModuleInfo
 
-__all__ = ["Clock", "Engine", "FileSystem", "ModuleScanner", "ScanResult", "ToolRunner", "TypeChecker", "ViolationEngine"]
+__all__ = [
+    "Clock", "ContractRenderer", "Engine", "FileSystem", "ModuleScanner", "PackageBoundaries", "PackageChecks", "PackageProbes", "RootAwareEngine",
+    "ScanResult", "ToolRunner", "TypeChecker", "ViolationEngine",
+]
 
 
 class ToolRunner(Protocol):
@@ -81,6 +92,64 @@ class Engine(Protocol):
     def command(self, files: Sequence[str]) -> list[str]: ...  # files: the changed ones (empty = everything)
 
     def passed(self, result: ToolResult) -> bool: ...
+
+
+class RootAwareEngine(Protocol):
+    """Optional extension for an engine whose command depends on the project it runs in.
+
+    import-linter does not discover the file ``generate`` writes for it; this lets the adapter add ``--config`` only when
+    that file is Arborescent's and the project has no import-linter configuration of its own. Separate from ``Engine`` so
+    existing and user-supplied adapters are unaffected.
+    """
+
+    def command_in(self, files: Sequence[str], root: Path, fs: FileSystem) -> list[str]: ...
+
+
+@runtime_checkable
+class ContractRenderer(Protocol):
+    """An engine that is configured from the neutral contracts: it writes its own file format and nothing else does."""
+
+    @property
+    def config_file(self) -> str: ...  # relative to the generated-files directory
+
+    def render_contracts(self, contracts: ArchitectureContracts) -> str: ...
+
+
+class PackageBoundaries(Protocol):
+    """What the engine configs are compiled from when packages are declared: who may import whom, as contracts."""
+
+    def allows(self, importer: str, imported: str) -> bool: ...
+
+    def contracts(self, module_leaves: Sequence[str], allowance: Callable[[str], Allowance | None]) -> list[Contract]: ...
+
+
+class PackageProbes(Protocol):
+    """The selftest mutations the package rules contribute, built over the catalog that was loaded for this run."""
+
+    def mutations(
+        self, policy: Policy, arbor_index: Mapping[str, tuple[str | None, str | None]], scope_by_module: Mapping[str, str]
+    ) -> tuple[list[Mutation], list[str]]: ...  # (mutations, why the rest cannot be built)
+
+
+class PackageChecks(Protocol):
+    """Everything the engine asks of the package-annotation layer, and nothing else.
+
+    The engine owns this interface and the annotation layer implements it, so the core never imports the annotation layer:
+    a package that depends on the core is not also depended on by it. Bound in ``Services``; with a ``package_catalog`` in
+    the policy and nothing bound the engine refuses to run, so a missing binding cannot read as a clean result.
+    """
+
+    def gap_violations(
+        self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult, scanner: ModuleScanner
+    ) -> list[Violation]: ...
+
+    def boundaries(self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> PackageBoundaries | None: ...
+
+    def new_files(self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> dict[str, str]: ...  # path -> text
+
+    def probes(
+        self, policy: Policy, root: Path, fs: FileSystem, scan: ScanResult, scanner: ModuleScanner
+    ) -> PackageProbes | None: ...
 
 
 class ViolationEngine(Protocol):

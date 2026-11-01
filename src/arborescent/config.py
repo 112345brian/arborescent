@@ -138,6 +138,10 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         ruff_overrides=ruff_overrides,
         customization_labels=customizations,
         practices=dict(raw.get("practices", {})),
+        package_catalog=_package_catalog(raw),
+        package_parts=_package_parts(raw),
+        package_pyproject=_package_pyproject(raw),
+        modularity=_modularity(raw),
         children=_child_arbors(raw),
         preset=PRESETS[preset_name],
         io_modules=frozenset(io_modules),
@@ -148,7 +152,8 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
     "scan_vendors",
     "child_policy_mode",
-    "ruff", "practices", "exclude",
+    "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
+    "modularity",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "io_modules", "groups",
@@ -401,4 +406,31 @@ def _suggestion_threshold(raw: Mapping[str, Any]) -> int:
     value = raw.get("suggestion_threshold", 300)
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise PolicyError("`suggestion_threshold` must be a positive integer")
+    return value
+
+
+def _package_catalog(raw: Mapping[str, Any]) -> str | None:
+    value = raw.get("package_catalog")
+    if value is not None and not isinstance(value, str):
+        raise PolicyError("`package_catalog` must be a relative path to a packages.toml file")
+    return value
+
+
+def _package_parts(raw: Mapping[str, Any]) -> tuple[str, ...]:
+    value: object = raw.get("package_parts", [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise PolicyError("`package_parts` must be a list of relative paths to extracted part trees")
+    return tuple(item for item in value if isinstance(item, str))
+
+def _package_pyproject(raw: Mapping[str, Any]) -> bool:
+    value = raw.get("package_pyproject", False)
+    if not isinstance(value, bool):
+        raise PolicyError("`package_pyproject` must be a boolean")
+    return value
+
+
+def _modularity(raw: Mapping[str, Any]) -> str:
+    value = raw.get("modularity", "ready")
+    if not isinstance(value, str):
+        raise PolicyError("`modularity` must be \"ready\" or \"report\"")
     return value

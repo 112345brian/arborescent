@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
-import threading
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from arborescent_helpers import write_files
+from extracted_tree import extract_tree
 
 from arborescent.certification import _native_minimum
 from arborescent.cli import main
@@ -124,8 +123,7 @@ def test_manifest_separates_semantics_origin_location_and_operation_state(
 ) -> None:
     root, catalog = _repo(tmp_path)
 
-    destination = catalog.extract(
-        "collection-core", tmp_path / "out/core", repository="org/vendored"
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core", repository="org/vendored"
     )
     extracted = load_extracted_package(FS, destination)
 
@@ -162,23 +160,21 @@ def test_manifest_separates_semantics_origin_location_and_operation_state(
     ).is_dir()  # origin stays traceable, and distinct from current
 
 
-def test_repository_defaults_to_origin_and_must_not_be_blank(tmp_path: Path) -> None:
+def test_repository_defaults_to_origin(tmp_path: Path) -> None:
     _, catalog = _repo(tmp_path)
 
     extracted = load_extracted_package(
-        FS, catalog.extract("collection-core", tmp_path / "out/core")
+        FS, extract_tree(catalog, "collection-core", tmp_path / "out/core")
     )
     assert extracted.current_repository == extracted.origin_repository == "org/repo"
-    with pytest.raises(CatalogError, match="repository must be a non-empty string"):
-        catalog.extract("collection-core", tmp_path / "out/blank", repository="  ")
 
 
 def test_round_trip_into_differently_named_directories_keeps_ring_assignments(
     tmp_path: Path,
 ) -> None:
     root, catalog = _repo(tmp_path)
-    first = catalog.extract("collection-core", tmp_path / "out/first-name")
-    second = catalog.extract("collection-core", tmp_path / "elsewhere/another")
+    first = extract_tree(catalog, "collection-core", tmp_path / "out/first-name")
+    second = extract_tree(catalog, "collection-core", tmp_path / "elsewhere/another")
 
     assert load_extracted_package(FS, first) == load_extracted_package(FS, second)
     for relative in ("arborescent.toml", "src/core/api.py"):
@@ -203,8 +199,7 @@ def test_round_trip_into_differently_named_directories_keeps_ring_assignments(
 def test_round_trip_with_dependencies_keeps_each_nested_policy(tmp_path: Path) -> None:
     root, catalog = _repo(tmp_path)
 
-    destination = catalog.extract(
-        "collection-core", tmp_path / "out/core", include_dependencies=True
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core", include_dependencies=True
     )
     extracted = load_extracted_package(FS, destination)
 
@@ -230,26 +225,6 @@ def test_round_trip_with_dependencies_keeps_each_nested_policy(tmp_path: Path) -
     }
 
 
-def test_layout_change_that_would_change_module_identity_is_an_explicit_error(
-    tmp_path: Path,
-) -> None:
-    root, _ = _repo(tmp_path)
-    write_files(
-        root,
-        {
-            "packages.toml": CATALOG.replace(
-                'path = "packages/core/src"\nrole = "source"',
-                'path = "packages/core/src"\nrole = "source"\ndestination = "lib"',
-            )
-        },
-    )
-    catalog = PackageCatalog.load(FS, root)
-
-    with pytest.raises(CatalogError, match="would change module identity"):
-        catalog.extract("collection-core", tmp_path / "out/core")
-    assert not (tmp_path / "out/core").exists()
-
-
 def test_declared_nested_config_that_is_not_shipped_is_an_error(tmp_path: Path) -> None:
     root, _ = _repo(tmp_path)
     write_files(
@@ -264,7 +239,7 @@ def test_declared_nested_config_that_is_not_shipped_is_an_error(tmp_path: Path) 
     )
 
     with pytest.raises(CatalogError, match="missing from the extraction"):
-        PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out/core")
+        extract_tree(PackageCatalog.load(FS, root), "collection-core", tmp_path / "out/core")
 
 
 @pytest.mark.parametrize(
@@ -292,7 +267,7 @@ def test_tampered_manifests_are_rejected(
     tmp_path: Path, old: str, new: str, message: str
 ) -> None:
     _, catalog = _repo(tmp_path)
-    destination = catalog.extract("collection-core", tmp_path / "out/core")
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core")
     manifest = destination / MANIFEST_NAME
     text = manifest.read_text(encoding="utf-8")
     assert old in text
@@ -306,8 +281,7 @@ def test_manifest_is_valid_toml_with_stable_and_location_tables_apart(
     tmp_path: Path,
 ) -> None:
     _, catalog = _repo(tmp_path)
-    destination = catalog.extract(
-        "collection-core", tmp_path / "out/core", include_dependencies=True
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core", include_dependencies=True
     )
 
     data = tomllib.loads((destination / MANIFEST_NAME).read_text(encoding="utf-8"))
@@ -331,7 +305,7 @@ def test_cli_validates_an_extracted_package_and_reports_a_broken_one(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _, catalog = _repo(tmp_path)
-    destination = catalog.extract("collection-core", tmp_path / "out/core")
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core")
 
     assert main(["packages", "validate", "--extracted", str(destination)]) == 0
     assert "valid: extracted collection-core" in capsys.readouterr().out
@@ -350,8 +324,7 @@ def test_non_bmp_and_special_characters_in_metadata_survive_extraction(
     root, _ = _repo(tmp_path)
     write_files(root, {"packages.toml": catalog})
 
-    destination = PackageCatalog.load(FS, root).extract(
-        "collection-core", tmp_path / "out/core"
+    destination = extract_tree(PackageCatalog.load(FS, root), "collection-core", tmp_path / "out/core"
     )
 
     assert load_extracted_package(FS, destination).semantics.summary == summary
@@ -360,47 +333,6 @@ def test_non_bmp_and_special_characters_in_metadata_survive_extraction(
 def _toml_literal(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\t", "\\t")
     return f'"{escaped}"'
-
-
-def test_renaming_a_module_through_destination_is_an_explicit_error(
-    tmp_path: Path,
-) -> None:
-    """Passed the old check: ``src`` still exists, but module ``core`` silently became ``renamed``."""
-    root, _ = _repo(tmp_path)
-    catalog = CATALOG.replace(
-        'path = "packages/core/src"\nrole = "source"',
-        'path = "packages/core/src/core"\nrole = "source"\ndestination = "src/renamed"',
-    ).replace(
-        'arborescent_config = "arborescent.toml" }\n\n[[packages.paths]]\npath = "packages/core/arborescent.toml"',
-        'arborescent_config = "arborescent.toml" }\n\n[[packages.paths]]\npath = "packages/core/arborescent.toml"',
-    )
-    write_files(root, {"packages.toml": catalog})
-
-    with pytest.raises(CatalogError, match=r"core -> renamed"):
-        PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out/core")
-    assert not (tmp_path / "out/core").exists()
-
-
-def test_module_identity_is_checked_even_when_the_policy_uses_default_sources(
-    tmp_path: Path,
-) -> None:
-    root, _ = _repo(tmp_path)
-    default_sources = CHILD_POLICY.replace(
-        'sources = ["src"]\nsource_roots = ["src"]\n', ""
-    )
-    write_files(
-        root,
-        {
-            "packages/core/arborescent.toml": default_sources,
-            "packages.toml": CATALOG.replace(
-                'path = "packages/core/src"\nrole = "source"',
-                'path = "packages/core/src"\nrole = "source"\ndestination = "lib/src"',
-            ),
-        },
-    )
-
-    with pytest.raises(CatalogError, match="would change module identity"):
-        PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out/core")
 
 
 def test_a_shipped_policy_is_validated_even_without_arborescent_config_metadata(
@@ -416,14 +348,14 @@ def test_a_shipped_policy_is_validated_even_without_arborescent_config_metadata(
     )
 
     with pytest.raises(CatalogError, match="shipped policy"):
-        catalog.extract("collection-policy", tmp_path / "out/policy")
+        extract_tree(catalog, "collection-policy", tmp_path / "out/policy")
 
 
 def test_revalidation_rejects_a_symlink_that_appears_in_the_tree_but_not_in_generated_directories(
     tmp_path: Path,
 ) -> None:
     _, catalog = _repo(tmp_path)
-    destination = catalog.extract("collection-core", tmp_path / "out/core")
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core")
     venv = destination / ".venv/bin"
     venv.mkdir(parents=True)
     (venv / "python").symlink_to(tmp_path / "missing-interpreter")
@@ -450,7 +382,7 @@ def test_parent_policy_neither_governs_nor_is_changed_by_a_childs_extraction(
     )
     before = parent.read_bytes()
 
-    destination = catalog.extract("collection-core", tmp_path / "out/core")
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core")
 
     assert parent.read_bytes() == before
     assert (destination / "arborescent.toml").read_bytes() == (
@@ -469,7 +401,7 @@ def test_extracted_policy_meets_the_native_minimum_profile_on_its_own(
 ) -> None:
     """Static profile requirements only: Ruff and Tach version certification needs the real tools."""
     _, catalog = _repo(tmp_path)
-    destination = catalog.extract("collection-core", tmp_path / "out/core")
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core")
     policy, root = load_policy(FS, destination / "arborescent.toml")
 
     assert _native_minimum(policy, FsScanner().scan(policy, root)) == []
@@ -480,75 +412,6 @@ def _simple_catalog(extra_paths: str = "", root: str = "packages/core") -> str:
         '[[packages]]\nid = "collection-core"\nname = "Core"\nkind = "lib"\nrepository = "org/repo"\n'
         f'root = "{root}"\nsummary = "s"\n' + extra_paths
     )
-
-
-def test_a_real_python_package_named_like_build_output_is_copied(
-    tmp_path: Path,
-) -> None:
-    """The review's headline case: ``pkg/build/__init__.py`` used to vanish and the identity check passed."""
-    root = tmp_path / "repo"
-    write_files(
-        root,
-        {
-            "pkg/__init__.py": "",
-            "pkg/a.py": "from pkg.build import X\n",
-            "pkg/build/__init__.py": "X = 1\n",
-            "pkg/dist/__init__.py": "",
-            "pkg/build/lib/old.py": "",  # no __init__ at pkg/build/lib -> still inside the real package, kept
-            "pkg/venv/pyvenv.cfg": "home = /usr\n",  # a virtualenv has no __init__.py
-            "pkg/.git": "gitdir: ../elsewhere\n",  # worktree pointer file
-            "pkg/.pytest_cache/README.md": "x",
-            "pkg/.DS_Store": "x",
-            "pkg/arborescent.toml": CHILD_POLICY.replace(
-                'sources = ["src"]\nsource_roots = ["src"]\n', ""
-            ).replace('exclude = ["tests"]\n', ""),
-            "packages.toml": _simple_catalog(
-                '[[packages.paths]]\npath = "pkg"\nrole = "source"\n', root="pkg"
-            ),
-        },
-    )
-
-    destination = PackageCatalog.load(FS, root).extract(
-        "collection-core", tmp_path / "out"
-    )
-
-    extracted = {
-        p.relative_to(destination).as_posix()
-        for p in destination.rglob("*")
-        if p.is_file()
-    }
-    assert {
-        "build/__init__.py",
-        "dist/__init__.py",
-        "build/lib/old.py",
-        "a.py",
-    } <= extracted
-    assert not extracted & {
-        ".git",
-        ".DS_Store",
-        ".pytest_cache/README.md",
-        "venv/pyvenv.cfg",
-    }
-
-
-def test_a_policy_moved_away_from_its_sources_is_an_error(tmp_path: Path) -> None:
-    root, _ = _repo(tmp_path)
-    write_files(
-        root,
-        {
-            "packages.toml": CATALOG.replace(
-                'path = "packages/core/arborescent.toml"\nrole = "config"',
-                'path = "packages/core/arborescent.toml"\nrole = "config"\ndestination = "conf/arborescent.toml"',
-            ).replace(
-                'metadata = { import = "core", boundary = "public", arborescent_config = "arborescent.toml" }',
-                'metadata = { import = "core", boundary = "public" }',
-            )
-        },
-    )
-
-    with pytest.raises(CatalogError, match="expects 'src'"):
-        PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out/core")
-    assert not (tmp_path / "out/core").exists()
 
 
 PYPROJECT_POLICY = (
@@ -571,11 +434,11 @@ def test_a_pyproject_policy_is_checked_like_an_arborescent_toml(tmp_path: Path) 
         },
     )
     with pytest.raises(CatalogError, match="expects 'src'"):
-        PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out/moved")
+        extract_tree(PackageCatalog.load(FS, root), "collection-core", tmp_path / "out/moved")
 
     write_files(root, {"packages.toml": _simple_catalog(paths.format(dest=""), "p")})
     assert (
-        PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out/ok")
+        extract_tree(PackageCatalog.load(FS, root), "collection-core", tmp_path / "out/ok")
         / "src/a.py"
     ).is_file()
 
@@ -596,7 +459,7 @@ def test_a_pyproject_without_an_arborescent_table_is_not_treated_as_a_policy(
     )
 
     assert (
-        PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out")
+        extract_tree(PackageCatalog.load(FS, root), "collection-core", tmp_path / "out")
         / "a.py"
     ).is_file()
 
@@ -617,60 +480,11 @@ class _RacyFileSystem(LocalFileSystem):
         return super().exists(path)
 
 
-def test_a_destination_that_appears_non_empty_is_never_deleted(tmp_path: Path) -> None:
-    root, _ = _repo(tmp_path)
-    destination = (
-        (tmp_path / "out/core").resolve()
-        if (tmp_path / "out").exists()
-        else tmp_path.resolve() / "out/core"
-    )
-    catalog = PackageCatalog.load(_RacyFileSystem(destination), root)
-
-    with pytest.raises(CatalogError, match="not empty"):
-        catalog.extract("collection-core", destination)
-    assert (destination / "precious.txt").read_text(encoding="utf-8") == "keep"
-
-
-@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs POSIX named pipes")
-def test_a_named_pipe_in_a_source_tree_is_rejected_instead_of_hanging(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "repo"
-    write_files(
-        root,
-        {
-            "p/a.py": "",
-            "packages.toml": _simple_catalog(
-                '[[packages.paths]]\npath = "p"\nrole = "source"\n', "p"
-            ),
-        },
-    )
-    os.mkfifo(root / "p/pipe")
-    outcome: list[CatalogError | None] = []
-
-    def attempt() -> None:
-        try:
-            PackageCatalog.load(FS, root).extract("collection-core", tmp_path / "out")
-        except CatalogError as exc:
-            outcome.append(exc)
-        else:
-            outcome.append(None)
-
-    worker = threading.Thread(target=attempt, daemon=True)
-    worker.start()
-    worker.join(timeout=10)
-
-    assert not worker.is_alive(), "extraction blocked on a named pipe"
-    assert isinstance(outcome[0], CatalogError)
-    assert "special files" in str(outcome[0])
-
-
 def _tampered(
     tmp_path: Path, edit: Callable[[str], str], *, dependencies: bool = False
 ) -> Path:
     _, catalog = _repo(tmp_path)
-    destination = catalog.extract(
-        "collection-core", tmp_path / "out/core", include_dependencies=dependencies
+    destination = extract_tree(catalog, "collection-core", tmp_path / "out/core", include_dependencies=dependencies
     )
     manifest = destination / MANIFEST_NAME
     text = manifest.read_text(encoding="utf-8")

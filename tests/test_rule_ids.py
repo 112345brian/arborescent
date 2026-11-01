@@ -7,16 +7,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from arborescent_helpers import CLASSIFY, mini_policy, ring_with, write_files
+from arborescent_helpers import CLASSIFY, mini_policy, ring_with, services, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
 from arborescent.config import load_policy
 from arborescent.domain import Rule, Violation
 from arborescent.engine import Services, write_generated
 from arborescent.rules import check_modules
-from arborescent.selftest import NO_MUTATION, plan
+from arborescent.selftest import NO_MUTATION, plan, selftest
 from arborescent.testing import FakeToolRunner
 
+PACKAGE_RULES = {rule for rule in Rule if rule.startswith("package-")}
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY: dict[str, Any] = {"sources": ["app", "run.py"], "entry_scripts": ["run"], "classify": {**CLASSIFY, "run": "composition"}}
 
@@ -58,6 +59,22 @@ def test_rule_id_strings_never_change() -> None:
             "unannotated-module",
             "scope-import",
             "scope-effect-leak",
+            "package-unassigned-module",
+            "package-multiply-assigned-module",
+            "package-unowned-asset",
+            "package-multiply-assigned-asset",
+            "package-spans-rings",
+            "package-undeclared-dependency",
+            "package-dependency-cycle",
+            "package-unused-dependency",
+            "package-owns-everything",
+            "package-semantics-drift",
+            "package-membership-drift",
+            "package-ring-drift",
+            "package-public-symbol-dropped",
+            "package-private-import",
+            "package-release-policy-missing",
+            "package-pyproject-drift",
         ]
     )
 
@@ -74,8 +91,10 @@ def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     scan = FsScanner().scan(policy, root)
     mutated = {m.rule for m in plan(policy, scan)[0]}
     # the arborescent repo has no entry scripts, and does not enable require_arbor_annotations (its own source
-    # is not fully annotated yet); those rules' mutations are covered by the next two tests instead
-    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE} >= set(Rule)
+    # is not fully annotated yet); those rules' mutations are covered by the next two tests instead. The package rules'
+    # probes are only built with the catalog in view (`selftest`), so they are asserted by
+    # `test_arborescent_probes_its_own_package_rules` below and, on synthetic catalogs, by tests/test_package_gaps.py.
+    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, *PACKAGE_RULES} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
 
@@ -152,13 +171,13 @@ def test_check_modules_edge_inputs(repo: Path) -> None:
 
 def test_write_generated_writes_every_file_and_reports_them(repo: Path) -> None:
     policy = mini_policy()
-    services = Services(FsScanner(), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), [])
-    written = write_generated(policy, repo, services)
+    fake_services = Services(FsScanner(), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), [])
+    written = write_generated(policy, repo, fake_services)
     assert written == sorted(written) and written
     for rel in written:
         assert b"\r\n" not in (repo / rel).read_bytes()
     (repo / written[0]).write_text("stale", encoding="utf-8")
-    assert write_generated(policy, repo, services) == []  # existing presets are left untouched
+    assert write_generated(policy, repo, fake_services) == []  # existing presets are left untouched
     assert (repo / written[0]).read_text(encoding="utf-8") == "stale"
 
 
@@ -167,3 +186,27 @@ def test_write_generated_makes_missing_folders(repo: Path, ring_change: dict[str
     policy = mini_policy(ring=ring_with(**ring_change))
     written = write_generated(policy, repo, Services(FsScanner(), FakeToolRunner(), [], LocalFileSystem(), SystemClock(), []))
     assert all((repo / rel).is_file() for rel in written)
+
+
+def test_arborescent_probes_its_own_package_rules() -> None:
+    """Arborescent opts into its own package checks (packages.toml). Its one package cannot exercise every rule, and the
+    ones it cannot are skipped with a reason, never silently; nothing may survive."""
+    policy, root = load_policy(LocalFileSystem(), ROOT / "pyproject.toml")
+    assert policy.package_catalog == "packages.toml"
+    report = selftest(policy, root, services())
+    assert report.survived == []
+    for rule in (
+        "package-release-policy-missing",
+        "package-multiply-assigned-module",
+        "package-multiply-assigned-asset",
+        "package-spans-rings",
+        "package-unassigned-module",
+        "package-unowned-asset",
+        "package-undeclared-dependency",
+    ):
+        assert any(entry.startswith(f"[{rule}]") for entry in report.killed), rule
+    for rule in (
+        "package-private-import",  # no package declares a public surface
+        "package-pyproject-drift",  # package_pyproject is off, so there is no derived file to edit
+    ):
+        assert any(entry.startswith(f"{rule}:") for entry in report.skipped), rule

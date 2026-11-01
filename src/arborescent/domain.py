@@ -16,9 +16,15 @@ from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 __all__ = [
     "ALL",
     "EFFECT_RULES",
+    "INFORMATIONAL_RULES",
     "NOISE_DIRS",
+    "Allowance",
+    "ArchitectureContracts",
     "ArchitectureScope",
     "ChildArbor",
+    "Contract",
+    "ModuleLayer",
+    "Mutation",
     "Policy",
     "PolicyError",
     "RingRule",
@@ -72,6 +78,24 @@ class Rule(StrEnum):
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
     UNANNOTATED_MODULE = "unannotated-module"
+    # package assignment (`package_catalog`): which package owns each module and asset
+    PACKAGE_UNASSIGNED_MODULE = "package-unassigned-module"
+    PACKAGE_MULTIPLY_ASSIGNED_MODULE = "package-multiply-assigned-module"
+    PACKAGE_UNOWNED_ASSET = "package-unowned-asset"
+    PACKAGE_MULTIPLY_ASSIGNED_ASSET = "package-multiply-assigned-asset"
+    PACKAGE_SPANS_RINGS = "package-spans-rings"
+    PACKAGE_UNDECLARED_DEPENDENCY = "package-undeclared-dependency"
+    PACKAGE_DEPENDENCY_CYCLE = "package-dependency-cycle"
+    PACKAGE_UNUSED_DEPENDENCY = "package-unused-dependency"
+    PACKAGE_OWNS_EVERYTHING = "package-owns-everything"
+    # annotation preservation (`package_parts`): a split part keeps the catalog's annotations and public contracts
+    PACKAGE_SEMANTICS_DRIFT = "package-semantics-drift"
+    PACKAGE_MEMBERSHIP_DRIFT = "package-membership-drift"
+    PACKAGE_RING_DRIFT = "package-ring-drift"
+    PACKAGE_PUBLIC_SYMBOL_DROPPED = "package-public-symbol-dropped"
+    PACKAGE_PRIVATE_IMPORT = "package-private-import"
+    PACKAGE_RELEASE_POLICY_MISSING = "package-release-policy-missing"
+    PACKAGE_PYPROJECT_DRIFT = "package-pyproject-drift"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {
@@ -85,6 +109,12 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "dynamic-import": Rule.EFFECT_DYNAMIC_IMPORT,
     "patch": Rule.EFFECT_PATCH,
 }
+
+# Findings that are reported but never fail a check and never enter the baseline: a package spanning rings is normal.
+# A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
+INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
+    Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING,
+})
 
 
 class PolicyError(ValueError):
@@ -195,8 +225,17 @@ class Policy:
     children: tuple[ChildArbor, ...] = ()
     require_arbor_annotations: bool = False
     require_arbor_annotations_exclude: tuple[str, ...] = ()
+    package_catalog: str | None = None  # opt-in: packages.toml path; every module and asset must belong to one package
+    package_parts: tuple[str, ...] = ()  # opt-in: extracted part trees (inside the repository) checked against the catalog
+    package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
+    modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
 
     def __post_init__(self) -> None:
+        _validate_package_catalog(self.package_catalog)
+        _validate_modularity(self.modularity, self.package_catalog)
+        _validate_package_parts(self.package_parts, self.package_catalog)
+        if self.package_pyproject and self.package_catalog is None:
+            raise PolicyError("`package_pyproject` derives from the packages in `package_catalog`, which is not set")
         _validate_rings(self.rings, self.classify, bool(self.scopes))
         for pattern, targets in self.module_forbid_imports:
             if not pattern or not targets:
@@ -374,6 +413,37 @@ class Policy:
         return all(self.allowed_rings(r.name) == frozenset(x.name for x in self.rings[: i + 1]) for i, r in enumerate(self.rings))
 
 
+def _validate_package_catalog(value: str | None) -> None:
+    if value is None:
+        return
+    path = PurePosixPath(value)
+    if not value or path.is_absolute() or ".." in path.parts or "\\" in value:
+        raise PolicyError(f"`package_catalog` must be a relative path inside the repository, got {value!r}")
+
+
+MODULARITY_MODES: tuple[str, ...] = ("ready", "report")
+
+
+def _validate_modularity(value: str, catalog: str | None) -> None:
+    if value not in MODULARITY_MODES:
+        raise PolicyError(f"`modularity` must be one of {list(MODULARITY_MODES)}, got {value!r}")
+    if value == "report" and catalog is None:
+        raise PolicyError("`modularity = \"report\"` needs `package_catalog`: there are no package gaps to report without one")
+
+
+def _validate_package_parts(parts: tuple[str, ...], catalog: str | None) -> None:
+    if not parts:
+        return
+    if catalog is None:
+        raise PolicyError("`package_parts` needs `package_catalog`: the parts are checked against the catalog")
+    for value in parts:
+        path = PurePosixPath(value)
+        if not value or path.is_absolute() or ".." in path.parts or "\\" in value or value in (".", "./"):
+            raise PolicyError(f"`package_parts` must list relative paths inside the repository, got {value!r}")
+    if len(set(parts)) != len(parts):
+        raise PolicyError("`package_parts` must not list a path twice")
+
+
 def _validate_suggestion_threshold(value: int) -> None:
     if value < 1:
         raise PolicyError("`suggestion_threshold` must be a positive number of logical code lines")
@@ -496,3 +566,47 @@ def _validate_scope_acyclic(scopes: tuple[ArchitectureScope, ...], names: list[s
 
     for name in names:
         visit(name)
+
+
+# (names that are not third-party-free for the module, names its ring lists); ``None`` for a module with no ring.
+Allowance = tuple[frozenset[str], frozenset[str]]
+Contract = tuple[str, list[str], list[str]]  # (name, source modules, forbidden modules)
+
+
+@dataclass(frozen=True)
+class ModuleLayer:
+    """One module in the neutral contracts: the layer it sits in and, when the boundaries are listed per module, who it may import."""
+
+    path: str
+    layer: str
+    may_import: tuple[str, ...] | None = None  # ``None``: the layer order alone decides
+
+
+@dataclass(frozen=True)
+class ArchitectureContracts:
+    """What the policy requires of the import graph, in no tool's format. The engine adapters render it (import-linter,
+    tach) or are handed it (any graph analyzer the user supplies); the core never writes a tool's configuration itself.
+
+    Paths are relative to the repository root; the adapter that writes a file relative to ``config_dir`` does the offsetting.
+    """
+
+    root_packages: tuple[str, ...]
+    forbidden: tuple[Contract, ...]  # (name, importers, modules they may not import), in the order they are reported
+    layers: tuple[str, ...]  # outermost first
+    modules: tuple[ModuleLayer, ...]
+    explicit_boundaries: bool  # ``modules`` carry ``may_import``: same-layer peers and package boundaries are listed, not implied
+    source_roots: tuple[str, ...]
+    config_dir: str  # where the generated files go, relative to the repository root ("" = the root)
+    distributions: tuple[tuple[str, str], ...]  # (module, distribution) where the import name differs from the package name
+    external_exclude: tuple[str, ...]  # third-party imports no tool should demand a declaration for
+
+
+@dataclass(frozen=True)
+class Mutation:
+    """A selftest mutation: text appended to one file (or a new file) that must make one rule newly fire."""
+
+    rule: Rule  # the rule id that must newly fire
+    label: str
+    file: str  # posix path relative to the root
+    append: str  # text appended to the file ("" for an added file: see ``new_file``)
+    new_file: bool = False

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from . import baseline as ratchet_mod
@@ -12,13 +13,18 @@ from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner, SystemCl
 from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .cli_install import _install_tools, _setup_install_command
+from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
 from .domain import Policy, PolicyError
+from .driver_filter_repo import FilterRepo
+from .driver_libcst import LibCstRename
+from .driver_port import ImportRewriter, MigrationLibrary
 from .engine import (
     EngineRun,
     Options,
     Services,
+    enforced,
     pick_checker,
     run_check,
     run_engine,
@@ -26,6 +32,9 @@ from .engine import (
     write_generated,
 )
 from .engines import default_engines
+from .migration_export import migration_arguments_of
+from .migration_json import export_document, render_export, render_schema
+from .package_checks import AnnotationPackageChecks
 from .packages import PackageCatalog, load_extracted_package
 from .ports import FileSystem, ScanResult
 from .rules import RuleContext
@@ -45,6 +54,7 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
         LocalFileSystem(),
         SystemClock(),
         default_engines(output_dir),
+        AnnotationPackageChecks(),
     )
 
 
@@ -111,6 +121,11 @@ def _parser() -> argparse.ArgumentParser:
         help="require Arborescent minimum profile v1",
     )
     c.add_argument(
+        "--require-modularity",
+        action="store_true",
+        help="fail unless `modularity` is \"ready\" with a package_catalog and no package gap is open",
+    )
+    c.add_argument(
         "--no-baseline",
         action="store_true",
         help="ignore the baseline: report every violation",
@@ -161,25 +176,17 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="validate an extracted package directory instead of the repository catalog",
     )
-    extract = package_actions.add_parser("extract")
-    extract.add_argument("package_id")
-    extract.add_argument(
-        "--output", type=Path, required=True, help="new destination directory"
+    export = package_actions.add_parser(
+        "export", help="write the read-only migration export (JSON) for the policy's package_catalog"
     )
-    extract.add_argument(
-        "--catalog",
-        default="packages.toml",
-        help="package metadata file relative to repository root",
-    )
-    extract.add_argument(
-        "--repository",
-        help="repository the extracted package will live in (default: its origin repository)",
-    )
-    extract.add_argument(
-        "--with-dependencies",
+    export.add_argument("--output", type=Path, help="file to write (default: standard output)")
+    export.add_argument(
+        "--require-ready",
         action="store_true",
-        help="include declared dependency packages",
+        help="exit 1 when the export still has an annotation gap of severity error",
     )
+    _ = package_actions.add_parser("schema", help="print the JSON Schema the export validates against")
+    add_migrate_parser(package_actions)
     b = sub.add_parser(
         "bench", help="time every engine, cold and warm, on prepared codebases"
     )
@@ -198,20 +205,28 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Sequence[str] | None = None, services: Services | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None, services: Services | None = None, library: MigrationLibrary | None = None,
+    rewriter: ImportRewriter | None = None, environ: Mapping[str, str] | None = None,
+) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command == "check" and args.yes and not args.install_tools:
         parser.error("--yes requires --install-tools")
+    if getattr(args, "with_dependencies", False):
+        parser.error("--with-dependencies was removed: a dependency is a separate package, so extract each one on its own")
     try:
         if args.command == "bench":
             return run_bench(args.dirs, args.checkers, default_services)
         fs = services.fs if services else LocalFileSystem()
+        if args.command == "packages" and args.package_action == "schema":
+            sys.stdout.write(render_schema())
+            return 0
         if args.command == "packages" and getattr(args, "extracted", None) is not None:
             extracted = load_extracted_package(fs, args.extracted)
             print(f"valid: extracted {extracted.semantics.id} ({len(extracted.paths)} paths)")
             return 0
-        if args.command == "packages":
+        if args.command == "packages" and args.package_action not in ("export", "migrate", "extract"):
             root = (
                 args.config.parent
                 if args.config
@@ -224,7 +239,10 @@ def main(argv: Sequence[str] | None = None, services: Services | None = None) ->
             cache=not getattr(args, "no_cache", False),
             output_dir=policy.output_dir,
         )
-        return _dispatch(args, policy, root, svc)
+        tools = MigrationTools(
+            library or FilterRepo(svc.runner, svc.fs), rewriter or LibCstRename(svc.runner), os.environ if environ is None else environ
+        )
+        return _dispatch(args, policy, root, svc, tools)
     except PolicyError as exc:
         print(f"arborescent: {exc}", file=sys.stderr)
         return 2
@@ -243,7 +261,7 @@ def _find_catalog_root(fs: FileSystem, start: Path, catalog_path: str) -> Path:
 
 
 def _dispatch(
-    args: argparse.Namespace, policy: Policy, root: Path, svc: Services
+    args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: MigrationTools
 ) -> int:
     if args.command == "generate":
         return _generate(policy, root, svc)
@@ -257,8 +275,10 @@ def _dispatch(
         return _annotate(args, policy, root, svc)
     if args.command == "selftest":
         return _selftest(policy, root, svc)
+    if args.command == "packages" and args.package_action in ("migrate", "extract"):
+        return run_migrate(args, policy, root, svc, tools)
     if args.command == "packages":
-        return _packages(args, root, svc.fs)
+        return _export(args, policy, root, svc)
     return _check(args, policy, root, svc)
 
 
@@ -271,14 +291,20 @@ def _packages(args: argparse.Namespace, root: Path, fs: FileSystem) -> int:
         for package in catalog.packages:
             print(f"{package.id}\t{package.root}\t{package.extraction_status}")
         return 0
-    destination = catalog.extract(
-        args.package_id,
-        args.output if args.output.is_absolute() else root / args.output,
-        include_dependencies=args.with_dependencies,
-        repository=args.repository,
-    )
-    print(f"extracted {args.package_id} to {destination}")
     return 0
+
+
+def _export(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    arguments = migration_arguments_of(policy, root, svc.fs, svc.scanner.scan(policy, root))
+    text = render_export(export_document(arguments, policy.package_catalog or "packages.toml"))
+    if args.output is None:
+        sys.stdout.write(text)
+    else:
+        destination = args.output if args.output.is_absolute() else root / args.output
+        svc.fs.mkdir(destination.parent)
+        svc.fs.write_text(destination, text)
+        print(f"wrote {destination}")
+    return 1 if args.require_ready and not arguments.ready else 0
 
 
 def _generate(policy: Policy, root: Path, svc: Services) -> int:
@@ -292,6 +318,7 @@ def _baseline(
     args: argparse.Namespace, policy: Policy, root: Path, svc: Services
 ) -> int:
     found, _ = run_own(policy, root, svc)
+    found, _ = enforced(policy, found)
     engine_names = {item.name for item in (*svc.engines, *svc.checkers)}
     if args.adopt in engine_names:
         found += run_engine(svc, args.adopt, root).violations
@@ -427,6 +454,7 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         require_tools=args.require_tools,
         use_baseline=not args.no_baseline,
         require_profile=args.require_profile,
+        require_modularity=args.require_modularity,
         growth_against=args.growth_against,
         no_cache=args.no_cache,
     )

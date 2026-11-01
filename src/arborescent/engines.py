@@ -8,7 +8,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .domain import ToolResult, Violation
+from .domain import ArchitectureContracts, ToolResult, Violation
+from .generated_config import (
+    HEADER,
+    IMPORT_LINTER_FILE,
+    TACH_FILE,
+    has_own_importlinter_config,
+    is_generated,
+    toml_list,
+    toml_quote,
+)
 from .ports import Engine, FileSystem
 
 __all__ = ["ImportLinter", "Ruff", "Tach", "TachExternal", "default_engines"]
@@ -18,20 +27,41 @@ __all__ = ["ImportLinter", "Ruff", "Tach", "TachExternal", "default_engines"]
 class ImportLinter:
     name: str = "import-linter"
     executable: str = "lint-imports"
-    config_file: str = "arborescent-importlinter.toml"  # retained for optional preset generation
+    config_file: str = IMPORT_LINTER_FILE  # what `generate` writes; import-linter does not discover it by itself
     supports_changed: bool = False
 
     def command(self, files: Sequence[str]) -> list[str]:
         return [self.executable]
 
+    def command_in(self, files: Sequence[str], root: Path, fs: FileSystem) -> list[str]:
+        """Read the generated contracts, but never over a configuration the project wrote itself."""
+        if has_own_importlinter_config(fs, root) or not is_generated(fs, root / self.config_file):
+            return self.command(files)
+        return [self.executable, "--config", self.config_file]
+
     def passed(self, result: ToolResult) -> bool:
         return result.returncode == 0
+
+    def render_contracts(self, contracts: ArchitectureContracts) -> str:
+        """Every neutral contract that forbids an import becomes a ``forbidden`` contract; layers and per-module lists are tach's."""
+        lines = [
+            HEADER, "[tool.importlinter]", f"root_packages = {toml_list(contracts.root_packages)}",
+            "include_external_packages = true", "",
+        ]
+        for name, sources, forbidden in contracts.forbidden:
+            lines += [
+                "[[tool.importlinter.contracts]]", f"name = {toml_quote(name)}", 'type = "forbidden"',
+                f"source_modules = {toml_list(sources)}", f"forbidden_modules = {toml_list(forbidden)}",
+                "allow_indirect_imports = true", "",
+            ]
+        return "\n".join(lines).rstrip() + "\n"
 
 
 @dataclass(frozen=True)
 class Tach:
     name: str = "tach"
     executable: str = "tach"
+    config_file: str = TACH_FILE
     working_directory: str = "."
     supports_changed: bool = False
 
@@ -40,6 +70,37 @@ class Tach:
 
     def passed(self, result: ToolResult) -> bool:
         return result.returncode == 0
+
+    def render_contracts(self, contracts: ArchitectureContracts) -> str:
+        """Layers plus, when the boundaries are listed per module, each module's ``depends_on``. Paths are relative to this file."""
+        depth = len([part for part in contracts.config_dir.split("/") if part and part != "."])
+        relative = "../" * depth
+        source_roots = [f"{relative}{root}" for root in contracts.source_roots]
+        excludes = [f"{relative}{pattern}" for pattern in ("**/__pycache__", "tests", ".venv", "venv", "node_modules")]
+        explicit = contracts.explicit_boundaries
+        lines = [
+            HEADER,
+            f"source_roots = {toml_list(source_roots)}",
+            f"exclude = {toml_list(excludes)}",
+            f"layers = {toml_list(contracts.layers)}",
+            'root_module = "ignore"',
+        ]
+        if explicit:
+            lines += [
+                "forbid_circular_dependencies = false  # per-module depends_on lists encode the layer, scope and package boundaries",
+                "layers_explicit_depends_on = true",
+            ]
+        else:
+            lines.append("forbid_circular_dependencies = true")
+        lines.append("")
+        renames = [f"{module}:{distribution}" for module, distribution in contracts.distributions]
+        lines += ["[external]", f"exclude = {toml_list(contracts.external_exclude)}", f"rename = {toml_list(renames)}", ""]
+        for module in contracts.modules:
+            lines += ["[[modules]]", f"path = {toml_quote(module.path)}", f"layer = {toml_quote(module.layer)}"]
+            if module.may_import is not None:
+                lines.append("depends_on = [" + ", ".join("{ path = " + toml_quote(other) + " }" for other in module.may_import) + "]")
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
 
 
 @dataclass(frozen=True)

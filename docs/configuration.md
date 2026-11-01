@@ -39,6 +39,11 @@ settings. The two forms cannot be mixed.
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
+| `modularity` | `"ready"` | Needs `package_catalog` for `"report"`. `"ready"`: every package gap fails `check`. `"report"`: gaps are shown as notes and never fail. Independent of `preset`; `--require-modularity` certifies it (see [Strict linting and strict modularity](#strict-linting-and-strict-modularity)). |
+| `package_catalog` | unset | Opt-in, any preset: path of a `packages.toml`. Every module and asset must belong to exactly one package (see [Package assignment](#package-assignment)). |
+| `package_parts` | `[]` | Opt-in, needs `package_catalog`: relative paths, inside the repository, of extracted part trees to check against the catalog (see [Annotation preservation](#annotation-preservation-across-a-split)). |
+
+| `package_pyproject` | `false` | Opt-in, needs `package_catalog`: derive each package's `pyproject.toml` fields from the annotations (see [Package pyproject.toml](#package-pyprojecttoml)). |
 
 ## Multi-scope configuration
 
@@ -139,10 +144,11 @@ uses the package metadata and extraction tools below.
 
 ## Package metadata and extraction
 
-Repository package ownership and extraction metadata live in a root `packages.toml` file. Arborescent owns the schema,
-validation, and extraction command; the repository declares stable package identities and the paths/roles it owns. Each
-path can carry string metadata that follows it when copied, such as the import package name or the relative path to an
-independent `arborescent.toml`.
+Repository package ownership and extraction metadata live in a root `packages.toml` file. Arborescent owns the schema, the
+validation and the manifest that records an extraction; the repository declares stable package identities and the paths/roles
+it owns. The extraction itself is done by a migration library (git filter-repo, with history) that `packages extract` drives.
+Each path can carry string metadata that is recorded in the manifest, such as the import package name or the relative path to
+an independent `arborescent.toml`.
 
 ```toml
 [[packages]]
@@ -168,30 +174,27 @@ destination = "tests/test_collection_core"
 ```
 
 The package root and every owned path must stay inside the repository. Package IDs are stable lowercase slugs, path
-ownership cannot overlap, and declared dependencies must form an acyclic graph. Extraction copies declared paths into a
-new destination and writes `.arborescent-package.toml` (see "Extraction manifest" below). A package with its own
-direct Arborescent policy is copied with that policy when it is listed as a configuration path; the child policy remains
-independently usable after extraction.
+ownership cannot overlap, and declared dependencies must form an acyclic graph. `packages extract` hands the declared paths to
+a migration library, which writes them to a new repository, and then writes `.arborescent-package.toml` (see "Extraction
+manifest" below). A package with its own direct Arborescent policy is extracted with that policy when it is listed as a
+configuration path; the child policy remains independently usable after extraction.
 
-Generated local output below a declared path is not copied: `__pycache__`, `*.pyc`, `.venv`, `venv`, `node_modules`,
-`.git` (directory or worktree pointer file), `.arborescent`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache`, `.tox`,
-`build`, `dist` and `.DS_Store` (the noise directories Arborescent already ignores, plus build output). A directory with
-one of those names is treated as generated output unless it is a real Python package (it contains `__init__.py`), so a
-package such as `pkg/build/__init__.py` is copied. A namespace package without `__init__.py` that is named like build
-output is skipped; give it an `__init__.py` or rename it. A declared path itself is always copied, even when it is named
-`build`, and symlinks inside skipped directories do not abort extraction. Special files (named pipes, devices) and
-symlinks elsewhere are rejected.
+Arborescent does no copying: which files cross (generated output, symlinks, special files, history) is the migration
+library's job, and git filter-repo only carries what is committed. Run it from a clean checkout of the branch to extract.
 
 ```sh
 arborescent packages validate
 arborescent packages list
-arborescent packages extract collection-core --output /tmp/collection-core
-arborescent packages extract collection-core --output /tmp/collection-core --with-dependencies
+arborescent packages extract collection-core --output /tmp/collection-core         # dry run: prints the exact arguments
+arborescent packages extract collection-core --output /tmp/collection-core --yes   # extract, then write the manifest
 ```
 
-Dependencies are included only when explicitly requested and are placed under `dependencies/<package-id>/`. The
-destination must not already exist. Extraction does not rewrite imports or invent build configuration; the package
-metadata declares the layout and the package owns its build and architecture files.
+`extract` is the `migrate` pipeline (see [migration-driver.md](migration-driver.md)) plus the manifest: the library runs, the
+import rewriter applies any declared `module_renames`, and then Arborescent writes and re-reads `.arborescent-package.toml`.
+`--output` is another name for `--target`; `--repository` sets where the manifest says the tree now lives (default: the
+package's home repository, else the repository it came from). The destination must not already exist. A dependency is a
+separate package, so extract each one on its own: `--with-dependencies` was removed. Extraction does not invent build
+configuration; the package metadata declares the layout and the package owns its build and architecture files.
 
 ### Extraction manifest
 
@@ -204,30 +207,27 @@ extraction *did*:
 | `[[paths]]` `role`, `metadata` | per-path meaning: role plus custom metadata (import name, boundary, `arborescent_config`, scope) | never |
 | `[origin]` | `repository`, `root` and `extraction_status` as declared in the catalog | no; kept for traceability |
 | `[[paths]]` `origin_path` | the path in the origin repository | no; kept for traceability |
-| `[location]` | the current `repository` (defaults to the origin; `--repository` sets another) and `root` (`.`) | yes |
+| `[location]` | the current `repository` (defaults to the package's home repository, else the origin; `--repository` sets another) and `root` (`.`) | yes |
 | `[[paths]]` `current_path` | where the path lives inside the extracted tree | yes |
 | `[extraction]` | `status = "extracted"` and `included_packages` | yes; describes the operation |
 | `[[dependencies]]` | the same stable fields for each included dependency, plus its origin and `current_root` | as above |
 
-Module identity is never rewritten. Extraction copies `arborescent.toml`, `classify` globs and in-file `__arbor__`
-annotations byte for byte. Extraction then compares, for every shipped `arborescent.toml`, the module name the policy
-derives for each copied file (from its `sources` and `source_roots`) before and after the move. A `destination` that
-renames a module, or moves it out of the policy's `sources`, fails with `would change module identity` (for example
-`core -> renamed`) and the partial extraction is removed. Files that merely become newly visible to a policy, such as
-tests moved under a `sources = "."` policy, add modules and are allowed. `arborescent_config` metadata is relative to
-the package's current root and must be shipped as a declared path.
+Module identity is not checked at extraction any more. The old extractor compared the module names a shipped policy derives
+before and after the move and refused a layout that changed one. A migration library moves paths; a path move that changes an
+import name needs a declared `module_renames` entry, which the driver's rewriter applies, but **nothing yet checks that the two
+agree**. This is a known gap, not a covered case. `arborescent_config` metadata is relative to the package's current root and
+must be shipped as a declared path.
 
 The manifest is a provenance snapshot taken at extraction, not an integrity seal: an extracted package is expected to
 evolve, so its files are not hashed.
 
-`arborescent packages validate --extracted DIR` re-validates an extracted tree (extraction runs the same structural
-check): the manifest must be well formed (stable lowercase package ids, status `extracted`, normalized origin paths, at
+`arborescent packages validate --extracted DIR` re-validates an extracted tree (`packages extract` runs the same structural
+check after writing the manifest): the manifest must be well formed (stable lowercase package ids, status `extracted`, normalized origin paths, at
 least one path, each path inside its package's current root, no duplicate dependencies); current paths
 must resolve inside the tree; no symlink may leave it (generated directories such as `.venv` are ignored);
 `included_packages` must match the package and its dependencies; and every shipped policy, whether
 `arborescent.toml` or a `pyproject.toml` with `[tool.arborescent]` and wherever it was placed, must load and find its
-`sources` and `source_roots`. The module-identity comparison (also applied to `pyproject.toml` policies) needs the origin tree, so it
-runs only during extraction. Files outside a policy's `sources` are not part of that comparison. A parent policy (`children`, `child_policy_mode`) is neither read nor changed by extracting
+`sources` and `source_roots`. A parent policy (`children`, `child_policy_mode`) is neither read nor changed by extracting
 a child; the child keeps governing itself.
 
 `suggestion_threshold` controls a report-only hint for large files. The metric counts lines containing code tokens and
@@ -264,6 +264,215 @@ complexity and architecture-aware rules. Ruff's broad test-assertion and subproc
 tests remain idiomatic and real process adapters can declare their deliberate subprocess boundary. `PIE807` is ignored
 because it conflicts with strict type inference for container factories. `check` prints `standard rules (baseline vN)` when no rule
 customization is active, or `customised rules: ...` with the changes that apply.
+
+### Package assignment
+
+Set `package_catalog = "packages.toml"` (any lint preset) and `arborescent check`
+reports, by rule id, every first-party module and every asset that does not belong to exactly one package. It reuses the
+`packages.toml` above: a package claims a file by listing it, or a folder above it, in `paths`. The catalog is only
+parsed for this check, so a double claim that `packages validate` refuses outright is reported as a finding naming the
+module and every claiming package.
+
+Non-Python files (templates, static files, vocabulary data, SQL) below the policy's `sources` are assets. Beyond the
+package `paths`, a catalog can claim assets with ordered globs; `*` and `?` stay inside one folder, `**` spans folders,
+and **the first matching rule wins**, so globs never claim a file twice. A glob that gives a file to a package other than
+the one whose path contains it is a double claim. The policy's `exclude` patterns and generated output (`__pycache__`,
+`build`, `dist`, `*.pyc`) are not assets; modules under a declared child arbor are not scanned and so not assigned.
+
+```toml
+[[assets]]
+pattern = "src/**/templates/*.html"
+package = "web"
+```
+
+Findings that name a package pair (`package-multiply-assigned-*`, `package-undeclared-dependency`) are failures like any
+other rule and can be baselined. `package-spans-rings` is printed as a `NOTE` and neither fails the check nor enters
+the baseline. `selftest` probes each rule when `package_catalog` is set: a new unowned module or asset, a second
+package claiming an owned file, a glob contradicting a path owner, a package spanning two rings, and a new import across
+packages with no declared dependency. A probe that cannot be built for the catalog is listed with the reason.
+This adds no behaviour to `packages extract`, which is unchanged.
+
+**Two layers.** The *annotation layer* is everything on this page that describes the code: the `__arbor__` ring
+annotations ([below](#module-ring-annotations-__arbor__)), the package catalog and its keys above, and the checks that
+report a missing or contradictory annotation by rule id. From it Arborescent builds the *migration arguments*: typed,
+tool-neutral objects (`arborescent.migration_arguments`: `MigrationArguments`, `PackageArguments`, `OwnedModule`,
+`OwnedAsset`, `PathRename`, `Bypass`, `Edge`, `Gap`) that carry, per package, its identity and `home`, the modules and
+assets it owns with their target paths, the module-name map, its public surface and the modules that bypass it, its
+declared dependencies and the open gaps. `packages export` is those objects serialised as JSON. Any tool can consume the
+arguments; none is named in them.
+
+The *auxiliary driver* is a separate layer on top. Its only job is to supply a dedicated migration library with the
+arguments it needs, through a port; it does not migrate, and the annotation layer never depends on it. The command is
+`arborescent packages migrate` ([migration-driver.md](migration-driver.md)).
+[migration-recipes.md](migration-recipes.md) describes it and shows, with a worked example and the caveats found by running
+each tool, how to supply the same arguments by hand to git filter-repo, `git subtree split`, rope, deptry, Copybara and
+Josh. Those recipes are documentation, not commands Arborescent ships.
+
+### Migration annotations and export
+
+(The [migration driver](migration-driver.md), `arborescent packages migrate`, hands one package's arguments to a migration library.)
+
+A package entry can also say where it will live and what it exposes, and `arborescent packages export` publishes all of
+it as one versioned JSON document for external migration tools (it converts nothing and migrates nothing):
+
+```toml
+[[packages]]
+id = "core"
+# ... id, name, kind, repository, root, summary, depends_on, paths as above
+public = ["app.core.api", "app.core.models.*"]   # the public surface (module-name globs)
+externals = ["pydantic"]                          # third-party import names it may use
+[packages.home]                                   # kind = "repository", repository = "org/core"
+kind = "workspace-member"                         # ... or a member of a workspace in the same repository
+path = "packages/core"
+[[packages.module_renames]]                       # module names that change in the target
+from = "app.core"
+to = "core"
+```
+
+All four keys are optional; a missing one is a named gap in the export when it matters (`public` only when another package imports the package), never a guess. See
+[migration-export.md](migration-export.md) for the document, the schema, the gap codes, a `git filter-repo` recipe and the
+comparison with blinkered's `blinkered.toml`.
+
+#### Package contracts for the engines: the cut list
+
+With `package_catalog` set, `arborescent generate` also compiles the assignment into the engines' own config, so what
+import-linter and tach report for a package **is** its cut list; Arborescent walks no import graph for it. A package's
+interface is its `public` list (see "Annotation preservation across a split"); a package without one is open.
+
+- **import-linter**: one `forbidden` contract per package, `package <id> imports only declared packages' public modules`.
+  Its sources are the package's modules, its forbidden modules every module of another package that the package does
+  not list in `depends_on`, plus every non-public module of a package it does list. Contracts use
+  `allow_indirect_imports = true`, so the output is the list of direct edges to cut.
+- **tach**: a `[[modules]]` entry per module as before, now with an explicit `depends_on` that is the ring rule
+  intersected with the same package rule (own package, a declared package's public modules). Setting `package_catalog`
+  therefore switches tach to `layers_explicit_depends_on`, whose lists grow with the number of modules.
+- **third-party names**: one `package <id> imports no I/O or third-party package its rings do not list` contract per
+  package, forbidding the names that none of its modules' rings list. The ring contracts already imply this for a
+  classified module; it names the package and also covers a module that has no ring. A package with a ring that allows
+  every external package (`"*"`) gets no such contract.
+
+A module claimed by no package or by several is left out of these contracts (those are the gap findings above). A package
+that is allowed to import everything has no boundary contract. A package whose rings and edges produce no violation, and
+that has no gap, can leave the monorepo. `check` reports a contract failure as the engine's own failure and flags a
+generated file that is out of date as drift. The engines' output is not ratcheted through the baseline: only Ruff's is.
+The same edges are also reported by Arborescent's own `package-undeclared-dependency` (#52) and `package-private-import`
+(#55) rules, which need no engine installed; a test keeps the contracts and those rules from disagreeing.
+
+### Strict linting and strict modularity
+
+Two independent questions with two independent keys. `preset` (`strict`, `standard`, `relaxed`) is how strictly the
+code is linted. `modularity` is whether the repository is ready to be split: with `package_catalog` set, `ready` (the
+default) fails `check` on every open package gap, `report` shows them as `NOTE` lines and never fails. A `relaxed`
+repository can be modularity-ready and a `strict` one can be not.
+
+`arborescent check --require-modularity` certifies it: it fails (`MODULARITY FAIL ...`) when no `package_catalog` is
+set, when `modularity` is `report`, when an error-severity `package-*` gap is open, or under `--changed` (gaps are a
+whole-repository fact). A non-empty cut list (`package-spans-rings`) is information and is allowed. One package owning every module
+(`package-owns-everything`) is information too: a package's size says nothing about its quality. On success it
+prints `CERTIFIED modularity ready`. `--require-profile` is unrelated: it certifies lint and tool versions only.
+
+### Annotation preservation across a split
+
+After a split by other tools, the question for Arborescent is whether the annotations survived, not whether the graph
+or the tests did (grimp, import-linter, tach and each part's own suite judge those). Two opt-in inputs, both needing
+`package_catalog` (any lint preset):
+
+- A package may declare `public = ["app.api", "app.api.*"]` in `packages.toml`: the dotted module globs other packages
+  may import (the same matching as a scope's `public`). Without `public`, a package has no declared surface and nothing
+  of it is private. `public` is stable semantic metadata: extraction carries it into `.arborescent-package.toml`, and
+  only when set, so manifests of packages without one are unchanged.
+- `package_parts = ["split/core", "split/shell"]` lists extracted trees (#27) that live inside the repository, for
+  example a staging folder the splitting tool writes to. Keep them outside the policy's `sources` or in `exclude`, or
+  the origin scan would see their modules twice. Each part is read with its manifest and scanned under the policy it
+  ships; a part that is not a valid extraction or ships no policy is an error, never a pass. Parts outside the
+  repository are not supported: `selftest` mutates a copy of the repository and must carry the parts with it.
+
+With parts, `check` compares each part with the catalog and the origin scan: semantic metadata (`id`, `name`, `kind`,
+`domain`, `summary`, `capabilities`, `depends_on`, `public`, and each path's role and metadata, keyed by origin path)
+must be equal; where a path now lives is a coordinate and is free to change. Module identity is assumed stable (#27): a
+renamed module reads as one missing and one extra, since there is no explicit module mapping yet. Only classes and
+functions count as symbols; a dropped constant is not seen.
+
+`package-private-import` also runs on the origin without parts, for every package that declares `public`, and on each
+part's modules, resolving their imports by origin module identity, so a part importing a private module of another part
+is found. The ring comparison uses the effective ring, so a changed `classify` entry and a moved `__arbor__` annotation
+both show. Rings that disagree between `__arbor__` and `classify` inside one tree remain `arbor-ring-mismatch`, and an
+import across packages without a declared dependency remains `package-undeclared-dependency`; neither is repeated here.
+`selftest` probes each rule that applies (one needs parts) and lists a probe it cannot build with the reason.
+
+### Release, pin and history policy
+
+Some inputs to a split cannot be derived from the code: how dependents pin a package, whether its history is kept, which
+merge style keeps pinned SHAs reachable. They are decisions, so a package entry in `packages.toml` records them.
+Arborescent stores and validates them and carries them in the `policy` field of the migration export; it releases, tags,
+pins and rewrites nothing. The tools that do receive these values as arguments.
+
+```toml
+[[packages]]
+id = "core"
+# ... name, kind, repository, root, summary, paths as above
+[packages.home]
+kind = "repository"
+repository = "https://github.com/org/core.git"
+history = "preserve"               # "preserve" or "fresh": keep the package's history, or start a new one
+[packages.release]
+pin = "tag"                        # "tag" or "sha": how dependents pin this package
+merge = "merge-commit"             # only "merge-commit": squash or rebase would orphan pinned SHAs
+tag_before_branch_delete = true    # true or false: tag the release before its branch is deleted
+
+[[packages]]
+id = "scratch"
+# ...
+unmanaged = true                   # explicitly outside release, pin and history policy
+```
+
+Every field is optional. Values are checked when the catalog is read: a value outside the lists above, a wrong type, an
+unknown key under `[packages.release]`, `unmanaged = true` together with a policy, or a policy on a workspace member is an
+error naming the package (a hard error like any other malformed catalog, not a baselinable finding). Any key a
+`[[packages]]` entry does not know is rejected the same way, so a typo such as `histroy` cannot pass silently. `unmanaged`
+can only be `true`; omit it to declare a policy.
+
+A package that declares neither a policy (`history` or a `[packages.release]` table, even an empty one) nor
+`unmanaged = true` is a named gap, reported as `package-release-policy-missing`; it fails the check like the other
+assignment gaps, can be baselined, and appears in the export's `gaps`. A workspace member is exempt: it stays in the
+repository, so it has no history or pin of its own, and its exported `policy` is always `null`. `selftest` probes the
+rule by adding a package with no policy.
+
+In the export, `policy` is `null` when nothing is declared, and otherwise
+`{ history, release: { pin, merge, tag_before_branch_delete } | null, unmanaged }`, with `null` for each field that is
+not set. An unmanaged package exports `{ history: null, release: null, unmanaged: true }`.
+
+
+### Package `pyproject.toml`
+
+Set `package_pyproject = true` (needs `package_catalog`) and `arborescent generate` creates, for every package in the
+catalog, the `pyproject.toml` at `<root>/pyproject.toml` when it does not exist. **An existing file is never rewritten.**
+Each package therefore needs its own `root`; two packages sharing one is an error that names both.
+
+Derived from the annotations (the only fields `check` compares):
+
+| field | derived from |
+|---|---|
+| `[project].dependencies` | the third-party names in the `external` allow-lists of the rings of the package's modules, mapped to distributions through the policy's `dependencies` table (`bs4 = "beautifulsoup4"`), plus the `id` of every package in `depends_on` (a package's distribution name is its `id`). Version specifiers are not compared. |
+| `[tool.uv.sources]` | one entry per sibling in `depends_on`, from the homes of the two packages: `{ workspace = true }` only when both are workspace members; `{ git = "<the sibling's catalog repository>", subdirectory = "<its home.path>" }` for a workspace member that a package outside the workspace needs; `{ git = "<home.repository>" }` for a package in its own repository; no entry when the sibling has no `home` (the export reports that gap). The pin (`rev`, `tag`, an `index`) is yours and is not compared. An extra `workspace = true` entry for a package that is not a dependency is drift. A git value that is not a URL gets no entry and is reported (below); Arborescent never guesses a URL or a host. |
+| `[tool.uv.workspace].members` | the `home.path` of every workspace-member package. Written into the root `pyproject.toml` (the file of the package rooted at `.`, or a new one when there is none). |
+| `[tool.arborescent]` and `[tool.tach]` `source_roots` | the policy's source roots that contain the package's modules, relative to the package root |
+| `[tool.importlinter].root_packages` | the top-level packages of the package's modules |
+
+A new file also gets a template: `name` (the package `id`), `description` (its `summary`), `version = "0.0.0"` and
+`requires-python` from the policy's `python`. The template adds no build backend, classifiers or other packaging
+configuration. A `[project]` that lists `dependencies` as `dynamic` is not compared; the three `source_roots` and
+`root_packages` tables are compared only when the file has them.
+
+`check` reports a differing derived field as `package-pyproject-drift`, naming the file, the field, both values and the
+annotation it disagrees with. Like generated-preset drift it is advisory: a `NOTE` line that neither fails the check nor
+enters the baseline, and the file is left as it is. A missing file is not drift (`generate` creates it). The same rule also reports, whether or not the file exists, a git source that would be built from a value that is not a URL (`org/name`, for instance, which uv does not accept).
+Changing one package's `home` changes only the `sources` entries that depend on it (its consumers', and its own when it has dependencies) and the member list. The files are written at
+each package's current `root`, while `members` lists `home.path`, the post-migration location; they are the same in a
+repository that already has the target layout. With `package_pyproject` set, `packages export` fills each package's
+`pyproject` object (path, `requires_python`, dependencies, sources, workspace members, source roots, root packages) with
+the same derived values; it is `null` otherwise. `selftest` probes the rule by appending a workspace source for
+a non-dependency to a derived file; with no derived file on disk the probe is listed as skipped with the reason.
 
 ## Module ring annotations: `__arbor__`
 
@@ -396,6 +605,23 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `invalid-arbor-annotation` | a module's `__arbor__` annotation is malformed or names an unknown ring |
 | `arbor-ring-mismatch` | a valid `__arbor__` ring disagrees with the ring the first matching `classify` glob would assign |
 | `unannotated-module` | `require_arbor_annotations` is enabled and a module resolves its ring only through `classify`, with no valid `__arbor__` annotation |
+| `package-unassigned-module` | `package_catalog` is set and a first-party module lies under no package's owned `paths` |
+| `package-multiply-assigned-module` | a module lies under the paths of two or more packages (the message names the module and every claiming package) |
+| `package-release-policy-missing` | `package_catalog` is set and a package declares no `history`, no `[packages.release]` table and not `unmanaged = true` |
+| `package-unowned-asset` | a non-Python file below the policy's `sources` is under no package path and matches no `[[assets]]` glob |
+| `package-multiply-assigned-asset` | an asset is under one package's path and also matched by another package's `[[assets]]` glob |
+| `package-spans-rings` | information only (never fails, never baselined): a package has modules in several rings, so a split must follow module sets, not folders |
+| `package-undeclared-dependency` | a module imports a module of another package that its own package does not list in `depends_on` |
+| `package-dependency-cycle` | packages list each other (directly or through others) in `depends_on`, so none can be split or released first; the same check `packages validate` makes |
+| `package-unused-dependency` | information only: a package lists a package in `depends_on` that none of its modules imports, which widens what it may import unnoticed (a plugin or runtime-loaded dependency can be real without a static import) |
+| `package-owns-everything` | information only: one package owns every module (two or more), so the ownership and dependency checks have no boundary between packages to check (rings and imports are still enforced). Never fails, here or in `--require-modularity` |
+| `package-semantics-drift` | a part's manifest names a package the catalog lacks, or a semantic field or a path's role or metadata differs from the catalog |
+| `package-membership-drift` | a module of an included package is missing from its part, or a part holds a module the catalog gives elsewhere or nowhere |
+| `package-ring-drift` | a module's effective ring in its part differs from the origin's |
+| `package-public-symbol-dropped` | a module on a package's declared public surface lost a public class or function in its part |
+| `package-private-import` | a module imports another package's module outside the `public` surface that package declares (checked in the origin and in each part) |
+
+| `package-pyproject-drift` | information only (never fails, never baselined): `package_pyproject` is set and a derived field of an existing package `pyproject.toml` disagrees with the annotations |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
 `getattr`, variables, or wrappers. A test patch is checked against the target module's ring and is considered only when

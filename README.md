@@ -126,6 +126,7 @@ arborescent check --install-tools # prompt to install missing tools, then run th
 arborescent install-tools # prompt to install missing tools without running checks
 arborescent check --install-tools --yes # install without prompting, then check
 arborescent check --require-tools --require-profile  # require profile v1 and its verified tool versions/rules
+arborescent check --require-modularity                # fail unless every module and asset has exactly one owning package (modularity = "ready")
 arborescent check --changed origin/main      # only files changed since a git ref
 arborescent discover     # list Python files that still need ring classification
 arborescent baseline     # record existing violations; future checks fail on new findings
@@ -133,7 +134,9 @@ arborescent selftest     # mutation-test native rules and fail if a rule stops f
 arborescent bench DIR…   # cold/warm timings of every engine on prepared codebases
 arborescent packages validate
 arborescent packages list
-arborescent packages extract PACKAGE_ID --output DIR
+arborescent packages extract PACKAGE_ID --output DIR  # migrate + the manifest the preservation checks read; dry run unless --yes
+arborescent packages export --output migration.json   # read-only JSON for migration tools; see docs/migration-export.md and docs/migration-recipes.md
+arborescent packages migrate PACKAGE_ID --target DIR  # dry run: the arguments a migration library would be given; see docs/migration-driver.md
 ```
 
 Documentation: [CLI commands, configuration and rules](docs/configuration.md) and
@@ -197,6 +200,13 @@ Engines run concurrently; Arborescent parses each file once (AST), caches facts 
 tach is optional: `disabled_tools = ["tach"]` still passes the minimum profile when import-linter stays enabled and installed.
 import-linter enforces the generated ring contracts and the native engine enforces external allow-lists. Prefer this for
 multi-`source_roots` workspaces (uv/Cargo/npm style), where tach cannot resolve cross-root imports and `check` warns.
+
+**Your own configuration always wins.** `check` runs import-linter with the generated `arborescent-importlinter.toml`
+(`lint-imports --config ...`) only when that file carries the generated header and the project has no import-linter
+configuration of its own (`.importlinter`, or an `[importlinter]` / `[tool.importlinter]` section in `setup.cfg`,
+`tox.ini` or `pyproject.toml`). With a config of your own, the command is unchanged and the generated file is only
+drift-checked, so nothing you wrote is ignored; a hand-written file that happens to share the generated name is never
+adopted. `generate` itself only creates missing files and never changes an existing one.
 
 `--changed` limits Arborescent, Ruff, and the type checker to changed files. import-linter, `tach check`, and `tach check-external`
 are graph-wide, so Arborescent skips them and reports that reason in the engine results. See the repository CHANGELOG for measured numbers; `arborescent bench` reproduces them.

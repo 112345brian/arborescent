@@ -1,0 +1,318 @@
+# Arborescent's own package catalog: the responsibilities the code already separates, declared so the package rules
+# run on this repository too. Homes are not decided yet, so none is declared.
+
+[[packages]]
+id = "core"
+name = "Core"
+kind = "library"
+repository = "112345brian/arborescent"
+root = "src/arborescent"
+summary = "The policy, the scan, the rules, the engines and the generated configs."
+externals = []
+history = "preserve"
+depends_on = []
+
+[[packages.paths]]
+path = "src/arborescent/__init__.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/adapters.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/architecture_contracts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/annotate.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/baseline.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/bench.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/certification.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/clock_adapter.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/config.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/domain.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/engine.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/engines.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/filesystem_adapter.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/generate.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/generated_config.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/install_tools.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/installer_adapter.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/module_forbid_probes.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/mutation.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/path_exclusion.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/ports.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/practices.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/presets.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/rules.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/scanner.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/selftest.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/stdlib.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/suggestions.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/tool_runner.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/typecheckers.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/py.typed"
+role = "assets"
+
+[[packages]]
+id = "annotations"
+name = "Annotations"
+kind = "library"
+repository = "112345brian/arborescent"
+root = "src/arborescent"
+summary = "Package ownership, policy, contracts, the migration export and the checks over them."
+externals = []
+history = "preserve"
+depends_on = ["core"]
+
+[[packages.paths]]
+path = "src/arborescent/migration_arguments.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/migration_export.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/migration_json.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_assignment.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_checks.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_contracts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_fields.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_gaps.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_manifest.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_model.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_parse.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_part_probes.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_parts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_policy.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_preservation.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_probes.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_pyproject.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_pyproject_gaps.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_render.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_tree.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_validation.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/packages.py"
+role = "source"
+
+[[packages]]
+id = "driver"
+name = "Driver"
+kind = "library"
+repository = "112345brian/arborescent"
+root = "src/arborescent"
+summary = "The migration driver: supplies a migration library with the arguments of one package."
+externals = []
+history = "preserve"
+depends_on = ["core", "annotations"]
+
+[[packages.paths]]
+path = "src/arborescent/cli_migrate.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/driver_filter_repo.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/driver_libcst.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/driver_libcst_scan.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/driver_plan.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/driver_port.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/driver_request.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/driver_rewrite.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/local_targets.py"
+role = "source"
+
+[[packages]]
+id = "app"
+name = "Application"
+kind = "application"
+repository = "112345brian/arborescent"
+root = "src/arborescent"
+summary = "The command line and the test support that wire the others together."
+externals = []
+history = "preserve"
+depends_on = ["core", "annotations", "driver"]
+
+[[packages.paths]]
+path = "src/arborescent/__main__.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_install.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_report.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/testing.py"
+role = "source"

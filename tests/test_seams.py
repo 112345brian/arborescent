@@ -40,7 +40,7 @@ def test_an_unquoted_toml_3_10_is_an_error_not_a_silent_3_1() -> None:
         _ = policy_from_mapping(mapping(python=3.10))
 
 
-@pytest.mark.parametrize("version", ["3.10", "3.15", "abc", ""])
+@pytest.mark.parametrize("version", ["3.10", "3.99", "abc", ""])  # 3.99 stays unsupported as releases are added
 def test_an_unsupported_version_is_a_policy_error_naming_the_supported_ones(version: str) -> None:
     with pytest.raises(PolicyError, match=r"3\.11"):
         _ = policy_from_mapping(mapping(python=version))

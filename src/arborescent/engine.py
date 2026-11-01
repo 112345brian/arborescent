@@ -4,7 +4,7 @@ shared parse, then apply the baseline ratchet."""
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -13,13 +13,24 @@ from typing import TYPE_CHECKING, cast
 from . import baseline as ratchet_mod
 from .certification import PROFILE, certify, tach_multi_root_note
 from .config import find_child_policy
-from .domain import Policy, PolicyError, Rule, ToolResult, Violation
-from .generate import generate
+from .domain import (
+    INFORMATIONAL_RULES,
+    Policy,
+    PolicyError,
+    Rule,
+    ToolResult,
+    Violation,
+)
+from .generate import generate_for_scan
+from .generated_config import GENERATED_MARKER
 from .ports import (
     Clock,
+    ContractRenderer,
     Engine,
     FileSystem,
     ModuleScanner,
+    PackageChecks,
+    RootAwareEngine,
     ScanResult,
     ToolRunner,
     TypeChecker,
@@ -32,7 +43,7 @@ from .suggestions import Suggestion, file_size_suggestions
 if TYPE_CHECKING:
     from .facts import ModuleInfo
 
-__all__ = ["CheckReport", "EngineRun", "Options", "Services", "changed_files", "drift", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
+__all__ = ["CheckReport", "EngineRun", "Options", "Services", "blocking", "changed_files", "contract_renderers", "drift", "enforced", "package_checks", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
 
 
 @dataclass(frozen=True)
@@ -43,6 +54,7 @@ class Services:
     fs: FileSystem
     clock: Clock
     engines: Sequence[Engine]  # run beside the chosen type checker (import-linter, tach); see arborescent.engines. No default: a forgotten list used to skip them silently
+    packages: PackageChecks | None = None  # the package-annotation layer; needed only when the policy sets `package_catalog`
 
 
 @dataclass(frozen=True)
@@ -53,6 +65,7 @@ class Options:
     require_tools: bool = False  # a missing engine is a failure, not a skip
     use_baseline: bool = True
     require_profile: bool = False
+    require_modularity: bool = False  # fail unless the policy keeps `modularity = "ready"` and no package gap is open
     growth_against: str | None = None
     no_cache: bool = False
 
@@ -71,6 +84,7 @@ class CheckReport:
     engines: list[EngineRun] = field(default_factory=lambda: [])
     drift: list[str] = field(default_factory=lambda: [])
     violations: list[Violation] = field(default_factory=lambda: [])
+    notes: list[Violation] = field(default_factory=lambda: [])  # informational findings: shown, never failing
     ratchet: ratchet_mod.Ratchet | None = None
     parsed: int = 0
     excluded: dict[str, int] = field(default_factory=lambda: {})
@@ -80,6 +94,8 @@ class CheckReport:
     discard_counts: dict[str, int] = field(default_factory=lambda: {})
     profile: str | None = None
     profile_failures: tuple[str, ...] = ()
+    modularity_failures: tuple[str, ...] = ()
+    modularity_certified: bool = False
     partial: bool = False
     seconds: float = 0.0
     tool_checks_enabled: bool = True
@@ -87,7 +103,7 @@ class CheckReport:
     @property
     def ok(self) -> bool:
         engines_ok = all(e.status != "fail" for e in self.engines)
-        return engines_ok and not self.profile_failures and (self.ratchet is None or self.ratchet.ok)
+        return engines_ok and not self.profile_failures and not self.modularity_failures and (self.ratchet is None or self.ratchet.ok)
 
     @property
     def configured_ok(self) -> bool:
@@ -130,7 +146,50 @@ def run_own(
     found += _inventory_violations(scan.modules)
     if practices and only is None:
         found += run_practices(policy, root, services.runner, services.fs, scan)
+    if only is None:  # ownership is a whole-repository fact; the selftest needs it whether or not practices run
+        checks = package_checks(policy, services)
+        if checks is not None:
+            found += checks.gap_violations(policy, root, services.fs, scan, services.scanner)
     return found, scan
+
+
+def blocking(found: Iterable[Violation]) -> list[Violation]:
+    """The findings that can fail a check or enter the baseline (information is reported, never recorded)."""
+    return [v for v in found if v.rule not in INFORMATIONAL_RULES]
+
+
+def _is_package_gap(violation: Violation) -> bool:
+    return str(violation.rule).startswith("package-")
+
+
+def enforced(policy: Policy, found: Iterable[Violation]) -> tuple[list[Violation], list[Violation]]:
+    """``(kept, demoted)``: the blocking findings, with package gaps moved to ``demoted`` under ``modularity = "report"``.
+    Everything that records or compares the baseline must use ``kept``, or a baseline written under ``report`` goes stale."""
+    kept = blocking(found)
+    if policy.modularity != "report":
+        return kept, []
+    return [v for v in kept if not _is_package_gap(v)], [v for v in kept if _is_package_gap(v)]
+
+
+def _apply_modularity(policy: Policy, report: CheckReport, found: Sequence[Violation], opts: Options, complete: bool) -> list[Violation]:
+    """The enforced findings. Records the demoted gaps as notes and, for ``--require-modularity``, the certificate result."""
+    kept, demoted = enforced(policy, found)
+    report.notes += demoted
+    if opts.require_modularity:
+        report.modularity_failures = _modularity_failures(policy, [v for v in blocking(found) if _is_package_gap(v)], complete)
+        report.modularity_certified = not report.modularity_failures
+    return kept
+
+
+def _modularity_failures(policy: Policy, gaps: Sequence[Violation], complete: bool) -> tuple[str, ...]:
+    """Why the repository is not certified modularity-ready; empty when it is. A cut list is not a gap and is allowed."""
+    if policy.package_catalog is None:
+        return ("no `package_catalog` is set: package ownership is not declared",)
+    if policy.modularity != "ready":
+        return (f"`modularity` is {policy.modularity!r}: package gaps are only reported, not enforced",)
+    if not complete:
+        return ("package gaps are a whole-repository fact and are not evaluated in --changed mode",)
+    return tuple(f"open package gap: {v.render()}" for v in gaps)
 
 
 def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:
@@ -162,7 +221,9 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     _, scan = run_own(policy, root, services, practices=False)
     wanted = [c for c in services.checkers if c.name in policy.type_checkers and not tool_is_disabled(policy, c)]
     written: list[str] = []
-    generated = sorted(generate(policy, sorted(scan.known), wanted, scan.arbor_index, scan.scope_by_module).items())
+    checks = package_checks(policy, services)
+    boundaries = None if checks is None else checks.boundaries(policy, root, services.fs, scan)
+    generated = sorted(generate_for_scan(policy, scan, wanted, contract_renderers(services), boundaries).items())
     for rel, text in generated:
         path = root / rel
         if services.fs.exists(path):
@@ -170,20 +231,52 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
         services.fs.mkdir(path.parent)
         services.fs.write_text(path, text)
         written.append(rel)
+    if checks is None:
+        return written
+    for rel, text in sorted(checks.new_files(policy, root, services.fs, scan).items()):  # package pyproject.toml files; never an existing one
+        services.fs.mkdir((root / rel).parent)
+        services.fs.write_text(root / rel, text)
+        written.append(rel)
     return written
 
 
-def drift(
-    fs: FileSystem, policy: Policy, root: Path, scan: ScanResult, checkers: Sequence[TypeChecker],
-) -> list[str]:
+def contract_renderers(services: Services) -> list[ContractRenderer]:
+    """The bound engines that are configured from the neutral contracts."""
+    return [engine for engine in services.engines if isinstance(engine, ContractRenderer)]
+
+
+def package_checks(policy: Policy, services: Services) -> PackageChecks | None:
+    """The bound package-annotation layer, or ``None`` when the policy declares no catalog. A catalog with nothing bound is
+    an error: the engine will not read a missing binding as a clean result."""
+    if policy.package_catalog is None:
+        return None
+    if services.packages is None:
+        raise PolicyError("`package_catalog` is set but no package checks are bound in Services; the entrypoint must bind them")
+    return services.packages
+
+
+def drift(fs: FileSystem, root: Path, expected: Mapping[str, str]) -> list[str]:
+    """Generated files on disk that differ from what ``generate`` would write now. A file Arborescent did not generate is not
+    drift: only one that carries the generated header is compared."""
     out: list[str] = []
-    for rel, expected in sorted(generate(policy, sorted(scan.known), checkers, scan.arbor_index, scan.scope_by_module).items()):
+    for rel, text in sorted(expected.items()):
         path = root / rel
         if fs.is_file(path):
             current = fs.read_text(path)
-            if current.startswith("# Generated by `arborescent generate`") and current != expected:
+            if current.startswith(GENERATED_MARKER) and current != text:
                 out.append(f"{rel}: differs from the policy; run `arborescent generate`")
     return out
+
+
+def _drift_report(policy: Policy, root: Path, services: Services, scan: ScanResult, opts: Options) -> list[str]:
+    checker = pick_checker(policy, services, opts.type_checker)
+    checks = package_checks(policy, services)
+    boundaries = None if checks is None else checks.boundaries(policy, root, services.fs, scan)
+    checkers = [
+        c for c in services.checkers if c.name in {*policy.type_checkers, checker.name} and not tool_is_disabled(policy, c)
+    ]
+    expected = generate_for_scan(policy, scan, checkers, contract_renderers(services), boundaries)
+    return _tach_notes(policy, opts) + drift(services.fs, root, expected)
 
 
 def pick_checker(policy: Policy, services: Services, override: str | None = None) -> TypeChecker:
@@ -209,8 +302,14 @@ def tool_is_disabled(policy: Policy, tool: object) -> bool:
     return canonical in policy.disabled_tools
 
 
+def _command(engine: Engine, files: Sequence[str], root: Path, fs: FileSystem) -> list[str]:
+    """The engine's command; an engine that depends on the project (``RootAwareEngine``) decides with the project in view."""
+    command_in = getattr(engine, "command_in", None)
+    return cast(RootAwareEngine, engine).command_in(files, root, fs) if callable(command_in) else engine.command(files)
+
+
 def _tool(services: Services, engine: Engine, files: Sequence[str], root: Path, opts: Options) -> EngineRun:
-    name, argv, ok = engine.name, engine.command(files), engine.passed
+    name, argv, ok = engine.name, _command(engine, files, root, services.fs), engine.passed
     if not services.runner.available(argv[0]):
         return EngineRun(name, "fail" if opts.require_tools else "skipped", 0.0, [f"{argv[0]} is not installed (extra)"])
     result = services.runner.run(argv, root)
@@ -231,6 +330,7 @@ def _child_arbor_command(config_path: Path, opts: Options) -> list[str]:
         (not opts.tools, "--no-tools"),
         (opts.require_tools, "--require-tools"),
         (opts.require_profile, "--require-profile"),
+        (opts.require_modularity, "--require-modularity"),
         (not opts.use_baseline, "--no-baseline"),
         (opts.no_cache, "--no-cache"),
     )
@@ -338,20 +438,11 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
             {module.name: module.path for module in scan.modules.values()},
             threshold=policy.suggestion_threshold,
         )
-        report.drift = _tach_notes(policy, opts) + drift(
-            services.fs,
-            policy,
-            root,
-            scan,
-            [
-                c
-                for c in services.checkers
-                if c.name in {*policy.type_checkers, checker.name} and not tool_is_disabled(policy, c)
-            ],
-        )
+        report.drift = _drift_report(policy, root, services, scan, opts)
         engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
         report.engines += engine_runs
-        report.violations = found + [v for run in engine_runs for v in run.violations]
+        report.notes = [v for v in found if v.rule in INFORMATIONAL_RULES]
+        report.violations = _apply_modularity(policy, report, found, opts, only is None) + [v for run in engine_runs for v in run.violations]
         base: set[str] = ratchet_mod.load(services.fs, root / policy.baseline) if opts.use_baseline else set()
         ruff_skipped = any(run.name == "ruff" and run.status in {"skipped", "disabled"} for run in engine_runs)
         if not opts.tools or ruff_skipped:

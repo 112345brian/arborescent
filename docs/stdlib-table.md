@@ -1,6 +1,6 @@
 # Stdlib table
 
-`arborescent.stdlib` holds the top-level standard-library module names per Python minor version (`3.11` to `3.14`). The
+`arborescent.stdlib` holds the top-level standard-library module names per Python minor version (`3.11` to `3.15`; the `3.15` row comes from the 3.15.0b4 beta and is re-checked by CI's 3.15 leg). The
 policy's `python` key picks the row, so a module counts as stdlib when the *target* version ships it, whatever
 interpreter runs Arborescent (`distutils` is stdlib for `python = "3.11"` and third-party for `"3.12"`). A `python` value
 outside the table is a `PolicyError` that lists the supported versions.
