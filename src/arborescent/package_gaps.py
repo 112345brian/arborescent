@@ -98,6 +98,7 @@ def repository_facts(policy: Policy, root: Path, fs: FileSystem, scan: ScanResul
         asset_paths(policy, root, fs),
         externals=externals,
         symbols=public_symbols(scan.modules),
+        file_refs={name: len(info.facts.file_refs) for name, info in scan.modules.items() if info.facts.file_refs},
     )
 
 

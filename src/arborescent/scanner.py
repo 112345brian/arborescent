@@ -19,7 +19,7 @@ from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 6
+_CACHE_VERSION = 7
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
@@ -179,7 +179,7 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
     top_level_defs = [[d.name, d.line, d.is_class, d.is_abstract] for d in f.top_level_defs]
     return [
         imports, effects, None if f.script_deps is None else list(f.script_deps),
-        suppressions, list(f.discard_calls), top_level_defs, f.arbor_ring, f.arbor_error,
+        suppressions, list(f.discard_calls), top_level_defs, f.arbor_ring, f.arbor_error, list(f.file_refs),
     ]
 
 
@@ -190,7 +190,7 @@ def _facts_from_json(raw: list[Any]) -> SourceFacts:
     top_level_defs = tuple(TopLevelDef(d[0], d[1], d[2], d[3]) for d in raw[5])
     return SourceFacts(
         imports, effects, None if raw[2] is None else tuple(raw[2]),
-        suppressions, tuple(raw[4]), top_level_defs, raw[6], raw[7],
+        suppressions, tuple(raw[4]), top_level_defs, raw[6], raw[7], tuple(raw[8]),
     )
 
 

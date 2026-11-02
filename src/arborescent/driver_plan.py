@@ -20,6 +20,7 @@ from .migration_arguments import (
     ERROR,
     Bypass,
     Gap,
+    GapCode,
     MigrationArguments,
     PackageArguments,
 )
@@ -43,6 +44,7 @@ class DriverPlan:
     arguments: tuple[str, ...]  # what the library would be called with; empty unless ready
     unapplied: tuple[str, ...]  # arguments the library cannot apply
     rewrite: ImportRewrite | None = None  # the import-rewriting step; None when no module changes its name
+    reviews: tuple[Gap, ...] = ()  # information a person should read before --yes; never blocks
 
 
 def plan_supply(arguments: MigrationArguments, package_id: str, library: MigrationLibrary, site: MigrationSite) -> DriverPlan:
@@ -58,14 +60,15 @@ def plan_supply(arguments: MigrationArguments, package_id: str, library: Migrati
         if bypasses:
             why.append(f"{len(bypasses)} import(s) of its private modules by other packages (a split would break them)")
         return DriverPlan(package_id, BLOCKED, "; ".join(why), gaps, bypasses, None, (), ())
+    reviews = tuple(gap for gap in arguments.gaps if gap.code == GapCode.FILE_RELATIVE_PATH and gap.package == package_id)
     home = package.home
     if home is not None and home.kind == "workspace-member":
         return DriverPlan(
             package_id, STAYS, f"workspace member at {home.path}: it stays in this repository, so there is no history to extract",
-            (), (), None, (), (),
+            (), (), None, (), (), reviews=reviews,
         )
     request = MigrationRequest(package_id, site.source, site.target, site.branch, package.path_renames, package.module_renames)
-    return DriverPlan(package_id, READY, "ready", (), (), request, library.arguments(request), library.unsupported(request), _rewrite_of(package))
+    return DriverPlan(package_id, READY, "ready", (), (), request, library.arguments(request), library.unsupported(request), _rewrite_of(package), reviews)
 
 
 def _rewrite_of(package: PackageArguments) -> ImportRewrite | None:

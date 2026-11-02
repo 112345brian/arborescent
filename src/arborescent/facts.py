@@ -82,6 +82,7 @@ class SourceFacts:
     top_level_defs: tuple[TopLevelDef, ...] = ()  # module-level classes and functions only
     arbor_ring: str | None = None
     arbor_error: str | None = None
+    file_refs: tuple[int, ...] = ()  # lines that read `__file__`: a location-dependent path breaks when the module moves
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -369,7 +370,12 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _top_level_defs(tree, _aliases(tree)),
         arbor_ring,
         arbor_error,
+        _file_ref_lines(tree),
     )
+
+
+def _file_ref_lines(tree: ast.AST) -> tuple[int, ...]:
+    return tuple(sorted(node.lineno for node in ast.walk(tree) if isinstance(node, ast.Name) and node.id == "__file__"))
 
 
 def resolve_targets(

@@ -83,6 +83,7 @@ reported as a gap, never guessed.
 | `package-unplaced-asset` | an `[[assets]]` glob owns a file that lies below none of the package's paths |
 | `package-module-rename-collision` | two modules of one package get the same `target_module` |
 | `package-unused-module-rename` | a `module_renames` entry matches no owned module |
+| `package-file-relative-path` | information: a module that moves reads `__file__`, so a `.env`, data folder or sibling-script path built from it may no longer resolve; `migrate` lists these under "review before --yes" |
 | `package-module-rename-mismatch` | a module's `target_module` is not the import name its target path gives, measured from the package's folder in the target or a `src` folder below it |
 
 The export-only codes exist only in the export; they are not `check` rules, so they never enter the baseline.

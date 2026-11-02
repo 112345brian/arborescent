@@ -178,6 +178,7 @@ def _print_plan(plan: DriverPlan, tools: MigrationTools, site: MigrationSite, vi
             print(f"  [{gap.code}] {gap.subject}: {gap.detail}")
         for bypass in plan.bypasses:
             print(f"  [private-import] {bypass.module} (package {bypass.package}) imports {bypass.imports}, which is not on the public surface of {plan.package}")
+        _print_reviews(plan)
         return
     request = plan.request
     if request is None:
@@ -199,6 +200,14 @@ def _print_plan(plan: DriverPlan, tools: MigrationTools, site: MigrationSite, vi
     print(f"arguments: {shlex.join(plan.arguments)}")
     if plan.rewrite is not None:
         _print_rewrite(plan, tools.rewriter, site, view.rewriter_ready)
+    _print_reviews(plan)
+
+
+def _print_reviews(plan: DriverPlan) -> None:
+    if plan.reviews:
+        print(f"review before --yes: {len(plan.reviews)} moved module(s) build paths from __file__:")
+        for gap in plan.reviews:
+            print(f"  [{gap.code}] {gap.subject}: {gap.detail}")
 
 
 def _print_rewrite(plan: DriverPlan, rewriter: ImportRewriter, site: MigrationSite, rewriter_ready: bool) -> None:

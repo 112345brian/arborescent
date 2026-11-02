@@ -50,10 +50,11 @@ class GapCode:
     MODULE_RENAME_COLLISION = "package-module-rename-collision"
     UNUSED_MODULE_RENAME = "package-unused-module-rename"
     MODULE_RENAME_MISMATCH = "package-module-rename-mismatch"
+    FILE_RELATIVE_PATH = "package-file-relative-path"
 
     ALL = (
         UNDECLARED_HOME, UNDECLARED_PUBLIC_SURFACE, UNDECLARED_EXTERNAL, UNPLACEABLE_PATH, UNPLACED_ASSET,
-        MODULE_RENAME_COLLISION, UNUSED_MODULE_RENAME, MODULE_RENAME_MISMATCH,
+        MODULE_RENAME_COLLISION, UNUSED_MODULE_RENAME, MODULE_RENAME_MISMATCH, FILE_RELATIVE_PATH,
     )
 
 
@@ -214,6 +215,7 @@ def _package_arguments(
         gaps.append(Gap(GapCode.UNDECLARED_HOME, package.id, "no [packages.home]: own repository or workspace member is not annotated", ERROR, package.id))
     _rename_gaps(package, modules, gaps)
     _rename_mismatch_gaps(package, modules, gaps)
+    _file_relative_gaps(package, modules, facts.file_refs, gaps)
     externals = _external_gaps(package, facts, mine, gaps)
     surface, bypasses = _public_surface(package, modules, importers, gaps)
     return PackageArguments(
@@ -300,6 +302,21 @@ def _rename_mismatch_gaps(package: PackageDescriptor, modules: Sequence[OwnedMod
             f"{item.target_module!r}; declare or correct a module_renames entry so imports are rewritten to the name that exists",
             ERROR, package.id,
         ))
+
+
+def _file_relative_gaps(
+    package: PackageDescriptor, modules: Sequence[OwnedModule], file_refs: Mapping[str, int], gaps: list[Gap]
+) -> None:
+    """A moved module that reads ``__file__`` may now look in the wrong place (#83); only a person can say. Information only."""
+    gaps.extend(
+        Gap(
+            GapCode.FILE_RELATIVE_PATH, item.module,
+            f"reads __file__ {file_refs[item.module]} time(s) and moves from {item.path} to {item.target_path}; check that each "
+            "path built from it (a .env, a data folder, a sibling script) still resolves", INFO, package.id,
+        )
+        for item in modules
+        if file_refs.get(item.module, 0) > 0 and item.target_path is not None and item.target_path != item.path
+    )
 
 
 def _module_below(path: PurePosixPath, root: PurePosixPath) -> str | None:

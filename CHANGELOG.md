@@ -5,6 +5,9 @@
 ## Unreleased
 
 ### Added
+- `package-file-relative-path` (information): a module that moves in a migration and reads `__file__` may now resolve a `.env`,
+  data folder or sibling-script path from the wrong place. It is exported as a gap and listed by `packages migrate` under
+  "review before --yes"; it never blocks. The scan cache is rebuilt once (#83).
 - After `check` and `baseline`, one line sizes the baselined `internal-import` entries as importing modules and distinct
   targets, so a shrink-only import cap can be read in modules and not only baseline entries (#75).
 
