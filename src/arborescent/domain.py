@@ -80,6 +80,7 @@ class Rule(StrEnum):
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
     UNANNOTATED_MODULE = "unannotated-module"
+    CLASSIFY_FACTS = "classify-facts"
     # package assignment (`package_catalog`): which package owns each module and asset
     PACKAGE_UNASSIGNED_MODULE = "package-unassigned-module"
     PACKAGE_MULTIPLY_ASSIGNED_MODULE = "package-multiply-assigned-module"
@@ -117,7 +118,7 @@ EFFECT_RULES: Mapping[str, Rule] = {
 # A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING,
-    Rule.TACH_INVISIBLE_IMPORT,
+    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS,
 })
 
 

@@ -83,6 +83,7 @@ class SourceFacts:
     arbor_ring: str | None = None
     arbor_error: str | None = None
     file_refs: tuple[int, ...] = ()  # lines that read `__file__`: a location-dependent path breaks when the module moves
+    main_guard: int = 0  # line of a top-level `if __name__ == "__main__":`, 0 when there is none: the module is also a program
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -371,7 +372,20 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         arbor_ring,
         arbor_error,
         _file_ref_lines(tree),
+        _main_guard_line(tree),
     )
+
+
+def _is_main_guard(test: ast.expr) -> bool:
+    if not (isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq)):
+        return False
+    sides = (test.left, test.comparators[0])
+    return any(isinstance(a, ast.Name) and a.id == "__name__" and isinstance(b, ast.Constant) and b.value == "__main__"
+               for a, b in (sides, sides[::-1]))
+
+
+def _main_guard_line(tree: ast.Module) -> int:
+    return next((stmt.lineno for stmt in tree.body if isinstance(stmt, ast.If) and _is_main_guard(stmt.test)), 0)
 
 
 def _file_ref_lines(tree: ast.AST) -> tuple[int, ...]:

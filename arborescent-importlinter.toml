@@ -8,6 +8,7 @@ include_external_packages = true
 name = "domain ring imports only ['domain']"
 type = "forbidden"
 source_modules = [
+    "arborescent.classify_audit",
     "arborescent.domain",
     "arborescent.driver_request",
     "arborescent.facts",
@@ -27,6 +28,7 @@ source_modules = [
     "arborescent.presets",
     "arborescent.rules",
     "arborescent.stdlib",
+    "arborescent.tach_visibility",
 ]
 forbidden_modules = [
     "arborescent.driver_port",
@@ -82,6 +84,7 @@ allow_indirect_imports = true
 name = "domain ring imports no I/O or third-party package it does not list"
 type = "forbidden"
 source_modules = [
+    "arborescent.classify_audit",
     "arborescent.domain",
     "arborescent.driver_request",
     "arborescent.facts",
@@ -101,6 +104,7 @@ source_modules = [
     "arborescent.presets",
     "arborescent.rules",
     "arborescent.stdlib",
+    "arborescent.tach_visibility",
 ]
 forbidden_modules = [
     "asyncio",
@@ -473,6 +477,7 @@ source_modules = [
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
+    "arborescent.classify_audit",
     "arborescent.clock_adapter",
     "arborescent.config",
     "arborescent.domain",
@@ -494,6 +499,7 @@ source_modules = [
     "arborescent.selftest",
     "arborescent.stdlib",
     "arborescent.suggestions",
+    "arborescent.tach_visibility",
     "arborescent.tool_runner",
     "arborescent.typecheckers",
 ]
@@ -643,6 +649,7 @@ source_modules = [
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
+    "arborescent.classify_audit",
     "arborescent.clock_adapter",
     "arborescent.config",
     "arborescent.domain",
@@ -664,6 +671,7 @@ source_modules = [
     "arborescent.selftest",
     "arborescent.stdlib",
     "arborescent.suggestions",
+    "arborescent.tach_visibility",
     "arborescent.tool_runner",
     "arborescent.typecheckers",
 ]

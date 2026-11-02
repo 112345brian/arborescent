@@ -125,6 +125,10 @@ path = "src/arborescent/tach_visibility.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/classify_audit.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/stdlib.py"
 role = "source"
 

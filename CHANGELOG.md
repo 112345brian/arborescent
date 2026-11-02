@@ -5,6 +5,10 @@
 ## Unreleased
 
 ### Added
+- `classify-facts` (information, never baselined, not part of `--require-modularity`): checks a module's `[classify]` ring against
+  its facts with three signals: it passes every rule of a more inner ring, it is a class-free leaf that only wires peers to
+  inner-ring code, or it has a `__main__` guard and is also imported. It uses imports, effect uses, top-level definitions and a
+  new `__main__` guard fact, never names; the scan cache is rebuilt once. Limits are in `docs/configuration.md` (#90).
 - `package-file-relative-path` (information): a module that moves in a migration and reads `__file__` may now resolve a `.env`,
   data folder or sibling-script path from the wrong place. It is exported as a gap and listed by `packages migrate` under
   "review before --yes"; it never blocks. The scan cache is rebuilt once (#83).

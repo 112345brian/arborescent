@@ -23,7 +23,7 @@ from .domain import (
 )
 from .facts import ModuleInfo, resolve_targets
 
-__all__ = ["check_modules"]
+__all__ = ["RuleContext", "check_modules", "fits_ring"]
 
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
 
@@ -328,6 +328,28 @@ def check_modules(
         out += _effect_uses(context, name, ring, info, known)
         out += _abstraction_violations(name, ring, rule, info)
     return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
+
+
+def fits_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, known: Collection[str]) -> bool:
+    """Whether ``info`` would pass every per-module ring rule (imports, external packages, OS branching, effects, abstraction) as ``ring``.
+
+    The same functions ``check_modules`` runs, asked about a ring the module is not in; an unresolvable import means no.
+    """
+    policy = context.policy_for(name)
+    if policy is None:
+        return False
+    tops = {m.split(".")[0] for m in known}
+    found: list[Violation] = []
+    for imp in info.facts.imports:
+        internal, external, error = resolve_targets(name, info.is_package, imp, known, tops)
+        if error is not None:
+            return False
+        found += _internal_imports(context, name, ring, imp.line, internal)
+        found += _external_imports(policy, name, ring, imp.line, external, {}, {})
+    found += _os_branching(policy, name, ring, policy.ring(ring), info)
+    found += _effect_uses(context, name, ring, info, known)
+    found += _abstraction_violations(name, ring, policy.ring(ring), info)
+    return not found
 
 
 def _finalize_checks(
