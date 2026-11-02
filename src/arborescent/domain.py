@@ -75,6 +75,8 @@ class Rule(StrEnum):
     DOCS_SYNC = "docs-sync"
     CRLF = "crlf"
     UNDECLARED_IMPORTS = "undeclared-imports"
+    STALE_CONFIG_PATH = "stale-config-path"
+    SOURCE_ROOT_DRIFT = "source-root-drift"
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
     UNANNOTATED_MODULE = "unannotated-module"

@@ -54,6 +54,8 @@ def test_rule_id_strings_never_change() -> None:
             "docs-sync",
             "crlf",
             "undeclared-imports",
+            "stale-config-path",
+            "source-root-drift",
             "invalid-arbor-annotation",
             "arbor-ring-mismatch",
             "unannotated-module",

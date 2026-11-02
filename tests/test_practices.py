@@ -21,6 +21,8 @@ from arborescent.practices import (
     run_practices,
     secrets_guard,
     sibling_versions,
+    source_root_drift,
+    stale_config_paths,
     undeclared_imports,
 )  # fmt: skip
 
@@ -239,3 +241,120 @@ def test_scope_import_name_to_distribution_mapping_is_honoured(repo: Path) -> No
     })
     scan = FsScanner().scan(policy, repo)
     assert undeclared_imports(FS, repo, policy, scan.modules, scan.known, "pyproject.toml") == []
+
+
+# -- stale-config-path (#89) --------------------------------------------------------------------------------------------
+
+MAKEFILE = "check:\n\tfor f in scripts/test_*.py; do python $$f; done\n\tpytest $(wildcard scripts/test_*.py)\n"
+
+
+def test_a_glob_in_build_config_that_matches_nothing_is_caught(tmp_path: Path) -> None:
+    """Real bug: a migration dissolved scripts/; `make check-ci` kept passing while running zero tests."""
+    write_files(tmp_path, {"Makefile": MAKEFILE})
+    found = stale_config_paths(FS, tmp_path, ["Makefile"])
+    assert [(v.rule, v.subject, v.line) for v in found] == [("stale-config-path", "Makefile", 2)]
+    assert "scripts/test_*.py" in found[0].detail
+
+
+def test_a_glob_that_still_matches_is_clean(tmp_path: Path) -> None:
+    write_files(tmp_path, {"Makefile": MAKEFILE, "scripts/test_a.py": ""})
+    assert stale_config_paths(FS, tmp_path, ["Makefile"]) == []
+
+
+def test_a_missing_script_and_a_missing_hatch_package_are_caught(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "Makefile": "gen:\n\tpython tools/gen.py\n",
+        "pyproject.toml": '[tool.hatch.build.targets.wheel]\npackages = ["scripts", "src/app"]\n',
+        "src/app/__init__.py": "",
+    })
+    found = stale_config_paths(FS, tmp_path, ["Makefile", "pyproject.toml"])
+    assert [(v.subject, "tools/gen.py" in v.detail or "scripts" in v.detail) for v in found] == [
+        ("Makefile", True), ("pyproject.toml", True),
+    ]
+    write_files(tmp_path, {"tools/gen.py": "", "scripts/x.py": ""})
+    assert stale_config_paths(FS, tmp_path, ["Makefile", "pyproject.toml"]) == []
+
+
+def test_urls_variables_generated_folders_comments_and_absolute_paths_are_not_references(tmp_path: Path) -> None:
+    write_files(tmp_path, {"Makefile": (
+        "# old: scripts/test_*.py\nclean:\n\trm -rf build/* dist/*.whl .venv/lib/*.py\n"
+        "\tcurl https://example.com/a/b.py\n\tls $(OUT)/x/*.py /usr/bin/*.py ../other/*.py ~/z/*.py\n"
+        "\tfind . -name '*.pyc'\n\tdelete src/**/*.pyc\n"
+    )})
+    assert stale_config_paths(FS, tmp_path, ["Makefile"]) == []
+
+
+def test_the_allow_list_and_unmatched_config_globs_are_quiet(tmp_path: Path) -> None:
+    write_files(tmp_path, {"Makefile": MAKEFILE})
+    assert stale_config_paths(FS, tmp_path, ["Makefile"], ["scripts/*"]) == []
+    assert stale_config_paths(FS, tmp_path, ["Missing", ".github/workflows/*.yml"]) == []
+
+
+def test_each_stale_token_is_reported_once_per_file(tmp_path: Path) -> None:
+    write_files(tmp_path, {"Makefile": MAKEFILE + "again:\n\tls scripts/test_*.py\n"})
+    assert len(stale_config_paths(FS, tmp_path, ["Makefile"])) == 1
+
+
+# -- source-root-drift (#91) --------------------------------------------------------------------------------------------
+
+def _drift(repo: Path, files: list[str] | None = None, **overrides: object) -> list[tuple[str, str]]:
+    policy = mini_policy(**overrides)
+    return [(v.subject, v.detail) for v in source_root_drift(FS, repo, policy, files or ["tach.toml", "pyproject.toml"])]
+
+
+def test_a_source_outside_every_source_root_is_caught(tmp_path: Path) -> None:
+    found = _drift(tmp_path, sources=["libs/x/src/x"], source_roots=["libs/y/src"])
+    assert len(found) == 1 and "libs/x/src/x" in found[0][1] and "source_root" in found[0][1]
+    assert _drift(tmp_path, sources=["libs/x/src/x"], source_roots=["libs/x/src"]) == []
+
+
+def test_tach_source_roots_must_equal_the_policys(tmp_path: Path) -> None:
+    write_files(tmp_path, {"tach.toml": 'source_roots = ["./libs/a/src/", "libs/old/src"]\n'})
+    found = _drift(tmp_path, sources=["libs/a/src/a", "libs/b/src/b"], source_roots=["libs/a/src", "libs/b/src"])
+    assert {s for s, _ in found} == {"tach.toml"}
+    text = " ".join(d for _, d in found)
+    assert "libs/b/src" in text and "libs/old/src" in text and "libs/a/src'" not in text
+    write_files(tmp_path, {"tach.toml": 'source_roots = ["libs/b/src", "./libs/a/src"]\n'})
+    assert _drift(tmp_path, sources=["libs/a/src/a", "libs/b/src/b"], source_roots=["libs/a/src", "libs/b/src"]) == []
+
+
+def test_pyproject_hatch_and_pytest_lists_must_carry_every_root_and_source(tmp_path: Path) -> None:
+    roots, sources = ["libs/a/src", "libs/b/src"], ["libs/a/src/a", "libs/b/src/b"]
+    write_files(tmp_path, {"pyproject.toml": (
+        '[tool.hatch.build.targets.wheel]\nsources = ["libs/a/src"]\npackages = ["libs/a/src/a"]\n'
+        '[tool.pytest.ini_options]\npythonpath = ["libs/a/src"]\n'
+    )})
+    text = " ".join(d for _, d in _drift(tmp_path, sources=sources, source_roots=roots))
+    assert text.count("libs/b/src") >= 3 and "libs/b/src/b" in text
+    write_files(tmp_path, {"pyproject.toml": (
+        '[tool.hatch.build.targets.wheel]\nsources = {"libs/a/src" = "", "libs/b/src" = ""}\npackages = ["libs/a/src/a", "libs/b/src/b"]\n'
+        '[tool.pytest.ini_options]\npythonpath = [".", "libs/a/src", "libs/b/src"]\n'
+    )})
+    assert _drift(tmp_path, sources=sources, source_roots=roots) == []
+
+
+def test_lists_that_are_absent_and_files_that_are_missing_are_not_drift(tmp_path: Path) -> None:
+    assert _drift(tmp_path, sources=["app"], source_roots=["."]) == []
+    write_files(tmp_path, {"pyproject.toml": "[project]\nname = 'x'\n"})
+    assert _drift(tmp_path, sources=["app"], source_roots=["."]) == []
+
+
+def test_scopes_contribute_the_union_of_their_roots_and_sources(tmp_path: Path) -> None:
+    scope = {"rings": ["domain"], "classify": {}}
+    policy = policy_from_mapping({"scopes": {
+        "a": {**scope, "sources": ["a/src/a"], "source_roots": ["a/src"]},
+        "b": {**scope, "sources": ["b/src/b"], "source_roots": ["b/src"]},
+    }})
+    write_files(tmp_path, {"tach.toml": 'source_roots = ["a/src"]\n'})
+    found = source_root_drift(FS, tmp_path, policy, ["tach.toml"])
+    assert [v.subject for v in found] == ["tach.toml"] and "b/src" in found[0].detail
+
+
+def test_both_practices_run_from_the_policy(repo: Path) -> None:
+    write_files(repo, {"Makefile": MAKEFILE, "tach.toml": 'source_roots = ["elsewhere"]\n'})
+    policy = mini_policy(practices={"stale-config-path": ["Makefile"], "source-root-drift": True})
+    scan = FsScanner().scan(policy, repo)
+    found = run_practices(policy, repo, SubprocessToolRunner(), FS, scan)
+    assert {v.rule for v in found} == {"stale-config-path", "source-root-drift"}
+    off = run_practices(mini_policy(), repo, SubprocessToolRunner(), FS, scan)
+    assert not {v.rule for v in off} & {"stale-config-path", "source-root-drift"}

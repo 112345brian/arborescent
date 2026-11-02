@@ -9,6 +9,8 @@ directory. Enable them under ``[tool.arborescent.practices]``.
 ``docs-sync``           the architecture doc's module table drifted from the policy
 ``crlf``                a shell script with CRLF line endings does not run
 ``undeclared-imports``  code imports a third-party package that no manifest declares
+``stale-config-path``   a Makefile glob or script path matched nothing after a move, so a suite silently ran zero tests
+``source-root-drift``   the source-root list is copied into tach and pyproject, and one copy was not updated
 """
 
 from __future__ import annotations
@@ -16,8 +18,8 @@ from __future__ import annotations
 import fnmatch
 import re
 import tomllib
-from collections.abc import Collection, Mapping, Sequence
-from pathlib import Path
+from collections.abc import Collection, Iterator, Mapping, Sequence
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from .domain import NOISE_DIRS, Policy, Rule, Violation, dist_name
@@ -208,8 +210,117 @@ def undeclared_imports(
     return list(out.values())
 
 
+_PATH_TOKEN = re.compile(r"[A-Za-z0-9_.\-*?/\[\]]+")
+_GENERATED_SUFFIXES = (".pyc", ".pyo", ".log", ".tmp")
+
+
+def _reference(token: str, noise: Collection[str]) -> str | None:
+    """The repository-relative path or glob a config token names, or ``None`` when it is not one worth checking."""
+    token = token.removeprefix("./").rstrip("/")
+    if "/" not in token or token.startswith(("/", "..", "~", "-")) or token.endswith(_GENERATED_SUFFIXES):
+        return None
+    if token.split("/", 1)[0] in noise:
+        return None
+    if any(c in token for c in "*?["):
+        return token
+    return token if token.endswith(".py") else None
+
+
+def _config_references(text: str, noise: Collection[str]) -> Iterator[tuple[int, str]]:
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        for found in _PATH_TOKEN.finditer(line):
+            start = found.start()
+            if start and line[start - 1] in "$/:~@{":  # a variable, an absolute path or a URL, not a repository path
+                continue
+            reference = _reference(found.group(0), noise)
+            if reference is not None:
+                yield number, reference
+
+
+def _hatch_packages(text: str) -> list[str]:
+    try:
+        wheel = tomllib.loads(text).get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("wheel", {})
+    except tomllib.TOMLDecodeError:
+        return []
+    packages: object = wheel.get("packages", [])
+    return [p for p in cast("list[object]", packages) if isinstance(p, str)] if isinstance(packages, list) else []
+
+
+def stale_config_paths(fs: FileSystem, root: Path, files: Sequence[str], allow: Sequence[str] = ()) -> list[Violation]:
+    """Configured files whose globs or ``.py`` paths match nothing, and a pyproject's hatch ``packages`` that do not exist."""
+    out: list[Violation] = []
+    noise = _NOISE | {".venv"}
+    for pattern in files:
+        for path in fs.glob(root, pattern):
+            if not fs.is_file(path):
+                continue
+            rel, text, seen = path.relative_to(root).as_posix(), fs.read_text(path), set[str]()
+            wanted = list(_config_references(text, noise))
+            if path.name == "pyproject.toml":
+                wanted += [(1, p.removeprefix("./").rstrip("/")) for p in _hatch_packages(text)]
+            for number, reference in wanted:
+                if reference in seen or any(fnmatch.fnmatch(reference, a) for a in allow):
+                    continue
+                seen.add(reference)
+                present = bool(fs.glob(root, reference)) if any(c in reference for c in "*?[") else fs.exists(root / reference)
+                if not present:
+                    out.append(Violation(Rule.STALE_CONFIG_PATH, rel, f"{reference} matches no file; a moved or removed path leaves this reference running nothing", number))
+    return out
+
+
+def _normal(path: str) -> str:
+    return PurePosixPath(path.removeprefix("./")).as_posix().rstrip("/") or "."
+
+
+def _below(path: str, root: str) -> bool:
+    return root == "." or path == root or path.startswith(root + "/")
+
+
+def _strings(value: object) -> list[str]:
+    if isinstance(value, dict):
+        return [_normal(k) for k in cast("dict[str, object]", value)]
+    return [_normal(v) for v in cast("list[object]", value) if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def source_root_drift(fs: FileSystem, root: Path, policy: Policy, files: Sequence[str]) -> list[Violation]:
+    """The policy's ``sources`` and ``source_roots`` against the copies in tach.toml and pyproject.toml (#91)."""
+    parts = [scope.policy for scope in policy.scopes] or [policy]
+    roots = sorted({_normal(r) for part in parts for r in part.source_roots})
+    sources = sorted({_normal(s) for part in parts for s in part.sources})
+    out = [
+        Violation(Rule.SOURCE_ROOT_DRIFT, source, f"source {source!r} is below no source_root ({', '.join(roots)}), so its module names are wrong")
+        for source in sources
+        if not any(_below(source, r) for r in roots)
+    ]
+    for name in files:
+        path = root / name
+        if not fs.is_file(path):
+            continue
+        try:
+            data = tomllib.loads(fs.read_text(path))
+        except tomllib.TOMLDecodeError:
+            continue
+        copies: list[tuple[str, list[str], list[str], bool]] = []  # (label, wanted, found, exact)
+        if path.name == "tach.toml" and "source_roots" in data:
+            copies.append(("source_roots", roots, _strings(data["source_roots"]), True))
+        if path.name == "pyproject.toml":
+            wheel = data.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("wheel", {})
+            pytest_options = data.get("tool", {}).get("pytest", {}).get("ini_options", {})
+            for label, wanted, table in (("hatch sources", roots, wheel.get("sources")), ("hatch packages", sources, wheel.get("packages")), ("pytest pythonpath", roots, pytest_options.get("pythonpath"))):
+                if table is not None:
+                    copies.append((label, wanted, _strings(table), False))
+        for label, wanted, found, exact in copies:
+            out += [Violation(Rule.SOURCE_ROOT_DRIFT, name, f"{label} lacks {item!r}, which arborescent's policy lists") for item in wanted if item not in found]
+            if exact:
+                out += [Violation(Rule.SOURCE_ROOT_DRIFT, name, f"{label} lists {item!r}, which arborescent's policy does not") for item in found if item not in wanted]
+    return out
+
+
 PRACTICES = (
-    Rule.GITIGNORE_SHADOW, Rule.SIBLING_VERSIONS, Rule.SECRETS_GUARD, Rule.DOCS_SYNC, Rule.CRLF, Rule.UNDECLARED_IMPORTS
+    Rule.GITIGNORE_SHADOW, Rule.SIBLING_VERSIONS, Rule.SECRETS_GUARD, Rule.DOCS_SYNC, Rule.CRLF, Rule.UNDECLARED_IMPORTS,
+    Rule.STALE_CONFIG_PATH, Rule.SOURCE_ROOT_DRIFT,
 )  # fmt: skip
 
 
@@ -236,4 +347,11 @@ def run_practices(
     if cfg.get(Rule.UNDECLARED_IMPORTS):
         manifest = cfg[Rule.UNDECLARED_IMPORTS] if isinstance(cfg[Rule.UNDECLARED_IMPORTS], str) else "pyproject.toml"
         out += undeclared_imports(fs, root, policy, modules, known, manifest)
+    if cfg.get(Rule.STALE_CONFIG_PATH):
+        files = [str(f) for f in cast("list[object]", cfg[Rule.STALE_CONFIG_PATH])] if isinstance(cfg[Rule.STALE_CONFIG_PATH], list) else []
+        allow = cfg.get("stale-config-path-allow", [])
+        out += stale_config_paths(fs, root, files, [str(a) for a in cast("list[object]", allow)] if isinstance(allow, list) else [])
+    if cfg.get(Rule.SOURCE_ROOT_DRIFT):
+        value = cfg[Rule.SOURCE_ROOT_DRIFT]
+        out += source_root_drift(fs, root, policy, [str(f) for f in cast("list[object]", value)] if isinstance(value, list) else ["tach.toml", "pyproject.toml"])
     return out

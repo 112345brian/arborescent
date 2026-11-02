@@ -191,7 +191,8 @@ no stdlib module counts as I/O).
 `gitignore-shadow` (an unanchored `local_voice/` ignored a real package: empty wheel), `sibling-versions` (a meta-package
 pinned `==0.1.1` while the component was `0.2.0`), `secrets-guard` (tests need an autouse conftest fixture that scrubs
 the environment), `docs-sync` (the architecture doc's `| module | ring |` table must equal the policy), `crlf`
-(scripts with CRLF), `undeclared-imports` (third-party import absent from the manifest). Each has a reproduction test in
+(scripts with CRLF), `undeclared-imports` (third-party import absent from the manifest), `stale-config-path`
+(a Makefile glob that matches nothing), `source-root-drift` (source roots copied into tach and pyproject disagree). Each has a reproduction test in
 `tests/test_practices.py` that builds the broken repository in a temp directory.
 
 ## Speed

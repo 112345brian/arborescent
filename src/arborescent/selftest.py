@@ -71,6 +71,8 @@ NO_MUTATION: dict[Rule, str] = {
     "scopes with a declared public dependency",
     Rule.CRLF: _PRACTICE,
     Rule.UNDECLARED_IMPORTS: _PRACTICE,
+    Rule.STALE_CONFIG_PATH: _PRACTICE,
+    Rule.SOURCE_ROOT_DRIFT: _PRACTICE,
 }
 
 
