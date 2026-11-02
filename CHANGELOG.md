@@ -2,9 +2,22 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
-## Unreleased
+## 0.4.0 — 2026-11-01
+
+`packages migrate` and `packages extract` are experimental in this release: they have run on a synthetic monorepo, on
+Arborescent itself and, since the first draft, against real repositories (which produced several fixes below), and their
+arguments may still change.
 
 ### Added
+- `middle_forbid = [...]` (top level or per scope) replaces the preset's default of effect categories that middle rings may not
+  use, so a `relaxed` policy can enforce effects without the I/O allow-lists `standard` and `strict` also require. A ring's own
+  `forbid` still wins (#86).
+- Practice `stale-config-path`: a glob or `.py` path in a configured file (a Makefile, CI yaml, pyproject) that matches nothing
+  after a move, so a suite silently ran zero tests; also a hatch `packages` entry that does not exist (#89).
+- Practice `source-root-drift`: a `sources` entry below no `source_roots` entry, and drift between the policy and the copies in
+  `tach.toml` `source_roots`, hatch `sources`/`packages` and pytest `pythonpath` (#91).
+- Migration export gap `package-module-rename-mismatch` (error): a module's `target_module` is not the import name its target
+  path gives, so imports would break in the new repository. A declared rename that does not match the move is the same gap (#77).
 - `tach-invisible-import` (information): a module that imports by a run-time name (`importlib.import_module`, `__import__`) creates
   an edge `tach check` cannot follow, so its pass said nothing about it. It is now listed per module as a `NOTE`, and
   `check --require-visible` fails on each one (`VISIBILITY FAIL`) for repositories that want tach's verdict to be complete (#59).
@@ -91,6 +104,8 @@
   skips with a reason where `git filter-repo`, import-linter or tach is not installed; Arborescent does not migrate (#57).
 
 ### Changed
+- The `external-import` detail now names the first-party module a bare sibling import resembles and says it only resolves when the
+  file runs as a script. The rule id is unchanged (#88).
 - `packages extract` is a wrapper: it runs the `migrate` pipeline (a migration library such as git filter-repo, then the import
   rewriter) and writes `.arborescent-package.toml` afterwards. It takes `--output` as another name for `--target`, is a dry run
   unless `--yes`, and needs `package_catalog` in the policy. Arborescent no longer copies files itself: `PackageCatalog.extract`,
