@@ -8,6 +8,7 @@ include_external_packages = true
 name = "domain ring imports only ['domain']"
 type = "forbidden"
 source_modules = [
+    "arborescent.classify_audit",
     "arborescent.domain",
     "arborescent.driver_request",
     "arborescent.facts",
@@ -83,6 +84,7 @@ allow_indirect_imports = true
 name = "domain ring imports no I/O or third-party package it does not list"
 type = "forbidden"
 source_modules = [
+    "arborescent.classify_audit",
     "arborescent.domain",
     "arborescent.driver_request",
     "arborescent.facts",
@@ -475,6 +477,7 @@ source_modules = [
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
+    "arborescent.classify_audit",
     "arborescent.clock_adapter",
     "arborescent.config",
     "arborescent.domain",
@@ -646,6 +649,7 @@ source_modules = [
     "arborescent.baseline",
     "arborescent.bench",
     "arborescent.certification",
+    "arborescent.classify_audit",
     "arborescent.clock_adapter",
     "arborescent.config",
     "arborescent.domain",

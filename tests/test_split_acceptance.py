@@ -126,7 +126,7 @@ def own_findings(root: Path, *, parts: tuple[str, ...] = ()) -> list[tuple[str, 
     if parts:
         policy = dataclasses.replace(policy, package_parts=parts)
     found, _ = run_own(policy, root, services(FakeToolRunner()))
-    return sorted((v.rule, v.subject) for v in found if v.rule not in {Rule.PACKAGE_SPANS_RINGS})
+    return sorted((v.rule, v.subject) for v in found if v.rule not in {Rule.PACKAGE_SPANS_RINGS, Rule.CLASSIFY_FACTS})
 
 
 # --- 1. the cut list is the engines' own output ---------------------------------------------------------------------

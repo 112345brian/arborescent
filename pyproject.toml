@@ -114,6 +114,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.path_exclusion" = "domain"
 "arborescent.package_assignment" = "domain"
 "arborescent.tach_visibility" = "domain"
+"arborescent.classify_audit" = "domain"
 "arborescent.migration_arguments" = "domain"
 "arborescent.migration_json" = "domain"
 "arborescent.package_preservation" = "domain"

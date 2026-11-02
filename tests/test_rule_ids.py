@@ -60,6 +60,7 @@ def test_rule_id_strings_never_change() -> None:
             "invalid-arbor-annotation",
             "arbor-ring-mismatch",
             "unannotated-module",
+            "classify-facts",
             "scope-import",
             "scope-effect-leak",
             "package-unassigned-module",

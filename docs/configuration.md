@@ -600,6 +600,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `unclassified` | a module has neither a valid enabled `__arbor__` annotation nor a matching `classify` pattern |
 | `forbidden-module` | a first-party module's dotted name matches a `forbidden_modules` pattern. Reported even if the module is also `unclassified`; per scope, only for modules that scope owns |
 | `noise-dir-code` | a tracked `.py` file appears below a skipped directory such as `.venv`, `.tox` or `node_modules` |
+| `classify-facts` | information only (never fails, never baselined, not part of `--require-modularity`): a module's facts contradict its ring. Three signals, described in "Checking `classify` against a module's facts" below |
 | `tach-invisible-import` | information, never baselined: a scanned module (outside `tests`, `.venv` and other folders tach skips) calls `importlib` or `__import__`, which tach's static graph does not follow. Not reported when `tach` is in `disabled_tools`; `check --require-visible` turns each into `VISIBILITY FAIL` |
 | `vendor-folder` | a convention-named vendor folder is excluded and fingerprinted in the baseline |
 | `wildcard-ring` | a non-outermost ring uses `*` in `external` or `may_import` (one finding per ring and axis) |
@@ -649,6 +650,23 @@ Effect rules detect direct imports and attribute chains, including aliases. They
 the first argument is a static project-package string or attribute under the configured `secrets-guard` tests folder.
 `noqa` comments do not suppress native effect findings. Suppression and reasoned `discard()` counts are always reported;
 increases need `baseline --allow-growth --reason` (or one-time family adoption), while removals can shrink the baseline.
+
+### Checking `classify` against a module's facts
+
+`classify` and `__arbor__` are trusted: a glob such as `training* -> adapters` puts every match in that ring, and the
+ring rules only complain when a module does *more* than its ring allows. `classify-facts` notes the other direction and
+a few mixed cases. It uses only facts the scan already has (imports, effect uses, top-level definitions, and a
+`__main__` guard), never a module's name or what it seems to mean. It is information: shown as `NOTE`, never fails `check`,
+never enters the baseline, and is not a reason to fail `--require-modularity`. It is skipped under `--changed`, because each
+signal compares a module with its importers and peers. Three signals:
+
+| signal | stated precisely | limits |
+|---|---|---|
+| could sit in an inner ring | the module defines at least one top-level class or function, has no `__main__` guard, defines no abstract class or stub function, is not an `entry_scripts` module, and passes every per-module rule of a more inner ring (internal imports, external packages, OS branching, effects, `require_abstract`). The note names the innermost such ring. | The scanner does not see `open()`, `print()`, `input()`, calls through objects that do I/O, or what a function does with its arguments, so "passes the rules" is weaker than "is pure". If your rings share one external allow-list, nearly everything fits the inner ring and the note carries no information. A ring can be right for its role (an adapter that only drives a port) even though its facts fit an inner one. |
+| composition-shaped | the module is not in the outermost ring, and the outermost ring may import every ring (`may_import = ["*"]`); the module defines functions and no class, no other module imports it, and it imports two or more distinct modules of its own ring plus at least one module of an inner ring. | It shows the shape of an entrypoint that wires adapters to a use case, not that it constructs or calls anything. Nothing is said about what the wiring does. A leaf script that is meant to be an adapter will match. |
+| program and library | the module has a top-level `if __name__ == "__main__":` and at least one other module imports it, and it is not in the outermost ring when that ring may import every ring (where programs belong). | It cannot tell which functions are pure and which read a database, so it reports the mix, not the part that should move. A `__main__` guard that only calls `main()` still counts. |
+
+None of these is a verdict. Each is a prompt to open the file and decide.
 
 ## Practices: `[tool.arborescent.practices]`
 

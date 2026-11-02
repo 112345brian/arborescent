@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 
 from . import baseline as ratchet_mod
 from .certification import PROFILE, certify, tach_multi_root_note
+from .classify_audit import audit_classification
 from .config import find_child_policy
 from .domain import (
     INFORMATIONAL_RULES,
@@ -147,6 +148,8 @@ def run_own(
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
     found += _inventory_violations(scan.modules)
+    if only is None:  # the signals compare a module with its importers and peers: a whole-repository fact
+        found += audit_classification(indexes, scan.modules, scan.known)
     if "tach" not in policy.disabled_tools:
         found += invisible_import_violations(scan.modules.values())
     if practices and only is None:
