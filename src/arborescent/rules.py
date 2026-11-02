@@ -94,9 +94,20 @@ def _internal_imports(
     return out
 
 
+def _sibling_index(known: Collection[str]) -> dict[str, list[str]]:
+    """Last component -> dotted first-party modules, for naming what a bare sibling import was probably meant to be."""
+    index: dict[str, list[str]] = {}
+    for module in sorted(known):
+        if "." in module:
+            index.setdefault(module.rsplit(".", 1)[1], []).append(module)
+    return index
+
+
 def _external_imports(
-    policy: Policy, name: str, ring: str, rule: RingRule, line: int, tops: Collection[str], third_party: ThirdParty
+    policy: Policy, name: str, ring: str, line: int, tops: Collection[str], third_party: ThirdParty,
+    siblings: Mapping[str, list[str]],
 ) -> list[Violation]:
+    rule = policy.ring(ring)
     out: list[Violation] = []
     for top in tops:
         is_stdlib = top in policy.stdlib
@@ -104,6 +115,12 @@ def _external_imports(
             third_party.setdefault(dist_name(policy.dependencies.get(top, top)), set()).add(name)
         if ALL not in rule.external and top not in rule.external and policy.restricts_external(top, is_stdlib):
             detail = f"[{ring}] imports external package {top!r}; {ring} may import only {sorted(rule.external)}"
+            candidates = siblings.get(top)
+            if candidates is not None:
+                detail += (
+                    f"; {top!r} looks like first-party {' or '.join(candidates)} imported bare, which only resolves when the "
+                    "file runs as a script (sys.path[0]); import it by its package path"
+                )
             out.append(Violation(Rule.EXTERNAL_IMPORT, name, detail, line))
     return out
 
@@ -272,6 +289,7 @@ def check_modules(
 ) -> list[Violation]:
     context = indexes if isinstance(indexes, RuleContext) else RuleContext(policy, indexes, {})
     tops = {m.split(".")[0] for m in known}
+    siblings = _sibling_index(known)
     out = _wildcard_findings(policy)
     third_party_by_scope: dict[str | None, ThirdParty] = {}
     import_graph: dict[str, set[str]] = {name: set() for name in modules}
@@ -305,7 +323,7 @@ def check_modules(
             out += _scope_imports(context, name, imp.line, internal)
             out += _scope_effect_leaks(context, modules, name, imp.line, internal)
             out += _internal_imports(context, name, ring, imp.line, internal)
-            out += _external_imports(local_policy, name, ring, rule, imp.line, external, third_party)
+            out += _external_imports(local_policy, name, ring, imp.line, external, third_party, siblings)
         out += _os_branching(local_policy, name, ring, rule, info)
         out += _effect_uses(context, name, ring, info, known)
         out += _abstraction_violations(name, ring, rule, info)

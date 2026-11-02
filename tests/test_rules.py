@@ -71,6 +71,25 @@ def test_external_allow_list_is_per_ring(repo: Path) -> None:
     assert {(v.subject, v.rule) for v in run(repo)} == {("app.domain", "external-import")}
 
 
+def test_bare_sibling_import_names_the_first_party_module_it_resembles(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "import ports\n"})
+    (found,) = run(repo)
+    assert (found.rule, found.subject) == ("external-import", "app.domain")
+    assert "'ports'" in found.detail and "app.ports" in found.detail and "sys.path" in found.detail
+
+
+def test_bare_import_matching_no_first_party_module_keeps_the_plain_message(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "import psutil\n"})
+    (found,) = run(repo)
+    assert "app." not in found.detail and "sys.path" not in found.detail
+
+
+def test_bare_sibling_import_lists_every_candidate_module(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "import shared\n", "app/a/shared.py": "", "app/b/shared.py": ""})
+    details = [v.detail for v in run(repo) if v.subject == "app.domain" and v.rule == "external-import"]
+    assert len(details) == 1 and "app.a.shared" in details[0] and "app.b.shared" in details[0]
+
+
 def test_lazy_external_import_counts(repo: Path) -> None:
     write_files(repo, {"app/ports.py": "def f() -> None:\n    import requests\n"})
     assert rules(run(repo)) == {"external-import"}
