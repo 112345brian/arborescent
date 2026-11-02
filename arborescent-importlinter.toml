@@ -27,6 +27,7 @@ source_modules = [
     "arborescent.presets",
     "arborescent.rules",
     "arborescent.stdlib",
+    "arborescent.tach_visibility",
 ]
 forbidden_modules = [
     "arborescent.driver_port",
@@ -101,6 +102,7 @@ source_modules = [
     "arborescent.presets",
     "arborescent.rules",
     "arborescent.stdlib",
+    "arborescent.tach_visibility",
 ]
 forbidden_modules = [
     "asyncio",
@@ -494,6 +496,7 @@ source_modules = [
     "arborescent.selftest",
     "arborescent.stdlib",
     "arborescent.suggestions",
+    "arborescent.tach_visibility",
     "arborescent.tool_runner",
     "arborescent.typecheckers",
 ]
@@ -664,6 +667,7 @@ source_modules = [
     "arborescent.selftest",
     "arborescent.stdlib",
     "arborescent.suggestions",
+    "arborescent.tach_visibility",
     "arborescent.tool_runner",
     "arborescent.typecheckers",
 ]
