@@ -7,10 +7,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .domain import PolicyError, Violation
+from .domain import PolicyError, Rule, Violation
 from .ports import FileSystem
 
-__all__ = ["Ratchet", "apply", "growth_consistent", "load", "record", "save"]
+__all__ = ["Ratchet", "apply", "growth_consistent", "internal_import_summary", "load", "record", "save"]
 
 VERSION = 2
 
@@ -139,6 +139,23 @@ def growth_consistent(current: dict[str, object], at_ref: dict[str, object]) -> 
             return False
         logged.update(keys)
     return current_keys - ref_keys == logged
+
+
+def internal_import_summary(baselined: Iterable[Violation]) -> str | None:
+    """One line sizing a shrink-only import cap in modules, not edges: ``from pkg import mod`` records two entries."""
+    entries = {v.key: v for v in baselined if v.rule == Rule.INTERNAL_IMPORT and v.target}
+    if not entries:
+        return None
+    importers = {v.subject for v in entries.values()}
+    targets = {v.target for v in entries.values()}
+
+    def count(n: int, noun: str, plural: str) -> str:
+        return f"{n} {noun if n == 1 else plural}"
+
+    return (
+        f"baselined internal-import: {count(len(entries), 'entry', 'entries')}, "
+        f"{count(len(importers), 'importing module', 'importing modules')}, {count(len(targets), 'distinct target', 'distinct targets')}"
+    )
 
 
 def apply(violations: Iterable[Violation], baseline: set[str], complete: bool = True) -> Ratchet:

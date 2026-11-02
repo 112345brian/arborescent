@@ -115,6 +115,11 @@ def _print_setup_hint(report: CheckReport, setup_command: str | None = None) -> 
 
 def _print_summary(report: CheckReport) -> None:
     tolerated = report.ratchet.tolerated if report.ratchet else 0
+    if report.ratchet is not None:
+        new = {v.key for v in report.ratchet.new}
+        summary = ratchet_mod.internal_import_summary(v for v in report.violations if v.key not in new)
+        if summary is not None:
+            print(summary)
     print(
         f"arborescent check: {'OK' if report.ok else 'FAILED'} in {report.seconds:.2f}s "
         f"({len(report.violations)} violation(s), {tolerated} baselined, {report.parsed} file(s) parsed"

@@ -351,6 +351,9 @@ def _baseline(
         reason=args.reason,
     )
     print(f"baseline: recorded {count} violation(s) in {policy.baseline}")
+    summary = ratchet_mod.internal_import_summary(found)
+    if summary is not None:
+        print(summary)
     return 0
 
 

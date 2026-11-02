@@ -85,12 +85,12 @@ def _internal_imports(
             continue
         banned = policy.forbids_module_import(name, target)
         if banned is not None:
-            out.append(Violation(Rule.INTERNAL_IMPORT, name, f"[{name}] imports forbidden module {target}; {banned!r} is forbidden by module policy", line))
+            out.append(Violation(Rule.INTERNAL_IMPORT, name, f"[{name}] imports forbidden module {target}; {banned!r} is forbidden by module policy", line, target))
             continue
         target_ring = context.resolve_ring(target)
         if target_ring is not None and target_ring not in allowed:
             detail = f"[{ring}] imports {target} [{target_ring}]; {ring} may import only {sorted(allowed)}"
-            out.append(Violation(Rule.INTERNAL_IMPORT, name, detail, line))
+            out.append(Violation(Rule.INTERNAL_IMPORT, name, detail, line, target))
     return out
 
 

@@ -681,6 +681,11 @@ key to match the keys in growth-log entries appended since that ref. This checks
 command wrote the file. A person could edit both the baseline and its log by hand, so review of baseline changes
 remains part of the protection (for example, require review through `CODEOWNERS`).
 
+A shrink-only cap on imports (`module_forbid_imports` with the baseline) is sized in baseline entries, and `from pkg import mod`
+records two entries (`pkg` and `pkg.mod`). After `check` and `baseline`, one line sizes the baselined `internal-import` entries
+in modules: `baselined internal-import: 232 entries, 41 importing modules, 156 distinct targets`. A target is the dotted module
+as the entry records it, so the package and the submodule of one `from` import count separately.
+
 ## Commands and exit codes
 
 All seven commands are documented here. Run `arborescent COMMAND --help` for the concise option list.

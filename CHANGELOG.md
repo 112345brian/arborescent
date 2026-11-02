@@ -2,6 +2,12 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- After `check` and `baseline`, one line sizes the baselined `internal-import` entries as importing modules and distinct
+  targets, so a shrink-only import cap can be read in modules and not only baseline entries (#75).
+
 ## 0.4.0 — 2026-11-01
 
 `packages migrate` and `packages extract` are experimental in this release: they have run on a synthetic monorepo, on

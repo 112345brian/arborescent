@@ -146,6 +146,7 @@ class Violation:
     subject: str
     detail: str
     line: int = 0
+    target: str = field(default="", compare=False)  # the imported module, for import findings; not part of the key
 
     @property
     def key(self) -> str:
