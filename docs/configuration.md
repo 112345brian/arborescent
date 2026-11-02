@@ -25,6 +25,7 @@ settings. The two forms cannot be mixed.
 | `library_roots` | `[]` | Same expansion for editable in-repo libraries (for example `libs`); the folders are scanned normally. Not allowed with `scopes`. |
 | `module_forbid_imports` | `{}` | Module glob -> internal module/package names this module may not import, in addition to ring rules. |
 | `preset` | `"strict"` | How much of the external and OS rules applies: `strict`, `standard` or `relaxed` (see below). |
+| `middle_forbid` | the preset's | Effect categories middle rings may not use, replacing the preset default (see below). |
 | `io_modules` | built-in set | Stdlib modules that count as I/O, process or OS. Replaces the default set; `[]` means none. |
 | `groups` | `{}` | Named lists, used as `"@name"` inside any `may_import` or `external` list. |
 | `dependencies` | `{}` | Import name -> distribution name, where they differ (`yaml = "pyyaml"`). Used for entry-script and manifest checks. |
@@ -61,7 +62,7 @@ repository component. Each scope requires non-empty `sources`, `source_roots` an
 | `ring` | `{}` | Per-ring `may_import`, `external`, `os_branching` and `forbid` tables, local to this scope. |
 | `public` | `[]` | Dotted module patterns consumers may import from this scope. |
 | `depends_on` | `[]` | Scope names this scope may import. Each cross-scope import must target a declared dependency and match its `public` patterns. |
-| `preset`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
+| `preset`, `middle_forbid`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
 | `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
 
 Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
@@ -581,6 +582,10 @@ lazy-import detection and the entry-script check are the same in all of them.
 
 For middle rings, `strict` forbids every effect category, `standard` forbids `env`, `sleep`, `threads` and `process`,
 and `relaxed` forbids none. The innermost and outermost positional defaults apply under every preset.
+
+`middle_forbid = ["clock", "env"]` replaces that middle-ring default under any preset, so a `relaxed` policy can enforce
+effect categories without the allow-lists `standard` and `strict` also require. A ring's own `forbid` still wins, and
+`dynamic-import` is added whenever a ring forbids anything. In a scoped policy the key is set per scope.
 
 `io_modules` also drives the generated import-linter contracts, which ban the I/O modules a ring does not list. Under
 `relaxed` the contracts ban only declared third-party packages.

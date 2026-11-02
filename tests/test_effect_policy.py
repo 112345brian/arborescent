@@ -140,3 +140,62 @@ def test_unknown_or_malformed_forbid_policy_is_rejected(bad: object) -> None:
 
     with pytest.raises(PolicyError, match="forbid"):
         _ = policy_from_mapping(raw)
+
+
+def test_relaxed_preset_enforces_no_middle_ring_effects_by_default(repo: Path) -> None:
+    write_files(repo, {"app/ports.py": "import time\ntime.time()\n"})
+
+    assert effects(run(repo, preset="relaxed")) == set()
+
+
+def test_middle_forbid_opts_a_relaxed_policy_into_effect_enforcement_without_io_allow_lists(repo: Path) -> None:
+    write_files(repo, {"app/ports.py": "import time, os\ntime.time()\nos.getcwd()\n"})
+
+    found = run(repo, preset="relaxed", middle_forbid=["clock"])
+
+    # `time` and `os` are stdlib, so `relaxed` still asks for no allow-list entry; only the effect is reported.
+    assert [f.rule for f in found] == ["effect-clock"]
+
+
+def test_a_ring_forbid_table_still_beats_the_middle_forbid_key(repo: Path) -> None:
+    write_files(repo, {"app/ports.py": "import time\ntime.time()\n"})
+    open_ring = ring_with(ports={"may_import": ["domain"], "forbid": []})
+
+    assert effects(run(repo, preset="relaxed", middle_forbid=["clock"], ring=open_ring)) == set()
+
+
+def test_middle_forbid_applies_to_the_innermost_and_outermost_rings_not_at_all(repo: Path) -> None:
+    source = "import time\ntime.time()\n"
+    write_files(repo, {"app/main.py": source})
+
+    assert effects(run(repo, preset="relaxed", middle_forbid=["clock"])) == set()
+
+
+@pytest.mark.parametrize("bad", ["clock", [""], [3], ["not-an-effect"]])
+def test_middle_forbid_rejects_malformed_values(bad: object) -> None:
+    with pytest.raises(PolicyError, match="middle_forbid"):
+        mini_policy(preset="relaxed", middle_forbid=bad)
+
+
+def test_middle_forbid_adds_dynamic_import_like_any_forbidding_ring(repo: Path) -> None:
+    write_files(repo, {"app/ports.py": "def f(n: str) -> object:\n    return __import__(n)\n"})
+
+    assert any(f.rule == "effect-dynamic-import" for f in run(repo, preset="relaxed", middle_forbid=["clock"]))
+
+
+def test_middle_forbid_is_reported_as_a_customization() -> None:
+    assert "forbid" in mini_policy(preset="relaxed", middle_forbid=["clock"]).customization_labels
+
+
+def test_middle_forbid_is_set_per_scope() -> None:
+    scope = {"rings": ["domain", "ports", "adapters"], "classify": {}, "preset": "relaxed"}
+    raw = {
+        "scopes": {
+            "a": {**scope, "sources": ["a/src"], "source_roots": ["a/src"], "middle_forbid": ["clock"]},
+            "b": {**scope, "sources": ["b/src"], "source_roots": ["b/src"]},
+        }
+    }
+    policy = policy_from_mapping(raw)
+
+    assert policy.scope("a").policy.forbidden_effects("ports") >= {"clock", "dynamic-import"}
+    assert policy.scope("b").policy.forbidden_effects("ports") == frozenset()
