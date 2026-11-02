@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### Changed
+- `packages migrate` now rewrites `from <old> import <module>` (also with `as`, several names, `from app import core` for a
+  renamed `app.core`, and `from <old> import *`) instead of refusing it: a small LibCST transformer in the adapter rewrites the
+  statement before `RenameCommand` runs, keeping every name bound to the same module under the same name (#71). It still
+  refuses, with the statements listed and nothing modified, a `from <old> import a, b` that mixes a renamed module with a name
+  that is not one from a renamed package, `import <new> as x` for a module renamed to a top-level name (LibCST's rename corrupts
+  it), and files that do not parse. `docs/migration-driver.md`.
+
 ### Added
 - `package-file-relative-path` (information): a module that moves in a migration and reads `__file__` may now resolve a `.env`,
   data folder or sibling-script path from the wrong place. It is exported as a gap and listed by `packages migrate` under
