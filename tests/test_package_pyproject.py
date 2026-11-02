@@ -17,6 +17,8 @@ from arborescent.migration_export import migration_arguments_of
 from arborescent.migration_json import SCHEMA, export_document
 from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_model import CatalogError
+from arborescent.package_pyproject import DerivedProject
+from arborescent.package_pyproject_gaps import pyproject_violations
 from arborescent.practices import undeclared_imports
 from arborescent.selftest import plan, selftest
 
@@ -112,6 +114,13 @@ def test_generate_writes_a_pyproject_per_package_with_only_derived_fields_and_a_
     core = load(tmp_path, "core/pyproject.toml")
     assert core["project"]["dependencies"] == []  # type: ignore[index]
     assert "uv" not in core["tool"]  # type: ignore[operator]  # nothing to derive: no sibling, so no sources table
+
+
+def test_a_non_bmp_character_in_the_summary_renders_as_valid_toml(tmp_path: Path) -> None:
+    repo(tmp_path, CATALOG.replace('summary = "adapters"', 'summary = "adapters \U0001F600"'))
+    write_generated(policy(), tmp_path, services())
+    shell = load(tmp_path, "shell/pyproject.toml")  # tomllib.loads raises if the escape is not valid TOML
+    assert shell["project"]["description"] == "adapters \U0001F600"  # type: ignore[index]
 
 
 def test_the_root_pyproject_lists_the_workspace_members(tmp_path: Path) -> None:
@@ -238,6 +247,25 @@ def test_an_own_repository_source_checks_the_git_url_but_not_the_pin(tmp_path: P
     write_files(tmp_path, {"shell/pyproject.toml": '[project]\nname = "shell"\ndependencies = ["beautifulsoup4", "core"]\n'
                            '[tool.uv.sources]\ncore = { workspace = true }\n'})
     assert [s for s, _ in drift(tmp_path) if "sources" in s] == ["shell/pyproject.toml:tool.uv.sources"]
+
+
+def test_an_own_repository_source_missing_the_git_key_entirely_is_drift(tmp_path: Path) -> None:
+    repo(tmp_path, catalog_with_core_elsewhere(), {
+        "shell/pyproject.toml": '[project]\nname = "shell"\ndependencies = ["beautifulsoup4", "core"]\n'
+        '[tool.uv.sources]\ncore = { rev = "abc123" }\n'})  # no `git` key at all
+    assert [s for s, _ in drift(tmp_path) if "sources" in s] == ["shell/pyproject.toml:tool.uv.sources"]
+
+
+def test_an_unreadable_pyproject_is_a_drift_violation_not_a_crash(tmp_path: Path) -> None:
+    (tmp_path / "shell").mkdir()
+    (tmp_path / "shell" / "pyproject.toml").write_text('[project]\nname = "shell"\n', encoding="utf-8")
+
+    class _UnreadableFs(LocalFileSystem):
+        def read_text(self, path: Path) -> str:
+            raise PermissionError(f"denied: {path}")
+
+    found = pyproject_violations(_UnreadableFs(), tmp_path, (DerivedProject("shell/pyproject.toml", None),))
+    assert len(found) == 1 and found[0].rule == Rule.PACKAGE_PYPROJECT_DRIFT and "denied" in found[0].detail
 
 
 def test_the_generated_manifest_satisfies_the_undeclared_imports_practice(tmp_path: Path) -> None:

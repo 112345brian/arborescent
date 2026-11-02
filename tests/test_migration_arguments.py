@@ -170,6 +170,7 @@ def test_a_complete_catalog_has_no_blocking_gap() -> None:
     [
         (lambda c: c.replace('[packages.home]\nkind = "repository"\nrepository = "example/core"\n', ""), ("package-undeclared-home", "core")),
         (lambda c: c.replace('public = ["app.core.api"]\n', ""), ("package-undeclared-public-surface", "core")),
+        (lambda c: c.replace('public = ["app.core.api"]\n', 'public = ["app.core.nonexistent"]\n'), ("package-empty-public-surface", "core")),
         (lambda c: c.replace('externals = ["pydantic"]\n', ""), ("package-undeclared-external", "core")),
         (lambda c: c.replace('externals = ["flask"]\n', ""), ("package-undeclared-external", "web")),
         (lambda c: c.replace('to = "core"\n', 'to = "core"\n[[packages.module_renames]]\nfrom = "nothing.here"\nto = "x"\n'), ("package-unused-module-rename", "nothing.here")),

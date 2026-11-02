@@ -310,6 +310,24 @@ def test_patch_target_uses_annotation_in_changed_scan(repo: Path) -> None:
     assert "[domain]" in found[0].detail
 
 
+def test_patch_target_has_its_own_tests_folder_key_independent_of_secrets_guard(repo: Path) -> None:
+    write_files(repo, {
+        "app/main.py": '__arbor__ = {"ring": "domain"}\nVALUE = 1\n',
+        "tests/test_main.py": 'from unittest.mock import patch\npatch("app.main.VALUE")\n',
+    })
+    policy = mini_policy(
+        sources=["app", "tests"], source_roots=["."],
+        classify={**CLASSIFY, "tests.*": "composition"},
+        practices={"effect-patch": "tests"},  # no `secrets-guard` configured at all
+        ring=ring_with(composition={"may_import": ["*"], "external": ["unittest"]}),
+    )
+    scan = FsScanner().scan(policy, repo, frozenset({"tests/test_main.py"}))
+
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
+
+    assert [(v.rule, v.subject) for v in found] == [("effect-patch", "tests.test_main")]
+
+
 def _scope_boundary_policy(
     *, alpha_depends: list[str] | None = None, alpha_forbid: dict[str, list[str]] | None = None,
 ) -> Policy:

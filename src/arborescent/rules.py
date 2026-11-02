@@ -148,7 +148,7 @@ def _effect_uses(
 ) -> list[Violation]:
     policy = context.require_policy(name)
     out: list[Violation] = []
-    tests_folder = policy.practices.get("secrets-guard")
+    tests_folder = policy.practices.get("effect-patch", policy.practices.get("secrets-guard"))
     package_names = {module.split(".", 1)[0] for module in known}
     for use in info.facts.effect_uses:
         if use.category == "os-branching":

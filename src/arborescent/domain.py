@@ -18,6 +18,7 @@ __all__ = [
     "EFFECT_RULES",
     "INFORMATIONAL_RULES",
     "NOISE_DIRS",
+    "TACH_EXCLUDED_FOLDERS",
     "Allowance",
     "ArchitectureContracts",
     "ArchitectureScope",
@@ -37,6 +38,9 @@ __all__ = [
 NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".arborescent", ".mypy_cache", ".ruff_cache", ".tox"})
 DISABLED_TOOL_NAMES = frozenset({"import-linter", "tach", "ruff", "pyright", "basedpyright", "ty", "pyrefly", "arbor-annotations"})
 # Folders no walker (scanner, practices, selftest copy) looks into. Practices add build output on top of this.
+
+TACH_EXCLUDED_FOLDERS = ("__pycache__", "tests", ".venv", "venv", "node_modules")
+# The generated tach.toml `exclude` (engines.py); tach_visibility reads the same names, so the two never drift apart.
 
 ALL = "*"  # in `may_import` or `external`: no restriction
 

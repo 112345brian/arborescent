@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .domain import Rule, Violation
+from .domain import TACH_EXCLUDED_FOLDERS, Rule, Violation
 from .facts import ModuleInfo
 
 __all__ = ["invisible_import_violations"]
 
-_TACH_EXCLUDED_PARTS = frozenset({"tests", ".venv", "venv", "node_modules", "__pycache__"})  # the generated tach.toml `exclude`
+_TACH_EXCLUDED_PARTS = frozenset(TACH_EXCLUDED_FOLDERS)
 
 
 def invisible_import_violations(modules: Iterable[ModuleInfo]) -> list[Violation]:

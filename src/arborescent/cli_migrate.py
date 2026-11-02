@@ -80,7 +80,7 @@ def add_migrate_parser(package_actions: argparse._SubParsersAction[argparse.Argu
 
 def run_migrate(args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: MigrationTools) -> int:
     library, rewriter = tools.library, tools.rewriter
-    arguments = migration_arguments_of(policy, root, svc.fs, svc.scanner.scan(policy, root))
+    arguments = migration_arguments_of(policy, root, svc.fs, svc.scanner.scan(policy, root), svc.scanner)
     location, chosen = _resolve_target(args, root, svc, tools, tuple(item.id for item in arguments.packages))
     # A target is only needed once the plan turns out to be ready, so a blocked package is still explained without one.
     site = MigrationSite(root, root / DEFAULT_CONFIG.parent / "no-target" if chosen is None else chosen.path, args.branch)
@@ -114,7 +114,7 @@ def run_migrate(args: argparse.Namespace, policy: Policy, root: Path, svc: Servi
 
 def _write_manifest(args: argparse.Namespace, policy: Policy, root: Path, svc: Services, site: MigrationSite) -> int:
     """``extract`` only: record what the library extracted, in Arborescent's own manifest, and read it back."""
-    context = load_package_context(policy, root, svc.fs, svc.scanner.scan(policy, root))
+    context = load_package_context(policy, root, svc.fs, svc.scanner.scan(policy, root), svc.scanner)
     if context is None:
         raise PolicyError("packages extract needs package_catalog in the policy")
     try:

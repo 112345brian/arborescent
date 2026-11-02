@@ -647,7 +647,10 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
 `getattr`, variables, or wrappers. A test patch is checked against the target module's ring and is considered only when
-the first argument is a static project-package string or attribute under the configured `secrets-guard` tests folder.
+the first argument is a static project-package string or attribute under the tests folder the `effect-patch` practice
+configures (falling back to the `secrets-guard` tests folder when `effect-patch` is unset, for a policy that configured
+only `secrets-guard`; set `effect-patch` directly to enable this check without also enabling the environment-scrubbing
+check `secrets-guard` makes).
 `noqa` comments do not suppress native effect findings. Suppression and reasoned `discard()` counts are always reported;
 increases need `baseline --allow-growth --reason` (or one-time family adoption), while removals can shrink the baseline.
 
@@ -677,6 +680,7 @@ Each practice is off until it has a value.
 | `gitignore-shadow` | `true`, or a list of file globs to allow | a `.py` file is git-ignored (an unanchored pattern hid a package) |
 | `sibling-versions` | glob of `pyproject.toml` files, e.g. `"*/pyproject.toml"` | a project pins a sibling project to a version the sibling does not have |
 | `secrets-guard` | tests folder, e.g. `"tests"` | `conftest.py` has no autouse fixture that scrubs the environment |
+| `effect-patch` | tests folder, e.g. `"tests"` | not a check of its own: the tests folder the `effect-patch` ring rule reads a `mock.patch` test from (falls back to `secrets-guard`'s tests folder when unset) |
 | `docs-sync` | path of the architecture doc | the doc's `\| module \| ring \|` table equals the policy (see `docs/architecture.md`) |
 | `crlf` | list of file globs, e.g. `["*.sh"]` | a matching file has CRLF line endings |
 | `undeclared-imports` | `true`, or a manifest path (default `pyproject.toml`) | a third-party import is absent from the manifest's dependencies |

@@ -12,7 +12,6 @@ without a ``home`` gets no entry (the migration export reports the missing annot
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -21,6 +20,7 @@ from typing import Any
 
 from .domain import Rule, Violation, dist_name
 from .package_model import CatalogDocument, CatalogError, PackageDescriptor, is_git_url
+from .package_render import toml_str
 
 __all__ = ["DerivedProject", "ProjectFacts", "derive_projects", "drift_violations", "render_template"]
 
@@ -166,7 +166,7 @@ def export_of(project: DerivedProject) -> dict[str, object]:
 
 
 def _q(value: str) -> str:
-    return json.dumps(value)
+    return toml_str(value)
 
 
 def _array(items: Sequence[str]) -> str:
@@ -268,7 +268,7 @@ def _source_drift(project: DerivedProject, package: PackageDescriptor, actual: M
         value = value if isinstance(value, dict) else {}
         agrees = (
             value == {"workspace": True} if entry.get("workspace") is True
-            else "workspace" not in value and value.get("git", entry["git"]) == entry["git"] and bool(value)
+            else "workspace" not in value and value.get("git") == entry["git"] and bool(value)
             and value.get("subdirectory", entry.get("subdirectory")) == entry.get("subdirectory")
         )
         if not agrees:

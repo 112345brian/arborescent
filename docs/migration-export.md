@@ -78,6 +78,7 @@ reported as a gap, never guessed.
 |---|---|
 | `package-undeclared-home` | the package has no `[packages.home]` |
 | `package-undeclared-public-surface` | other packages import it and it declares no `public` surface |
+| `package-empty-public-surface` | it declares a non-empty `public` surface that matches none of its owned modules (e.g. a stale glob after a rename) |
 | `package-undeclared-external` | a module imports a third-party name that `externals` does not list (or `externals` is absent) |
 | `package-unplaceable-path` | an owned path lies outside the package `root` and has no `destination` |
 | `package-unplaced-asset` | an `[[assets]]` glob owns a file that lies below none of the package's paths |

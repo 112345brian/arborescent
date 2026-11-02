@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .domain import ArchitectureContracts, ToolResult, Violation
+from .domain import TACH_EXCLUDED_FOLDERS, ArchitectureContracts, ToolResult, Violation
 from .generated_config import (
     HEADER,
     IMPORT_LINTER_FILE,
@@ -76,7 +76,9 @@ class Tach:
         depth = len([part for part in contracts.config_dir.split("/") if part and part != "."])
         relative = "../" * depth
         source_roots = [f"{relative}{root}" for root in contracts.source_roots]
-        excludes = [f"{relative}{pattern}" for pattern in ("**/__pycache__", "tests", ".venv", "venv", "node_modules")]
+        excludes = [
+            f"{relative}**/{name}" if name == "__pycache__" else f"{relative}{name}" for name in TACH_EXCLUDED_FOLDERS
+        ]
         explicit = contracts.explicit_boundaries
         lines = [
             HEADER,

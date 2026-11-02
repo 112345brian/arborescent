@@ -300,7 +300,7 @@ def _packages(args: argparse.Namespace, root: Path, fs: FileSystem) -> int:
 
 
 def _export(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
-    arguments = migration_arguments_of(policy, root, svc.fs, svc.scanner.scan(policy, root))
+    arguments = migration_arguments_of(policy, root, svc.fs, svc.scanner.scan(policy, root), svc.scanner)
     text = render_export(export_document(arguments, policy.package_catalog or "packages.toml"))
     if args.output is None:
         sys.stdout.write(text)

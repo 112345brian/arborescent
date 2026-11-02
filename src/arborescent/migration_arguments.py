@@ -44,6 +44,7 @@ class GapCode:
 
     UNDECLARED_HOME = "package-undeclared-home"
     UNDECLARED_PUBLIC_SURFACE = "package-undeclared-public-surface"
+    EMPTY_PUBLIC_SURFACE = "package-empty-public-surface"
     UNDECLARED_EXTERNAL = "package-undeclared-external"
     UNPLACEABLE_PATH = "package-unplaceable-path"
     UNPLACED_ASSET = "package-unplaced-asset"
@@ -53,8 +54,8 @@ class GapCode:
     FILE_RELATIVE_PATH = "package-file-relative-path"
 
     ALL = (
-        UNDECLARED_HOME, UNDECLARED_PUBLIC_SURFACE, UNDECLARED_EXTERNAL, UNPLACEABLE_PATH, UNPLACED_ASSET,
-        MODULE_RENAME_COLLISION, UNUSED_MODULE_RENAME, MODULE_RENAME_MISMATCH, FILE_RELATIVE_PATH,
+        UNDECLARED_HOME, UNDECLARED_PUBLIC_SURFACE, EMPTY_PUBLIC_SURFACE, UNDECLARED_EXTERNAL, UNPLACEABLE_PATH,
+        UNPLACED_ASSET, MODULE_RENAME_COLLISION, UNUSED_MODULE_RENAME, MODULE_RENAME_MISMATCH, FILE_RELATIVE_PATH,
     )
 
 
@@ -352,6 +353,12 @@ def _public_surface(
             gaps.append(Gap(GapCode.UNDECLARED_PUBLIC_SURFACE, package.id, f"imported by packages {', '.join(sorted(importers))} but declares no public surface", ERROR, package.id))
         return (), ()
     surface = tuple(m.module for m in modules if _is_public(m.module, package.public))
+    if not surface:
+        gaps.append(Gap(
+            GapCode.EMPTY_PUBLIC_SURFACE, package.id,
+            f"declares a public surface ({', '.join(package.public)}) that matches none of its owned modules",
+            ERROR, package.id,
+        ))
     bypasses = tuple(sorted(
         (Bypass(module, importer, target) for importer, pairs in importers.items() for module, target in pairs if not _is_public(target, package.public)),
         key=lambda b: (b.module, b.imports),

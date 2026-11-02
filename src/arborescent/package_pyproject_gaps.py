@@ -67,7 +67,7 @@ def pyproject_violations(fs: FileSystem, root: Path, projects: tuple[DerivedProj
             continue
         try:
             data = tomllib.loads(fs.read_text(path))
-        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+        except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
             found.append(Violation(Rule.PACKAGE_PYPROJECT_DRIFT, project.path, f"cannot be read, so no derived field was compared: {exc}"))
             continue
         found += drift_violations(project, data)
