@@ -20,7 +20,7 @@ from arborescent.driver_plan import READY, plan_supply
 from arborescent.driver_request import MigrationOutcome, RewriteFinding
 from arborescent.testing import FakeImportRewriter, FakeMigrationLibrary, FakeToolRunner
 
-RENAMED = CLI_CATALOG.replace("[[packages.paths]]", '[[packages.module_renames]]\nfrom = "app"\nto = "core"\n[[packages.paths]]', 1)
+RENAMED = CLI_CATALOG.replace("[[packages.paths]]", '[[packages.module_renames]]\nfrom = "app"\nto = "core"\n[[packages.paths]]', 1).replace('destination = "app"', 'destination = "core"')
 
 
 def run(tmp_path: Path, library: FakeMigrationLibrary, rewriter: FakeImportRewriter, *extra: str, catalog: str = RENAMED) -> int:

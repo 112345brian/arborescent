@@ -27,6 +27,9 @@ MANIFEST = ".arborescent-package.toml"
 
 def run(tmp_path: Path, action: str, *argv: str, library: FakeMigrationLibrary | None = None, catalog: str = CLI_CATALOG) -> int:
     _repo(tmp_path, catalog)
+    for flag in ("--output", "--target"):
+        if flag in argv and "--yes" in argv:  # the fake library migrates nothing, so the tree the manifest is checked against is made here
+            (Path(argv[argv.index(flag) + 1]) / "app").mkdir(parents=True, exist_ok=True)
     base = ["--config", str(tmp_path / "arborescent.toml"), "packages", action, "core", *argv]
     return main(base, services(FakeToolRunner()), library=library or FakeMigrationLibrary(), environ={})
 
@@ -60,7 +63,7 @@ def test_after_the_library_ran_a_valid_manifest_records_what_was_extracted(tmp_p
     assert extracted.semantics.id == "core"
     assert extracted.origin_repository == "example/mono"
     assert extracted.current_repository == "example/core"  # where the package now lives: its home repository
-    assert [(p.origin_path, p.current_path) for p in extracted.paths] == [("app", ".")]
+    assert [(p.origin_path, p.current_path) for p in extracted.paths] == [("app", "app")]
 
 
 def test_the_repository_flag_overrides_where_the_manifest_says_it_lives(tmp_path: Path) -> None:

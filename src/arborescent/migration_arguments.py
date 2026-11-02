@@ -49,10 +49,11 @@ class GapCode:
     UNPLACED_ASSET = "package-unplaced-asset"
     MODULE_RENAME_COLLISION = "package-module-rename-collision"
     UNUSED_MODULE_RENAME = "package-unused-module-rename"
+    MODULE_RENAME_MISMATCH = "package-module-rename-mismatch"
 
     ALL = (
         UNDECLARED_HOME, UNDECLARED_PUBLIC_SURFACE, UNDECLARED_EXTERNAL, UNPLACEABLE_PATH, UNPLACED_ASSET,
-        MODULE_RENAME_COLLISION, UNUSED_MODULE_RENAME,
+        MODULE_RENAME_COLLISION, UNUSED_MODULE_RENAME, MODULE_RENAME_MISMATCH,
     )
 
 
@@ -212,6 +213,7 @@ def _package_arguments(
     if package.home is None:
         gaps.append(Gap(GapCode.UNDECLARED_HOME, package.id, "no [packages.home]: own repository or workspace member is not annotated", ERROR, package.id))
     _rename_gaps(package, modules, gaps)
+    _rename_mismatch_gaps(package, modules, gaps)
     externals = _external_gaps(package, facts, mine, gaps)
     surface, bypasses = _public_surface(package, modules, importers, gaps)
     return PackageArguments(
@@ -276,6 +278,38 @@ def _rename_gaps(package: PackageDescriptor, modules: Sequence[OwnedModule], gap
         for rename in package.module_renames
         if not any(m.module == rename.source or m.module.startswith(rename.source + ".") for m in modules)
     )
+
+
+def _rename_mismatch_gaps(package: PackageDescriptor, modules: Sequence[OwnedModule], gaps: list[Gap]) -> None:
+    """A module's import name in the target must be the one its target path gives (#77); otherwise imports break there.
+
+    The path decides the name from the package's folder in the target, or from a ``src`` folder below it. A module no owned
+    path places has no target path, so the unplaced-path gaps already cover it.
+    """
+    base = PurePosixPath(package.home.path) if package.home is not None and package.home.path is not None else PurePosixPath()
+    for item in modules:
+        if item.target_path is None or not item.target_path.endswith(".py"):
+            continue
+        implied = [_module_below(PurePosixPath(item.target_path), root) for root in (base, base / "src")]
+        if item.target_module in implied:
+            continue
+        shown = next((name for name in implied if name is not None), item.target_path)
+        gaps.append(Gap(
+            GapCode.MODULE_RENAME_MISMATCH, item.module,
+            f"{item.module} of {package.id!r} lands at {item.target_path}, which imports as {shown!r}, but its target module is "
+            f"{item.target_module!r}; declare or correct a module_renames entry so imports are rewritten to the name that exists",
+            ERROR, package.id,
+        ))
+
+
+def _module_below(path: PurePosixPath, root: PurePosixPath) -> str | None:
+    """The dotted module a ``.py`` file is when ``root`` is the import root; ``None`` when the file is not below it."""
+    if not within(path, root):
+        return None
+    parts = list(path.relative_to(root).with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
 
 
 def _external_gaps(

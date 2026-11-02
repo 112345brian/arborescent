@@ -136,7 +136,7 @@ def test_the_export_carries_every_field_a_migration_tool_is_given() -> None:
     core = next(p for p in document()["packages"] if p["id"] == "core")
     assert set(core) == {"id", "name", "kind", "summary", "domain", "capabilities", "home", "owned", "surface", "dependencies", "vendored", "policy", "pyproject"}
     assert set(core["owned"]) == {"modules", "assets", "path_renames", "module_renames"}
-    assert core["owned"]["modules"][0] == {"module": "app.core.api", "path": "src/app/core/api.py", "target_path": "api.py", "target_module": "core.api"}
+    assert core["owned"]["modules"][0] == {"module": "app.core.api", "path": "src/app/core/api.py", "target_path": "src/core/api.py", "target_module": "core.api"}
     assert core["surface"] == {"public": ["app.core.api"], "bypasses": [{"module": "app.web.routes", "package": "web", "imports": "app.core.internal"}]}
     assert core["dependencies"] == {"packages": [], "external": ["pydantic"]}
 
@@ -247,6 +247,7 @@ repository = "example/core"
 [[packages.paths]]
 path = "app"
 role = "source"
+destination = "app"
 """
 
 

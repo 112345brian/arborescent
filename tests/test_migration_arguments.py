@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -41,9 +42,11 @@ to = "core"
 [[packages.paths]]
 path = "src/app/core/api.py"
 role = "source"
+destination = "src/core/api.py"
 [[packages.paths]]
 path = "src/app/core/internal.py"
 role = "source"
+destination = "src/core/internal.py"
 [[packages.paths]]
 path = "src/app/core/schema"
 role = "assets"
@@ -65,6 +68,7 @@ path = "packages/web"
 [[packages.paths]]
 path = "src/app/web"
 role = "source"
+destination = "src/app/web"
 
 [[assets]]
 pattern = "src/app/**/*.sql"
@@ -108,28 +112,28 @@ def test_identity_and_home_are_carried_for_both_outcomes() -> None:
 def test_owned_modules_and_assets_are_repository_relative_with_their_target_paths() -> None:
     core = package(build(), "core")
     assert [(m.module, m.path, m.target_path) for m in core.modules] == [
-        ("app.core.api", "src/app/core/api.py", "api.py"),
-        ("app.core.internal", "src/app/core/internal.py", "internal.py"),
+        ("app.core.api", "src/app/core/api.py", "src/core/api.py"),
+        ("app.core.internal", "src/app/core/internal.py", "src/core/internal.py"),
     ]
     assert [(a.path, a.target_path) for a in core.assets] == [("src/app/core/schema/user.json", "data/schema/user.json")]
     web = package(build(), "web")
-    assert [(a.path, a.target_path) for a in web.assets] == [("src/app/web/page.html", "packages/web/page.html")]
+    assert [(a.path, a.target_path) for a in web.assets] == [("src/app/web/page.html", "packages/web/src/app/web/page.html")]
 
 
 def test_a_workspace_member_lands_below_its_home_path() -> None:
     web = package(build(), "web")
     assert [(m.path, m.target_path) for m in web.modules] == [
-        ("src/app/web/routes.py", "packages/web/routes.py"),
-        ("src/app/web/views.py", "packages/web/views.py"),
+        ("src/app/web/routes.py", "packages/web/src/app/web/routes.py"),
+        ("src/app/web/views.py", "packages/web/src/app/web/views.py"),
     ]
-    assert [(r.source, r.target) for r in web.path_renames] == [("src/app/web", "packages/web")]
+    assert [(r.source, r.target) for r in web.path_renames] == [("src/app/web", "packages/web/src/app/web")]
 
 
 def test_path_renames_follow_destinations_and_roots() -> None:
     core = package(build(), "core")
     assert [(r.source, r.target) for r in core.path_renames] == [
-        ("src/app/core/api.py", "api.py"),
-        ("src/app/core/internal.py", "internal.py"),
+        ("src/app/core/api.py", "src/core/api.py"),
+        ("src/app/core/internal.py", "src/core/internal.py"),
         ("src/app/core/schema", "data/schema"),
     ]
 
@@ -177,7 +181,7 @@ def test_each_unresolved_annotation_is_a_named_gap(edit: Callable[[str], str], e
 
 
 def test_an_owned_path_outside_the_root_without_a_destination_is_unplaceable() -> None:
-    arguments = build(CATALOG.replace('root = "src/app/core"', 'root = "src/app/elsewhere"'))
+    arguments = build(CATALOG.replace('root = "src/app/core"', 'root = "src/app/elsewhere"').replace('destination = "src/core/api.py"\n', ""))
     assert ("package-unplaceable-path", "src/app/core/api.py") in codes(arguments)
 
 
@@ -270,3 +274,82 @@ def test_the_home_derives_whether_its_repository_is_a_git_url_and_never_stores_i
     assert PackageHome("repository", repository="example/core").repository_is_git_url is False
     assert PackageHome("repository", repository="git@github.com:example/core.git").repository_is_git_url is True
     assert PackageHome("workspace-member", path="packages/x").repository_is_git_url is None
+
+
+RENAME_CATALOG = """
+[[packages]]
+id = "core"
+name = "Core"
+kind = "library"
+repository = "example/mono"
+root = "app/core"
+summary = "domain"
+[packages.home]
+kind = "{kind}"
+{home}
+{renames}
+[[packages.paths]]
+path = "app/core"
+role = "source"
+{destination}
+"""
+RENAME_FACTS = RepositoryFacts(
+    modules={"app.core.models": "app/core/models.py", "app.core": "app/core/__init__.py", "app.core.sub.deep": "app/core/sub/deep.py"},
+    rings={}, imports={}, assets=(), externals={},
+)
+RENAME = '[[packages.module_renames]]\nfrom = "app.core"\nto = "core"\n'
+OWN_REPO = 'kind = "repository"\nrepository = "example/core"'
+MEMBER = 'kind = "workspace-member"\npath = "packages/core"'
+
+
+def _destination(destination: str) -> str:
+    """"." means the package root lands at the target root, which is the default, so no `destination` line."""
+    return "" if destination == "." else f'destination = "{destination}"'
+
+
+def rename_gaps(*, destination: str, renames: str = "", home: str = OWN_REPO) -> set[tuple[str, str]]:
+    kind = "workspace-member" if "path =" in home else "repository"
+    text = RENAME_CATALOG.format(kind=kind, home=home.split("\n", 1)[1], renames=renames, destination=_destination(destination))
+    return {(g.code, g.subject) for g in build(text, RENAME_FACTS).gaps if g.code == GapCode.MODULE_RENAME_MISMATCH}
+
+
+def test_a_move_that_changes_the_import_name_without_a_rename_is_a_mismatch() -> None:
+    # app/core/models.py lands at models.py: the module becomes `models`, but nothing says so and imports are not rewritten.
+    assert ("package-module-rename-mismatch", "app.core.models") in rename_gaps(destination=".")
+
+
+def test_a_declared_rename_that_matches_the_move_is_clean() -> None:
+    assert rename_gaps(destination="src/core", renames=RENAME) == set()
+    assert rename_gaps(destination="core", renames=RENAME) == set()
+
+
+def test_a_rename_for_a_module_whose_path_did_not_change_is_a_mismatch() -> None:
+    # The path keeps `app/core/...` but a rename claims the module is now `core.*`, so rewritten imports name nothing real.
+    found = rename_gaps(destination="app/core", renames=RENAME)
+    assert {subject for _, subject in found} == {"app.core", "app.core.models", "app.core.sub.deep"}
+
+
+def test_a_path_move_that_keeps_the_name_needs_no_rename() -> None:
+    assert rename_gaps(destination="app/core", home=OWN_REPO) == set()
+    assert rename_gaps(destination="app/core", home=MEMBER) == set()
+    assert rename_gaps(destination="src/app/core") == set()  # a src layout in the new repository
+
+
+def test_a_workspace_member_is_measured_from_its_own_folder() -> None:
+    assert rename_gaps(destination="core", renames=RENAME, home=MEMBER) == set()
+    assert rename_gaps(destination="src/core", renames=RENAME, home=MEMBER) == set()
+    assert ("package-module-rename-mismatch", "app.core.models") in rename_gaps(destination=".", home=MEMBER)
+
+
+def test_a_module_with_no_target_path_is_left_to_the_unplaced_rules() -> None:
+    facts = RepositoryFacts({"app.core.models": "app/core/models.py", "app.other": "app/other.py"}, {}, {}, (), {})
+    text = RENAME_CATALOG.format(kind="repository", home='repository = "example/core"', renames="", destination=_destination("app/core"))
+    assert not [g for g in build(text, facts).gaps if g.code == GapCode.MODULE_RENAME_MISMATCH and g.subject == "app.other"]
+
+
+def test_the_mismatch_gap_blocks_a_migration_and_is_documented() -> None:
+    text = RENAME_CATALOG.format(kind="repository", home='repository = "example/core"', renames="", destination=_destination("."))
+    arguments = build(text, RENAME_FACTS)
+    assert not arguments.ready
+    assert GapCode.MODULE_RENAME_MISMATCH in GapCode.ALL
+    assert GapCode.MODULE_RENAME_MISMATCH in Path("docs/migration-export.md").read_text(encoding="utf-8")

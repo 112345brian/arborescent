@@ -28,7 +28,7 @@ def test_the_default_is_a_dry_run_that_prints_the_exact_arguments_and_supplies_n
     assert library.supplied == []
     assert "dry run" in out
     assert shlex.join(["fake-migrate", "core", str(tmp_path / "out")]) in out  # the library's own rendering of the exact arguments
-    assert "app -> ." in out  # the path rename that would be supplied
+    assert "app -> app" in out  # the path rename that would be supplied
     assert "--yes" in out
 
 
@@ -113,6 +113,7 @@ repository = "https://github.com/example/core.git"
 [[packages.paths]]
 path = "src/app/core"
 role = "source"
+destination = "src/app/core"
 
 [[packages]]
 id = "web"
@@ -129,6 +130,7 @@ path = "packages/web"
 [[packages.paths]]
 path = "src/app/web"
 role = "source"
+destination = "src/app/web"
 """
 
 
