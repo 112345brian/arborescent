@@ -6,9 +6,14 @@ command is LibCST's, not ours; this adapter only chooses its inputs and refuses 
 through the ``ToolRunner`` port and an isolated (``-I``) subprocess, so a module planted in the tree cannot shadow one
 and importing this module never imports LibCST (the extra is optional).
 
-Rewritten (checked on real code): ``import M``, ``import M as a``, ``from M import name``, ``from M import *``. Refused
-before any file is touched: ``from <old> import <module>``, because the output of LibCST's rename can then still parse
-while naming something no longer bound. Checked afterwards: any import that still names an old module is a failure.
+Rewritten by LibCST (checked on real code): ``import M``, ``import M as a``, ``from M import name``, ``from M import *``.
+Rewritten by this adapter's own transformer, first (#71), because LibCST's output for it can still parse while naming
+something no longer bound: ``from <old> import <module>`` (also with ``as``, several names, a renamed package) and
+``from <old> import *`` for a renamed ``<old>``. Refused before any file is touched: a file that does not parse, and
+``from <old> import a, b`` that mixes a renamed module with a name that is not one while ``<old>`` is itself renamed, and
+``import <new> as x`` where ``<new>`` is a top-level name (LibCST's rename corrupts it, so ``from app import core as c`` with
+``app.core`` renamed to ``core`` cannot go through it).
+Checked afterwards: any import that still names an old module is a failure.
 """
 
 from __future__ import annotations
@@ -44,11 +49,11 @@ class LibCstRename:
 
     def commands(self, request: RewriteRequest) -> tuple[tuple[str, ...], ...]:
         paths = [str(request.root / item) for item in request.paths]
-        return tuple(
+        return (self._rewrite_argv(request), *(
             (sys.executable, "-I", "-m", "libcst.tool", "codemod", "--external", "--hide-progress", "--no-format", _RENAME, *paths,
              "--old_name", rename.source, "--new_name", rename.target)
             for rename in request.renames
-        )
+        ))
 
     def apply(self, request: RewriteRequest) -> MigrationOutcome:
         refused = self.unsupported(request)
@@ -57,7 +62,10 @@ class LibCstRename:
                 False,
                 f"refused: {len(refused)} import statement(s) LibCST's rename cannot rewrite safely; no file was modified:\n{_listing(refused)}",
             )
-        for command in self.commands(request):
+        first = self._runner.run(list(self._rewrite_argv(request)), request.root)
+        if first.returncode != 0:
+            return MigrationOutcome(False, f"could not rewrite the `from <old> import <module>` statements ({first.stderr.strip() or 'the rewriter failed'}); files changed so far stay changed")
+        for command in self.commands(request)[1:]:
             done = self._runner.run(list(command), request.root)
             failed = re.search(r"Failed to codemod (\d+)", done.stdout + done.stderr)
             if done.returncode != 0 or (failed is not None and int(failed.group(1)) > 0):
@@ -70,11 +78,18 @@ class LibCstRename:
             return MigrationOutcome(False, f"{len(left)} import(s) naming an old module were left unrewritten (the files already changed stay changed):\n{_listing(left)}")
         return MigrationOutcome(True, f"{len(request.renames)} module rename(s) applied below {request.root}")
 
+    def _rewrite_argv(self, request: RewriteRequest) -> tuple[str, ...]:
+        argv = [sys.executable, "-I", "-m", _SCAN, "rewrite", str(request.root)]
+        for item in request.paths:
+            argv += ["--under", item]
+        argv += [f"{rename.source}={rename.target}" for rename in request.renames]
+        return tuple(argv)
+
     def _scan(self, mode: str, request: RewriteRequest) -> tuple[RewriteFinding, ...]:
         argv = [sys.executable, "-I", "-m", _SCAN, mode, str(request.root)]
         for item in request.paths:
             argv += ["--under", item]
-        argv += sorted(rename.source for rename in request.renames)
+        argv += sorted(f"{rename.source}={rename.target}" if mode == "forms" else rename.source for rename in request.renames)
         done = self._runner.run(argv, request.root)
         try:
             if done.returncode != 0:

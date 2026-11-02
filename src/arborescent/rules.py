@@ -1,7 +1,7 @@
 """Arborescent's own checks, as pure functions over already-parsed modules.
 
 Rules (ids in ``domain.Rule``): ``unclassified``, ``internal-import``, ``external-import``, ``os-branching``,
-``bad-import`` and ``undeclared-entry-dependency``. Lazy (function-level) and ``TYPE_CHECKING`` imports count. How much of the external
+``bad-import``, ``forbidden-module`` and ``undeclared-entry-dependency``. Lazy (function-level) and ``TYPE_CHECKING`` imports count. How much of the external
 and OS-branching rules applies is the policy's preset; layering and classification are never relaxed.
 """
 
@@ -301,6 +301,13 @@ def check_modules(
         mismatch = context.annotation_ring_mismatch(name)
         if mismatch is not None:
             out.append(Violation(Rule.ARBOR_RING_MISMATCH, name, mismatch))
+        pattern = local_policy.forbidden_module_pattern(name) if local_policy is not None else None
+        if pattern is not None:
+            out.append(Violation(
+                Rule.FORBIDDEN_MODULE, name,
+                f"module matches forbidden_modules pattern {pattern!r}; a first-party module with this name must not "
+                f"exist (remove it, or drop the pattern from forbidden_modules)",
+            ))
         ring = context.resolve_ring(name)
         if ring is None:
             out.append(Violation(Rule.UNCLASSIFIED, name, (context.policy_for(name) or context.policy).unclassified_detail(name)))

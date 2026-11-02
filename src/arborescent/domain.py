@@ -45,6 +45,7 @@ class Rule(StrEnum):
     """Every rule id, in one place. The values are stored in baseline files (``rule|subject|detail``): never rename one."""
 
     UNCLASSIFIED = "unclassified"
+    FORBIDDEN_MODULE = "forbidden-module"
     NOISE_DIR_CODE = "noise-dir-code"
     VENDOR_FOLDER = "vendor-folder"
     WILDCARD_RING = "wildcard-ring"
@@ -224,6 +225,7 @@ class Policy:
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
     forbid_everywhere: tuple[str, ...] = ()
+    forbidden_modules: tuple[str, ...] = ()  # globs on dotted first-party module names that must not exist
     tach_external_exclude: tuple[str, ...] = ()  # written to tach `[external] exclude`
     forbid_circular_imports: bool = True
     python: str = "3.11"
@@ -319,6 +321,10 @@ class Policy:
             if fnmatch.fnmatchcase(module, pattern):
                 return ring
         return None
+
+    def forbidden_module_pattern(self, module: str) -> str | None:
+        """The first `forbidden_modules` glob matching the module's full dotted name, or None."""
+        return next((p for p in self.forbidden_modules if fnmatch.fnmatchcase(module, p)), None)
 
     def unclassified_detail(self, module: str) -> str:
         """Explain a missing ring, hinting at ``pkg*`` when a `classify` glob names only a parent package."""

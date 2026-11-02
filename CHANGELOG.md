@@ -4,11 +4,23 @@
 
 ## Unreleased
 
+### Changed
+- `packages migrate` now rewrites `from <old> import <module>` (also with `as`, several names, `from app import core` for a
+  renamed `app.core`, and `from <old> import *`) instead of refusing it: a small LibCST transformer in the adapter rewrites the
+  statement before `RenameCommand` runs, keeping every name bound to the same module under the same name (#71). It still
+  refuses, with the statements listed and nothing modified, a `from <old> import a, b` that mixes a renamed module with a name
+  that is not one from a renamed package, `import <new> as x` for a module renamed to a top-level name (LibCST's rename corrupts
+  it), and files that do not parse. `docs/migration-driver.md`.
+
 ### Added
 - `classify-facts` (information, never baselined, not part of `--require-modularity`): checks a module's `[classify]` ring against
   its facts with three signals: it passes every rule of a more inner ring, it is a class-free leaf that only wires peers to
   inner-ring code, or it has a `__main__` guard and is also imported. It uses imports, effect uses, top-level definitions and a
   new `__main__` guard fact, never names; the scan cache is rebuilt once. Limits are in `docs/configuration.md` (#90).
+- `forbidden_modules` policy key (root or per scope) and the `forbidden-module` rule: `check` fails when a first-party module whose
+  dotted name matches a `classify`-style glob exists, for a generic package that moved to a pinned dependency and must not
+  come back. It never looks at imports, so it does not overlap `forbid_everywhere`, and it fires even for a module that is
+  classified or `unclassified` (#78).
 - `package-file-relative-path` (information): a module that moves in a migration and reads `__file__` may now resolve a `.env`,
   data folder or sibling-script path from the wrong place. It is exported as a gap and listed by `packages migrate` under
   "review before --yes"; it never blocks. The scan cache is rebuilt once (#83).

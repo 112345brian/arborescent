@@ -414,16 +414,16 @@ def test_the_driver_rewrites_the_imports_of_the_new_repository_and_leaves_the_mo
 
 @needs_filter_repo
 @needs_libcst
-def test_the_driver_refuses_an_import_form_it_cannot_rewrite_and_changes_nothing(monorepo: Path, tmp_path: Path) -> None:
+def test_the_driver_rewrites_from_old_import_module_and_changes_nothing_in_the_monorepo(monorepo: Path, tmp_path: Path) -> None:
     remove_the_blocking_edge(monorepo)
     rename_module(monorepo, "orders", "app.orders", "orders")  # orders/service.py says `from app.orders import model`
     before = tree_hash(monorepo)
     target = tmp_path / "orders-repo"
     done = migrate(monorepo, "orders", target, "--yes")
-    assert done.returncode == 1, done.stdout + done.stderr
-    assert "unsupported-import-form" in done.stdout + done.stderr and "app/orders/service.py" in (done.stdout + done.stderr).replace("\\", "/")
-    assert not target.exists()  # nothing was created
-    assert tree_hash(monorepo) == before  # and nothing in the monorepo was modified
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "from orders import model" in (target / "orders/service.py").read_text(encoding="utf-8")  # #71: it used to be refused
+    assert "app.orders" not in (target / "orders/service.py").read_text(encoding="utf-8")
+    assert tree_hash(monorepo) == before  # nothing in the monorepo was modified
 
 
 @needs_filter_repo
