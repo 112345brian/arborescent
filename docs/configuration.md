@@ -31,6 +31,7 @@ settings. The two forms cannot be mixed.
 | `dependencies` | `{}` | Import name -> distribution name, where they differ (`yaml = "pyyaml"`). Used for entry-script and manifest checks. |
 | `tach_external_exclude` | `[]` | Package names written to the generated Tach `[external] exclude`: optional extras imported lazily, or transitive dependencies the project does not declare. Tach reads only the base dependencies and matches distribution names where they differ from import names (`google-genai`, `pyyaml`). |
 | `forbid_everywhere` | `[]` | Packages no module may import, in any ring (one global import-linter contract). |
+| `forbidden_modules` | `[]` | `classify`-style globs on dotted first-party module names that must not exist under `sources`, for example `["text_claims", "text_claims.*"]` after that package moved to a pinned dependency. Globs match the whole module name and `*` crosses dots, so a package needs its own name and `name.*`. Each matching module fails once (`forbidden-module`), naming the first matching pattern. It looks only at modules that exist, never at imports: use `forbid_everywhere` to ban importing a package. A pattern that matches nothing is fine. |
 | `forbid_circular_imports` | `true` | Rejects cycles in the first-party module import graph, including lazy and `TYPE_CHECKING` imports. Set to `false` only to opt out; the Arborescent minimum profile requires `true`. |
 | `require_arbor_annotations` | `false` | Makes a module that resolves its ring only through `classify` (no valid `__arbor__` annotation) a hard failure (`unannotated-module`), instead of a silent fallback. See "Requiring annotations" below. |
 | `require_arbor_annotations_exclude` | `[]` | `classify`-style module-name globs exempt from `require_arbor_annotations`, for modules that cannot carry an annotation (vendored, read-only, generated). Has no effect unless `require_arbor_annotations` is set. |
@@ -63,7 +64,7 @@ repository component. Each scope requires non-empty `sources`, `source_roots` an
 | `public` | `[]` | Dotted module patterns consumers may import from this scope. |
 | `depends_on` | `[]` | Scope names this scope may import. Each cross-scope import must target a declared dependency and match its `public` patterns. |
 | `preset`, `middle_forbid`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
-| `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
+| `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbidden_modules`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
 
 Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
 `ruff`, `practices`, `exclude` and `children` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
@@ -597,6 +598,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | rule | fires when |
 |---|---|
 | `unclassified` | a module has neither a valid enabled `__arbor__` annotation nor a matching `classify` pattern |
+| `forbidden-module` | a first-party module's dotted name matches a `forbidden_modules` pattern. Reported even if the module is also `unclassified`; per scope, only for modules that scope owns |
 | `noise-dir-code` | a tracked `.py` file appears below a skipped directory such as `.venv`, `.tox` or `node_modules` |
 | `tach-invisible-import` | information, never baselined: a scanned module (outside `tests`, `.venv` and other folders tach skips) calls `importlib` or `__import__`, which tach's static graph does not follow. Not reported when `tach` is in `disabled_tools`; `check --require-visible` turns each into `VISIBILITY FAIL` |
 | `vendor-folder` | a convention-named vendor folder is excluded and fingerprinted in the baseline |

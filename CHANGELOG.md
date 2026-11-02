@@ -13,6 +13,10 @@
   it), and files that do not parse. `docs/migration-driver.md`.
 
 ### Added
+- `forbidden_modules` policy key (root or per scope) and the `forbidden-module` rule: `check` fails when a first-party module whose
+  dotted name matches a `classify`-style glob exists, for a generic package that moved to a pinned dependency and must not
+  come back. It never looks at imports, so it does not overlap `forbid_everywhere`, and it fires even for a module that is
+  classified or `unclassified` (#78).
 - `package-file-relative-path` (information): a module that moves in a migration and reads `__file__` may now resolve a `.env`,
   data folder or sibling-script path from the wrong place. It is exported as a gap and listed by `packages migrate` under
   "review before --yes"; it never blocks. The scan cache is rebuilt once (#83).

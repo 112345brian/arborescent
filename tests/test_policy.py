@@ -536,3 +536,26 @@ def test_classify_from_reports_missing_or_malformed_files_and_unknown_layers(tmp
         _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nclassify = "x"\nrings = ["domain"]\n', TACH_LAYERS)
     with pytest.raises(PolicyError, match="unknown ring"):
         _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["domain"]\n', TACH_LAYERS)
+
+
+def test_forbidden_modules_defaults_to_empty_and_parses_a_list() -> None:
+    assert policy_from_mapping(_scoped_raw()).scope("alpha").policy.forbidden_modules == ()
+    raw = {**MINI, "forbidden_modules": ["text_claims", "text_claims.*"]}
+    assert policy_from_mapping(raw).forbidden_modules == ("text_claims", "text_claims.*")
+
+
+@pytest.mark.parametrize("value", ["text_claims", [1], [""], {"a": "b"}, [["x"]]])
+def test_forbidden_modules_must_be_a_list_of_non_empty_strings(value: object) -> None:
+    with pytest.raises(PolicyError, match="forbidden_modules"):
+        policy_from_mapping({**MINI, "forbidden_modules": value})
+
+
+def test_forbidden_modules_is_a_scope_key_and_not_a_root_key_with_scopes() -> None:
+    raw = _scoped_raw()
+    scopes = raw["scopes"]
+    assert isinstance(scopes, dict)
+    scopes["alpha"]["forbidden_modules"] = ["alpha.legacy"]
+    assert policy_from_mapping(raw).scope("alpha").policy.forbidden_modules == ("alpha.legacy",)
+    assert policy_from_mapping(raw).scope("shared").policy.forbidden_modules == ()
+    with pytest.raises(PolicyError, match="cannot be combined with `scopes`"):
+        policy_from_mapping({**_scoped_raw(), "forbidden_modules": ["x"]})

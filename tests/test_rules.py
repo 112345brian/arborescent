@@ -521,3 +521,55 @@ def test_require_arbor_annotations_is_scope_local(tmp_path: Path) -> None:
     assert [(item.rule, item.subject) for item in found if item.rule == Rule.UNANNOTATED_MODULE] == [
         (Rule.UNANNOTATED_MODULE, "core"),
     ]
+
+
+def _forbidden(found: list[Violation]) -> list[Violation]:
+    return [v for v in found if v.rule == "forbidden-module"]
+
+
+def test_forbidden_module_that_exists_is_a_violation_naming_pattern_and_module(repo: Path) -> None:
+    write_files(repo, {"app/text_claims.py": "X = 1\n"})
+    found = _forbidden(run(repo, forbidden_modules=["app.text_claims"], classify={**CLASSIFY, "app.text_claims": "domain"}))
+    assert [(v.rule, v.subject) for v in found] == [("forbidden-module", "app.text_claims")]
+    assert "'app.text_claims'" in found[0].detail
+    assert "forbidden_modules" in found[0].detail
+
+
+def test_forbidden_modules_empty_list_reports_nothing(repo: Path) -> None:
+    assert _forbidden(run(repo, forbidden_modules=[])) == []
+
+
+def test_forbidden_modules_glob_that_matches_nothing_is_silent(repo: Path) -> None:
+    assert _forbidden(run(repo, forbidden_modules=["text_claims", "text_claims.*", "zzz*"])) == []
+
+
+def test_module_matching_two_patterns_is_reported_once_with_the_first_pattern(repo: Path) -> None:
+    found = _forbidden(run(repo, forbidden_modules=["app.po*", "app.ports", "app.*"]))
+    assert [(v.subject, "'app.po*'" in v.detail) for v in found if v.subject == "app.ports"] == [("app.ports", True)]
+    assert len([v for v in found if v.subject == "app.ports"]) == 1
+
+
+def test_forbidden_module_is_reported_even_when_unclassified(repo: Path) -> None:
+    write_files(repo, {"app/text_claims.py": "X = 1\n"})
+    found = run(repo, forbidden_modules=["app.text_claims"])
+    assert {(v.rule, v.subject) for v in found} == {("unclassified", "app.text_claims"), ("forbidden-module", "app.text_claims")}
+
+
+def test_forbidden_modules_applies_only_inside_its_scope(tmp_path: Path) -> None:
+    write_files(tmp_path, {
+        "libs/alpha/src/alpha/__init__.py": "", "libs/alpha/src/alpha/legacy.py": "",
+        "libs/beta/src/beta/__init__.py": "", "libs/beta/src/beta/legacy.py": "",
+    })
+    def scope(name: str, **extra: Any) -> dict[str, Any]:
+        return {
+            "sources": [f"libs/{name}/src"], "source_roots": [f"libs/{name}/src"], "rings": ["domain"],
+            "classify": {f"{name}*": "domain"}, **extra,
+        }
+    policy = policy_from_mapping({
+        "python": "3.12", "disabled_tools": ["ruff"],
+        "scopes": {"alpha": scope("alpha", forbidden_modules=["*.legacy"]), "beta": scope("beta")},
+    })
+    scan = FsScanner().scan(policy, tmp_path)
+    context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
+    found = _forbidden(check_modules(policy, scan.modules, scan.known, scan.entry_deps, context))
+    assert [v.subject for v in found] == ["alpha.legacy"]

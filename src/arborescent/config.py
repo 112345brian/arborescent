@@ -163,6 +163,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
+        forbidden_modules=_string_list(raw, "forbidden_modules"),
         tach_external_exclude=tuple(raw.get("tach_external_exclude", [])),
         forbid_circular_imports=forbid_circular_imports,
         require_arbor_annotations=require_arbor_annotations,
@@ -196,7 +197,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "io_modules", "groups",
     "module_forbid_imports", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
-    "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
+    "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
 })
 _SCOPE_ARCHITECTURE_KEYS = _LEGACY_ARCHITECTURE_KEYS - {"sources"}
 
@@ -242,6 +243,7 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
         entry_scripts=tuple(script for scope in scopes for script in scope.policy.entry_scripts),
         dependencies={},
         forbid_everywhere=(),
+        forbidden_modules=(),
         tach_external_exclude=(),
         require_arbor_annotations=False,
         require_arbor_annotations_exclude=(),
