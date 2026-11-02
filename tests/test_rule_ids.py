@@ -27,6 +27,7 @@ def test_rule_id_strings_never_change() -> None:
     assert sorted(Rule) == sorted(
         [
             "unclassified",
+            "forbidden-module",
             "noise-dir-code",
             "vendor-folder",
             "wildcard-ring",
