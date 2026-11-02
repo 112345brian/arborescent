@@ -11,6 +11,10 @@
   refuses, with the statements listed and nothing modified, a `from <old> import a, b` that mixes a renamed module with a name
   that is not one from a renamed package, `import <new> as x` for a module renamed to a top-level name (LibCST's rename corrupts
   it), and files that do not parse. `docs/migration-driver.md`.
+- Effect rules no longer count a bare parameter default that names an effect (`clock_now=datetime.now`, `new_id=uuid.uuid4`,
+  `environ=os.environ`) as a use: it is the injection seam the message asks for. Calls, module-level aliases and a default
+  wrapped in a lambda still count. Applies to `clock`, `env`, `identity`, `randomness`, `sleep`, `threads` and `process`; the
+  optional `effect_defaults` knob and `Callable` annotation check from #101 are not implemented. The scan cache is rebuilt once.
 
 ### Added
 - `classify-facts` (information, never baselined, not part of `--require-modularity`): checks a module's `[classify]` ring against

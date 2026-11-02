@@ -171,8 +171,22 @@ def _effect_category(target: str) -> str | None:
     return None
 
 
+_INJECTABLE_EFFECTS = frozenset({"clock", "env", "identity", "randomness", "sleep", "threads", "process"})
+
+
+def _injection_defaults(tree: ast.AST) -> set[int]:
+    """Ids of bare Name/Attribute parameter defaults: a reference there is the injection seam, not a use."""
+    seams: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+            defaults = [*node.args.defaults, *node.args.kw_defaults]
+            seams.update(id(d) for d in defaults if isinstance(d, ast.Name | ast.Attribute))
+    return seams
+
+
 def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     aliases = _aliases(tree)
+    seams = _injection_defaults(tree)
     uses: set[EffectUse] = set()
     imported_os_names: set[str] = set()
     for node in ast.walk(tree):
@@ -188,7 +202,7 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
             target = _dotted(node, aliases)
             if target is not None:
                 category = _effect_category(target)
-                if category is not None:
+                if category is not None and not (id(node) in seams and category in _INJECTABLE_EFFECTS):
                     uses.add(EffectUse(node.lineno, category, target))
         if not isinstance(node, ast.Call):
             continue

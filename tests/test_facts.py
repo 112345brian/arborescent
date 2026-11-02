@@ -340,3 +340,22 @@ def test_fact_cache_round_trips_suppressions_and_discard_calls(tmp_path: Path) -
     assert warm.modules["app.domain"].facts.discard_calls == (2,)
     assert warm.modules["app.domain"].facts.top_level_defs == first.modules["app.domain"].facts.top_level_defs
     assert [d.name for d in warm.modules["app.domain"].facts.top_level_defs] == ["Port"]
+
+
+def _clock_targets(source: str) -> set[tuple[int, str]]:
+    return {(use.line, use.target) for use in extract(source).effect_uses if use.category == "clock"}
+
+
+def test_parameter_default_naming_an_effect_is_an_injection_seam_not_a_use() -> None:
+    assert _clock_targets("from datetime import datetime\ndef f(*, now=datetime.now):\n    return now()\n") == set()
+    assert _clock_targets("import uuid\nclass C:\n    def __init__(self, new_id=uuid.uuid4): ...\n") == set()
+    assert _clock_targets("import time\nasync def f(clock_time=time.time): ...\n") == set()
+    assert _clock_targets("import time\ng = lambda t=time.time: t()\n") == set()
+
+
+def test_effect_outside_a_bare_parameter_default_still_counts() -> None:
+    now = "datetime.datetime.now"
+    assert _clock_targets("import datetime\ndef f():\n    return datetime.datetime.now()\n") == {(3, now)}
+    assert _clock_targets("import datetime\nNOW = datetime.datetime.now\n") == {(2, now)}
+    assert _clock_targets("import datetime\ndef f(*, now=lambda: datetime.datetime.now()): ...\n") == {(2, now)}
+    assert _clock_targets("import datetime\ndef f(now=datetime.datetime.now):\n    return datetime.datetime.now()\n") == {(3, now)}
