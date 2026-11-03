@@ -37,7 +37,7 @@ settings. The two forms cannot be mixed.
 | `require_arbor_annotations_exclude` | `[]` | `classify`-style module-name globs exempt from `require_arbor_annotations`, for modules that cannot carry an annotation (vendored, read-only, generated). Has no effect unless `require_arbor_annotations` is set. |
 | `entry_scripts` | `[]` | Dotted names of PEP 723 single-file scripts. Each must declare, in its `# /// script` block, every third-party distribution the project code imports. |
 | `type_checkers` | `["ty"]` | `pyright`, `basedpyright`, `ty` and/or `pyrefly`. The first one runs by default; `check --type-checker` overrides it. A config file is generated for each one listed. |
-| `dev_tools` | `[]` | Repository-relative folders or files that are developer tooling (`["devtools", "scripts"]`). They need no ring or `__arbor__` annotation (never `unclassified`), may import product code, and are skipped by the ring, external-import and effect rules. A product module that imports one fails with `dev-tool-import`. A module annotated `__arbor__ = {"role": "dev_tool"}` outside these paths fails with `dev-tool-misplaced`. Tooling still enters the suppression and discard inventories, and the report lists it under its own `dev tools` heading, apart from `exclude`. Root-level (shared by all scopes). |
+| `dev_tools` | `[]` | Repository-relative folders or files that are developer tooling (`["devtools", "scripts"]`). Entries are normalised (`./tools/` is `tools`); `.`, `..` and absolute paths are refused. They need no ring or `__arbor__` annotation (never `unclassified`), may import product code, and are skipped by the ring, external-import and effect rules. A product module that imports one fails with `dev-tool-import`. A module annotated `__arbor__ = {"role": "dev_tool"}` outside these paths fails with `dev-tool-misplaced`. Tooling still enters the suppression and discard inventories, and the report lists it under its own `dev tools` heading, apart from `exclude`. Root-level (shared by all scopes). |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
@@ -564,7 +564,7 @@ Migrating an existing classify-only project:
 | `may_import` | `[]` | Inner rings this ring may import; `["*"]` means every inner ring. A ring may always import itself. An outer ring in this list is a policy error (the onion rule). |
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
-| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `filesystem`, `dynamic-import`, or `patch`. |
+| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `filesystem`, `dynamic-import`, or `patch`. `database` and `filesystem` are never in the positional default; list them to enforce them. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 
 A ring that is not given a table has no inner imports, no external imports and no OS branching. If `forbid` is omitted,
@@ -737,7 +737,9 @@ against the baseline. Options:
 - `--no-tools` / `--engines core`: core mode. Run only Arborescent's own checks (rings, effects, suppressions, the baseline
   ratchet); no import-linter, Tach, type checker or installer is invoked, and each is listed as `SKIPPED`, never `OK`. It
   needs only Arborescent itself (`uvx arborescent check --engines core`), does not import the project and uses no network.
-  The only subprocess it may start is `git ls-files`, to list files; without git it walks the directory. It rejects
+  It starts no engine, but it is not subprocess-free: it uses `git ls-files` to list files (without git it walks the
+  directory), `practices` and `--changed`/`--growth-against` call git, and a child policy is checked by a nested
+  `arborescent check --no-tools`. It rejects
   `--require-tools`, `--require-profile` and `--install-tools` (exit 2), since those demand an engine.
 - `--require-tools`: fail when a configured checker is missing instead of skipping it.
 - `--require-profile`: require the versioned Arborescent minimum profile; this also requires its tools.

@@ -22,6 +22,10 @@ _DATABASE_PACKAGES = ("sqlite3.", "psycopg.", "psycopg2.", "asyncpg.", "pymysql.
 _FILESYSTEM_APIS = frozenset({
     "open", "io.open", "os.open", "os.remove", "os.unlink", "os.rename", "os.replace", "os.mkdir", "os.makedirs", "os.rmdir",
     "os.removedirs", "os.listdir", "os.scandir", "os.walk", "os.stat", "os.chmod", "os.symlink", "os.truncate", "glob.glob", "glob.iglob",
+    "shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copyfileobj", "shutil.copymode", "shutil.copystat", "shutil.copytree",
+    "shutil.move", "shutil.rmtree", "shutil.make_archive", "shutil.unpack_archive", "shutil.chown",
+    "tempfile.NamedTemporaryFile", "tempfile.TemporaryFile", "tempfile.TemporaryDirectory", "tempfile.SpooledTemporaryFile",
+    "tempfile.mkstemp", "tempfile.mkdtemp", "tempfile.mktemp",
 })
 _PATH_IO_METHODS = frozenset({
     "read_text", "write_text", "read_bytes", "write_bytes", "open", "mkdir", "touch", "unlink", "rmdir", "rename", "replace",
@@ -162,7 +166,7 @@ def _dotted(node: ast.expr, aliases: dict[str, str]) -> str | None:
 def _storage_category(target: str) -> str | None:
     if target.startswith(_DATABASE_PACKAGES):
         return "database"
-    if target in _FILESYSTEM_APIS or target.startswith(("shutil.", "tempfile.")):
+    if target in _FILESYSTEM_APIS:
         return "filesystem"
     return None
 
@@ -201,8 +205,23 @@ def _injection_defaults(tree: ast.AST) -> set[int]:
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
             defaults = [*node.args.defaults, *node.args.kw_defaults]
-            seams.update(id(d) for d in defaults if isinstance(d, ast.Name | ast.Attribute))
+            for default in defaults:
+                if isinstance(default, ast.Name | ast.Attribute):
+                    seams.update(id(inner) for inner in ast.walk(default))  # `os.environ.get` also holds `os.environ`
     return seams
+
+
+def _rebound_names(tree: ast.AST) -> set[str]:
+    """Names the module assigns, defines or takes as parameters (imports are resolved by `_aliases`): a bare builtin name among them is not the builtin."""
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            bound.add(node.id)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+    return bound
 
 
 def _path_io_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
@@ -218,6 +237,7 @@ def _path_io_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
 def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     aliases = _aliases(tree)
     seams = _injection_defaults(tree)
+    rebound = _rebound_names(tree)
     uses: set[EffectUse] = set()
     imported_os_names: set[str] = set()
     for node in ast.walk(tree):
@@ -228,7 +248,7 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
                     uses.add(EffectUse(node.lineno, "os-branching", target))
                     imported_os_names.add(item.asname or item.name)
         if isinstance(node, ast.Attribute | ast.Name):
-            if isinstance(node, ast.Name) and node.id in imported_os_names:
+            if isinstance(node, ast.Name) and (node.id in imported_os_names or (node.id == "open" and "open" in rebound)):
                 continue
             target = _dotted(node, aliases)
             if target is not None:

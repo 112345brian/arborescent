@@ -100,3 +100,56 @@ def test_scan_reports_tool_modules_and_keeps_them_in_the_suppression_inventory(r
 
     assert scan.dev_tool_modules == frozenset({"devtools", "devtools.scan"})
     assert scan.modules["devtools.scan"].facts.suppressions
+
+
+def rows(root: Path, **overrides: object) -> list[tuple[str, str, int]]:
+    policy = mini_policy(**overrides)
+    found, _ = run_own(policy, root, make_services(GitFiles(available=False)), practices=False)
+    return [(v.rule, v.subject, v.line) for v in found]
+
+
+def test_one_import_statement_of_tooling_is_one_violation(repo: Path) -> None:
+    tool_repo(repo)
+    write_files(repo, {"app/domain.py": "from devtools import scan\n"})
+
+    assert [r for r in rows(repo, dev_tools=["devtools"]) if r[0] == "dev-tool-import"] == [("dev-tool-import", "app.domain", 1)]
+
+
+@pytest.mark.parametrize("entry", ["./devtools", "devtools/", ".//devtools", "devtools\\"])
+def test_dev_tools_entries_are_normalised(repo: Path, entry: str) -> None:
+    assert not {f for f in findings(tool_repo(repo), dev_tools=[entry]) if f[1].startswith("devtools")}
+    assert mini_policy(dev_tools=[entry]).dev_tools == ("devtools",)
+
+
+@pytest.mark.parametrize("entry", [".", "..", "../x", "a/../b", "/abs/tools", "C:/tools"])
+def test_dev_tools_entries_outside_the_repository_are_refused(entry: str) -> None:
+    with pytest.raises(PolicyError, match="dev_tools"):
+        mini_policy(dev_tools=[entry])
+
+
+def test_misplaced_role_is_ignored_when_annotations_are_disabled(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": '__arbor__ = {"role": "dev_tool"}\n'})
+
+    assert ("dev-tool-misplaced", "app.domain") in findings(repo)
+    assert not {f for f in findings(repo, disabled_tools=["arbor-annotations"]) if f[0] == "dev-tool-misplaced"}
+
+
+def test_tooling_is_still_checked_for_unresolvable_imports_and_forbidden_names(repo: Path) -> None:
+    tool_repo(repo, "from ... import nowhere\n")
+
+    found = findings(repo, dev_tools=["devtools"], forbidden_modules=["devtools.scan"])
+
+    assert ("bad-import", "devtools.scan") in found
+    assert ("forbidden-module", "devtools.scan") in found
+
+
+def test_tooling_import_cycles_are_still_reported(repo: Path) -> None:
+    write_files(repo, {"devtools/__init__.py": "", "devtools/a.py": "import devtools.b\n", "devtools/b.py": "import devtools.a\n"})
+
+    assert any(rule == "circular-import" for rule, _ in findings(repo, dev_tools=["devtools"]))
+
+
+def test_a_ring_annotation_on_tooling_is_not_a_mismatch(repo: Path) -> None:
+    tool_repo(repo, '__arbor__ = {"ring": "domain", "role": "dev_tool"}\n')
+
+    assert not {f for f in findings(repo, dev_tools=["devtools"]) if f[0] == "arbor-ring-mismatch"}

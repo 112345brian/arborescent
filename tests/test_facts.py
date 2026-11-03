@@ -359,3 +359,9 @@ def test_effect_outside_a_bare_parameter_default_still_counts() -> None:
     assert _clock_targets("import datetime\nNOW = datetime.datetime.now\n") == {(2, now)}
     assert _clock_targets("import datetime\ndef f(*, now=lambda: datetime.datetime.now()): ...\n") == {(2, now)}
     assert _clock_targets("import datetime\ndef f(now=datetime.datetime.now):\n    return datetime.datetime.now()\n") == {(3, now)}
+
+
+def test_a_dotted_parameter_default_is_a_seam_all_the_way_down() -> None:
+    facts = extract("import os\n\ndef f(get=os.environ.get):\n    return get('X')\n\ndef g():\n    return os.environ.get('X')\n", "m.py")
+
+    assert [(use.category, use.line) for use in facts.effect_uses] == [("env", 7)]

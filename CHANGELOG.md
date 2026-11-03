@@ -19,17 +19,19 @@
 ### Added
 - `check --engines core` (same as `--no-tools`) is the documented core mode for a pre-commit hook or a plain test run: only
   Arborescent's own checks run, every skipped engine is listed as `SKIPPED`, and combining it with `--require-tools`,
-  `--require-profile` or `--install-tools` exits 2 instead of passing silently. The only subprocess it starts is `git ls-files`
-  (#100).
+  `--require-profile` or `--install-tools` exits 2 instead of passing silently. It starts no engine, but still uses git (file list,
+  `practices`, `--changed`, `--growth-against`) and checks child policies in a nested core-mode run (#100).
 - `dev_tools` policy key and the `dev-tool-import` and `dev-tool-misplaced` rules: folders of developer tooling need no ring,
-  may import product code, and are skipped by the ring, external-import and effect rules, but product code importing them
+  may import product code, and are skipped by the ring, external-import and effect rules (unresolvable imports, forbidden
+  module names and import cycles are still checked), but product code importing them
   fails. `__arbor__ = {"role": "dev_tool"}` is accepted only below a `dev_tools` path. Tooling keeps its suppression and
   discard inventory and gets its own heading in the report. Not implemented from #99: effect checks on tooling,
   `dev_tools_may_import` and `--list-dev-tools`. The scan cache is rebuilt once (#99).
 - `database` and `filesystem` effect categories with `effect-database` and `effect-filesystem` rules, forbiddable per ring with
-  `forbid` / `middle_forbid` like the others. Direct references only. **Behavior change:** the innermost ring (and `strict`
-  middle rings) forbid every category by default, so an inner-ring module that calls `open(`, `shutil` or `sqlite3` is now
-  reported; set `forbid` on the ring to opt out. The scan cache is rebuilt once (#92).
+  `forbid` / `middle_forbid` like the others. Direct references only (`open`, `os`/`glob`
+  file calls, `shutil` copy/move/remove, `tempfile` file creators, `Path(...).read_text()` and similar). Opt-in: no ring
+  forbids them by default, so existing policies are unaffected; list them in `forbid` / `middle_forbid`. The scan cache is
+  rebuilt once (#92).
 - Test pinning #93: with `classify_from`, a module missing from tach.toml's layers is reported as `unclassified` (it was never
   exempt); no new rule was needed.
 - `classify-facts` (information, never baselined, not part of `--require-modularity`): checks a module's `[classify]` ring against

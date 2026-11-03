@@ -78,9 +78,10 @@ def _dev_tool_imports(
     out: list[Violation] = []
     for imp in info.facts.imports if context.tool_modules else ():
         internal, _, _ = resolve_targets(name, info.is_package, imp, known, tops)
-        out.extend(
+        hits = [target for target in internal if target in context.tool_modules]
+        out.extend(  # `from devtools import scan` resolves to the package and the submodule: report the most specific one
             Violation(Rule.DEV_TOOL_IMPORT, name, f"imports dev tool {target}; developer tooling may import product code, never the reverse", imp.line, target)
-            for target in internal if target in context.tool_modules
+            for target in hits if not any(other.startswith(target + ".") for other in hits)
         )
     return out
 
@@ -312,12 +313,12 @@ def check_modules(
         detail = context.annotation_violation(name)
         if detail is not None:
             out.append(Violation(Rule.INVALID_ARBOR_ANNOTATION, name, detail))
-        mismatch = context.annotation_ring_mismatch(name)
+        is_tool = name in context.tool_modules  # developer tooling: no ring, may import product code
+        mismatch = None if is_tool else context.annotation_ring_mismatch(name)
         if mismatch is not None:
             out.append(Violation(Rule.ARBOR_RING_MISMATCH, name, mismatch))
-        if name in context.tool_modules:
-            continue  # developer tooling: no ring, may import product code
-        out += _dev_tool_imports(context, name, info, known, tops)
+        if not is_tool:
+            out += _dev_tool_imports(context, name, info, known, tops)
         pattern = local_policy.forbidden_module_pattern(name) if local_policy is not None else None
         if pattern is not None:
             out.append(Violation(
@@ -325,6 +326,16 @@ def check_modules(
                 f"module matches forbidden_modules pattern {pattern!r}; a first-party module with this name must not "
                 f"exist (remove it, or drop the pattern from forbidden_modules)",
             ))
+        if is_tool:  # ring, external-import and effect rules do not apply; unresolvable imports and import cycles still do
+            for imp in info.facts.imports:
+                internal, _, error = resolve_targets(name, info.is_package, imp, known, tops)
+                import_graph[name].update(
+                    target for target in internal
+                    if target in modules and context.scope_name(target) == context.scope_name(name)
+                )
+                if error is not None:
+                    out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
+            continue
         ring = context.resolve_ring(name)
         if ring is None:
             out.append(Violation(Rule.UNCLASSIFIED, name, (context.policy_for(name) or context.policy).unclassified_detail(name)))

@@ -281,7 +281,7 @@ class FsScanner:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             merged = fresh if only is None else {**cache, **fresh}
             _ = cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "files": merged}), encoding="utf-8")
-        misplaced = _misplaced_dev_tools(files, modules, dev_tool_modules)
+        misplaced = _misplaced_dev_tools(files, modules, dev_tool_modules) if annotations_enabled else ()
         if annotations_enabled:
             # This pass covers every discovered file, including unchanged import
             # targets and modules outside both classify and sources.

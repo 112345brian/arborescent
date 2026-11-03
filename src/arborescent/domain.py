@@ -10,10 +10,11 @@ from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
-from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Preset
+from .presets import DEFAULT_FORBIDDEN_EFFECTS, DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Preset
 from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 
 __all__ = [
+    "path_under",
     "ALL",
     "EFFECT_RULES",
     "INFORMATIONAL_RULES",
@@ -148,6 +149,13 @@ def _validate_disabled_tools(tools: tuple[str, ...]) -> None:
 def dist_name(name: str) -> str:
     """PEP 503 normalised distribution name."""
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def path_under(rel: str, entry: str) -> bool:
+    """Whether repository-relative ``rel`` is ``entry`` or lies below it; both use ``/`` or ``\\`` separators."""
+    path = rel.replace("\\", "/").strip("/")
+    folder = entry.replace("\\", "/").strip("/")
+    return path == folder or path.startswith(folder + "/")
 
 
 @dataclass(frozen=True)
@@ -335,8 +343,7 @@ class Policy:
 
     def is_dev_tool_path(self, rel: str) -> bool:
         """Whether a repository-relative path is, or lies below, a `dev_tools` entry."""
-        path = rel.replace("\\", "/").strip("/")
-        return any(path == entry or path.startswith(entry + "/") for entry in (e.replace("\\", "/").strip("/") for e in self.dev_tools))
+        return any(path_under(rel, entry) for entry in self.dev_tools)
 
     def forbidden_module_pattern(self, module: str) -> str | None:
         """The first `forbidden_modules` glob matching the module's full dotted name, or None."""
@@ -435,7 +442,7 @@ class Policy:
         elif position == len(self.rings) - 1:
             forbidden = frozenset[str]()
         elif position == 0:
-            forbidden = EFFECT_CATEGORIES
+            forbidden = DEFAULT_FORBIDDEN_EFFECTS
         else:
             forbidden = self.preset.middle_forbid
         if forbidden and "dynamic-import" not in forbidden:

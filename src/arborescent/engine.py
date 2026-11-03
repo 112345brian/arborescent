@@ -21,6 +21,7 @@ from .domain import (
     Rule,
     ToolResult,
     Violation,
+    path_under,
 )
 from .generate import generate_for_scan
 from .generated_config import GENERATED_MARKER
@@ -168,7 +169,7 @@ def run_own(
 
 def _dev_tool_counts(policy: Policy, scan: ScanResult) -> dict[str, int]:
     return {
-        entry: sum(1 for module in scan.dev_tool_modules if Policy.is_dev_tool_path(replace(policy, dev_tools=(entry,)), scan.paths[module]))
+        entry: sum(1 for module in scan.dev_tool_modules if path_under(scan.paths[module], entry))
         for entry in policy.dev_tools
     }
 

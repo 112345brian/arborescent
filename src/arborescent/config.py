@@ -164,7 +164,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
         forbidden_modules=_string_list(raw, "forbidden_modules"),
-        dev_tools=_string_list(raw, "dev_tools"),
+        dev_tools=_dev_tool_paths(raw),
         tach_external_exclude=tuple(raw.get("tach_external_exclude", [])),
         forbid_circular_imports=forbid_circular_imports,
         require_arbor_annotations=require_arbor_annotations,
@@ -351,6 +351,17 @@ def _string_list(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
         raise PolicyError(f"`{key}` must be a list of non-empty strings")
     return tuple(cast("list[str]", value))
+
+
+def _dev_tool_paths(raw: Mapping[str, Any]) -> tuple[str, ...]:
+    """`dev_tools` entries as canonical repository-relative paths: `./tools/` becomes `tools`; `.`, `..` and absolute paths are refused."""
+    out: list[str] = []
+    for entry in _string_list(raw, "dev_tools"):
+        parts = [part for part in entry.replace("\\", "/").split("/") if part not in ("", ".")]
+        if ".." in parts or not parts or entry.startswith(("/", "\\")) or (len(entry) > 1 and entry[1] == ":"):
+            raise PolicyError(f"`dev_tools` entry {entry!r} must be a folder or file below the repository root (no `.`, `..` or absolute path)")
+        out.append("/".join(parts))
+    return tuple(out)
 
 
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:

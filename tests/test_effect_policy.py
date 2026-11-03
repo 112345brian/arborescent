@@ -220,10 +220,40 @@ def test_database_and_filesystem_access_are_effects_a_ring_can_forbid(repo: Path
     assert effects(run(repo, ring=only_db)) == {("effect-database", "app.ports")}
 
 
-def test_filesystem_and_database_effects_are_forbidden_in_the_innermost_ring_by_default(repo: Path) -> None:
-    write_files(repo, {"app/domain.py": "def read(p):\n    return open(p).read()\n"})
+def test_filesystem_and_database_effects_are_opt_in(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "import sqlite3\ndef read(p):\n    sqlite3.connect(p)\n    return open(p).read()\n"})
+    domain = ring_with(domain={"external": ["sqlite3"]})
+    opted_in = ring_with(domain={"external": ["sqlite3"], "forbid": ["database", "filesystem"]})
 
-    assert ("effect-filesystem", "app.domain") in effects(run(repo))
+    assert effects(run(repo, ring=domain)) == set()
+    assert effects(run(repo, ring=opted_in)) == {("effect-database", "app.domain"), ("effect-filesystem", "app.domain")}
+
+
+def test_middle_forbid_can_opt_a_strict_policy_into_filesystem(repo: Path) -> None:
+    write_files(repo, {"app/ports.py": "def read(p):\n    return open(p).read()\n"})
+
+    assert effects(run(repo)) == set()
+    assert effects(run(repo, middle_forbid=["filesystem"])) == {("effect-filesystem", "app.ports")}
+
+
+def test_a_local_named_open_and_non_io_helpers_are_not_filesystem_use(repo: Path) -> None:
+    source = (
+        "import shutil, tempfile\n"
+        "def f(open):\n    return open\n"
+        "def g():\n    open = 1\n    return open\n"
+        "def h():\n    return shutil.which('x'), tempfile.gettempdir()\n"
+    )
+    write_files(repo, {"app/domain.py": source})
+    domain = ring_with(domain={"external": ["shutil", "tempfile"], "forbid": ["filesystem"]})
+
+    assert effects(run(repo, ring=domain)) == set()
+
+
+def test_tempfile_and_shutil_file_operations_are_filesystem_use(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "import shutil, tempfile\ndef f():\n    tempfile.mkdtemp()\n    shutil.rmtree('x')\n"})
+    domain = ring_with(domain={"external": ["shutil", "tempfile"], "forbid": ["filesystem"]})
+
+    assert effects(run(repo, ring=domain)) == {("effect-filesystem", "app.domain")}
 
 
 def test_pure_path_manipulation_is_not_filesystem_access(repo: Path) -> None:
