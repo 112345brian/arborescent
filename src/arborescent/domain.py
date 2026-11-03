@@ -10,7 +10,7 @@ from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
-from .presets import DEFAULT_FORBIDDEN_EFFECTS, DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Preset
+from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Preset
 from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 
 __all__ = [
@@ -442,7 +442,7 @@ class Policy:
         elif position == len(self.rings) - 1:
             forbidden = frozenset[str]()
         elif position == 0:
-            forbidden = DEFAULT_FORBIDDEN_EFFECTS
+            forbidden = EFFECT_CATEGORIES
         else:
             forbidden = self.preset.middle_forbid
         if forbidden and "dynamic-import" not in forbidden:

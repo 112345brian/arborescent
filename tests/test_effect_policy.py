@@ -220,20 +220,13 @@ def test_database_and_filesystem_access_are_effects_a_ring_can_forbid(repo: Path
     assert effects(run(repo, ring=only_db)) == {("effect-database", "app.ports")}
 
 
-def test_filesystem_and_database_effects_are_opt_in(repo: Path) -> None:
+def test_filesystem_and_database_effects_are_forbidden_in_the_innermost_ring_by_default(repo: Path) -> None:
     write_files(repo, {"app/domain.py": "import sqlite3\ndef read(p):\n    sqlite3.connect(p)\n    return open(p).read()\n"})
     domain = ring_with(domain={"external": ["sqlite3"]})
-    opted_in = ring_with(domain={"external": ["sqlite3"], "forbid": ["database", "filesystem"]})
+    allowed = ring_with(domain={"external": ["sqlite3"], "forbid": []})
 
-    assert effects(run(repo, ring=domain)) == set()
-    assert effects(run(repo, ring=opted_in)) == {("effect-database", "app.domain"), ("effect-filesystem", "app.domain")}
-
-
-def test_middle_forbid_can_opt_a_strict_policy_into_filesystem(repo: Path) -> None:
-    write_files(repo, {"app/ports.py": "def read(p):\n    return open(p).read()\n"})
-
-    assert effects(run(repo)) == set()
-    assert effects(run(repo, middle_forbid=["filesystem"])) == {("effect-filesystem", "app.ports")}
+    assert effects(run(repo, ring=domain)) == {("effect-database", "app.domain"), ("effect-filesystem", "app.domain")}
+    assert effects(run(repo, ring=allowed)) == set()
 
 
 def test_a_local_named_open_and_non_io_helpers_are_not_filesystem_use(repo: Path) -> None:
