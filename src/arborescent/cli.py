@@ -32,6 +32,7 @@ from .engine import (
     write_generated,
 )
 from .engines import default_engines
+from .git_hook import HookOutcome, ensure_git_hook
 from .migration_export import migration_arguments_of
 from .migration_json import export_document, render_export, render_schema
 from .package_checks import AnnotationPackageChecks
@@ -327,7 +328,20 @@ def _generate(policy: Policy, root: Path, svc: Services) -> int:
     _ = pick_checker(policy, svc)
     for rel in write_generated(policy, root, svc):
         print(f"wrote {rel}")
+    _report_git_hook(ensure_git_hook(policy, root, svc.fs, svc.runner))
     return 0
+
+
+def _report_git_hook(outcome: HookOutcome) -> None:
+    """Say what the strict preset's pre-push hook did; a hook that is already right, not wanted or not possible is silent."""
+    if outcome.status in ("installed", "updated"):
+        print(f"{outcome.status} git hook {outcome.path} (strict preset: blocks a push that would fail `arborescent check`)")
+    elif outcome.status == "foreign":
+        print(
+            f"arborescent: {outcome.path} exists and is not Arborescent's, so it was left alone; "
+            "the strict preset cannot block a failing push until it runs `arborescent check --require-tools --require-profile`",
+            file=sys.stderr,
+        )
 
 
 def _baseline(
@@ -487,6 +501,7 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         print(f"arborescent check: {conflict}", file=sys.stderr)
         return 2
     args.no_tools = args.no_tools or args.engines == "core"
+    _report_git_hook(ensure_git_hook(policy, root, svc.fs, svc.runner))
     install_status = 0
     if args.install_tools:
         install_status = _install_tools(

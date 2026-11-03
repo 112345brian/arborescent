@@ -77,6 +77,10 @@ path = "src/arborescent/generated_config.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/git_hook.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/install_tools.py"
 role = "source"
 

@@ -17,6 +17,9 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- The `strict` preset (the default) installs a `pre-push` git hook when you run `generate` or `check`. It runs `arborescent check
+  --require-tools --require-profile`, so a push that would fail CI is blocked locally. A `pre-push` hook Arborescent did not write is
+  left alone with a warning; `standard` and `relaxed` install nothing. `FileSystem` gained `make_executable`.
 - `check --engines core` (same as `--no-tools`) is the documented core mode for a pre-commit hook or a plain test run: only
   Arborescent's own checks run, every skipped engine is listed as `SKIPPED`, and combining it with `--require-tools`,
   `--require-profile` or `--install-tools` exits 2 instead of passing silently. It starts no engine, but still uses git (file list,

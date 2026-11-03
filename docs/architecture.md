@@ -90,6 +90,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.bench` | `single` | application |
 | `arborescent.config` | `single` | application |
 | `arborescent.certification` | `single` | application |
+| `arborescent.git_hook` | `single` | application |
 | `arborescent.install_tools` | `single` | application |
 | `arborescent.engine` | `single` | application |
 | `arborescent.generate` | `single` | application |

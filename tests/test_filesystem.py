@@ -163,3 +163,12 @@ def test_clocks_only_move_forward() -> None:
         assert b >= a
     fake = FakeClock(step=2.0)
     assert (fake.now(), fake.now()) == (2.0, 4.0)
+
+
+def test_make_executable_keeps_content_and_rejects_a_missing_file(env: tuple[FileSystem, Path]) -> None:
+    fs, root = env
+    fs.write_text(root / "hook", "#!/bin/sh\n")
+    fs.make_executable(root / "hook")
+    assert fs.read_text(root / "hook") == "#!/bin/sh\n"
+    with pytest.raises(FileNotFoundError):
+        fs.make_executable(root / "nope")
