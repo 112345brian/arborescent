@@ -85,7 +85,7 @@ require_abstract = true
 [tool.arborescent.ring.application]
 may_import = ["domain", "ports"]
 # pathlib: Path values only (join, relative_to); every disk access goes through FileSystem (tests/test_filesystem.py)
-external = ["@pure", "pathlib", "concurrent", "arborescent"]
+external = ["@pure", "pathlib", "concurrent", "shlex", "arborescent"]
 # The application coordinates parallel engines; all other effect categories keep the strict default.
 forbid = ["clock", "dynamic-import", "env", "identity", "patch", "process", "randomness", "sleep"]
 
@@ -132,6 +132,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.engine" = "application"
 "arborescent.certification" = "application"
 "arborescent.install_tools" = "application"
+"arborescent.git_hook" = "application"
 "arborescent.practices" = "application"
 "arborescent.selftest" = "application"
 "arborescent.suggestions" = "application"

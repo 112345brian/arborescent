@@ -70,6 +70,8 @@ class FileSystem(Protocol):
 
     def mkdir(self, path: Path) -> None: ...  # with parents; existing is fine
 
+    def make_executable(self, path: Path) -> None: ...  # FileNotFoundError if missing; a no-op where files have no execute bit
+
     def remove_file(self, path: Path) -> None: ...
 
     def remove_tree(self, path: Path) -> None: ...  # a missing path is fine

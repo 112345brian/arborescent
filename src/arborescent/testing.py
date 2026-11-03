@@ -122,6 +122,7 @@ class FakeFileSystem:
 
     files: dict[str, bytes] = field(default_factory=lambda: {})
     dirs: set[str] = field(default_factory=lambda: {"/"})
+    executable: set[str] = field(default_factory=lambda: set())
     _temp_count: int = 0
 
     @staticmethod
@@ -204,6 +205,12 @@ class FakeFileSystem:
         if key in self.files:
             raise FileExistsError(key)
         self.dirs.add(key)
+
+    def make_executable(self, path: Path) -> None:
+        key = self._key(path)
+        if key not in self.files:
+            raise FileNotFoundError(key)
+        self.executable.add(key)
 
     def remove_file(self, path: Path) -> None:
         key = self._key(path)

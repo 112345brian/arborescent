@@ -164,6 +164,11 @@ layering, classification (every module needs a ring) and lazy-import detection a
 | `standard` | third-party packages and the I/O stdlib set; other stdlib is free | yes |
 | `relaxed` | third-party packages only | no |
 
+The `strict` preset also installs a git hook: `arborescent generate` and `arborescent check` write `pre-push` (where git
+looks for it, so `core.hooksPath` and worktrees are honoured) that runs `arborescent check --require-tools --require-profile`,
+so a push that CI would reject is stopped locally. An existing `pre-push` that Arborescent did not write is never changed; a
+warning says the push is not gated. `standard` and `relaxed` install nothing.
+
 The I/O stdlib set (`os`, `subprocess`, `socket`, `sqlite3`, `pathlib`, ...: see `arborescent.presets.IO_MODULES`) also drives
 the generated import-linter bans. Replace it per project with `io_modules = ["os", "subprocess", ...]` (an empty list means
 no stdlib module counts as I/O).

@@ -52,6 +52,9 @@ class LocalFileSystem:
     def mkdir(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
+    def make_executable(self, path: Path) -> None:
+        path.chmod(path.stat().st_mode | 0o111)
+
     def remove_file(self, path: Path) -> None:
         path.unlink()
 

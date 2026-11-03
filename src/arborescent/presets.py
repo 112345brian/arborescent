@@ -38,6 +38,7 @@ class Preset:
     external_scope: Scope
     os_branching: bool  # True: only rings marked ``os_branching`` may read os.name / sys.platform
     middle_forbid: frozenset[str]
+    git_hook: bool = False  # True: configuring or checking a repo also installs the pre-push hook that runs ``check``
 
     @property
     def bans_io(self) -> bool:
@@ -56,7 +57,7 @@ class Preset:
 PRESETS: dict[str, Preset] = {
     p.name: p
     for p in (
-        Preset("strict", "every external import, stdlib included, must be allow-listed per ring; OS branching limited", "all", True, EFFECT_CATEGORIES),
+        Preset("strict", "every external import, stdlib included, must be allow-listed per ring; OS branching limited", "all", True, EFFECT_CATEGORIES, git_hook=True),
         Preset("standard", "third-party and I/O stdlib must be allow-listed; other stdlib is free; OS branching limited", "io", True, frozenset({"env", "sleep", "threads", "process"})),
         Preset("relaxed", "only third-party packages are allow-listed; layering and classification still enforced", "third-party", False, frozenset()),
     )
