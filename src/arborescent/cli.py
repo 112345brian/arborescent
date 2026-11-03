@@ -16,7 +16,7 @@ from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
-from .domain import Policy, PolicyError
+from .domain import Policy, PolicyError, path_under
 from .driver_filter_repo import FilterRepo
 from .driver_libcst import LibCstRename
 from .driver_port import ImportRewriter, MigrationLibrary
@@ -105,6 +105,11 @@ def _parser() -> argparse.ArgumentParser:
         choices=("all", "core"),
         default="all",
         help="`core` runs only Arborescent's own checks (the same as --no-tools): no import-linter, tach, ruff or type checker is invoked or installed",
+    )
+    c.add_argument(
+        "--list-dev-tools",
+        action="store_true",
+        help="print every `dev_tools` path with the modules below it, and annotated dev tools outside them, then exit",
     )
     c.add_argument(
         "--require-tools",
@@ -460,7 +465,23 @@ def _core_mode_conflict(args: argparse.Namespace) -> str | None:
     return f"{', '.join(demanded)} cannot be combined with core mode (--no-tools / --engines core): no external engine runs"
 
 
+def _list_dev_tools(policy: Policy, root: Path, svc: Services) -> int:
+    scan = svc.scanner.scan(policy, root)
+    if not policy.dev_tools:
+        print("no `dev_tools` paths configured")
+    for entry in policy.dev_tools:
+        below = sorted(module for module in scan.dev_tool_modules if path_under(scan.paths[module], entry))
+        print(f"{entry}: {len(below)} module(s)")
+        for module in below:
+            print(f"  {module}  ({scan.paths[module]})")
+    for module, path in scan.misplaced_dev_tools:
+        print(f"MISPLACED {module} ({path}): annotated as a dev tool but outside every `dev_tools` path")
+    return 1 if scan.misplaced_dev_tools else 0
+
+
 def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    if args.list_dev_tools:
+        return _list_dev_tools(policy, root, svc)
     conflict = _core_mode_conflict(args)
     if conflict is not None:
         print(f"arborescent check: {conflict}", file=sys.stderr)

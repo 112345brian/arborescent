@@ -14,7 +14,7 @@
 - Effect rules no longer count a bare parameter default that names an effect (`clock_now=datetime.now`, `new_id=uuid.uuid4`,
   `environ=os.environ`) as a use: it is the injection seam the message asks for. Calls, module-level aliases and a default
   wrapped in a lambda still count. Applies to `clock`, `env`, `identity`, `randomness`, `sleep`, `threads` and `process`; the
-  optional `effect_defaults` knob and `Callable` annotation check from #101 are not implemented. The scan cache is rebuilt once.
+  `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
 - `check --engines core` (same as `--no-tools`) is the documented core mode for a pre-commit hook or a plain test run: only
@@ -25,8 +25,7 @@
   may import product code, and are skipped by the ring, external-import and effect rules (unresolvable imports, forbidden
   module names and import cycles are still checked), but product code importing them
   fails. `__arbor__ = {"role": "dev_tool"}` is accepted only below a `dev_tools` path. Tooling keeps its suppression and
-  discard inventory and gets its own heading in the report. Not implemented from #99: effect checks on tooling,
-  `dev_tools_may_import` and `--list-dev-tools`. The scan cache is rebuilt once (#99).
+  discard inventory and gets its own heading in the report. Tooling is also checked for raw process use (`dev_tools_forbid`, default `["process"]`) and can be limited to chosen product modules (`dev_tools_may_import`, rule `dev-tool-product-import`); `check --list-dev-tools` shows what is covered. The scan cache is rebuilt once (#99).
 - `database` and `filesystem` effect categories with `effect-database` and `effect-filesystem` rules, forbiddable per ring with
   `forbid` / `middle_forbid` like the others. Direct references only (`open`, `os`/`glob`
   file calls, `shutil` copy/move/remove, `tempfile` file creators, `Path(...).read_text()` and similar). The innermost ring (and

@@ -27,7 +27,7 @@ from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 11
+_CACHE_VERSION = 12
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
@@ -193,9 +193,19 @@ class ScanData:
     misplaced_dev_tools: tuple[tuple[str, str], ...] = ()  # (module, path): annotated as dev tooling, outside every `dev_tools` path
 
 
+def _load_cache(cache_file: Path | None) -> dict[str, list[Any]]:
+    if not (cache_file and cache_file.is_file()):
+        return {}
+    try:
+        loaded = json.loads(cache_file.read_text(encoding="utf-8"))
+        return loaded["files"] if loaded.get("v") == _CACHE_VERSION else {}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
 def _facts_to_json(f: SourceFacts) -> list[Any]:
     imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only] for i in f.imports]
-    effects = [[u.line, u.category, u.target] for u in f.effect_uses]
+    effects = [[u.line, u.category, u.target, u.seam] for u in f.effect_uses]
     suppressions = [[line, kind] for line, kind in f.suppressions]
     top_level_defs = [[d.name, d.line, d.is_class, d.is_abstract] for d in f.top_level_defs]
     return [
@@ -206,7 +216,7 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
 
 def _facts_from_json(raw: list[Any]) -> SourceFacts:
     imports = tuple(RawImport(i[0], i[1], tuple(i[2]), i[3], i[4], i[5]) for i in raw[0])
-    effects = tuple(EffectUse(u[0], u[1], u[2]) for u in raw[1])
+    effects = tuple(EffectUse(u[0], u[1], u[2], u[3]) for u in raw[1])
     suppressions = tuple((item[0], item[1]) for item in raw[3])
     top_level_defs = tuple(TopLevelDef(d[0], d[1], d[2], d[3]) for d in raw[5])
     return SourceFacts(
@@ -227,14 +237,7 @@ class FsScanner:
 
     def scan(self, policy: Policy, root: Path, only: frozenset[str] | None = None) -> ScanData:
         cache_file = self._cache_dir / "scan.json" if self._cache_dir else None
-        cache: dict[str, list[Any]] = {}
-        if cache_file and cache_file.is_file():
-            try:
-                loaded = json.loads(cache_file.read_text(encoding="utf-8"))
-                if loaded.get("v") == _CACHE_VERSION:
-                    cache = loaded["files"]
-            except (OSError, ValueError, KeyError):
-                cache = {}
+        cache = _load_cache(cache_file)
         files, excluded, noise_files, unclassified, vendor_folders = self._discover(policy, root)
         known = frozenset(m for m, _, _ in files)
         scope_by_module = {

@@ -268,7 +268,7 @@ def test_old_fact_cache_schema_is_discarded(repo: Path, tmp_path: Path) -> None:
     )
     scan = run_own(mini_policy(), repo, services(cache=cache), practices=False)[1]
     assert scan.parsed == 5
-    assert json.loads((cache / "scan.json").read_text(encoding="utf-8"))["v"] == 11
+    assert json.loads((cache / "scan.json").read_text(encoding="utf-8"))["v"] == 12
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
@@ -607,3 +607,16 @@ def test_core_mode_rejects_options_that_demand_an_engine(repo: Path, flag: str, 
     cfg.write_text(CORE_POLICY, encoding="utf-8")
     assert main(["--config", str(cfg), "check", "--engines", "core", flag], services()) == 2
     assert "core mode" in capsys.readouterr().err
+
+
+def test_list_dev_tools_prints_each_path_with_its_modules_and_flags_misplaced_ones(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_files(repo, {"app/__init__.py": "", "app/main.py": '__arbor__ = {"role": "dev_tool"}\n', "devtools/__init__.py": "", "devtools/scan.py": ""})
+    cfg = repo / "arborescent.toml"
+    cfg.write_text('dev_tools = ["devtools"]\n' + CORE_POLICY, encoding="utf-8")
+
+    status = main(["--config", str(cfg), "check", "--list-dev-tools"], services())
+
+    out = capsys.readouterr().out
+    assert status == 1
+    assert "devtools: 2 module(s)" in out and "devtools.scan" in out
+    assert "MISPLACED app.main" in out

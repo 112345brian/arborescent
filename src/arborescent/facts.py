@@ -68,6 +68,7 @@ class EffectUse:
     line: int
     category: str
     target: str
+    seam: int = 0  # 0: a use; 1: a parameter default whose annotation is a Callable/Mapping; 2: a parameter default otherwise
 
 
 @dataclass(frozen=True)
@@ -184,13 +185,18 @@ def _effect_category(target: str) -> str | None:
         return "randomness"
     if target in {"time.sleep", "asyncio.sleep"}:
         return "sleep"
-    stored = _storage_category(target)
-    if stored is not None:
-        return stored
+    return _storage_category(target) or _concurrency_category(target) or _import_category(target)
+
+
+def _concurrency_category(target: str) -> str | None:
     if target.startswith("threading.") or target in _THREAD_POOL_APIS:
         return "threads"
     if target.startswith(("multiprocessing.", "subprocess.", "asyncio.create_subprocess_")) or target in _PROCESS_OS_APIS | _PROCESS_POOL_APIS:
         return "process"
+    return None
+
+
+def _import_category(target: str) -> str | None:
     if target.startswith("importlib.") or target in {"builtins.__import__", "__import__"}:
         return "dynamic-import"
     return None
@@ -199,15 +205,47 @@ def _effect_category(target: str) -> str | None:
 _INJECTABLE_EFFECTS = frozenset({"clock", "env", "identity", "randomness", "sleep", "threads", "process"})
 
 
-def _injection_defaults(tree: ast.AST) -> set[int]:
-    """Ids of bare Name/Attribute parameter defaults: a reference there is the injection seam, not a use."""
-    seams: set[int] = set()
+_SEAM_ANNOTATIONS = frozenset({"Callable", "Mapping", "MutableMapping"})
+
+
+def _is_seam_annotation(node: ast.expr | None) -> bool:
+    """Whether a parameter annotation says "a callable or a mapping", looking through Optional/Union/`|` and string forms."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            return _is_seam_annotation(ast.parse(node.value, mode="eval").body)
+        except SyntaxError:
+            return False
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _is_seam_annotation(node.left) or _is_seam_annotation(node.right)
+    if isinstance(node, ast.Subscript):
+        base = node.value
+        name = base.attr if isinstance(base, ast.Attribute) else base.id if isinstance(base, ast.Name) else ""
+        if name in {"Optional", "Union", "Annotated"}:
+            inner = node.slice
+            return any(_is_seam_annotation(item) for item in (inner.elts if isinstance(inner, ast.Tuple) else [inner]))
+        return _is_seam_annotation(base)
+    if isinstance(node, ast.Attribute):
+        return node.attr in _SEAM_ANNOTATIONS
+    return isinstance(node, ast.Name) and node.id in _SEAM_ANNOTATIONS
+
+
+def _injection_defaults(tree: ast.AST) -> dict[int, int]:
+    """Node id -> seam kind for every node inside a bare Name/Attribute parameter default: a reference there is the injection seam."""
+    seams: dict[int, int] = {}
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
-            defaults = [*node.args.defaults, *node.args.kw_defaults]
-            for default in defaults:
-                if isinstance(default, ast.Name | ast.Attribute):
-                    seams.update(id(inner) for inner in ast.walk(default))  # `os.environ.get` also holds `os.environ`
+        if isinstance(node, ast.Lambda):
+            pairs = [(None, d) for d in [*node.args.defaults, *node.args.kw_defaults]]
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            positional = [*node.args.posonlyargs, *node.args.args]
+            pairs = [*zip(positional[len(positional) - len(node.args.defaults):], node.args.defaults, strict=True),
+                     *zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True)]
+            pairs = [(arg.annotation, default) for arg, default in pairs]
+        else:
+            continue
+        for annotation, default in pairs:
+            if isinstance(default, ast.Name | ast.Attribute):
+                kind = 1 if _is_seam_annotation(annotation) else 2
+                seams.update((id(inner), kind) for inner in ast.walk(default))  # `os.environ.get` also holds `os.environ`
     return seams
 
 
@@ -253,24 +291,32 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
             target = _dotted(node, aliases)
             if target is not None:
                 category = _effect_category(target)
-                if category is not None and not (id(node) in seams and category in _INJECTABLE_EFFECTS):
-                    uses.add(EffectUse(node.lineno, category, target))
+                if category is not None:
+                    seam = seams.get(id(node), 0) if category in _INJECTABLE_EFFECTS else 0
+                    uses.add(EffectUse(node.lineno, category, target, seam))
         path_use = _path_io_use(node, aliases)
         if path_use is not None:
             uses.add(path_use)
-        if not isinstance(node, ast.Call):
-            continue
-        function = _dotted(node.func, aliases)
-        if function is None:
-            continue
-        is_mock_patch = function in {"unittest.mock.patch", "mock.patch"} or function.endswith(".mock.patch")
-        is_monkeypatch = function.endswith(".setattr") and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == "monkeypatch"
-        if (is_mock_patch or is_monkeypatch) and node.args:
-            arg = node.args[0]
-            target = arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else _dotted(arg, aliases)
-            if target is not None:
-                uses.add(EffectUse(node.lineno, "patch", target))
+        patch = _patch_use(node, aliases)
+        if patch is not None:
+            uses.add(patch)
     return tuple(sorted(uses))
+
+
+def _patch_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
+    """``patch("pkg.mod.name")`` / ``monkeypatch.setattr("pkg.mod.name", ...)``: the static patch target."""
+    if not isinstance(node, ast.Call):
+        return None
+    function = _dotted(node.func, aliases)
+    if function is None or not node.args:
+        return None
+    is_mock_patch = function in {"unittest.mock.patch", "mock.patch"} or function.endswith(".mock.patch")
+    is_monkeypatch = function.endswith(".setattr") and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == "monkeypatch"
+    if not (is_mock_patch or is_monkeypatch):
+        return None
+    arg = node.args[0]
+    target = arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else _dotted(arg, aliases)
+    return EffectUse(node.lineno, "patch", target) if target is not None else None
 
 
 def _suppression_comments(source: str) -> tuple[tuple[int, str], ...]:

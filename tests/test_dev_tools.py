@@ -153,3 +153,33 @@ def test_a_ring_annotation_on_tooling_is_not_a_mismatch(repo: Path) -> None:
     tool_repo(repo, '__arbor__ = {"ring": "domain", "role": "dev_tool"}\n')
 
     assert not {f for f in findings(repo, dev_tools=["devtools"]) if f[0] == "arbor-ring-mismatch"}
+
+
+def test_raw_process_use_in_tooling_is_reported_by_default(repo: Path) -> None:
+    tool_repo(repo, "import subprocess\nsubprocess.run(['git', 'status'])\n")
+
+    assert ("effect-process", "devtools.scan") in findings(repo, dev_tools=["devtools"])
+
+
+def test_dev_tools_forbid_can_allow_or_widen_what_tooling_may_use(repo: Path) -> None:
+    tool_repo(repo, "import subprocess, time\nsubprocess.run(['x'])\ntime.time()\n")
+
+    allowed = findings(repo, dev_tools=["devtools"], dev_tools_forbid=[])
+    widened = findings(repo, dev_tools=["devtools"], dev_tools_forbid=["clock"])
+
+    assert not {f for f in allowed if f[0].startswith("effect-")}
+    assert {f for f in widened if f[0].startswith("effect-")} == {("effect-clock", "devtools.scan")}
+
+
+def test_dev_tools_forbid_rejects_unknown_categories() -> None:
+    with pytest.raises(PolicyError, match="dev_tools_forbid"):
+        mini_policy(dev_tools=["devtools"], dev_tools_forbid=["nope"])
+
+
+def test_dev_tools_may_import_limits_which_product_modules_tooling_reaches(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "", "app/ports.py": "", "devtools/__init__.py": "", "devtools/scan.py": "from app import domain\nfrom app import ports\n"})
+
+    found = rows(repo, dev_tools=["devtools"], dev_tools_may_import=["app.domain"])
+
+    assert [r for r in found if r[0] == "dev-tool-product-import"] == [("dev-tool-product-import", "devtools.scan", 2)]
+    assert not [r for r in rows(repo, dev_tools=["devtools"]) if r[0] == "dev-tool-product-import"]

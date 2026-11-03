@@ -253,3 +253,34 @@ def test_pure_path_manipulation_is_not_filesystem_access(repo: Path) -> None:
     write_files(repo, {"app/domain.py": "from pathlib import Path\ndef name(p):\n    return Path(p).name + str(Path(p).parent)\n"})
 
     assert effects(run(repo, ring=ring_with(domain={"external": ["pathlib"]}))) == set()
+
+
+SEAM_SOURCE = (
+    "import time\nfrom typing import Callable\n\n"
+    "def typed(clock: Callable[[], float] = time.time): return clock()\n"
+    "def untyped(clock=time.time): return clock()\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("injection", set()), ("typed", {("effect-clock", "app.domain")}), ("count", {("effect-clock", "app.domain")})],
+)
+def test_effect_defaults_decides_whether_a_parameter_default_is_a_use(repo: Path, mode: str, expected: set[tuple[str, str]]) -> None:
+    write_files(repo, {"app/domain.py": SEAM_SOURCE})
+    domain = ring_with(domain={"external": ["time", "typing"]})
+
+    assert effects(run(repo, ring=domain, effect_defaults=mode)) == expected
+
+
+def test_effect_defaults_counts_each_seam_kind_by_mode(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": SEAM_SOURCE})
+    domain = ring_with(domain={"external": ["time", "typing"]})
+    lines = {mode: sorted(f.line for f in run(repo, ring=domain, effect_defaults=mode) if f.rule == "effect-clock") for mode in ("injection", "typed", "count")}
+
+    assert lines == {"injection": [], "typed": [5], "count": [4, 5]}
+
+
+def test_effect_defaults_rejects_unknown_modes() -> None:
+    with pytest.raises(PolicyError, match="effect_defaults"):
+        mini_policy(effect_defaults="sometimes")

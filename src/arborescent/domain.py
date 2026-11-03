@@ -14,7 +14,6 @@ from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Pre
 from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 
 __all__ = [
-    "path_under",
     "ALL",
     "EFFECT_RULES",
     "INFORMATIONAL_RULES",
@@ -34,6 +33,7 @@ __all__ = [
     "ToolResult",
     "Violation",
     "dist_name",
+    "path_under",
 ]
 
 NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".arborescent", ".mypy_cache", ".ruff_cache", ".tox"})
@@ -65,6 +65,7 @@ class Rule(StrEnum):
     EFFECT_PROCESS = "effect-process"
     DEV_TOOL_IMPORT = "dev-tool-import"
     DEV_TOOL_MISPLACED = "dev-tool-misplaced"
+    DEV_TOOL_PRODUCT_IMPORT = "dev-tool-product-import"
     EFFECT_DATABASE = "effect-database"
     EFFECT_FILESYSTEM = "effect-filesystem"
     EFFECT_DYNAMIC_IMPORT = "effect-dynamic-import"
@@ -244,6 +245,9 @@ class Policy:
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
     forbid_everywhere: tuple[str, ...] = ()
     forbidden_modules: tuple[str, ...] = ()  # globs on dotted first-party module names that must not exist
+    dev_tools_forbid: tuple[str, ...] = ("process",)  # effect categories tooling may not use (raw subprocess by default)
+    dev_tools_may_import: tuple[str, ...] = ()  # globs of product modules tooling may import; empty means any
+    effect_defaults: str = "injection"  # how a parameter default naming an effect counts: injection | typed | count
     dev_tools: tuple[str, ...] = ()  # repository-relative folders or files that are developer tooling: no ring, may import product code, never imported by it
     tach_external_exclude: tuple[str, ...] = ()  # written to tach `[external] exclude`
     forbid_circular_imports: bool = True
@@ -340,6 +344,15 @@ class Policy:
             if fnmatch.fnmatchcase(module, pattern):
                 return ring
         return None
+
+    def counts_effect_seam(self, seam: int) -> bool:
+        """Whether an effect reference with this `EffectUse.seam` kind is a use under `effect_defaults`."""
+        if self.effect_defaults == "count":
+            return True
+        return seam == 0 if self.effect_defaults == "injection" else seam != 1
+
+    def tool_may_import(self, target: str) -> bool:
+        return not self.dev_tools_may_import or any(fnmatch.fnmatchcase(target, pattern) for pattern in self.dev_tools_may_import)
 
     def is_dev_tool_path(self, rel: str) -> bool:
         """Whether a repository-relative path is, or lies below, a `dev_tools` entry."""

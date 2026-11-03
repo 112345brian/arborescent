@@ -67,6 +67,7 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.EFFECT_THREADS: "effect-threads is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_PROCESS: "effect-process is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.DEV_TOOL_IMPORT: "needs a `dev_tools` path in the policy; covered by focused rule tests",
+    Rule.DEV_TOOL_PRODUCT_IMPORT: "needs `dev_tools` and `dev_tools_may_import` in the policy; covered by focused rule tests",
     Rule.DEV_TOOL_MISPLACED: "needs a `dev_tools` path in the policy; covered by focused rule tests",
     Rule.EFFECT_DATABASE: "effect-database is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_FILESYSTEM: "effect-filesystem is exercised by focused rule tests; the selftest probes the clock effect family",
@@ -225,7 +226,7 @@ def _leaking_public_dependency(
             if info is None or _already_imports(host_info, name):
                 continue
             for use in info.facts.effect_uses:
-                if use.category in forbidden:
+                if use.category in forbidden and scope.policy.counts_effect_seam(use.seam):
                     return name, use.category
     return None
 

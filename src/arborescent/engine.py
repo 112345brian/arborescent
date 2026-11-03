@@ -423,6 +423,41 @@ def _engine_violations(engine: Engine, result: ToolResult, root: Path, fs: FileS
     return findings
 
 
+def _plan_engines(
+    policy: Policy, root: Path, services: Services, files: Sequence[str] | None, opts: Options, pool: ThreadPoolExecutor,
+) -> list[Future[EngineRun] | EngineRun]:
+    """One entry per engine and checker: submitted to the pool, or an immediate skipped/disabled result.
+
+    ``files`` is None for a whole-repository run and the changed Python files for ``--changed``."""
+    checker = pick_checker(policy, services, opts.type_checker)
+    only = files
+    futures: list[Future[EngineRun] | EngineRun] = []
+    if opts.tools:
+        active_engines = [engine for engine in services.engines if not tool_is_disabled(policy, engine)]
+        active_checker = None if tool_is_disabled(policy, checker) else checker
+        for engine in (*active_engines, *((active_checker,) if active_checker is not None else ())):
+            if only is not None and not files:
+                futures.append(EngineRun(engine.name, "skipped", 0.0, ["no changed Python files"]))
+            elif only is not None and not getattr(engine, "supports_changed", True):
+                futures.append(EngineRun(engine.name, "skipped", 0.0, ["graph-wide engine skipped in --changed mode"]))
+            else:
+                futures.append(pool.submit(_tool, services, engine, files or [], root / getattr(engine, "working_directory", "."), opts))
+        futures.extend(
+            EngineRun(engine.name, "disabled", 0.0, ["disabled by `disabled_tools`"])
+            for engine in services.engines
+            if tool_is_disabled(policy, engine)
+        )
+        if active_checker is None:
+            futures.append(EngineRun(checker.name, "disabled", 0.0, ["disabled by `disabled_tools`"]))
+    else:
+        futures.extend(
+            EngineRun(engine.name, "skipped", 0.0, ["not run: core mode (--no-tools / --engines core)"])
+            for engine in (*services.engines, checker)
+            if not tool_is_disabled(policy, engine)
+        )
+    return futures
+
+
 def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
     opts = opts if opts is not None else Options()
     if opts.require_profile and not opts.require_tools:
@@ -431,34 +466,10 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
     report = CheckReport(tool_checks_enabled=opts.tools)
     only = changed_files(services.runner, root, opts.changed) if opts.changed is not None else None
     report.partial = only is not None
-    checker = pick_checker(policy, services, opts.type_checker)
     pool = ThreadPoolExecutor(max_workers=max(1, len(services.engines) + 1))
     try:
         files = sorted(path for path in only if services.fs.is_file(root / path)) if only is not None else []
-        futures: list[Future[EngineRun] | EngineRun] = []
-        if opts.tools:
-            active_engines = [engine for engine in services.engines if not tool_is_disabled(policy, engine)]
-            active_checker = None if tool_is_disabled(policy, checker) else checker
-            for engine in (*active_engines, *((active_checker,) if active_checker is not None else ())):
-                if only is not None and not files:
-                    futures.append(EngineRun(engine.name, "skipped", 0.0, ["no changed Python files"]))
-                elif only is not None and not getattr(engine, "supports_changed", True):
-                    futures.append(EngineRun(engine.name, "skipped", 0.0, ["graph-wide engine skipped in --changed mode"]))
-                else:
-                    futures.append(pool.submit(_tool, services, engine, files, root / getattr(engine, "working_directory", "."), opts))
-            futures.extend(
-                EngineRun(engine.name, "disabled", 0.0, ["disabled by `disabled_tools`"])
-                for engine in services.engines
-                if tool_is_disabled(policy, engine)
-            )
-            if active_checker is None:
-                futures.append(EngineRun(checker.name, "disabled", 0.0, ["disabled by `disabled_tools`"]))
-        else:
-            futures.extend(
-                EngineRun(engine.name, "skipped", 0.0, ["not run: core mode (--no-tools / --engines core)"])
-                for engine in (*services.engines, checker)
-                if not tool_is_disabled(policy, engine)
-            )
+        futures = _plan_engines(policy, root, services, files if only is not None else None, opts, pool)
         t0 = services.clock.now()
         found, scan = run_own(policy, root, services, only)
         report.engines.append(EngineRun("arborescent", "ok", services.clock.now() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))

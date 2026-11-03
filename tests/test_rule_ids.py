@@ -42,6 +42,7 @@ def test_rule_id_strings_never_change() -> None:
             "effect-process",
             "dev-tool-import",
             "dev-tool-misplaced",
+            "dev-tool-product-import",
             "effect-database",
             "effect-filesystem",
             "effect-dynamic-import",
