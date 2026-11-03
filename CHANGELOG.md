@@ -17,6 +17,10 @@
   optional `effect_defaults` knob and `Callable` annotation check from #101 are not implemented. The scan cache is rebuilt once.
 
 ### Added
+- `check --engines core` (same as `--no-tools`) is the documented core mode for a pre-commit hook or a plain test run: only
+  Arborescent's own checks run, every skipped engine is listed as `SKIPPED`, and combining it with `--require-tools`,
+  `--require-profile` or `--install-tools` exits 2 instead of passing silently. The only subprocess it starts is `git ls-files`
+  (#100).
 - `dev_tools` policy key and the `dev-tool-import` and `dev-tool-misplaced` rules: folders of developer tooling need no ring,
   may import product code, and are skipped by the ring, external-import and effect rules, but product code importing them
   fails. `__arbor__ = {"role": "dev_tool"}` is accepted only below a `dev_tools` path. Tooling keeps its suppression and

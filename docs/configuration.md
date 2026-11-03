@@ -734,7 +734,11 @@ against the baseline. Options:
   engines are skipped because they cannot check a partial module graph.
 - `--type-checker NAME`: override the first checker listed in `type_checkers` (`basedpyright`, `pyrefly`, `pyright`
   or `ty`).
-- `--no-tools`: skip import-linter, Tach and the type checker.
+- `--no-tools` / `--engines core`: core mode. Run only Arborescent's own checks (rings, effects, suppressions, the baseline
+  ratchet); no import-linter, Tach, type checker or installer is invoked, and each is listed as `SKIPPED`, never `OK`. It
+  needs only Arborescent itself (`uvx arborescent check --engines core`), does not import the project and uses no network.
+  The only subprocess it may start is `git ls-files`, to list files; without git it walks the directory. It rejects
+  `--require-tools`, `--require-profile` and `--install-tools` (exit 2), since those demand an engine.
 - `--require-tools`: fail when a configured checker is missing instead of skipping it.
 - `--require-profile`: require the versioned Arborescent minimum profile; this also requires its tools.
 - `--install-tools`: offer to install missing configured tools before checking. The prompt defaults to No.

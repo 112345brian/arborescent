@@ -581,3 +581,29 @@ def test_nested_child_arbor_failure_fails_parent_recursively(repo: Path, monkeyp
     assert child_run.status == "fail"
     assert any("unclassified" in line for line in child_run.lines)
     assert not report.ok
+
+
+CORE_POLICY = (
+    'sources = ["app"]\nrings = ["domain"]\n[ring.domain]\nexternal = ["__future__"]\n'
+    '[classify]\n"app" = "domain"\n"app.*" = "domain"\n'
+)
+
+
+def test_core_mode_runs_no_engine_lists_each_as_skipped_and_starts_only_git(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    cfg = repo / "arborescent.toml"
+    cfg.write_text(CORE_POLICY, encoding="utf-8")
+    runner = FakeToolRunner({"git"})
+    for flags in (["--no-tools"], ["--engines", "core"]):
+        runner.calls.clear()
+        _ = main(["--config", str(cfg), "check", *flags], services(runner))
+        out = capsys.readouterr().out
+        assert "SKIPPED" in out and "import-linter" in out and "tach" in out
+        assert all(call[0] == "git" for call in runner.calls), runner.calls
+
+
+@pytest.mark.parametrize("flag", ["--require-tools", "--require-profile", "--install-tools"])
+def test_core_mode_rejects_options_that_demand_an_engine(repo: Path, flag: str, capsys: pytest.CaptureFixture[str]) -> None:
+    cfg = repo / "arborescent.toml"
+    cfg.write_text(CORE_POLICY, encoding="utf-8")
+    assert main(["--config", str(cfg), "check", "--engines", "core", flag], services()) == 2
+    assert "core mode" in capsys.readouterr().err

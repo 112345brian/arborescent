@@ -452,6 +452,12 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
             )
             if active_checker is None:
                 futures.append(EngineRun(checker.name, "disabled", 0.0, ["disabled by `disabled_tools`"]))
+        else:
+            futures.extend(
+                EngineRun(engine.name, "skipped", 0.0, ["not run: core mode (--no-tools / --engines core)"])
+                for engine in (*services.engines, checker)
+                if not tool_is_disabled(policy, engine)
+            )
         t0 = services.clock.now()
         found, scan = run_own(policy, root, services, only)
         report.engines.append(EngineRun("arborescent", "ok", services.clock.now() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))

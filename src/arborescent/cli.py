@@ -101,6 +101,12 @@ def _parser() -> argparse.ArgumentParser:
         help="skip import-linter, tach and the type checker",
     )
     c.add_argument(
+        "--engines",
+        choices=("all", "core"),
+        default="all",
+        help="`core` runs only Arborescent's own checks (the same as --no-tools): no import-linter, tach, ruff or type checker is invoked or installed",
+    )
+    c.add_argument(
         "--require-tools",
         action="store_true",
         help="a missing engine fails instead of skipping",
@@ -444,7 +450,22 @@ def _selftest(policy: Policy, root: Path, svc: Services) -> int:
     return 0 if rep.ok else 1
 
 
+def _core_mode_conflict(args: argparse.Namespace) -> str | None:
+    """Core mode runs no external engine, so an option that demands one is rejected rather than silently passing."""
+    if not (args.no_tools or args.engines == "core"):
+        return None
+    demanded = [flag for flag, on in (("--require-tools", args.require_tools), ("--require-profile", args.require_profile), ("--install-tools", args.install_tools)) if on]
+    if not demanded:
+        return None
+    return f"{', '.join(demanded)} cannot be combined with core mode (--no-tools / --engines core): no external engine runs"
+
+
 def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    conflict = _core_mode_conflict(args)
+    if conflict is not None:
+        print(f"arborescent check: {conflict}", file=sys.stderr)
+        return 2
+    args.no_tools = args.no_tools or args.engines == "core"
     install_status = 0
     if args.install_tools:
         install_status = _install_tools(

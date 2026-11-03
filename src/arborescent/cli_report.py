@@ -55,7 +55,7 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
         for key in report.ratchet.stale:
             print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline`): {key}")
     for e in report.engines:
-        print(f"{e.status.upper():7}{e.name} ({e.seconds:.2f}s) {' | '.join(e.lines[-1:]) if e.status != 'fail' else ''}")
+        print(f"{e.status.upper():7}{' ' if len(e.status) >= 7 else ''}{e.name} ({e.seconds:.2f}s) {' | '.join(e.lines[-1:]) if e.status != 'fail' else ''}")
         if e.status == "fail":
             print("\n".join("        " + ln for ln in e.lines))
     _print_setup_hint(report, setup_command)
