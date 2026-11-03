@@ -13,7 +13,7 @@ import tomllib
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
-__all__ = ["OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef", "extract", "resolve_targets"]
+__all__ = ["DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef", "extract", "resolve_targets"]
 
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
 _ABSTRACT_BASE_NAMES = frozenset({"ABC", "abc.ABC", "Protocol", "typing.Protocol", "typing_extensions.Protocol"})
@@ -91,6 +91,7 @@ class SourceFacts:
     top_level_defs: tuple[TopLevelDef, ...] = ()  # module-level classes and functions only
     arbor_ring: str | None = None
     arbor_error: str | None = None
+    arbor_role: str | None = None  # `__arbor__ = {"role": "dev_tool"}`: the module claims to be developer tooling
     file_refs: tuple[int, ...] = ()  # lines that read `__file__`: a location-dependent path breaks when the module moves
     main_guard: int = 0  # line of a top-level `if __name__ == "__main__":`, 0 when there is none: the module is also a program
 
@@ -310,7 +311,8 @@ def _top_level_defs(tree: ast.AST, aliases: dict[str, str]) -> tuple[TopLevelDef
     return tuple(out)
 
 
-_ARBOR_LEGAL_KEYS = frozenset({"ring"})
+_ARBOR_LEGAL_KEYS = frozenset({"ring", "role"})
+DEV_TOOL_ROLE = "dev_tool"
 _CONDITIONAL_CONTAINERS = (ast.If, ast.Try, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith)
 
 
@@ -348,28 +350,34 @@ def _find_arbor_assignments(stmts: list[ast.stmt], conditional: bool) -> list[tu
     return found
 
 
-def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None]:
+def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None, str | None]:
+    """``(ring, error, role)`` from the module's ``__arbor__`` assignment."""
     found = _find_arbor_assignments(list(tree.body), False)
     if not found:
-        return None, None
+        return None, None, None
     if any(conditional for _, conditional in found):
-        return None, "__arbor__ must not be assigned inside conditional code"
+        return None, "__arbor__ must not be assigned inside conditional code", None
     value = found[-1][0]
     try:
         annotation = ast.literal_eval(value) if value is not None else None
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
-        return None, "__arbor__ must be a literal dictionary"
+        return None, "__arbor__ must be a literal dictionary", None
     if not isinstance(annotation, dict):
-        return None, "__arbor__ must be a dictionary"
+        return None, "__arbor__ must be a dictionary", None
     unknown = sorted(set(annotation) - _ARBOR_LEGAL_KEYS)
     if unknown:
-        return None, f"__arbor__ has unknown key(s): {', '.join(map(repr, unknown))}"
+        return None, f"__arbor__ has unknown key(s): {', '.join(map(repr, unknown))}", None
+    role = annotation.get("role")
+    if "role" in annotation and role != DEV_TOOL_ROLE:
+        return None, f'__arbor__."role" must be "{DEV_TOOL_ROLE}"', None
     if "ring" not in annotation:
-        return None, '__arbor__ dictionary is missing "ring"'
+        if role is not None:
+            return None, None, role
+        return None, '__arbor__ dictionary is missing "ring"', None
     ring = annotation["ring"]
     if not isinstance(ring, str):
-        return None, '__arbor__."ring" must be a string'
-    return ring, None
+        return None, '__arbor__."ring" must be a string', None
+    return ring, None, role
 
 
 def _script_deps(source: str) -> tuple[str, ...] | None:
@@ -392,7 +400,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     imports: list[RawImport] = []
     _walk(tree, False, False, imports)
-    arbor_ring, arbor_error = _arbor_ring(tree)
+    arbor_ring, arbor_error, arbor_role = _arbor_ring(tree)
     return SourceFacts(
         tuple(imports),
         _effect_uses(tree),
@@ -402,6 +410,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _top_level_defs(tree, _aliases(tree)),
         arbor_ring,
         arbor_error,
+        arbor_role,
         _file_ref_lines(tree),
         _main_guard_line(tree),
     )

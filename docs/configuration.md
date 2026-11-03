@@ -37,6 +37,7 @@ settings. The two forms cannot be mixed.
 | `require_arbor_annotations_exclude` | `[]` | `classify`-style module-name globs exempt from `require_arbor_annotations`, for modules that cannot carry an annotation (vendored, read-only, generated). Has no effect unless `require_arbor_annotations` is set. |
 | `entry_scripts` | `[]` | Dotted names of PEP 723 single-file scripts. Each must declare, in its `# /// script` block, every third-party distribution the project code imports. |
 | `type_checkers` | `["ty"]` | `pyright`, `basedpyright`, `ty` and/or `pyrefly`. The first one runs by default; `check --type-checker` overrides it. A config file is generated for each one listed. |
+| `dev_tools` | `[]` | Repository-relative folders or files that are developer tooling (`["devtools", "scripts"]`). They need no ring or `__arbor__` annotation (never `unclassified`), may import product code, and are skipped by the ring, external-import and effect rules. A product module that imports one fails with `dev-tool-import`. A module annotated `__arbor__ = {"role": "dev_tool"}` outside these paths fails with `dev-tool-misplaced`. Tooling still enters the suppression and discard inventories, and the report lists it under its own `dev tools` heading, apart from `exclude`. Root-level (shared by all scopes). |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
@@ -498,7 +499,8 @@ __arbor__ = {"ring": "domain"}
 ```
 
 The `ring` value must be a string naming one of the policy's configured `rings` (the owning scope's rings in
-multi-scope mode); `ring` is the only legal key today, and any other key reports `invalid-arbor-annotation`.
+multi-scope mode). The legal keys are `ring` and `role`; any other key reports `invalid-arbor-annotation`. `role` accepts only
+`"dev_tool"` (`__arbor__ = {"role": "dev_tool"}`, no ring needed) and is valid only under a `dev_tools` path (`dev-tool-misplaced`).
 Arborescent reads the assignment statically, without importing or executing the module. Only direct module-level
 assignments count; assignments inside functions or classes are ignored (they are not module-level annotations at
 all). An assignment inside conditional code at module level (`if`, `try`, `for`, `while` or `with`) is not ignored:
@@ -598,6 +600,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | rule | fires when |
 |---|---|
 | `unclassified` | a module has neither a valid enabled `__arbor__` annotation nor a matching `classify` pattern |
+| `dev-tool-import` | a module outside every `dev_tools` path imports a module below one (top-level, lazy and `TYPE_CHECKING` imports all count) |
+| `dev-tool-misplaced` | a module annotated `__arbor__ = {"role": "dev_tool"}` lies outside every `dev_tools` path, so the annotation cannot grant the exemption by itself |
 | `forbidden-module` | a first-party module's dotted name matches a `forbidden_modules` pattern. Reported even if the module is also `unclassified`; per scope, only for modules that scope owns |
 | `noise-dir-code` | a tracked `.py` file appears below a skipped directory such as `.venv`, `.tox` or `node_modules` |
 | `classify-facts` | information only (never fails, never baselined, not part of `--require-modularity`): a module's facts contradict its ring. Three signals, described in "Checking `classify` against a module's facts" below |

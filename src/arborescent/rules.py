@@ -33,6 +33,7 @@ class RuleContext:
     policy: Policy
     arbor_index: Mapping[str, tuple[str | None, str | None]]
     scope_by_module: Mapping[str, str]
+    tool_modules: frozenset[str] = frozenset()  # modules below a `dev_tools` path: no ring, never imported by product code
 
     def scope_name(self, name: str) -> str | None:
         return self.scope_by_module.get(name) if self.policy.scopes else None
@@ -69,6 +70,19 @@ class RuleContext:
     def annotation_required_violation(self, name: str) -> str | None:
         policy = self.policy_for(name)
         return policy.annotation_required_violation(self.arbor_index, name) if policy is not None else None
+
+
+def _dev_tool_imports(
+    context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], tops: Collection[str],
+) -> list[Violation]:
+    out: list[Violation] = []
+    for imp in info.facts.imports:
+        internal, _, _ = resolve_targets(name, info.is_package, imp, known, tops)
+        out.extend(
+            Violation(Rule.DEV_TOOL_IMPORT, name, f"imports dev tool {target}; developer tooling may import product code, never the reverse", imp.line, target)
+            for target in internal if target in context.tool_modules
+        )
+    return out
 
 
 def _internal_imports(
@@ -301,6 +315,10 @@ def check_modules(
         mismatch = context.annotation_ring_mismatch(name)
         if mismatch is not None:
             out.append(Violation(Rule.ARBOR_RING_MISMATCH, name, mismatch))
+        if name in context.tool_modules:
+            continue  # developer tooling: no ring, may import product code
+        if context.tool_modules:
+            out += _dev_tool_imports(context, name, info, known, tops)
         pattern = local_policy.forbidden_module_pattern(name) if local_policy is not None else None
         if pattern is not None:
             out.append(Violation(

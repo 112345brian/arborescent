@@ -62,6 +62,8 @@ class Rule(StrEnum):
     EFFECT_SLEEP = "effect-sleep"
     EFFECT_THREADS = "effect-threads"
     EFFECT_PROCESS = "effect-process"
+    DEV_TOOL_IMPORT = "dev-tool-import"
+    DEV_TOOL_MISPLACED = "dev-tool-misplaced"
     EFFECT_DATABASE = "effect-database"
     EFFECT_FILESYSTEM = "effect-filesystem"
     EFFECT_DYNAMIC_IMPORT = "effect-dynamic-import"
@@ -234,6 +236,7 @@ class Policy:
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
     forbid_everywhere: tuple[str, ...] = ()
     forbidden_modules: tuple[str, ...] = ()  # globs on dotted first-party module names that must not exist
+    dev_tools: tuple[str, ...] = ()  # repository-relative folders or files that are developer tooling: no ring, may import product code, never imported by it
     tach_external_exclude: tuple[str, ...] = ()  # written to tach `[external] exclude`
     forbid_circular_imports: bool = True
     python: str = "3.11"
@@ -329,6 +332,11 @@ class Policy:
             if fnmatch.fnmatchcase(module, pattern):
                 return ring
         return None
+
+    def is_dev_tool_path(self, rel: str) -> bool:
+        """Whether a repository-relative path is, or lies below, a `dev_tools` entry."""
+        path = rel.replace("\\", "/").strip("/")
+        return any(path == entry or path.startswith(entry + "/") for entry in (e.replace("\\", "/").strip("/") for e in self.dev_tools))
 
     def forbidden_module_pattern(self, module: str) -> str | None:
         """The first `forbidden_modules` glob matching the module's full dotted name, or None."""

@@ -17,6 +17,11 @@
   optional `effect_defaults` knob and `Callable` annotation check from #101 are not implemented. The scan cache is rebuilt once.
 
 ### Added
+- `dev_tools` policy key and the `dev-tool-import` and `dev-tool-misplaced` rules: folders of developer tooling need no ring,
+  may import product code, and are skipped by the ring, external-import and effect rules, but product code importing them
+  fails. `__arbor__ = {"role": "dev_tool"}` is accepted only below a `dev_tools` path. Tooling keeps its suppression and
+  discard inventory and gets its own heading in the report. Not implemented from #99: effect checks on tooling,
+  `dev_tools_may_import` and `--list-dev-tools`. The scan cache is rebuilt once (#99).
 - `database` and `filesystem` effect categories with `effect-database` and `effect-filesystem` rules, forbiddable per ring with
   `forbid` / `middle_forbid` like the others. Direct references only. **Behavior change:** the innermost ring (and `strict`
   middle rings) forbid every category by default, so an inner-ring module that calls `open(`, `shutil` or `sqlite3` is now

@@ -40,6 +40,8 @@ def test_rule_id_strings_never_change() -> None:
             "effect-sleep",
             "effect-threads",
             "effect-process",
+            "dev-tool-import",
+            "dev-tool-misplaced",
             "effect-database",
             "effect-filesystem",
             "effect-dynamic-import",

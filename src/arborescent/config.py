@@ -164,6 +164,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
         forbidden_modules=_string_list(raw, "forbidden_modules"),
+        dev_tools=_string_list(raw, "dev_tools"),
         tach_external_exclude=tuple(raw.get("tach_external_exclude", [])),
         forbid_circular_imports=forbid_circular_imports,
         require_arbor_annotations=require_arbor_annotations,
@@ -192,7 +193,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
-    "modularity",
+    "modularity", "dev_tools",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "io_modules", "groups",

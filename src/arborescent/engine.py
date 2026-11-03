@@ -92,6 +92,7 @@ class CheckReport:
     parsed: int = 0
     excluded: dict[str, int] = field(default_factory=lambda: {})
     vendor_folders: tuple[tuple[str, str], ...] = ()
+    dev_tools: dict[str, int] = field(default_factory=lambda: {})  # `dev_tools` path -> modules below it
     suggestions: list[Suggestion] = field(default_factory=list)
     suppression_counts: dict[tuple[str, str], int] = field(default_factory=lambda: {})
     discard_counts: dict[str, int] = field(default_factory=lambda: {})
@@ -133,7 +134,7 @@ def run_own(
     policy: Policy, root: Path, services: Services, only: frozenset[str] | None = None, practices: bool = True
 ) -> tuple[list[Violation], ScanResult]:
     scan = services.scanner.scan(policy, root, only)
-    indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
+    indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules))
     found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, indexes)
     found += [
         Violation(Rule.INVALID_ARBOR_ANNOTATION, module, detail)
@@ -144,6 +145,10 @@ def run_own(
     found += [
         Violation(Rule.UNCLASSIFIED, module, (indexes.policy_for(module) or policy).unclassified_detail(module))
         for module, _ in scan.unclassified
+    ]
+    found += [
+        Violation(Rule.DEV_TOOL_MISPLACED, module, f"{path} is annotated as a dev tool but lies outside every `dev_tools` path; move it or list its folder in `dev_tools`")
+        for module, path in scan.misplaced_dev_tools
     ]
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
@@ -447,6 +452,10 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         report.suppression_counts, report.discard_counts = _inventory_counts(scan.modules)
         report.excluded = dict(scan.excluded)
         report.vendor_folders = tuple(scan.vendor_folders)
+        report.dev_tools = {
+            entry: sum(1 for module in scan.dev_tool_modules if scan.paths[module].strip("/") == entry.strip("/") or scan.paths[module].startswith(entry.strip("/") + "/"))
+            for entry in policy.dev_tools
+        }
         report.suggestions = file_size_suggestions(
             services.fs,
             root,
