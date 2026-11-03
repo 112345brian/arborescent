@@ -30,7 +30,7 @@ def test_changed_mode_restricts_import_linter_to_changed_files() -> None:
 
     from arborescent import engine
 
-    assert "supports_changed" in inspect.getsource(engine.run_check)  # type: ignore[attr-defined]
+    assert "supports_changed" in inspect.getsource(engine._plan_engines)  # type: ignore[attr-defined]  # run_check delegates the per-engine decision
 
 
 def test_engine_commands_use_native_config_discovery_independent_of_output_dir() -> None:

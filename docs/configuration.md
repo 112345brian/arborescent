@@ -37,6 +37,10 @@ settings. The two forms cannot be mixed.
 | `require_arbor_annotations_exclude` | `[]` | `classify`-style module-name globs exempt from `require_arbor_annotations`, for modules that cannot carry an annotation (vendored, read-only, generated). Has no effect unless `require_arbor_annotations` is set. |
 | `entry_scripts` | `[]` | Dotted names of PEP 723 single-file scripts. Each must declare, in its `# /// script` block, every third-party distribution the project code imports. |
 | `type_checkers` | `["ty"]` | `pyright`, `basedpyright`, `ty` and/or `pyrefly`. The first one runs by default; `check --type-checker` overrides it. A config file is generated for each one listed. |
+| `dev_tools` | `[]` | Repository-relative folders or files that are developer tooling (`["devtools", "scripts"]`). Entries are normalised (`./tools/` is `tools`); `.`, `..` and absolute paths are refused. They need no ring or `__arbor__` annotation (never `unclassified`), may import product code, and are skipped by the ring, external-import and effect rules. A product module that imports one fails with `dev-tool-import`. A module annotated `__arbor__ = {"role": "dev_tool"}` outside these paths fails with `dev-tool-misplaced`. Tooling still enters the suppression and discard inventories, and the report lists it under its own `dev tools` heading, apart from `exclude`. Root-level (shared by all scopes). |
+| `dev_tools_forbid` | `["process"]` | Effect categories (`clock`, `env`, `process`, `filesystem`, …) that `dev_tools` modules may not use. The default reports raw `subprocess` use in tooling; `[]` allows everything. Reported as the matching `effect-*` rule. |
+| `dev_tools_may_import` | `[]` | Dotted-module globs of product modules that `dev_tools` modules may import. Empty means any; otherwise an import of another product module is `dev-tool-product-import`. |
+| `effect_defaults` | `"injection"` | How a bare parameter default that names an effect (`now=datetime.now`) counts. `"injection"`: never a use. `"typed"`: not a use only when the parameter is annotated `Callable` or `Mapping` (alone, in `Optional`/`Union`/`\|`, or as a string), so `x: int = datetime.now` still counts. `"count"`: always a use. Calls, aliases and lambda-wrapped defaults always count; applies to `clock`, `env`, `identity`, `randomness`, `sleep`, `threads` and `process`. Settable per scope. |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
@@ -498,7 +502,8 @@ __arbor__ = {"ring": "domain"}
 ```
 
 The `ring` value must be a string naming one of the policy's configured `rings` (the owning scope's rings in
-multi-scope mode); `ring` is the only legal key today, and any other key reports `invalid-arbor-annotation`.
+multi-scope mode). The legal keys are `ring` and `role`; any other key reports `invalid-arbor-annotation`. `role` accepts only
+`"dev_tool"` (`__arbor__ = {"role": "dev_tool"}`, no ring needed) and is valid only under a `dev_tools` path (`dev-tool-misplaced`).
 Arborescent reads the assignment statically, without importing or executing the module. Only direct module-level
 assignments count; assignments inside functions or classes are ignored (they are not module-level annotations at
 all). An assignment inside conditional code at module level (`if`, `try`, `for`, `while` or `with`) is not ignored:
@@ -562,7 +567,7 @@ Migrating an existing classify-only project:
 | `may_import` | `[]` | Inner rings this ring may import; `["*"]` means every inner ring. A ring may always import itself. An outer ring in this list is a policy error (the onion rule). |
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
-| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `dynamic-import`, or `patch`. |
+| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `filesystem`, `dynamic-import`, or `patch`. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 
 A ring that is not given a table has no inner imports, no external imports and no OS branching. If `forbid` is omitted,
@@ -598,6 +603,9 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | rule | fires when |
 |---|---|
 | `unclassified` | a module has neither a valid enabled `__arbor__` annotation nor a matching `classify` pattern |
+| `dev-tool-import` | a module outside every `dev_tools` path imports a module below one (top-level, lazy and `TYPE_CHECKING` imports all count) |
+| `dev-tool-misplaced` | a module annotated `__arbor__ = {"role": "dev_tool"}` lies outside every `dev_tools` path, so the annotation cannot grant the exemption by itself |
+| `dev-tool-product-import` | a `dev_tools` module imports a product module that `dev_tools_may_import` does not allow |
 | `forbidden-module` | a first-party module's dotted name matches a `forbidden_modules` pattern. Reported even if the module is also `unclassified`; per scope, only for modules that scope owns |
 | `noise-dir-code` | a tracked `.py` file appears below a skipped directory such as `.venv`, `.tox` or `node_modules` |
 | `classify-facts` | information only (never fails, never baselined, not part of `--require-modularity`): a module's facts contradict its ring. Three signals, described in "Checking `classify` against a module's facts" below |
@@ -613,6 +621,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-sleep` | a ring that forbids `sleep` calls `time.sleep` or `asyncio.sleep` |
 | `effect-threads` | a ring that forbids `threads` uses `threading` or constructs a `ThreadPoolExecutor` |
 | `effect-process` | a ring that forbids `process` starts a process or shell command through `subprocess`, `multiprocessing`, `ProcessPoolExecutor`, or direct `os` spawn/exec APIs |
+| `effect-database` | a ring that forbids `database` uses `sqlite3`, `psycopg`, `psycopg2`, `asyncpg`, `pymysql`, `mysql.connector`, `sqlalchemy`, `pymongo`, `redis` or `aiosqlite` |
+| `effect-filesystem` | a ring that forbids `filesystem` calls `open`, `os` file operations (`os.remove`, `os.listdir`, `os.walk`, ...), `shutil`, `tempfile`, `glob`, or reads/writes through `Path(...)` (`read_text`, `write_text`, `mkdir`, `glob`, ...). Direct references only: a `Path` held in a variable or a call routed through a wrapper is not seen |
 | `effect-dynamic-import` | a ring that forbids any effect uses `importlib` or `__import__` |
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
@@ -728,7 +738,14 @@ against the baseline. Options:
   engines are skipped because they cannot check a partial module graph.
 - `--type-checker NAME`: override the first checker listed in `type_checkers` (`basedpyright`, `pyrefly`, `pyright`
   or `ty`).
-- `--no-tools`: skip import-linter, Tach and the type checker.
+- `--list-dev-tools`: print each `dev_tools` path with the modules below it, plus modules annotated as dev tooling outside every path (exit 1 if any), then exit without checking.
+- `--no-tools` / `--engines core`: core mode. Run only Arborescent's own checks (rings, effects, suppressions, the baseline
+  ratchet); no import-linter, Tach, type checker or installer is invoked, and each is listed as `SKIPPED`, never `OK`. It
+  needs only Arborescent itself (`uvx arborescent check --engines core`), does not import the project and uses no network.
+  It starts no engine, but it is not subprocess-free: it uses `git ls-files` to list files (without git it walks the
+  directory), `practices` and `--changed`/`--growth-against` call git, and a child policy is checked by a nested
+  `arborescent check --no-tools`. It rejects
+  `--require-tools`, `--require-profile` and `--install-tools` (exit 2), since those demand an engine.
 - `--require-tools`: fail when a configured checker is missing instead of skipping it.
 - `--require-profile`: require the versioned Arborescent minimum profile; this also requires its tools.
 - `--install-tools`: offer to install missing configured tools before checking. The prompt defaults to No.

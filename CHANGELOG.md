@@ -11,8 +11,28 @@
   refuses, with the statements listed and nothing modified, a `from <old> import a, b` that mixes a renamed module with a name
   that is not one from a renamed package, `import <new> as x` for a module renamed to a top-level name (LibCST's rename corrupts
   it), and files that do not parse. `docs/migration-driver.md`.
+- Effect rules no longer count a bare parameter default that names an effect (`clock_now=datetime.now`, `new_id=uuid.uuid4`,
+  `environ=os.environ`) as a use: it is the injection seam the message asks for. Calls, module-level aliases and a default
+  wrapped in a lambda still count. Applies to `clock`, `env`, `identity`, `randomness`, `sleep`, `threads` and `process`; the
+  `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- `check --engines core` (same as `--no-tools`) is the documented core mode for a pre-commit hook or a plain test run: only
+  Arborescent's own checks run, every skipped engine is listed as `SKIPPED`, and combining it with `--require-tools`,
+  `--require-profile` or `--install-tools` exits 2 instead of passing silently. It starts no engine, but still uses git (file list,
+  `practices`, `--changed`, `--growth-against`) and checks child policies in a nested core-mode run (#100).
+- `dev_tools` policy key and the `dev-tool-import` and `dev-tool-misplaced` rules: folders of developer tooling need no ring,
+  may import product code, and are skipped by the ring, external-import and effect rules (unresolvable imports, forbidden
+  module names and import cycles are still checked), but product code importing them
+  fails. `__arbor__ = {"role": "dev_tool"}` is accepted only below a `dev_tools` path. Tooling keeps its suppression and
+  discard inventory and gets its own heading in the report. Tooling is also checked for raw process use (`dev_tools_forbid`, default `["process"]`) and can be limited to chosen product modules (`dev_tools_may_import`, rule `dev-tool-product-import`); `check --list-dev-tools` shows what is covered. The scan cache is rebuilt once (#99).
+- `database` and `filesystem` effect categories with `effect-database` and `effect-filesystem` rules, forbiddable per ring with
+  `forbid` / `middle_forbid` like the others. Direct references only (`open`, `os`/`glob`
+  file calls, `shutil` copy/move/remove, `tempfile` file creators, `Path(...).read_text()` and similar). The innermost ring (and
+  `strict` middle rings) forbid them by default like every other category, so an inner-ring module that calls `open(`,
+  `shutil` or `sqlite3` is now reported; set `forbid` on the ring to allow it. The scan cache is rebuilt once (#92).
+- Test pinning #93: with `classify_from`, a module missing from tach.toml's layers is reported as `unclassified` (it was never
+  exempt); no new rule was needed.
 - `classify-facts` (information, never baselined, not part of `--require-modularity`): checks a module's `[classify]` ring against
   its facts with three signals: it passes every rule of a more inner ring, it is a class-free leaf that only wires peers to
   inner-ring code, or it has a `__main__` guard and is also imported. It uses imports, effect uses, top-level definitions and a

@@ -202,6 +202,12 @@ class ScanResult(Protocol):
     def unclassified(self) -> Sequence[tuple[str, str]]: ...  # (module name, repository-relative path)
 
     @property
+    def dev_tool_modules(self) -> frozenset[str]: ...  # modules below a `dev_tools` path
+
+    @property
+    def misplaced_dev_tools(self) -> Sequence[tuple[str, str]]: ...  # (module, path) annotated as dev tooling outside `dev_tools`
+
+    @property
     def vendor_folders(self) -> Sequence[tuple[str, str]]: ...  # (auto-excluded folder, content fingerprint)
 
 

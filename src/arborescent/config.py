@@ -164,6 +164,10 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
         forbidden_modules=_string_list(raw, "forbidden_modules"),
+        dev_tools=_dev_tool_paths(raw),
+        dev_tools_forbid=_effect_list(raw, "dev_tools_forbid", ("process",)),
+        dev_tools_may_import=_string_list(raw, "dev_tools_may_import"),
+        effect_defaults=_effect_defaults(raw),
         tach_external_exclude=tuple(raw.get("tach_external_exclude", [])),
         forbid_circular_imports=forbid_circular_imports,
         require_arbor_annotations=require_arbor_annotations,
@@ -192,12 +196,13 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
-    "modularity",
+    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "io_modules", "groups",
     "module_forbid_imports", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
+    "effect_defaults",
 })
 _SCOPE_ARCHITECTURE_KEYS = _LEGACY_ARCHITECTURE_KEYS - {"sources"}
 
@@ -350,6 +355,34 @@ def _string_list(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
         raise PolicyError(f"`{key}` must be a list of non-empty strings")
     return tuple(cast("list[str]", value))
+
+
+def _effect_defaults(raw: Mapping[str, Any]) -> str:
+    value = raw.get("effect_defaults", "injection")
+    if value not in ("injection", "typed", "count"):
+        raise PolicyError("`effect_defaults` must be \"injection\", \"typed\" or \"count\"")
+    return str(value)
+
+
+def _effect_list(raw: Mapping[str, Any], key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    if key not in raw:
+        return default
+    categories = _string_list(raw, key)
+    unknown = set(categories) - EFFECT_CATEGORIES
+    if unknown:
+        raise PolicyError(f"unknown effect category in `{key}`: {sorted(unknown)}")
+    return categories
+
+
+def _dev_tool_paths(raw: Mapping[str, Any]) -> tuple[str, ...]:
+    """`dev_tools` entries as canonical repository-relative paths: `./tools/` becomes `tools`; `.`, `..` and absolute paths are refused."""
+    out: list[str] = []
+    for entry in _string_list(raw, "dev_tools"):
+        parts = [part for part in entry.replace("\\", "/").split("/") if part not in ("", ".")]
+        if ".." in parts or not parts or entry.startswith(("/", "\\")) or (len(entry) > 1 and entry[1] == ":"):
+            raise PolicyError(f"`dev_tools` entry {entry!r} must be a folder or file below the repository root (no `.`, `..` or absolute path)")
+        out.append("/".join(parts))
+    return tuple(out)
 
 
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:

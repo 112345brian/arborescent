@@ -31,6 +31,10 @@ def _print_excluded(report: CheckReport) -> None:
     else:
         for folder, count in sorted(excluded.items()):
             print(f"  {folder}/ ({count} file(s))")
+    if report.dev_tools:
+        print("dev tools (no ring, may import product code, never imported by it):")
+        for entry, count in sorted(report.dev_tools.items()):
+            print(f"  {entry}/ ({count} module(s))")
 
 
 def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: str | None = None) -> None:
@@ -51,7 +55,7 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
         for key in report.ratchet.stale:
             print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline`): {key}")
     for e in report.engines:
-        print(f"{e.status.upper():7}{e.name} ({e.seconds:.2f}s) {' | '.join(e.lines[-1:]) if e.status != 'fail' else ''}")
+        print(f"{e.status.upper():9}{e.name} ({e.seconds:.2f}s) {' | '.join(e.lines[-1:]) if e.status != 'fail' else ''}")
         if e.status == "fail":
             print("\n".join("        " + ln for ln in e.lines))
     _print_setup_hint(report, setup_command)

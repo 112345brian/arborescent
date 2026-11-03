@@ -340,3 +340,51 @@ def test_fact_cache_round_trips_suppressions_and_discard_calls(tmp_path: Path) -
     assert warm.modules["app.domain"].facts.discard_calls == (2,)
     assert warm.modules["app.domain"].facts.top_level_defs == first.modules["app.domain"].facts.top_level_defs
     assert [d.name for d in warm.modules["app.domain"].facts.top_level_defs] == ["Port"]
+
+
+def _clock_targets(source: str) -> set[tuple[int, str]]:
+    return {(use.line, use.target) for use in extract(source).effect_uses if use.category == "clock" and use.seam == 0}
+
+
+def test_parameter_default_naming_an_effect_is_an_injection_seam_not_a_use() -> None:
+    assert _clock_targets("from datetime import datetime\ndef f(*, now=datetime.now):\n    return now()\n") == set()
+    assert _clock_targets("import uuid\nclass C:\n    def __init__(self, new_id=uuid.uuid4): ...\n") == set()
+    assert _clock_targets("import time\nasync def f(clock_time=time.time): ...\n") == set()
+    assert _clock_targets("import time\ng = lambda t=time.time: t()\n") == set()
+
+
+def test_effect_outside_a_bare_parameter_default_still_counts() -> None:
+    now = "datetime.datetime.now"
+    assert _clock_targets("import datetime\ndef f():\n    return datetime.datetime.now()\n") == {(3, now)}
+    assert _clock_targets("import datetime\nNOW = datetime.datetime.now\n") == {(2, now)}
+    assert _clock_targets("import datetime\ndef f(*, now=lambda: datetime.datetime.now()): ...\n") == {(2, now)}
+    assert _clock_targets("import datetime\ndef f(now=datetime.datetime.now):\n    return datetime.datetime.now()\n") == {(3, now)}
+
+
+def test_a_dotted_parameter_default_is_a_seam_all_the_way_down() -> None:
+    facts = extract("import os\n\ndef f(get=os.environ.get):\n    return get('X')\n\ndef g():\n    return os.environ.get('X')\n", "m.py")
+
+    assert [(use.category, use.line) for use in facts.effect_uses if use.seam == 0] == [("env", 7)]
+    assert {use.line for use in facts.effect_uses if use.seam} == {3}
+
+
+SEAMS = (
+    "import datetime\nfrom typing import Callable\n\n"
+    "def typed(now: Callable[[], object] = datetime.datetime.now): return now()\n"
+    "def untyped(now=datetime.datetime.now): return now()\n"
+    "def wrong(now: int = datetime.datetime.now): return now\n"
+)
+
+
+def test_parameter_defaults_record_whether_their_annotation_is_a_callable() -> None:
+    kinds = {use.line: use.seam for use in extract(SEAMS, "m.py").effect_uses}
+
+    assert kinds == {4: 1, 5: 2, 6: 2}
+
+
+def test_effect_defaults_modes_decide_which_seams_count() -> None:
+    from arborescent_helpers import mini_policy
+
+    modes = {mode: [mini_policy(effect_defaults=mode).counts_effect_seam(s) for s in (0, 1, 2)] for mode in ("injection", "typed", "count")}
+
+    assert modes == {"injection": [True, False, False], "typed": [True, False, True], "count": [True, True, True]}

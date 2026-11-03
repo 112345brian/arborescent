@@ -10,6 +10,7 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from .domain import (
     ALL,
@@ -21,7 +22,7 @@ from .domain import (
     Violation,
     dist_name,
 )
-from .facts import ModuleInfo, resolve_targets
+from .facts import EffectUse, ModuleInfo, resolve_targets
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
@@ -33,6 +34,7 @@ class RuleContext:
     policy: Policy
     arbor_index: Mapping[str, tuple[str | None, str | None]]
     scope_by_module: Mapping[str, str]
+    tool_modules: frozenset[str] = frozenset()  # modules below a `dev_tools` path: no ring, never imported by product code
 
     def scope_name(self, name: str) -> str | None:
         return self.scope_by_module.get(name) if self.policy.scopes else None
@@ -69,6 +71,61 @@ class RuleContext:
     def annotation_required_violation(self, name: str) -> str | None:
         policy = self.policy_for(name)
         return policy.annotation_required_violation(self.arbor_index, name) if policy is not None else None
+
+
+def _dev_tool_imports(
+    context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], tops: Collection[str],
+) -> list[Violation]:
+    out: list[Violation] = []
+    for imp in info.facts.imports if context.tool_modules else ():
+        internal, _, _ = resolve_targets(name, info.is_package, imp, known, tops)
+        hits = [target for target in internal if target in context.tool_modules]
+        out.extend(  # `from devtools import scan` resolves to the package and the submodule: report the most specific one
+            Violation(Rule.DEV_TOOL_IMPORT, name, f"imports dev tool {target}; developer tooling may import product code, never the reverse", imp.line, target)
+            for target in hits if not any(other.startswith(target + ".") for other in hits)
+        )
+    return out
+
+
+class _ImportEnv(NamedTuple):
+    modules: Mapping[str, ModuleInfo]
+    known: Collection[str]
+    tops: Collection[str]
+    graph: dict[str, set[str]]
+
+
+def _dev_tool_findings(context: RuleContext, name: str, info: ModuleInfo, env: _ImportEnv) -> list[Violation]:
+    """Ring and external-import rules do not apply to tooling; unresolvable imports, import cycles, `dev_tools_forbid`
+    effects and `dev_tools_may_import` still do."""
+    out = _dev_tool_effects(context.policy, name, info)
+    for imp in info.facts.imports:
+        internal, _, error = resolve_targets(name, info.is_package, imp, env.known, env.tops)
+        out += _dev_tool_product_imports(context, name, imp.line, internal)
+        env.graph[name].update(
+            target for target in internal
+            if target in env.modules and context.scope_name(target) == context.scope_name(name)
+        )
+        if error is not None:
+            out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
+    return out
+
+
+def _dev_tool_effects(policy: Policy, name: str, info: ModuleInfo) -> list[Violation]:
+    return [
+        Violation(EFFECT_RULES[use.category], name, f"[dev tool] effect {use.category} uses {use.target}; tooling may not use it (`dev_tools_forbid`)", use.line)
+        for use in info.facts.effect_uses
+        if use.category in policy.dev_tools_forbid and use.category in EFFECT_RULES and policy.counts_effect_seam(use.seam)
+    ]
+
+
+def _dev_tool_product_imports(context: RuleContext, name: str, line: int, targets: Collection[str]) -> list[Violation]:
+    policy = context.policy
+    product = [target for target in targets if target not in context.tool_modules]
+    return [  # `from app import domain` resolves to `app` and `app.domain`: judge the most specific only
+        Violation(Rule.DEV_TOOL_PRODUCT_IMPORT, name, f"dev tool imports product module {target}, which `dev_tools_may_import` does not allow", line, target)
+        for target in product
+        if not any(other.startswith(target + ".") for other in product) and not policy.tool_may_import(target)
+    ]
 
 
 def _internal_imports(
@@ -143,30 +200,34 @@ def _target_ring(context: RuleContext, target: str, known: Collection[str]) -> s
     return None
 
 
+def _patch_violation(context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], use: EffectUse) -> list[Violation]:
+    policy = context.require_policy(name)
+    tests_folder = policy.practices.get("effect-patch", policy.practices.get("secrets-guard"))
+    package_names = {module.split(".", 1)[0] for module in known}
+    if not isinstance(tests_folder, str) or not tests_folder.strip("/"):
+        return []
+    folder = tests_folder.replace("\\", "/").strip("/")
+    if not info.path.replace("\\", "/").startswith(folder + "/") or use.target.split(".", 1)[0] not in package_names:
+        return []
+    target_ring = _target_ring(context, use.target, known)
+    if target_ring is None or "patch" not in policy.forbidden_effects(target_ring):
+        return []
+    detail = f"[{target_ring}] tests patch project target {use.target}; inject a port instead"
+    return [Violation(EFFECT_RULES["patch"], name, detail, use.line)]
+
+
 def _effect_uses(
     context: RuleContext, name: str, ring: str, info: ModuleInfo, known: Collection[str],
 ) -> list[Violation]:
     policy = context.require_policy(name)
     out: list[Violation] = []
-    tests_folder = policy.practices.get("effect-patch", policy.practices.get("secrets-guard"))
-    package_names = {module.split(".", 1)[0] for module in known}
     for use in info.facts.effect_uses:
+        if not policy.counts_effect_seam(use.seam):
+            continue
         if use.category == "os-branching":
             continue  # preserve the original os_branching option and Rule id
         if use.category == "patch":
-            if not isinstance(tests_folder, str) or not tests_folder.strip("/"):
-                continue
-            folder = tests_folder.replace("\\", "/").strip("/")
-            path = info.path.replace("\\", "/")
-            if not path.startswith(folder + "/"):
-                continue
-            if use.target.split(".", 1)[0] not in package_names:
-                continue
-            target_ring = _target_ring(context, use.target, known)
-            if target_ring is None or "patch" not in policy.forbidden_effects(target_ring):
-                continue
-            detail = f"[{target_ring}] tests patch project target {use.target}; inject a port instead"
-            out.append(Violation(EFFECT_RULES["patch"], name, detail, use.line))
+            out += _patch_violation(context, name, info, known, use)
             continue
         if use.category in policy.forbidden_effects(ring):
             rule = EFFECT_RULES.get(use.category)
@@ -257,7 +318,7 @@ def _scope_effect_leaks(
             continue
         seen: set[str] = set()
         for use in info.facts.effect_uses:
-            if use.category not in forbidden or use.category in seen:
+            if use.category not in forbidden or use.category in seen or not target_scope.policy.counts_effect_seam(use.seam):
                 continue
             seen.add(use.category)
             detail = (
@@ -280,6 +341,29 @@ def _wildcard_findings(policy: Policy) -> list[Violation]:
     ]
 
 
+def _module_preamble(context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], tops: Collection[str]) -> list[Violation]:
+    """Annotation, tooling-import and forbidden-name findings, which apply whether or not the module has a ring."""
+    is_tool = name in context.tool_modules
+    out: list[Violation] = []
+    detail = context.annotation_violation(name)
+    if detail is not None:
+        out.append(Violation(Rule.INVALID_ARBOR_ANNOTATION, name, detail))
+    mismatch = None if is_tool else context.annotation_ring_mismatch(name)
+    if mismatch is not None:
+        out.append(Violation(Rule.ARBOR_RING_MISMATCH, name, mismatch))
+    if not is_tool:
+        out += _dev_tool_imports(context, name, info, known, tops)
+    local_policy = context.policy_for(name)
+    pattern = local_policy.forbidden_module_pattern(name) if local_policy is not None else None
+    if pattern is not None:
+        out.append(Violation(
+            Rule.FORBIDDEN_MODULE, name,
+            f"module matches forbidden_modules pattern {pattern!r}; a first-party module with this name must not "
+            f"exist (remove it, or drop the pattern from forbidden_modules)",
+        ))
+    return out
+
+
 def check_modules(
     policy: Policy,
     modules: Mapping[str, ModuleInfo],
@@ -295,19 +379,11 @@ def check_modules(
     import_graph: dict[str, set[str]] = {name: set() for name in modules}
     for name, info in sorted(modules.items()):
         local_policy = context.policy_for(name)
-        detail = context.annotation_violation(name)
-        if detail is not None:
-            out.append(Violation(Rule.INVALID_ARBOR_ANNOTATION, name, detail))
-        mismatch = context.annotation_ring_mismatch(name)
-        if mismatch is not None:
-            out.append(Violation(Rule.ARBOR_RING_MISMATCH, name, mismatch))
-        pattern = local_policy.forbidden_module_pattern(name) if local_policy is not None else None
-        if pattern is not None:
-            out.append(Violation(
-                Rule.FORBIDDEN_MODULE, name,
-                f"module matches forbidden_modules pattern {pattern!r}; a first-party module with this name must not "
-                f"exist (remove it, or drop the pattern from forbidden_modules)",
-            ))
+        is_tool = name in context.tool_modules  # developer tooling: no ring, may import product code
+        out += _module_preamble(context, name, info, known, tops)
+        if is_tool:
+            out += _dev_tool_findings(context, name, info, _ImportEnv(modules, known, tops, import_graph))
+            continue
         ring = context.resolve_ring(name)
         if ring is None:
             out.append(Violation(Rule.UNCLASSIFIED, name, (context.policy_for(name) or context.policy).unclassified_detail(name)))

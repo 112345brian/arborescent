@@ -7,6 +7,7 @@ from arborescent_helpers import mini_policy, write_files
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
 from arborescent.baseline import save
 from arborescent.cli import main
+from arborescent.config import load_policy
 from arborescent.domain import ToolResult
 from arborescent.engine import Services, run_own
 from arborescent.engines import default_engines
@@ -127,3 +128,21 @@ def test_coverage_debt_can_be_adopted_as_a_family(repo: Path) -> None:
     assert main(["--config", str(config), "baseline", "--adopt", "coverage"], services) == 0
 
     assert "unclassified|scripts.extra|" in fs.read_text(repo / "arborescent-baseline.json")
+
+
+def test_module_missing_from_the_tach_layers_is_unclassified_not_silently_exempt(tmp_path: Path) -> None:
+    """#93: with `classify_from`, a new module that nobody registered in tach.toml is reported, not skipped."""
+    write_files(tmp_path, {
+        "tach.toml": '[[modules]]\npath = "app.routes.jobs"\nlayer = "routes"\n',
+        "arborescent.toml": 'classify_from = "tach.toml"\nrings = ["routes"]\n',
+        "app/__init__.py": "",
+        "app/routes/__init__.py": "",
+        "app/routes/jobs.py": "def _rescore_deps(): ...\n",
+        "app/routes/jobs_contract.py": "def handler():\n    from app.routes.jobs import _rescore_deps\n    return _rescore_deps\n",
+    })
+    policy = load_policy(LocalFileSystem(), tmp_path / "arborescent.toml")[0]
+
+    found, _ = run_own(policy, tmp_path, make_services(GitFiles(available=False)), practices=False)
+
+    assert {v.subject for v in found if v.rule == "unclassified"} >= {"app.routes.jobs_contract"}
+    assert "app.routes.jobs" not in {v.subject for v in found if v.rule == "unclassified"}

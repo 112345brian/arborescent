@@ -13,11 +13,24 @@ import tomllib
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
-__all__ = ["OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef", "extract", "resolve_targets"]
+__all__ = ["DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef", "extract", "resolve_targets"]
 
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
 _ABSTRACT_BASE_NAMES = frozenset({"ABC", "abc.ABC", "Protocol", "typing.Protocol", "typing_extensions.Protocol"})
 _ABC_META_NAMES = frozenset({"ABCMeta", "abc.ABCMeta"})
+_DATABASE_PACKAGES = ("sqlite3.", "psycopg.", "psycopg2.", "asyncpg.", "pymysql.", "mysql.connector.", "sqlalchemy.", "pymongo.", "redis.", "aiosqlite.")
+_FILESYSTEM_APIS = frozenset({
+    "open", "io.open", "os.open", "os.remove", "os.unlink", "os.rename", "os.replace", "os.mkdir", "os.makedirs", "os.rmdir",
+    "os.removedirs", "os.listdir", "os.scandir", "os.walk", "os.stat", "os.chmod", "os.symlink", "os.truncate", "glob.glob", "glob.iglob",
+    "shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copyfileobj", "shutil.copymode", "shutil.copystat", "shutil.copytree",
+    "shutil.move", "shutil.rmtree", "shutil.make_archive", "shutil.unpack_archive", "shutil.chown",
+    "tempfile.NamedTemporaryFile", "tempfile.TemporaryFile", "tempfile.TemporaryDirectory", "tempfile.SpooledTemporaryFile",
+    "tempfile.mkstemp", "tempfile.mkdtemp", "tempfile.mktemp",
+})
+_PATH_IO_METHODS = frozenset({
+    "read_text", "write_text", "read_bytes", "write_bytes", "open", "mkdir", "touch", "unlink", "rmdir", "rename", "replace",
+    "iterdir", "glob", "rglob", "stat",
+})
 _THREAD_POOL_APIS = frozenset({
     "concurrent.futures.ThreadPoolExecutor",
     "concurrent.futures.thread.ThreadPoolExecutor",
@@ -55,6 +68,7 @@ class EffectUse:
     line: int
     category: str
     target: str
+    seam: int = 0  # 0: a use; 1: a parameter default whose annotation is a Callable/Mapping; 2: a parameter default otherwise
 
 
 @dataclass(frozen=True)
@@ -82,6 +96,7 @@ class SourceFacts:
     top_level_defs: tuple[TopLevelDef, ...] = ()  # module-level classes and functions only
     arbor_ring: str | None = None
     arbor_error: str | None = None
+    arbor_role: str | None = None  # `__arbor__ = {"role": "dev_tool"}`: the module claims to be developer tooling
     file_refs: tuple[int, ...] = ()  # lines that read `__file__`: a location-dependent path breaks when the module moves
     main_guard: int = 0  # line of a top-level `if __name__ == "__main__":`, 0 when there is none: the module is also a program
 
@@ -149,6 +164,14 @@ def _dotted(node: ast.expr, aliases: dict[str, str]) -> str | None:
     return None
 
 
+def _storage_category(target: str) -> str | None:
+    if target.startswith(_DATABASE_PACKAGES):
+        return "database"
+    if target in _FILESYSTEM_APIS:
+        return "filesystem"
+    return None
+
+
 def _effect_category(target: str) -> str | None:
     if target in OS_BRANCH_ATTRS:
         return "os-branching"
@@ -162,17 +185,97 @@ def _effect_category(target: str) -> str | None:
         return "randomness"
     if target in {"time.sleep", "asyncio.sleep"}:
         return "sleep"
+    return _storage_category(target) or _concurrency_category(target) or _import_category(target)
+
+
+def _concurrency_category(target: str) -> str | None:
     if target.startswith("threading.") or target in _THREAD_POOL_APIS:
         return "threads"
     if target.startswith(("multiprocessing.", "subprocess.", "asyncio.create_subprocess_")) or target in _PROCESS_OS_APIS | _PROCESS_POOL_APIS:
         return "process"
+    return None
+
+
+def _import_category(target: str) -> str | None:
     if target.startswith("importlib.") or target in {"builtins.__import__", "__import__"}:
         return "dynamic-import"
     return None
 
 
+_INJECTABLE_EFFECTS = frozenset({"clock", "env", "identity", "randomness", "sleep", "threads", "process"})
+
+
+_SEAM_ANNOTATIONS = frozenset({"Callable", "Mapping", "MutableMapping"})
+
+
+def _is_seam_annotation(node: ast.expr | None) -> bool:
+    """Whether a parameter annotation says "a callable or a mapping", looking through Optional/Union/`|` and string forms."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            return _is_seam_annotation(ast.parse(node.value, mode="eval").body)
+        except SyntaxError:
+            return False
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _is_seam_annotation(node.left) or _is_seam_annotation(node.right)
+    if isinstance(node, ast.Subscript):
+        base = node.value
+        name = base.attr if isinstance(base, ast.Attribute) else base.id if isinstance(base, ast.Name) else ""
+        if name in {"Optional", "Union", "Annotated"}:
+            inner = node.slice
+            return any(_is_seam_annotation(item) for item in (inner.elts if isinstance(inner, ast.Tuple) else [inner]))
+        return _is_seam_annotation(base)
+    if isinstance(node, ast.Attribute):
+        return node.attr in _SEAM_ANNOTATIONS
+    return isinstance(node, ast.Name) and node.id in _SEAM_ANNOTATIONS
+
+
+def _injection_defaults(tree: ast.AST) -> dict[int, int]:
+    """Node id -> seam kind for every node inside a bare Name/Attribute parameter default: a reference there is the injection seam."""
+    seams: dict[int, int] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Lambda):
+            pairs = [(None, d) for d in [*node.args.defaults, *node.args.kw_defaults]]
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            positional = [*node.args.posonlyargs, *node.args.args]
+            pairs = [*zip(positional[len(positional) - len(node.args.defaults):], node.args.defaults, strict=True),
+                     *zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True)]
+            pairs = [(arg.annotation, default) for arg, default in pairs]
+        else:
+            continue
+        for annotation, default in pairs:
+            if isinstance(default, ast.Name | ast.Attribute):
+                kind = 1 if _is_seam_annotation(annotation) else 2
+                seams.update((id(inner), kind) for inner in ast.walk(default))  # `os.environ.get` also holds `os.environ`
+    return seams
+
+
+def _rebound_names(tree: ast.AST) -> set[str]:
+    """Names the module assigns, defines or takes as parameters (imports are resolved by `_aliases`): a bare builtin name among them is not the builtin."""
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            bound.add(node.id)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+    return bound
+
+
+def _path_io_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
+    """``Path(...).read_text()`` and friends: the receiver is a call, which `_dotted` cannot name."""
+    if not (isinstance(node, ast.Attribute) and node.attr in _PATH_IO_METHODS and isinstance(node.value, ast.Call)):
+        return None
+    constructor = _dotted(node.value.func, aliases)
+    if constructor not in {"pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "pathlib.WindowsPath"}:
+        return None
+    return EffectUse(node.lineno, "filesystem", f"{constructor}.{node.attr}")
+
+
 def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     aliases = _aliases(tree)
+    seams = _injection_defaults(tree)
+    rebound = _rebound_names(tree)
     uses: set[EffectUse] = set()
     imported_os_names: set[str] = set()
     for node in ast.walk(tree):
@@ -183,26 +286,37 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
                     uses.add(EffectUse(node.lineno, "os-branching", target))
                     imported_os_names.add(item.asname or item.name)
         if isinstance(node, ast.Attribute | ast.Name):
-            if isinstance(node, ast.Name) and node.id in imported_os_names:
+            if isinstance(node, ast.Name) and (node.id in imported_os_names or (node.id == "open" and "open" in rebound)):
                 continue
             target = _dotted(node, aliases)
             if target is not None:
                 category = _effect_category(target)
                 if category is not None:
-                    uses.add(EffectUse(node.lineno, category, target))
-        if not isinstance(node, ast.Call):
-            continue
-        function = _dotted(node.func, aliases)
-        if function is None:
-            continue
-        is_mock_patch = function in {"unittest.mock.patch", "mock.patch"} or function.endswith(".mock.patch")
-        is_monkeypatch = function.endswith(".setattr") and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == "monkeypatch"
-        if (is_mock_patch or is_monkeypatch) and node.args:
-            arg = node.args[0]
-            target = arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else _dotted(arg, aliases)
-            if target is not None:
-                uses.add(EffectUse(node.lineno, "patch", target))
+                    seam = seams.get(id(node), 0) if category in _INJECTABLE_EFFECTS else 0
+                    uses.add(EffectUse(node.lineno, category, target, seam))
+        path_use = _path_io_use(node, aliases)
+        if path_use is not None:
+            uses.add(path_use)
+        patch = _patch_use(node, aliases)
+        if patch is not None:
+            uses.add(patch)
     return tuple(sorted(uses))
+
+
+def _patch_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
+    """``patch("pkg.mod.name")`` / ``monkeypatch.setattr("pkg.mod.name", ...)``: the static patch target."""
+    if not isinstance(node, ast.Call):
+        return None
+    function = _dotted(node.func, aliases)
+    if function is None or not node.args:
+        return None
+    is_mock_patch = function in {"unittest.mock.patch", "mock.patch"} or function.endswith(".mock.patch")
+    is_monkeypatch = function.endswith(".setattr") and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id == "monkeypatch"
+    if not (is_mock_patch or is_monkeypatch):
+        return None
+    arg = node.args[0]
+    target = arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else _dotted(arg, aliases)
+    return EffectUse(node.lineno, "patch", target) if target is not None else None
 
 
 def _suppression_comments(source: str) -> tuple[tuple[int, str], ...]:
@@ -279,7 +393,8 @@ def _top_level_defs(tree: ast.AST, aliases: dict[str, str]) -> tuple[TopLevelDef
     return tuple(out)
 
 
-_ARBOR_LEGAL_KEYS = frozenset({"ring"})
+_ARBOR_LEGAL_KEYS = frozenset({"ring", "role"})
+DEV_TOOL_ROLE = "dev_tool"
 _CONDITIONAL_CONTAINERS = (ast.If, ast.Try, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith)
 
 
@@ -317,28 +432,34 @@ def _find_arbor_assignments(stmts: list[ast.stmt], conditional: bool) -> list[tu
     return found
 
 
-def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None]:
+def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None, str | None]:
+    """``(ring, error, role)`` from the module's ``__arbor__`` assignment."""
     found = _find_arbor_assignments(list(tree.body), False)
     if not found:
-        return None, None
+        return None, None, None
     if any(conditional for _, conditional in found):
-        return None, "__arbor__ must not be assigned inside conditional code"
+        return None, "__arbor__ must not be assigned inside conditional code", None
     value = found[-1][0]
     try:
         annotation = ast.literal_eval(value) if value is not None else None
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
-        return None, "__arbor__ must be a literal dictionary"
+        return None, "__arbor__ must be a literal dictionary", None
     if not isinstance(annotation, dict):
-        return None, "__arbor__ must be a dictionary"
+        return None, "__arbor__ must be a dictionary", None
     unknown = sorted(set(annotation) - _ARBOR_LEGAL_KEYS)
     if unknown:
-        return None, f"__arbor__ has unknown key(s): {', '.join(map(repr, unknown))}"
+        return None, f"__arbor__ has unknown key(s): {', '.join(map(repr, unknown))}", None
+    role = annotation.get("role")
+    if "role" in annotation and role != DEV_TOOL_ROLE:
+        return None, f'__arbor__."role" must be "{DEV_TOOL_ROLE}"', None
     if "ring" not in annotation:
-        return None, '__arbor__ dictionary is missing "ring"'
+        if role is not None:
+            return None, None, role
+        return None, '__arbor__ dictionary is missing "ring"', None
     ring = annotation["ring"]
     if not isinstance(ring, str):
-        return None, '__arbor__."ring" must be a string'
-    return ring, None
+        return None, '__arbor__."ring" must be a string', None
+    return ring, None, role
 
 
 def _script_deps(source: str) -> tuple[str, ...] | None:
@@ -361,7 +482,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     imports: list[RawImport] = []
     _walk(tree, False, False, imports)
-    arbor_ring, arbor_error = _arbor_ring(tree)
+    arbor_ring, arbor_error, arbor_role = _arbor_ring(tree)
     return SourceFacts(
         tuple(imports),
         _effect_uses(tree),
@@ -371,6 +492,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _top_level_defs(tree, _aliases(tree)),
         arbor_ring,
         arbor_error,
+        arbor_role,
         _file_ref_lines(tree),
         _main_guard_line(tree),
     )

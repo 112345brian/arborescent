@@ -7,19 +7,27 @@ import hashlib
 import json
 import os
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .domain import NOISE_DIRS, Policy, PolicyError
-from .facts import EffectUse, ModuleInfo, RawImport, SourceFacts, TopLevelDef, extract
+from .facts import (
+    DEV_TOOL_ROLE,
+    EffectUse,
+    ModuleInfo,
+    RawImport,
+    SourceFacts,
+    TopLevelDef,
+    extract,
+)
 from .path_exclusion import excluded_by_policy
 from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 8
+_CACHE_VERSION = 12
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
@@ -79,12 +87,23 @@ def _add_discovered(found: dict[str, tuple[str, bool, str]], policy: Policy, rel
 
 
 def _is_unclassified(policy: Policy, module: str, rel: str) -> bool:
+    if policy.is_dev_tool_path(rel):
+        return False
     scope = policy.scope_for_path(rel) if policy.scopes else None
     if policy.scopes and scope is None:
         return True
     if scope is not None:
         return scope.policy.ring_of(module) is None and not _under_sources(rel, scope.policy.sources)
     return policy.ring_of(module) is None and not _under_sources(rel, policy.sources)
+
+
+def _misplaced_dev_tools(
+    files: Sequence[tuple[str, bool, str]], modules: Mapping[str, ModuleInfo], dev_tool_modules: Collection[str],
+) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted(
+        (module, rel) for module, _, rel in files
+        if module in modules and modules[module].facts.arbor_role == DEV_TOOL_ROLE and module not in dev_tool_modules
+    ))
 
 
 def _excluded_folder(rel: str, patterns: Sequence[str]) -> str:
@@ -170,27 +189,39 @@ class ScanData:
     vendor_folders: tuple[tuple[str, str], ...] = ()  # (folder, content fingerprint)
     arbor_index: dict[str, tuple[str | None, str | None]] = field(default_factory=lambda: {})
     scope_by_module: dict[str, str] = field(default_factory=lambda: {})
+    dev_tool_modules: frozenset[str] = frozenset()  # modules below a `dev_tools` path
+    misplaced_dev_tools: tuple[tuple[str, str], ...] = ()  # (module, path): annotated as dev tooling, outside every `dev_tools` path
+
+
+def _load_cache(cache_file: Path | None) -> dict[str, list[Any]]:
+    if not (cache_file and cache_file.is_file()):
+        return {}
+    try:
+        loaded = json.loads(cache_file.read_text(encoding="utf-8"))
+        return loaded["files"] if loaded.get("v") == _CACHE_VERSION else {}
+    except (OSError, ValueError, KeyError):
+        return {}
 
 
 def _facts_to_json(f: SourceFacts) -> list[Any]:
     imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only] for i in f.imports]
-    effects = [[u.line, u.category, u.target] for u in f.effect_uses]
+    effects = [[u.line, u.category, u.target, u.seam] for u in f.effect_uses]
     suppressions = [[line, kind] for line, kind in f.suppressions]
     top_level_defs = [[d.name, d.line, d.is_class, d.is_abstract] for d in f.top_level_defs]
     return [
         imports, effects, None if f.script_deps is None else list(f.script_deps),
-        suppressions, list(f.discard_calls), top_level_defs, f.arbor_ring, f.arbor_error, list(f.file_refs), f.main_guard,
+        suppressions, list(f.discard_calls), top_level_defs, f.arbor_ring, f.arbor_error, list(f.file_refs), f.main_guard, f.arbor_role,
     ]
 
 
 def _facts_from_json(raw: list[Any]) -> SourceFacts:
     imports = tuple(RawImport(i[0], i[1], tuple(i[2]), i[3], i[4], i[5]) for i in raw[0])
-    effects = tuple(EffectUse(u[0], u[1], u[2]) for u in raw[1])
+    effects = tuple(EffectUse(u[0], u[1], u[2], u[3]) for u in raw[1])
     suppressions = tuple((item[0], item[1]) for item in raw[3])
     top_level_defs = tuple(TopLevelDef(d[0], d[1], d[2], d[3]) for d in raw[5])
     return SourceFacts(
         imports, effects, None if raw[2] is None else tuple(raw[2]),
-        suppressions, tuple(raw[4]), top_level_defs, raw[6], raw[7], tuple(raw[8]), raw[9],
+        suppressions, tuple(raw[4]), top_level_defs, raw[6], raw[7], raw[10], tuple(raw[8]), raw[9],
     )
 
 
@@ -206,14 +237,7 @@ class FsScanner:
 
     def scan(self, policy: Policy, root: Path, only: frozenset[str] | None = None) -> ScanData:
         cache_file = self._cache_dir / "scan.json" if self._cache_dir else None
-        cache: dict[str, list[Any]] = {}
-        if cache_file and cache_file.is_file():
-            try:
-                loaded = json.loads(cache_file.read_text(encoding="utf-8"))
-                if loaded.get("v") == _CACHE_VERSION:
-                    cache = loaded["files"]
-            except (OSError, ValueError, KeyError):
-                cache = {}
+        cache = _load_cache(cache_file)
         files, excluded, noise_files, unclassified, vendor_folders = self._discover(policy, root)
         known = frozenset(m for m, _, _ in files)
         scope_by_module = {
@@ -233,6 +257,8 @@ class FsScanner:
             if (only is None or rel in only or m in entry_scripts)
             and _is_enforced_source(policy, m, rel)
         }
+        dev_tool_modules = frozenset(m for m, _, rel in files if policy.is_dev_tool_path(rel))
+        wanted |= {m for m, _, rel in files if m in dev_tool_modules and (only is None or rel in only)}
         modules: dict[str, ModuleInfo] = {}
         paths: dict[str, str] = {}
         parsed = 0
@@ -258,6 +284,7 @@ class FsScanner:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             merged = fresh if only is None else {**cache, **fresh}
             _ = cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "files": merged}), encoding="utf-8")
+        misplaced = _misplaced_dev_tools(files, modules, dev_tool_modules) if annotations_enabled else ()
         if annotations_enabled:
             # This pass covers every discovered file, including unchanged import
             # targets and modules outside both classify and sources.
@@ -282,7 +309,7 @@ class FsScanner:
             noise_files = tuple(path for path in noise_files if path in only)
         return ScanData(
             known, modules, entry, paths, parsed, excluded, noise_files, unclassified,
-            vendor_folders, arbor_index, scope_by_module,
+            vendor_folders, arbor_index, scope_by_module, dev_tool_modules, misplaced,
         )
 
     def _discover(

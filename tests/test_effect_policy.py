@@ -199,3 +199,88 @@ def test_middle_forbid_is_set_per_scope() -> None:
 
     assert policy.scope("a").policy.forbidden_effects("ports") >= {"clock", "dynamic-import"}
     assert policy.scope("b").policy.forbidden_effects("ports") == frozenset()
+
+
+def test_database_and_filesystem_access_are_effects_a_ring_can_forbid(repo: Path) -> None:
+    source = (
+        "import shutil, sqlite3\n"
+        "from pathlib import Path\n"
+        "def load(path):\n"
+        "    db = sqlite3.connect('x.db')\n"
+        "    with open(path) as handle:\n"
+        "        handle.read()\n"
+        "    Path(path).write_text('x')\n"
+        "    shutil.copy(path, path)\n"
+    )
+    write_files(repo, {"app/ports.py": source})
+    ports = ring_with(ports={"may_import": ["domain"], "external": ["shutil", "sqlite3", "pathlib"], "forbid": ["database", "filesystem"]})
+
+    assert effects(run(repo, ring=ports)) == {("effect-database", "app.ports"), ("effect-filesystem", "app.ports")}
+    only_db = ring_with(ports={"may_import": ["domain"], "external": ["shutil", "sqlite3", "pathlib"], "forbid": ["database"]})
+    assert effects(run(repo, ring=only_db)) == {("effect-database", "app.ports")}
+
+
+def test_filesystem_and_database_effects_are_forbidden_in_the_innermost_ring_by_default(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "import sqlite3\ndef read(p):\n    sqlite3.connect(p)\n    return open(p).read()\n"})
+    domain = ring_with(domain={"external": ["sqlite3"]})
+    allowed = ring_with(domain={"external": ["sqlite3"], "forbid": []})
+
+    assert effects(run(repo, ring=domain)) == {("effect-database", "app.domain"), ("effect-filesystem", "app.domain")}
+    assert effects(run(repo, ring=allowed)) == set()
+
+
+def test_a_local_named_open_and_non_io_helpers_are_not_filesystem_use(repo: Path) -> None:
+    source = (
+        "import shutil, tempfile\n"
+        "def f(open):\n    return open\n"
+        "def g():\n    open = 1\n    return open\n"
+        "def h():\n    return shutil.which('x'), tempfile.gettempdir()\n"
+    )
+    write_files(repo, {"app/domain.py": source})
+    domain = ring_with(domain={"external": ["shutil", "tempfile"], "forbid": ["filesystem"]})
+
+    assert effects(run(repo, ring=domain)) == set()
+
+
+def test_tempfile_and_shutil_file_operations_are_filesystem_use(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "import shutil, tempfile\ndef f():\n    tempfile.mkdtemp()\n    shutil.rmtree('x')\n"})
+    domain = ring_with(domain={"external": ["shutil", "tempfile"], "forbid": ["filesystem"]})
+
+    assert effects(run(repo, ring=domain)) == {("effect-filesystem", "app.domain")}
+
+
+def test_pure_path_manipulation_is_not_filesystem_access(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "from pathlib import Path\ndef name(p):\n    return Path(p).name + str(Path(p).parent)\n"})
+
+    assert effects(run(repo, ring=ring_with(domain={"external": ["pathlib"]}))) == set()
+
+
+SEAM_SOURCE = (
+    "import time\nfrom typing import Callable\n\n"
+    "def typed(clock: Callable[[], float] = time.time): return clock()\n"
+    "def untyped(clock=time.time): return clock()\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [("injection", set()), ("typed", {("effect-clock", "app.domain")}), ("count", {("effect-clock", "app.domain")})],
+)
+def test_effect_defaults_decides_whether_a_parameter_default_is_a_use(repo: Path, mode: str, expected: set[tuple[str, str]]) -> None:
+    write_files(repo, {"app/domain.py": SEAM_SOURCE})
+    domain = ring_with(domain={"external": ["time", "typing"]})
+
+    assert effects(run(repo, ring=domain, effect_defaults=mode)) == expected
+
+
+def test_effect_defaults_counts_each_seam_kind_by_mode(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": SEAM_SOURCE})
+    domain = ring_with(domain={"external": ["time", "typing"]})
+    lines = {mode: sorted(f.line for f in run(repo, ring=domain, effect_defaults=mode) if f.rule == "effect-clock") for mode in ("injection", "typed", "count")}
+
+    assert lines == {"injection": [], "typed": [5], "count": [4, 5]}
+
+
+def test_effect_defaults_rejects_unknown_modes() -> None:
+    with pytest.raises(PolicyError, match="effect_defaults"):
+        mini_policy(effect_defaults="sometimes")

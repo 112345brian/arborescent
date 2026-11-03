@@ -33,6 +33,7 @@ __all__ = [
     "ToolResult",
     "Violation",
     "dist_name",
+    "path_under",
 ]
 
 NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".arborescent", ".mypy_cache", ".ruff_cache", ".tox"})
@@ -62,6 +63,11 @@ class Rule(StrEnum):
     EFFECT_SLEEP = "effect-sleep"
     EFFECT_THREADS = "effect-threads"
     EFFECT_PROCESS = "effect-process"
+    DEV_TOOL_IMPORT = "dev-tool-import"
+    DEV_TOOL_MISPLACED = "dev-tool-misplaced"
+    DEV_TOOL_PRODUCT_IMPORT = "dev-tool-product-import"
+    EFFECT_DATABASE = "effect-database"
+    EFFECT_FILESYSTEM = "effect-filesystem"
     EFFECT_DYNAMIC_IMPORT = "effect-dynamic-import"
     EFFECT_PATCH = "effect-patch"
     INTERNAL_IMPORT = "internal-import"
@@ -115,6 +121,8 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "sleep": Rule.EFFECT_SLEEP,
     "threads": Rule.EFFECT_THREADS,
     "process": Rule.EFFECT_PROCESS,
+    "database": Rule.EFFECT_DATABASE,
+    "filesystem": Rule.EFFECT_FILESYSTEM,
     "dynamic-import": Rule.EFFECT_DYNAMIC_IMPORT,
     "patch": Rule.EFFECT_PATCH,
 }
@@ -142,6 +150,13 @@ def _validate_disabled_tools(tools: tuple[str, ...]) -> None:
 def dist_name(name: str) -> str:
     """PEP 503 normalised distribution name."""
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def path_under(rel: str, entry: str) -> bool:
+    """Whether repository-relative ``rel`` is ``entry`` or lies below it; both use ``/`` or ``\\`` separators."""
+    path = rel.replace("\\", "/").strip("/")
+    folder = entry.replace("\\", "/").strip("/")
+    return path == folder or path.startswith(folder + "/")
 
 
 @dataclass(frozen=True)
@@ -230,6 +245,10 @@ class Policy:
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
     forbid_everywhere: tuple[str, ...] = ()
     forbidden_modules: tuple[str, ...] = ()  # globs on dotted first-party module names that must not exist
+    dev_tools_forbid: tuple[str, ...] = ("process",)  # effect categories tooling may not use (raw subprocess by default)
+    dev_tools_may_import: tuple[str, ...] = ()  # globs of product modules tooling may import; empty means any
+    effect_defaults: str = "injection"  # how a parameter default naming an effect counts: injection | typed | count
+    dev_tools: tuple[str, ...] = ()  # repository-relative folders or files that are developer tooling: no ring, may import product code, never imported by it
     tach_external_exclude: tuple[str, ...] = ()  # written to tach `[external] exclude`
     forbid_circular_imports: bool = True
     python: str = "3.11"
@@ -325,6 +344,19 @@ class Policy:
             if fnmatch.fnmatchcase(module, pattern):
                 return ring
         return None
+
+    def counts_effect_seam(self, seam: int) -> bool:
+        """Whether an effect reference with this `EffectUse.seam` kind is a use under `effect_defaults`."""
+        if self.effect_defaults == "count":
+            return True
+        return seam == 0 if self.effect_defaults == "injection" else seam != 1
+
+    def tool_may_import(self, target: str) -> bool:
+        return not self.dev_tools_may_import or any(fnmatch.fnmatchcase(target, pattern) for pattern in self.dev_tools_may_import)
+
+    def is_dev_tool_path(self, rel: str) -> bool:
+        """Whether a repository-relative path is, or lies below, a `dev_tools` entry."""
+        return any(path_under(rel, entry) for entry in self.dev_tools)
 
     def forbidden_module_pattern(self, module: str) -> str | None:
         """The first `forbidden_modules` glob matching the module's full dotted name, or None."""
