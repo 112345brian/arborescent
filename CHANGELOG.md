@@ -17,6 +17,8 @@
   optional `effect_defaults` knob and `Callable` annotation check from #101 are not implemented. The scan cache is rebuilt once.
 
 ### Added
+- Test pinning #93: with `classify_from`, a module missing from tach.toml's layers is reported as `unclassified` (it was never
+  exempt); no new rule was needed.
 - `classify-facts` (information, never baselined, not part of `--require-modularity`): checks a module's `[classify]` ring against
   its facts with three signals: it passes every rule of a more inner ring, it is a class-free leaf that only wires peers to
   inner-ring code, or it has a `__main__` guard and is also imported. It uses imports, effect uses, top-level definitions and a
