@@ -562,7 +562,7 @@ Migrating an existing classify-only project:
 | `may_import` | `[]` | Inner rings this ring may import; `["*"]` means every inner ring. A ring may always import itself. An outer ring in this list is a policy error (the onion rule). |
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
-| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `dynamic-import`, or `patch`. |
+| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `filesystem`, `dynamic-import`, or `patch`. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 
 A ring that is not given a table has no inner imports, no external imports and no OS branching. If `forbid` is omitted,
@@ -613,6 +613,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-sleep` | a ring that forbids `sleep` calls `time.sleep` or `asyncio.sleep` |
 | `effect-threads` | a ring that forbids `threads` uses `threading` or constructs a `ThreadPoolExecutor` |
 | `effect-process` | a ring that forbids `process` starts a process or shell command through `subprocess`, `multiprocessing`, `ProcessPoolExecutor`, or direct `os` spawn/exec APIs |
+| `effect-database` | a ring that forbids `database` uses `sqlite3`, `psycopg`, `psycopg2`, `asyncpg`, `pymysql`, `mysql.connector`, `sqlalchemy`, `pymongo`, `redis` or `aiosqlite` |
+| `effect-filesystem` | a ring that forbids `filesystem` calls `open`, `os` file operations (`os.remove`, `os.listdir`, `os.walk`, ...), `shutil`, `tempfile`, `glob`, or reads/writes through `Path(...)` (`read_text`, `write_text`, `mkdir`, `glob`, ...). Direct references only: a `Path` held in a variable or a call routed through a wrapper is not seen |
 | `effect-dynamic-import` | a ring that forbids any effect uses `importlib` or `__import__` |
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |

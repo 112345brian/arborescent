@@ -17,6 +17,10 @@
   optional `effect_defaults` knob and `Callable` annotation check from #101 are not implemented. The scan cache is rebuilt once.
 
 ### Added
+- `database` and `filesystem` effect categories with `effect-database` and `effect-filesystem` rules, forbiddable per ring with
+  `forbid` / `middle_forbid` like the others. Direct references only. **Behavior change:** the innermost ring (and `strict`
+  middle rings) forbid every category by default, so an inner-ring module that calls `open(`, `shutil` or `sqlite3` is now
+  reported; set `forbid` on the ring to opt out. The scan cache is rebuilt once (#92).
 - Test pinning #93: with `classify_from`, a module missing from tach.toml's layers is reported as `unclassified` (it was never
   exempt); no new rule was needed.
 - `classify-facts` (information, never baselined, not part of `--require-modularity`): checks a module's `[classify]` ring against

@@ -199,3 +199,34 @@ def test_middle_forbid_is_set_per_scope() -> None:
 
     assert policy.scope("a").policy.forbidden_effects("ports") >= {"clock", "dynamic-import"}
     assert policy.scope("b").policy.forbidden_effects("ports") == frozenset()
+
+
+def test_database_and_filesystem_access_are_effects_a_ring_can_forbid(repo: Path) -> None:
+    source = (
+        "import shutil, sqlite3\n"
+        "from pathlib import Path\n"
+        "def load(path):\n"
+        "    db = sqlite3.connect('x.db')\n"
+        "    with open(path) as handle:\n"
+        "        handle.read()\n"
+        "    Path(path).write_text('x')\n"
+        "    shutil.copy(path, path)\n"
+    )
+    write_files(repo, {"app/ports.py": source})
+    ports = ring_with(ports={"may_import": ["domain"], "external": ["shutil", "sqlite3", "pathlib"], "forbid": ["database", "filesystem"]})
+
+    assert effects(run(repo, ring=ports)) == {("effect-database", "app.ports"), ("effect-filesystem", "app.ports")}
+    only_db = ring_with(ports={"may_import": ["domain"], "external": ["shutil", "sqlite3", "pathlib"], "forbid": ["database"]})
+    assert effects(run(repo, ring=only_db)) == {("effect-database", "app.ports")}
+
+
+def test_filesystem_and_database_effects_are_forbidden_in_the_innermost_ring_by_default(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "def read(p):\n    return open(p).read()\n"})
+
+    assert ("effect-filesystem", "app.domain") in effects(run(repo))
+
+
+def test_pure_path_manipulation_is_not_filesystem_access(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "from pathlib import Path\ndef name(p):\n    return Path(p).name + str(Path(p).parent)\n"})
+
+    assert effects(run(repo, ring=ring_with(domain={"external": ["pathlib"]}))) == set()

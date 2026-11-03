@@ -18,6 +18,15 @@ __all__ = ["OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFac
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
 _ABSTRACT_BASE_NAMES = frozenset({"ABC", "abc.ABC", "Protocol", "typing.Protocol", "typing_extensions.Protocol"})
 _ABC_META_NAMES = frozenset({"ABCMeta", "abc.ABCMeta"})
+_DATABASE_PACKAGES = ("sqlite3.", "psycopg.", "psycopg2.", "asyncpg.", "pymysql.", "mysql.connector.", "sqlalchemy.", "pymongo.", "redis.", "aiosqlite.")
+_FILESYSTEM_APIS = frozenset({
+    "open", "io.open", "os.open", "os.remove", "os.unlink", "os.rename", "os.replace", "os.mkdir", "os.makedirs", "os.rmdir",
+    "os.removedirs", "os.listdir", "os.scandir", "os.walk", "os.stat", "os.chmod", "os.symlink", "os.truncate", "glob.glob", "glob.iglob",
+})
+_PATH_IO_METHODS = frozenset({
+    "read_text", "write_text", "read_bytes", "write_bytes", "open", "mkdir", "touch", "unlink", "rmdir", "rename", "replace",
+    "iterdir", "glob", "rglob", "stat",
+})
 _THREAD_POOL_APIS = frozenset({
     "concurrent.futures.ThreadPoolExecutor",
     "concurrent.futures.thread.ThreadPoolExecutor",
@@ -162,6 +171,10 @@ def _effect_category(target: str) -> str | None:
         return "randomness"
     if target in {"time.sleep", "asyncio.sleep"}:
         return "sleep"
+    if target.startswith(_DATABASE_PACKAGES):
+        return "database"
+    if target in _FILESYSTEM_APIS or target.startswith(("shutil.", "tempfile.")):
+        return "filesystem"
     if target.startswith("threading.") or target in _THREAD_POOL_APIS:
         return "threads"
     if target.startswith(("multiprocessing.", "subprocess.", "asyncio.create_subprocess_")) or target in _PROCESS_OS_APIS | _PROCESS_POOL_APIS:
@@ -204,6 +217,10 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
                 category = _effect_category(target)
                 if category is not None and not (id(node) in seams and category in _INJECTABLE_EFFECTS):
                     uses.add(EffectUse(node.lineno, category, target))
+        if isinstance(node, ast.Attribute) and node.attr in _PATH_IO_METHODS and isinstance(node.value, ast.Call):
+            constructor = _dotted(node.value.func, aliases)
+            if constructor in {"pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "pathlib.WindowsPath"}:
+                uses.add(EffectUse(node.lineno, "filesystem", f"{constructor}.{node.attr}"))
         if not isinstance(node, ast.Call):
             continue
         function = _dotted(node.func, aliases)

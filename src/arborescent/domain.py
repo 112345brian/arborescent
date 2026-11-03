@@ -62,6 +62,8 @@ class Rule(StrEnum):
     EFFECT_SLEEP = "effect-sleep"
     EFFECT_THREADS = "effect-threads"
     EFFECT_PROCESS = "effect-process"
+    EFFECT_DATABASE = "effect-database"
+    EFFECT_FILESYSTEM = "effect-filesystem"
     EFFECT_DYNAMIC_IMPORT = "effect-dynamic-import"
     EFFECT_PATCH = "effect-patch"
     INTERNAL_IMPORT = "internal-import"
@@ -115,6 +117,8 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "sleep": Rule.EFFECT_SLEEP,
     "threads": Rule.EFFECT_THREADS,
     "process": Rule.EFFECT_PROCESS,
+    "database": Rule.EFFECT_DATABASE,
+    "filesystem": Rule.EFFECT_FILESYSTEM,
     "dynamic-import": Rule.EFFECT_DYNAMIC_IMPORT,
     "patch": Rule.EFFECT_PATCH,
 }
