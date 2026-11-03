@@ -6,13 +6,12 @@ from pathlib import Path
 
 import pytest
 from arborescent_helpers import mini_policy, write_files
+from test_coverage import GitFiles, make_services
 
 from arborescent.adapters import FsScanner
 from arborescent.domain import PolicyError
 from arborescent.engine import run_own
 from arborescent.facts import extract
-
-from test_coverage import GitFiles, make_services
 
 
 def findings(root: Path, **overrides: object) -> set[tuple[str, str]]:

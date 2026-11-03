@@ -159,6 +159,14 @@ def _dotted(node: ast.expr, aliases: dict[str, str]) -> str | None:
     return None
 
 
+def _storage_category(target: str) -> str | None:
+    if target.startswith(_DATABASE_PACKAGES):
+        return "database"
+    if target in _FILESYSTEM_APIS or target.startswith(("shutil.", "tempfile.")):
+        return "filesystem"
+    return None
+
+
 def _effect_category(target: str) -> str | None:
     if target in OS_BRANCH_ATTRS:
         return "os-branching"
@@ -172,10 +180,9 @@ def _effect_category(target: str) -> str | None:
         return "randomness"
     if target in {"time.sleep", "asyncio.sleep"}:
         return "sleep"
-    if target.startswith(_DATABASE_PACKAGES):
-        return "database"
-    if target in _FILESYSTEM_APIS or target.startswith(("shutil.", "tempfile.")):
-        return "filesystem"
+    stored = _storage_category(target)
+    if stored is not None:
+        return stored
     if target.startswith("threading.") or target in _THREAD_POOL_APIS:
         return "threads"
     if target.startswith(("multiprocessing.", "subprocess.", "asyncio.create_subprocess_")) or target in _PROCESS_OS_APIS | _PROCESS_POOL_APIS:
@@ -198,6 +205,16 @@ def _injection_defaults(tree: ast.AST) -> set[int]:
     return seams
 
 
+def _path_io_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
+    """``Path(...).read_text()`` and friends: the receiver is a call, which `_dotted` cannot name."""
+    if not (isinstance(node, ast.Attribute) and node.attr in _PATH_IO_METHODS and isinstance(node.value, ast.Call)):
+        return None
+    constructor = _dotted(node.value.func, aliases)
+    if constructor not in {"pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "pathlib.WindowsPath"}:
+        return None
+    return EffectUse(node.lineno, "filesystem", f"{constructor}.{node.attr}")
+
+
 def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     aliases = _aliases(tree)
     seams = _injection_defaults(tree)
@@ -218,10 +235,9 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
                 category = _effect_category(target)
                 if category is not None and not (id(node) in seams and category in _INJECTABLE_EFFECTS):
                     uses.add(EffectUse(node.lineno, category, target))
-        if isinstance(node, ast.Attribute) and node.attr in _PATH_IO_METHODS and isinstance(node.value, ast.Call):
-            constructor = _dotted(node.value.func, aliases)
-            if constructor in {"pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "pathlib.WindowsPath"}:
-                uses.add(EffectUse(node.lineno, "filesystem", f"{constructor}.{node.attr}"))
+        path_use = _path_io_use(node, aliases)
+        if path_use is not None:
+            uses.add(path_use)
         if not isinstance(node, ast.Call):
             continue
         function = _dotted(node.func, aliases)

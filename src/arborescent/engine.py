@@ -166,6 +166,13 @@ def run_own(
     return found, scan
 
 
+def _dev_tool_counts(policy: Policy, scan: ScanResult) -> dict[str, int]:
+    return {
+        entry: sum(1 for module in scan.dev_tool_modules if Policy.is_dev_tool_path(replace(policy, dev_tools=(entry,)), scan.paths[module]))
+        for entry in policy.dev_tools
+    }
+
+
 def blocking(found: Iterable[Violation]) -> list[Violation]:
     """The findings that can fail a check or enter the baseline (information is reported, never recorded)."""
     return [v for v in found if v.rule not in INFORMATIONAL_RULES]
@@ -452,10 +459,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         report.suppression_counts, report.discard_counts = _inventory_counts(scan.modules)
         report.excluded = dict(scan.excluded)
         report.vendor_folders = tuple(scan.vendor_folders)
-        report.dev_tools = {
-            entry: sum(1 for module in scan.dev_tool_modules if scan.paths[module].strip("/") == entry.strip("/") or scan.paths[module].startswith(entry.strip("/") + "/"))
-            for entry in policy.dev_tools
-        }
+        report.dev_tools = _dev_tool_counts(policy, scan)
         report.suggestions = file_size_suggestions(
             services.fs,
             root,

@@ -7,6 +7,7 @@ from arborescent_helpers import mini_policy, write_files
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
 from arborescent.baseline import save
 from arborescent.cli import main
+from arborescent.config import load_policy
 from arborescent.domain import ToolResult
 from arborescent.engine import Services, run_own
 from arborescent.engines import default_engines
@@ -131,8 +132,6 @@ def test_coverage_debt_can_be_adopted_as_a_family(repo: Path) -> None:
 
 def test_module_missing_from_the_tach_layers_is_unclassified_not_silently_exempt(tmp_path: Path) -> None:
     """#93: with `classify_from`, a new module that nobody registered in tach.toml is reported, not skipped."""
-    from arborescent.config import load_policy
-
     write_files(tmp_path, {
         "tach.toml": '[[modules]]\npath = "app.routes.jobs"\nlayer = "routes"\n',
         "arborescent.toml": 'classify_from = "tach.toml"\nrings = ["routes"]\n',

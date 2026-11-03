@@ -76,7 +76,7 @@ def _dev_tool_imports(
     context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], tops: Collection[str],
 ) -> list[Violation]:
     out: list[Violation] = []
-    for imp in info.facts.imports:
+    for imp in info.facts.imports if context.tool_modules else ():
         internal, _, _ = resolve_targets(name, info.is_package, imp, known, tops)
         out.extend(
             Violation(Rule.DEV_TOOL_IMPORT, name, f"imports dev tool {target}; developer tooling may import product code, never the reverse", imp.line, target)
@@ -317,8 +317,7 @@ def check_modules(
             out.append(Violation(Rule.ARBOR_RING_MISMATCH, name, mismatch))
         if name in context.tool_modules:
             continue  # developer tooling: no ring, may import product code
-        if context.tool_modules:
-            out += _dev_tool_imports(context, name, info, known, tops)
+        out += _dev_tool_imports(context, name, info, known, tops)
         pattern = local_policy.forbidden_module_pattern(name) if local_policy is not None else None
         if pattern is not None:
             out.append(Violation(

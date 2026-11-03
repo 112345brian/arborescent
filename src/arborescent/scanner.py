@@ -7,13 +7,21 @@ import hashlib
 import json
 import os
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .domain import NOISE_DIRS, Policy, PolicyError
-from .facts import DEV_TOOL_ROLE, EffectUse, ModuleInfo, RawImport, SourceFacts, TopLevelDef, extract
+from .facts import (
+    DEV_TOOL_ROLE,
+    EffectUse,
+    ModuleInfo,
+    RawImport,
+    SourceFacts,
+    TopLevelDef,
+    extract,
+)
 from .path_exclusion import excluded_by_policy
 from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
@@ -87,6 +95,15 @@ def _is_unclassified(policy: Policy, module: str, rel: str) -> bool:
     if scope is not None:
         return scope.policy.ring_of(module) is None and not _under_sources(rel, scope.policy.sources)
     return policy.ring_of(module) is None and not _under_sources(rel, policy.sources)
+
+
+def _misplaced_dev_tools(
+    files: Sequence[tuple[str, bool, str]], modules: Mapping[str, ModuleInfo], dev_tool_modules: Collection[str],
+) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted(
+        (module, rel) for module, _, rel in files
+        if module in modules and modules[module].facts.arbor_role == DEV_TOOL_ROLE and module not in dev_tool_modules
+    ))
 
 
 def _excluded_folder(rel: str, patterns: Sequence[str]) -> str:
@@ -264,10 +281,7 @@ class FsScanner:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             merged = fresh if only is None else {**cache, **fresh}
             _ = cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "files": merged}), encoding="utf-8")
-        misplaced = tuple(sorted(
-            (module, rel) for module, _, rel in files
-            if module in modules and modules[module].facts.arbor_role == DEV_TOOL_ROLE and module not in dev_tool_modules
-        ))
+        misplaced = _misplaced_dev_tools(files, modules, dev_tool_modules)
         if annotations_enabled:
             # This pass covers every discovered file, including unchanged import
             # targets and modules outside both classify and sources.
