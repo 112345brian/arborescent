@@ -12,6 +12,7 @@ from arborescent import baseline
 from arborescent.adapters import FsScanner
 from arborescent.config import policy_from_mapping
 from arborescent.domain import Policy, Rule, Violation
+from arborescent.package_parts import module_imports
 from arborescent.rules import RuleContext, check_modules
 
 
@@ -591,3 +592,32 @@ def test_forbidden_modules_applies_only_inside_its_scope(tmp_path: Path) -> None
     context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
     found = _forbidden(check_modules(policy, scan.modules, scan.known, scan.entry_deps, context))
     assert [v.subject for v in found] == ["alpha.legacy"]
+
+
+EXT_CLASSIFY = {"app.ext": "adapters", "app.ext.rules": "ports"}  # a package whose `__init__` is outer but one submodule is not
+EXT_FILES = {"app/ext/__init__.py": "", "app/ext/rules.py": "HINTS: int = 1\n"}
+
+
+def _ports_importing(repo: Path, line: str) -> list[Violation]:
+    write_files(repo, {**EXT_FILES, "app/ports.py": f"from __future__ import annotations\n\n{line}\n"})
+    return run(repo, classify={**CLASSIFY, **EXT_CLASSIFY})
+
+
+@pytest.mark.parametrize("line", ["from app.ext import rules", "from app.ext.rules import HINTS", "from .ext import rules", "from .ext.rules import HINTS"])
+def test_every_spelling_of_importing_a_submodule_charges_the_submodule_ring_only(repo: Path, line: str) -> None:
+    """#109: `from pkg import sub` is the edge to `pkg.sub`, not to the package `__init__`'s (outer) ring."""
+    found = _ports_importing(repo, line)
+    assert [v for v in found if v.rule == "internal-import"] == []
+
+
+@pytest.mark.parametrize("line", ["from app.ext import HINTS", "from .ext import rules, HINTS", "from app.ext import rules, HINTS"])
+def test_importing_an_attribute_of_the_package_charges_the_package_ring(repo: Path, line: str) -> None:
+    found = _ports_importing(repo, line)
+    assert [v.subject for v in found if v.rule == "internal-import"] == ["app.ports"]
+    assert "app.ext" in next(v for v in found if v.rule == "internal-import").detail
+
+
+def test_package_splitting_still_sees_the_package_init_as_a_dependency(repo: Path) -> None:
+    write_files(repo, {**EXT_FILES, "app/ports.py": "from app.ext import rules\n"})
+    scan = FsScanner().scan(mini_policy(), repo)
+    assert module_imports(scan.modules, scan.known)["app.ports"] == ("app.ext", "app.ext.rules")

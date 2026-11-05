@@ -13,7 +13,7 @@ import tomllib
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
-__all__ = ["DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef", "extract", "resolve_targets"]
+__all__ = ["DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef", "extract", "resolve_runtime_targets", "resolve_targets"]
 
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
 _ABSTRACT_BASE_NAMES = frozenset({"ABC", "abc.ABC", "Protocol", "typing.Protocol", "typing_extensions.Protocol"})
@@ -272,9 +272,9 @@ def _path_io_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
     return EffectUse(node.lineno, "filesystem", f"{constructor}.{node.attr}")
 
 
-def _os_branch_imports(node: ast.AST) -> list[tuple[EffectUse, str]]:
+def _os_branch_imports(node: ast.ImportFrom) -> list[tuple[EffectUse, str]]:
     """``from sys import platform``: each OS-branching name an import binds, with the local name it is bound to."""
-    if not (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None):
+    if node.level != 0 or node.module is None:
         return []
     return [
         (EffectUse(node.lineno, "os-branching", f"{node.module}.{item.name}"), item.asname or item.name)
@@ -290,9 +290,10 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     uses: set[EffectUse] = set()
     imported_os_names: set[str] = set()
     for node in ast.walk(tree):
-        for use, bound_name in _os_branch_imports(node):
-            uses.add(use)
-            imported_os_names.add(bound_name)
+        if isinstance(node, ast.ImportFrom):
+            for use, bound_name in _os_branch_imports(node):
+                uses.add(use)
+                imported_os_names.add(bound_name)
         if isinstance(node, ast.Attribute | ast.Name):
             if isinstance(node, ast.Name) and (node.id in imported_os_names or (node.id == "open" and "open" in rebound)):
                 continue
@@ -530,23 +531,48 @@ def resolve_targets(
 
     Internal names are dotted modules from ``known``; ``from . import a, b`` yields the submodules ``a`` and ``b``
     when they are modules, and ``from .m import x`` yields ``m``.
+
+    ``from pkg import sub`` is an edge to ``pkg.sub`` alone, as ``from pkg.sub import x`` is; ``pkg`` is added only when some
+    imported name is not a submodule (it is read off the package) or is ``*``. That is the question a ring check asks.
     """
+    base, external, error = _import_base(module, is_package, imp, tops)
+    return ([], external, error) if base is None else (_import_edges(base, imp, known, runtime_init=False), [], None)
+
+
+def resolve_runtime_targets(
+    module: str, is_package: bool, imp: RawImport, known: Collection[str], tops: Collection[str]
+) -> tuple[list[str], list[str], str | None]:
+    """Like ``resolve_targets``, but for what actually runs: importing ``pkg.sub`` also runs ``pkg/__init__``.
+
+    Package splitting must carry that file with the modules that import its submodules, so ``from pkg import sub`` keeps the
+    edge to ``pkg`` next to the one to ``pkg.sub``."""
+    base, external, error = _import_base(module, is_package, imp, tops)
+    return ([], external, error) if base is None else (_import_edges(base, imp, known, runtime_init=True), [], None)
+
+
+def _import_base(module: str, is_package: bool, imp: RawImport, tops: Collection[str]) -> tuple[list[str] | None, list[str], str | None]:
+    """The dotted path an import names, or (None, external names, error) when it is not first-party or cannot be resolved."""
     parts = module.split(".")
     pkg = parts if is_package else parts[:-1]
     if imp.level:
         if imp.level - 1 > len(pkg):
-            return [], [], f"relative import climbs above the source root ({'.' * imp.level}{imp.module})"
-        base = pkg[: len(pkg) - (imp.level - 1)] + (imp.module.split(".") if imp.module else [])
-    else:
-        base = imp.module.split(".")
-        if base[0] not in tops:
-            return [], [base[0]] if base[0] else [], None
+            return None, [], f"relative import climbs above the source root ({'.' * imp.level}{imp.module})"
+        return pkg[: len(pkg) - (imp.level - 1)] + (imp.module.split(".") if imp.module else []), [], None
+    base = imp.module.split(".")
+    if base[0] not in tops:
+        return None, [base[0]] if base[0] else [], None
+    return base, [], None
+
+
+def _import_edges(base: list[str], imp: RawImport, known: Collection[str], *, runtime_init: bool) -> list[str]:
     if not imp.names:  # plain `import a.b.c`
-        return [_longest_known(base, known)], [], None
+        return [_longest_known(base, known)]
     subs = [".".join([*base, n]) for n in imp.names if n != "*" and ".".join([*base, n]) in known]
+    head = [_longest_known(base, known)] if base else []
+    if runtime_init:
+        return subs if not imp.module and subs else [*head, *subs]
     all_submodules = bool(subs) and len(subs) == len(imp.names)  # every name is a submodule: nothing is read off the package itself
-    head = [_longest_known(base, known)] if base and not all_submodules else []
-    return [*head, *subs], [], None
+    return ([] if all_submodules else head) + subs
 
 
 def _longest_known(parts: Iterable[str], known: Collection[str]) -> str:

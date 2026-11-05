@@ -38,10 +38,11 @@ def render_hook(prefix: str) -> str:
         "if [ -x .venv/bin/python ]; then PY=.venv/bin/python\n"
         "elif [ -x .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe\n"
         "else PY=python; command -v \"$PY\" >/dev/null 2>&1 || PY=python3; fi\n"
-        # An interpreter that cannot import arborescent says nothing about the code being pushed: say so and let CI decide,
-        # rather than blocking every push (including one that fixes the environment) with "No module named arborescent".
-        "if ! \"$PY\" -c 'import arborescent' >/dev/null 2>&1; then\n"
-        '  echo "arborescent pre-push: $PY cannot import arborescent; skipping the check (install it in the project environment, e.g. uv sync)" >&2\n'
+        # An interpreter that does not have arborescent at all says nothing about the code being pushed: say so and let CI decide,
+        # rather than blocking every push (including one that fixes the environment) with "No module named arborescent". An
+        # arborescent that is installed but broken is not skipped: the check runs and fails loudly.
+        "if ! \"$PY\" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec(\"arborescent\") is None)' >/dev/null 2>&1; then\n"
+        '  echo "arborescent pre-push: $PY has no arborescent installed; skipping the check (install it in the project environment, e.g. uv sync)" >&2\n'
         "  exit 0\n"
         "fi\n"
         'exec "$PY" -m arborescent check --require-tools --require-profile\n'

@@ -5,7 +5,12 @@ from pathlib import Path
 from arborescent_helpers import MINI_FILES, mini_policy, write_files
 
 from arborescent.adapters import FsScanner
-from arborescent.facts import RawImport, extract, resolve_targets
+from arborescent.facts import (
+    RawImport,
+    extract,
+    resolve_runtime_targets,
+    resolve_targets,
+)
 
 
 def test_effect_facts_resolve_module_and_from_import_aliases() -> None:
@@ -388,9 +393,12 @@ def test_effect_defaults_modes_decide_which_seams_count() -> None:
     assert modes == {"injection": [True, False, False], "typed": [True, False, True], "count": [True, True, True]}
 
 
-def _resolve(imp_module: str, names: tuple[str, ...], known: set[str]) -> list[str]:
-    internal, _, _ = resolve_targets("app.user", False, RawImport(0, imp_module, names, 1, False, False), known, {"ingest", "app"})
-    return internal
+def _resolve(imp_module: str, names: tuple[str, ...], known: set[str], *, level: int = 0, module: str = "app.user") -> list[str]:
+    return resolve_targets(module, False, RawImport(level, imp_module, names, 1, False, False), known, {"ingest", "app"})[0]
+
+
+def _resolve_runtime(imp_module: str, names: tuple[str, ...], known: set[str], *, level: int = 0, module: str = "app.user") -> list[str]:
+    return resolve_runtime_targets(module, False, RawImport(level, imp_module, names, 1, False, False), known, {"ingest", "app"})[0]
 
 
 KNOWN = {"ingest", "ingest.rules", "ingest.other", "app", "app.user"}
@@ -418,3 +426,27 @@ def test_from_package_import_star_keeps_the_package_edge() -> None:
 
 def test_from_submodule_import_name_is_an_edge_to_the_submodule() -> None:
     assert _resolve("ingest.rules", ("Hints",), KNOWN) == ["ingest.rules"]
+
+
+REL_KNOWN = {"ingest", "ingest.rules", "ingest.user"}
+
+
+def test_relative_import_of_only_submodules_has_no_package_edge() -> None:
+    assert _resolve("", ("rules",), REL_KNOWN, level=1, module="ingest.user") == ["ingest.rules"]
+
+
+def test_relative_import_mixing_a_submodule_and_an_attribute_also_depends_on_the_package() -> None:
+    """`from . import rules, Hints` reads `Hints` off the package `__init__`, as the absolute spelling does."""
+    assert _resolve("", ("rules", "Hints"), REL_KNOWN, level=1, module="ingest.user") == ["ingest", "ingest.rules"]
+    assert _resolve("", ("Hints",), REL_KNOWN, level=1, module="ingest.user") == ["ingest"]
+
+
+def test_relative_from_submodule_import_name_is_an_edge_to_the_submodule() -> None:
+    assert _resolve("rules", ("Hints",), REL_KNOWN, level=1, module="ingest.user") == ["ingest.rules"]
+
+
+def test_runtime_init_keeps_the_package_edge_next_to_the_submodule_edge() -> None:
+    """Package splitting follows what actually runs: importing a submodule runs the package `__init__` first."""
+    assert _resolve_runtime("ingest", ("rules",), KNOWN) == ["ingest", "ingest.rules"]
+    assert _resolve_runtime("", ("rules",), REL_KNOWN, level=1, module="ingest.user") == ["ingest.rules"]  # unchanged
+    assert _resolve_runtime("", ("rules", "Hints"), REL_KNOWN, level=1, module="ingest.user") == ["ingest.rules"]  # unchanged

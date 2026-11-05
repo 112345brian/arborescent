@@ -7,12 +7,16 @@
 ### Fixed
 - `from pkg import submodule` is now an import of `pkg.submodule` only, not also of the package's `__init__`; the package edge
   remains when any imported name is not a submodule (or is `*`). Both spellings of one import now agree (#109).
+  This includes the relative `from . import sibling, Hints`, which now also depends on the package (it reads `Hints` off its
+  `__init__`) where it used to resolve to the sibling alone. Package splitting (`resolve_runtime_targets`) still carries
+  `pkg/__init__` with every importer of a submodule, since importing it runs that file.
 - `classify_from` now classifies a package that tach never names as a module (only its submodules) with the one ring all its
   classified descendants share, so its `__init__.py` is no longer `unclassified`; when the descendants disagree it stays
-  unclassified, and an explicit `classify` entry or a tach module for the package still wins (#107).
+  unclassified, and an explicit `classify` entry or a tach module for the package still wins (#107). A package that holds a tach
+  module without a `layer`, or an explicitly classified descendant in another ring, is not inferred either.
 - The strict preset's pre-push hook runs the project's `.venv` interpreter when there is one, and when the interpreter it finds
-  cannot import `arborescent` it prints a warning and lets the push through instead of failing every push with "No module
-  named arborescent". A real `check` failure still blocks the push; CI remains the backstop for the skipped case.
+  has no `arborescent` installed it prints a warning and lets the push through instead of failing every push with "No module
+  named arborescent". An installed but broken `arborescent`, and every real `check` failure, still block the push.
 
 ### Changed
 - `packages migrate` now rewrites `from <old> import <module>` (also with `as`, several names, `from app import core` for a

@@ -588,3 +588,25 @@ def test_classify_from_does_not_infer_a_ring_for_a_package_with_an_explicit_entr
         tmp_path, 'classify_from = "tach.toml"\nrings = ["pipeline", "composition"]\n[classify]\n"ingest" = "composition"\n', tach,
     )
     assert policy.ring_of("ingest") == "composition"
+
+
+def test_classify_from_leaves_a_package_unclassified_when_a_sibling_module_has_no_layer(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tach = '[[modules]]\npath = "ingest.facts"\nlayer = "pipeline"\n[[modules]]\npath = "ingest.scratch"\n'
+    policy = _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["pipeline"]\n', tach)
+    assert policy.ring_of("ingest.facts") == "pipeline"
+    assert policy.ring_of("ingest") is None  # half the package was left unlayered on purpose
+
+
+def test_classify_from_counts_an_explicit_descendant_when_inferring_the_package_ring(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tach = '[[modules]]\npath = "ingest.facts"\nlayer = "pipeline"\n'
+    policy = _classify_from_repo(
+        tmp_path, 'classify_from = "tach.toml"\nrings = ["pipeline", "composition"]\n[classify]\n"ingest.cli" = "composition"\n', tach,
+    )
+    assert policy.ring_of("ingest.cli") == "composition"
+    assert policy.ring_of("ingest") is None  # its children now disagree
+
+
+def test_classify_from_infers_each_level_of_nested_packages_independently(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tach = '[[modules]]\npath = "a.b.one"\nlayer = "x"\n[[modules]]\npath = "a.c.two"\nlayer = "y"\n'
+    policy = _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["x", "y"]\n', tach)
+    assert (policy.ring_of("a.b"), policy.ring_of("a.c"), policy.ring_of("a")) == ("x", "y", None)
