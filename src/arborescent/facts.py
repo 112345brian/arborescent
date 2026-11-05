@@ -272,6 +272,17 @@ def _path_io_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
     return EffectUse(node.lineno, "filesystem", f"{constructor}.{node.attr}")
 
 
+def _os_branch_imports(node: ast.AST) -> list[tuple[EffectUse, str]]:
+    """``from sys import platform``: each OS-branching name an import binds, with the local name it is bound to."""
+    if not (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None):
+        return []
+    return [
+        (EffectUse(node.lineno, "os-branching", f"{node.module}.{item.name}"), item.asname or item.name)
+        for item in node.names
+        if f"{node.module}.{item.name}" in OS_BRANCH_ATTRS
+    ]
+
+
 def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     aliases = _aliases(tree)
     seams = _injection_defaults(tree)
@@ -279,12 +290,9 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     uses: set[EffectUse] = set()
     imported_os_names: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None:
-            for item in node.names:
-                target = f"{node.module}.{item.name}"
-                if target in OS_BRANCH_ATTRS:
-                    uses.add(EffectUse(node.lineno, "os-branching", target))
-                    imported_os_names.add(item.asname or item.name)
+        for use, bound_name in _os_branch_imports(node):
+            uses.add(use)
+            imported_os_names.add(bound_name)
         if isinstance(node, ast.Attribute | ast.Name):
             if isinstance(node, ast.Name) and (node.id in imported_os_names or (node.id == "open" and "open" in rebound)):
                 continue
@@ -449,14 +457,15 @@ def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None, str | None]:
     unknown = sorted(set(annotation) - _ARBOR_LEGAL_KEYS)
     if unknown:
         return None, f"__arbor__ has unknown key(s): {', '.join(map(repr, unknown))}", None
-    role = annotation.get("role")
-    if "role" in annotation and role != DEV_TOOL_ROLE:
+    declared_role = annotation.get("role")
+    if "role" in annotation and declared_role != DEV_TOOL_ROLE:
         return None, f'__arbor__."role" must be "{DEV_TOOL_ROLE}"', None
+    role = DEV_TOOL_ROLE if "role" in annotation else None
     if "ring" not in annotation:
         if role is not None:
             return None, None, role
         return None, '__arbor__ dictionary is missing "ring"', None
-    ring = annotation["ring"]
+    ring: object = annotation["ring"]
     if not isinstance(ring, str):
         return None, '__arbor__."ring" must be a string', None
     return ring, None, role

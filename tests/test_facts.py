@@ -383,8 +383,6 @@ def test_parameter_defaults_record_whether_their_annotation_is_a_callable() -> N
 
 
 def test_effect_defaults_modes_decide_which_seams_count() -> None:
-    from arborescent_helpers import mini_policy
-
     modes = {mode: [mini_policy(effect_defaults=mode).counts_effect_seam(s) for s in (0, 1, 2)] for mode in ("injection", "typed", "count")}
 
     assert modes == {"injection": [True, False, False], "typed": [True, False, True], "count": [True, True, True]}
