@@ -109,7 +109,19 @@ def _tach_classify(fs: FileSystem, path: Path, label: str) -> dict[str, str]:
         if isinstance(module_path, str) and isinstance(layer, str) and module_path and layer:
             out[module_path] = layer
             out[module_path + ".*"] = layer
-    return out
+    return {**_shared_parent_rings(out), **out}
+
+
+def _shared_parent_rings(layers: Mapping[str, str]) -> dict[str, str]:
+    """A package tach never names itself gets the one ring all of its classified descendants share (its `__init__`)."""
+    rings_below: dict[str, set[str]] = {}
+    for module_path, layer in layers.items():
+        if module_path.endswith(".*"):
+            continue
+        parts = module_path.split(".")
+        for end in range(1, len(parts)):
+            rings_below.setdefault(".".join(parts[:end]), set()).add(layer)
+    return {parent: next(iter(rings)) for parent, rings in rings_below.items() if len(rings) == 1}
 
 
 def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Path | None:
