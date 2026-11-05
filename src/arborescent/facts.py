@@ -535,8 +535,9 @@ def resolve_targets(
     if not imp.names:  # plain `import a.b.c`
         return [_longest_known(base, known)], [], None
     subs = [".".join([*base, n]) for n in imp.names if n != "*" and ".".join([*base, n]) in known]
-    head = [_longest_known(base, known)] if base else []
-    return (subs if not imp.module and subs else [*head, *subs]), [], None
+    all_submodules = bool(subs) and len(subs) == len(imp.names)  # every name is a submodule: nothing is read off the package itself
+    head = [_longest_known(base, known)] if base and not all_submodules else []
+    return [*head, *subs], [], None
 
 
 def _longest_known(parts: Iterable[str], known: Collection[str]) -> str:

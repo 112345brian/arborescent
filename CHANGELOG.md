@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fixed
+- `from pkg import submodule` is now an import of `pkg.submodule` only, not also of the package's `__init__`; the package edge
+  remains when any imported name is not a submodule (or is `*`). Both spellings of one import now agree (#109).
+
 ### Changed
 - `packages migrate` now rewrites `from <old> import <module>` (also with `as`, several names, `from app import core` for a
   renamed `app.core`, and `from <old> import *`) instead of refusing it: a small LibCST transformer in the adapter rewrites the

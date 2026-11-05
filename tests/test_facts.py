@@ -388,3 +388,37 @@ def test_effect_defaults_modes_decide_which_seams_count() -> None:
     modes = {mode: [mini_policy(effect_defaults=mode).counts_effect_seam(s) for s in (0, 1, 2)] for mode in ("injection", "typed", "count")}
 
     assert modes == {"injection": [True, False, False], "typed": [True, False, True], "count": [True, True, True]}
+
+
+def _resolve(imp_module: str, names: tuple[str, ...], known: set[str]) -> list[str]:
+    from arborescent.facts import RawImport, resolve_targets
+
+    internal, _, _ = resolve_targets("app.user", False, RawImport(0, imp_module, names, 1, False, False), known, {"ingest", "app"})
+    return internal
+
+
+KNOWN = {"ingest", "ingest.rules", "ingest.other", "app", "app.user"}
+
+
+def test_from_package_import_submodule_is_an_edge_to_the_submodule_only() -> None:
+    assert _resolve("ingest", ("rules",), KNOWN) == ["ingest.rules"]  # #109: not also the package __init__
+
+
+def test_from_package_import_several_submodules_has_no_package_edge() -> None:
+    assert _resolve("ingest", ("rules", "other"), KNOWN) == ["ingest.rules", "ingest.other"]
+
+
+def test_from_package_import_attribute_is_an_edge_to_the_package() -> None:
+    assert _resolve("ingest", ("Hints",), KNOWN) == ["ingest"]
+
+
+def test_from_package_import_submodule_and_attribute_keeps_both_edges() -> None:
+    assert _resolve("ingest", ("rules", "Hints"), KNOWN) == ["ingest", "ingest.rules"]
+
+
+def test_from_package_import_star_keeps_the_package_edge() -> None:
+    assert _resolve("ingest", ("*",), KNOWN) == ["ingest"]
+
+
+def test_from_submodule_import_name_is_an_edge_to_the_submodule() -> None:
+    assert _resolve("ingest.rules", ("Hints",), KNOWN) == ["ingest.rules"]
