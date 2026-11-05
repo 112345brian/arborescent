@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Fixed
+- `classify_from` now classifies a package that tach never names as a module (only its submodules) with the one ring all its
+  classified descendants share, so its `__init__.py` is no longer `unclassified`; when the descendants disagree it stays
+  unclassified, and an explicit `classify` entry or a tach module for the package still wins (#107).
+
 ### Changed
 - `packages migrate` now rewrites `from <old> import <module>` (also with `as`, several names, `from app import core` for a
   renamed `app.core`, and `from <old> import *`) instead of refusing it: a small LibCST transformer in the adapter rewrites the
