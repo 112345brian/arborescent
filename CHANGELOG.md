@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Fixed
+- The strict preset's pre-push hook runs the project's `.venv` interpreter when there is one, and when the interpreter it finds
+  cannot import `arborescent` it prints a warning and lets the push through instead of failing every push with "No module
+  named arborescent". A real `check` failure still blocks the push; CI remains the backstop for the skipped case.
+
 ### Changed
 - `packages migrate` now rewrites `from <old> import <module>` (also with `as`, several names, `from app import core` for a
   renamed `app.core`, and `from <old> import *`) instead of refusing it: a small LibCST transformer in the adapter rewrites the

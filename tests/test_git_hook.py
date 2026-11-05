@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -141,3 +142,54 @@ def test_every_caller_of_ensure_git_hook_looks_at_the_outcome() -> None:
             if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
                 func = node.value.func
                 assert not (isinstance(func, ast.Name) and func.id == "ensure_git_hook"), f"{path.name} discards the outcome"
+
+
+def _run_hook(tmp_path: Path, interpreter: str, *, venv: str | None = None) -> tuple[int, str, str]:
+    """Run the rendered hook under ``sh`` with fake interpreters; return its exit code, stderr and what the interpreter was asked."""
+    log = tmp_path / "calls.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("python", "python3"):
+        _fake_python(bin_dir / name, interpreter, log)
+    if venv is not None:
+        (tmp_path / ".venv" / "bin").mkdir(parents=True)
+        _fake_python(tmp_path / ".venv" / "bin" / "python", venv, log)
+    script = tmp_path / "pre-push"
+    script.write_text(render_hook(""), encoding="utf-8")
+    done = subprocess.run(["sh", str(script)], cwd=tmp_path, env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, capture_output=True, text=True, check=False)
+    return done.returncode, done.stderr, log.read_text(encoding="utf-8") if log.exists() else ""
+
+
+def _fake_python(path: Path, behaviour: str, log: Path) -> None:
+    """``behaviour``: "ok" has arborescent importable and the check passes, "violations" fails the check, "missing" cannot import it."""
+    path.write_text(
+        "#!/bin/sh\n"
+        f'echo "{path.parent.parent.name}:$*" >> {shlex.quote(str(log))}\n'
+        'case "$1" in\n'
+        f'  -c) [ "{behaviour}" = missing ] && exit 1; exit 0;;\n'
+        f'  -m) [ "{behaviour}" = violations ] && exit 1; exit 0;;\n'
+        "esac\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="needs a POSIX shell")
+def test_a_python_without_arborescent_does_not_block_the_push(tmp_path: Path) -> None:
+    """The hook stopped every push with "No module named arborescent" when the PATH python was not the project's."""
+    code, stderr, calls = _run_hook(tmp_path, "missing")
+    assert code == 0 and "arborescent" in stderr and "skipping" in stderr
+    assert "-m arborescent" not in calls
+
+
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="needs a POSIX shell")
+def test_real_violations_still_block_the_push(tmp_path: Path) -> None:
+    code, _, calls = _run_hook(tmp_path, "violations")
+    assert code == 1 and "-m arborescent check --require-tools --require-profile" in calls
+
+
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="needs a POSIX shell")
+def test_the_project_virtualenv_is_preferred_over_the_path_python(tmp_path: Path) -> None:
+    code, _, calls = _run_hook(tmp_path, "missing", venv="ok")
+    assert code == 0 and ".venv:-m arborescent check" in calls
+    assert "bin:-m arborescent" not in calls
