@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from . import baseline as ratchet_mod
@@ -85,6 +85,14 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="install without prompting (explicitly mutates this environment)",
     )
+    _add_check_parser(sub)
+    _add_maintenance_parsers(sub)
+    _add_packages_parser(sub)
+    _add_bench_parser(sub)
+    return p
+
+
+def _add_check_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
     c = sub.add_parser(
         "check", help="drift, engines (parallel), own checks, baseline ratchet"
     )
@@ -153,6 +161,9 @@ def _parser() -> argparse.ArgumentParser:
         help="verify baseline growth entries against a git ref",
     )
     c.add_argument("--no-cache", action="store_true")
+
+
+def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
     b = sub.add_parser(
         "baseline", help="create or shrink the baseline; growth must be explicit"
     )
@@ -177,6 +188,9 @@ def _parser() -> argparse.ArgumentParser:
         help="write the annotations instead of printing what would change",
     )
     sub.add_parser("selftest", help="mutation-test the rules")
+
+
+def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
     packages = sub.add_parser(
         "packages", help="validate, list or extract declared package metadata"
     )
@@ -204,6 +218,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     _ = package_actions.add_parser("schema", help="print the JSON Schema the export validates against")
     add_migrate_parser(package_actions)
+
+
+def _add_bench_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
     b = sub.add_parser(
         "bench", help="time every engine, cold and warm, on prepared codebases"
     )
@@ -219,7 +236,6 @@ def _parser() -> argparse.ArgumentParser:
         choices=sorted(all_checkers()),
         default=sorted(all_checkers()),
     )
-    return p
 
 
 def main(
@@ -280,23 +296,25 @@ def _find_catalog_root(fs: FileSystem, start: Path, catalog_path: str) -> Path:
 def _dispatch(
     args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: MigrationTools
 ) -> int:
-    if args.command == "generate":
-        return _generate(policy, root, svc)
-    if args.command == "install-tools":
-        return _install_tools(args, policy, root, svc)
-    if args.command == "baseline":
-        return _baseline(args, policy, root, svc)
-    if args.command == "discover":
-        return _discover(policy, root, svc)
-    if args.command == "annotate":
-        return _annotate(args, policy, root, svc)
-    if args.command == "selftest":
-        return _selftest(policy, root, svc)
-    if args.command == "packages" and args.package_action in ("migrate", "extract"):
-        return run_migrate(args, policy, root, svc, tools)
     if args.command == "packages":
-        return _export(args, policy, root, svc)
-    return _check(args, policy, root, svc)
+        return _dispatch_packages(args, policy, root, svc, tools)
+    handlers: dict[str, Callable[[], int]] = {
+        "generate": lambda: _generate(policy, root, svc),
+        "install-tools": lambda: _install_tools(args, policy, root, svc),
+        "baseline": lambda: _baseline(args, policy, root, svc),
+        "discover": lambda: _discover(policy, root, svc),
+        "annotate": lambda: _annotate(args, policy, root, svc),
+        "selftest": lambda: _selftest(policy, root, svc),
+    }
+    return handlers.get(args.command, lambda: _check(args, policy, root, svc))()
+
+
+def _dispatch_packages(
+    args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: MigrationTools
+) -> int:
+    if args.package_action in ("migrate", "extract"):
+        return run_migrate(args, policy, root, svc, tools)
+    return _export(args, policy, root, svc)
 
 
 def _packages(args: argparse.Namespace, root: Path, fs: FileSystem) -> int:

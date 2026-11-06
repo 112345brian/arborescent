@@ -48,18 +48,26 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
         print(f"DRIFT  {line}")
     _print_hints(report)
     _print_inventories(report)
+    _print_findings(args, report)
+    _print_engines(report)
+    _print_setup_hint(report, setup_command)
+    _print_summary(report)
+
+
+def _print_findings(args: argparse.Namespace, report: CheckReport) -> None:
     shown = report.ratchet.new if report.ratchet and not args.no_baseline else report.violations
     for v in shown:
         print(f"FAIL   {v.render()}")
     if report.ratchet:
         for key in report.ratchet.stale:
             print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline`): {key}")
+
+
+def _print_engines(report: CheckReport) -> None:
     for e in report.engines:
         print(f"{e.status.upper():9}{e.name} ({e.seconds:.2f}s) {' | '.join(e.lines[-1:]) if e.status != 'fail' else ''}")
         if e.status == "fail":
             print("\n".join("        " + ln for ln in e.lines))
-    _print_setup_hint(report, setup_command)
-    _print_summary(report)
 
 
 def _print_hints(report: CheckReport) -> None:

@@ -17,6 +17,7 @@ from .driver_plan import BLOCKED, READY, DriverPlan, plan_supply, supply
 from .driver_port import ImportRewriter, MigrationLibrary
 from .driver_request import (
     MODULE_RENAMES,
+    MigrationRequest,
     MigrationSite,
     RewriteFinding,
     RewriteRequest,
@@ -92,13 +93,9 @@ def run_migrate(args: argparse.Namespace, policy: Policy, root: Path, svc: Servi
     rewriter_ready = rewriter.available() if wants_rewrite else True
     findings = check_source(plan, rewriter, site) if wants_rewrite and rewriter_ready else ()
     _print_plan(plan, tools, site, _View(rewriter_ready, "" if chosen is None else chosen.source, not args.yes))
-    if plan.status == BLOCKED:
-        return 1
-    if plan.status != READY:
-        return 0  # a workspace member: there is nothing to supply, and that is not a failure
-    if findings:
-        _print_findings(findings)
-        return 1
+    early = _plan_outcome(plan, findings)
+    if early is not None:
+        return early
     missing = [_setup_line(tool, root, svc) for tool, ready in ((library, library.available()), (rewriter, rewriter_ready)) if not ready]
     for line in missing:
         print(line)
@@ -110,6 +107,18 @@ def run_migrate(args: argparse.Namespace, policy: Policy, root: Path, svc: Servi
     if code == 0 and args.package_action == "extract":
         return _write_manifest(args, policy, root, svc, site)
     return code
+
+
+def _plan_outcome(plan: DriverPlan, findings: tuple[RewriteFinding, ...]) -> int | None:
+    """The exit code when the plan alone settles the run (blocked, not supplyable, unsafe imports); None to go on."""
+    if plan.status == BLOCKED:
+        return 1
+    if plan.status != READY:
+        return 0  # a workspace member: there is nothing to supply, and that is not a failure
+    if findings:
+        _print_findings(findings)
+        return 1
+    return None
 
 
 def _write_manifest(args: argparse.Namespace, policy: Policy, root: Path, svc: Services, site: MigrationSite) -> int:
@@ -173,16 +182,21 @@ def _print_plan(plan: DriverPlan, tools: MigrationTools, site: MigrationSite, vi
     mode = "dry run: nothing is supplied; pass --yes to supply the library" if view.dry_run else "supplying the library"
     print(f"migrate {plan.package}: {mode}")
     if plan.status != READY:
-        print(f"{plan.status}: {plan.reason}")
-        for gap in plan.gaps:
-            print(f"  [{gap.code}] {gap.subject}: {gap.detail}")
-        for bypass in plan.bypasses:
-            print(f"  [private-import] {bypass.module} (package {bypass.package}) imports {bypass.imports}, which is not on the public surface of {plan.package}")
-        _print_reviews(plan)
-        return
-    request = plan.request
-    if request is None:
-        return
+        _print_unready(plan)
+    elif plan.request is not None:
+        _print_request(plan, plan.request, tools, site, view)
+
+
+def _print_unready(plan: DriverPlan) -> None:
+    print(f"{plan.status}: {plan.reason}")
+    for gap in plan.gaps:
+        print(f"  [{gap.code}] {gap.subject}: {gap.detail}")
+    for bypass in plan.bypasses:
+        print(f"  [private-import] {bypass.module} (package {bypass.package}) imports {bypass.imports}, which is not on the public surface of {plan.package}")
+    _print_reviews(plan)
+
+
+def _print_request(plan: DriverPlan, request: MigrationRequest, tools: MigrationTools, site: MigrationSite, view: _View) -> None:
     print(f"library: {tools.library.name}")
     print(f"source:  {request.source}")
     print(f"target:  {request.target}")
