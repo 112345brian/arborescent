@@ -91,7 +91,15 @@ def _validate_owned_path(
         relative_path(item.destination, f"package {package.id} destination")
     if not item.role.strip():
         raise CatalogError(f"package {package.id} path role cannot be empty")
-    source = root.joinpath(*source_path.parts)
+    _check_source_file(fs, root, package, item)
+    _check_overlap(package, item, source_path, owners)
+    owners.append((source_path, package.id))
+    if item.destination is not None:
+        extraction_target(package, item)
+
+
+def _check_source_file(fs: FileSystem, root: Path, package: PackageDescriptor, item: PackagePath) -> None:
+    source = root.joinpath(*relative_path(item.path, f"package {package.id} path").parts)
     if not fs.exists(source):
         raise CatalogError(f"package {package.id} path does not exist: {item.path}")
     resolved = fs.resolve(source)
@@ -101,6 +109,11 @@ def _validate_owned_path(
         )
     if not resolved.is_relative_to(root):
         raise CatalogError(f"path escapes repository root: {item.path}")
+
+
+def _check_overlap(
+    package: PackageDescriptor, item: PackagePath, source_path: PurePosixPath, owners: list[tuple[PurePosixPath, str]]
+) -> None:
     for prior, owner in owners:
         if within(source_path, prior) or within(prior, source_path):
             text = (
@@ -109,9 +122,6 @@ def _validate_owned_path(
                 else "overlaps another path"
             )
             raise CatalogError(f"path {item.path!r} {text} ({owner}, {package.id})")
-    owners.append((source_path, package.id))
-    if item.destination is not None:
-        extraction_target(package, item)
 
 
 def _validate_dependencies(packages: Sequence[PackageDescriptor]) -> None:

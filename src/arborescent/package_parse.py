@@ -140,16 +140,24 @@ def _home(value: Mapping[str, Any]) -> PackageHome | None:
         raise CatalogError(f"{name} kind must be one of {', '.join(HOME_KINDS)}: {kind!r}")
     repository, path = optional(raw, "repository"), optional(raw, "path")
     if kind == "repository":
-        if repository is None:
-            raise CatalogError(f"{name} of kind repository requires a repository")
-        if path is not None:
-            raise CatalogError(f"{name} of kind repository takes no path")
-        return PackageHome(kind, repository=repository)
+        return _repository_home(name, repository, path)
+    return _member_home(name, repository, path)
+
+
+def _repository_home(name: str, repository: str | None, path: str | None) -> PackageHome:
+    if repository is None:
+        raise CatalogError(f"{name} of kind repository requires a repository")
+    if path is not None:
+        raise CatalogError(f"{name} of kind repository takes no path")
+    return PackageHome("repository", repository=repository)
+
+
+def _member_home(name: str, repository: str | None, path: str | None) -> PackageHome:
     if path is None:
         raise CatalogError(f"{name} of kind workspace-member requires a path")
     if repository is not None:
         raise CatalogError(f"{name} of kind workspace-member takes no repository")
-    return PackageHome(kind, path=relative_path(path, f"{name} path").as_posix())
+    return PackageHome("workspace-member", path=relative_path(path, f"{name} path").as_posix())
 
 
 def _module_renames(value: Mapping[str, Any]) -> tuple[ModuleRename, ...]:

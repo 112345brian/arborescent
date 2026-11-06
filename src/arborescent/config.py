@@ -233,6 +233,30 @@ _LEGACY_ARCHITECTURE_KEYS = frozenset({
 _SCOPE_ARCHITECTURE_KEYS = _LEGACY_ARCHITECTURE_KEYS - {"sources"}
 
 
+def _scope_from_raw(name: object, raw_scope: object, raw: Mapping[str, Any]) -> ArchitectureScope:
+    """One entry of ``scopes``: validate its shape and build its policy from the root globals plus its own keys."""
+    if not isinstance(name, str) or not name:
+        raise PolicyError("scope names must be non-empty strings")
+    if not isinstance(raw_scope, Mapping):
+        raise PolicyError(f"scope {name!r} must be a table")
+    missing = {"sources", "source_roots", "rings"} - raw_scope.keys()
+    if missing:
+        raise PolicyError(f"scope {name!r} requires {sorted(missing)}")
+    public = _scope_strings(raw_scope, "public")
+    depends_on = _scope_strings(raw_scope, "depends_on")
+    child_raw = {
+        key: value for key, value in raw.items() if key in _SCOPED_ROOT_GLOBALS and key != "children"
+    }
+    child_raw.update({key: value for key, value in raw_scope.items() if key in _SCOPE_ARCHITECTURE_KEYS})
+    child_raw["sources"] = raw_scope["sources"]
+    child_raw["source_roots"] = raw_scope["source_roots"]
+    policy = policy_from_mapping(child_raw)
+    for key, value in (("sources", raw_scope["sources"]), ("source_roots", raw_scope["source_roots"])):
+        if not isinstance(value, list) or not all(isinstance(path, str) and path for path in value):
+            raise PolicyError(f"scope {name!r} `{key}` must be a list of non-empty paths")
+    return ArchitectureScope(name, policy, public, depends_on)
+
+
 def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
     legacy = _LEGACY_ARCHITECTURE_KEYS & raw.keys()
     if legacy:
@@ -240,28 +264,7 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
     raw_scopes = raw.get("scopes")
     if not isinstance(raw_scopes, Mapping) or not raw_scopes:
         raise PolicyError("`scopes` must map non-empty scope names to tables")
-    scopes: list[ArchitectureScope] = []
-    for name, raw_scope in raw_scopes.items():
-        if not isinstance(name, str) or not name:
-            raise PolicyError("scope names must be non-empty strings")
-        if not isinstance(raw_scope, Mapping):
-            raise PolicyError(f"scope {name!r} must be a table")
-        missing = {"sources", "source_roots", "rings"} - raw_scope.keys()
-        if missing:
-            raise PolicyError(f"scope {name!r} requires {sorted(missing)}")
-        public = _scope_strings(raw_scope, "public")
-        depends_on = _scope_strings(raw_scope, "depends_on")
-        child_raw = {
-            key: value for key, value in raw.items() if key in _SCOPED_ROOT_GLOBALS and key != "children"
-        }
-        child_raw.update({key: value for key, value in raw_scope.items() if key in _SCOPE_ARCHITECTURE_KEYS})
-        child_raw["sources"] = raw_scope["sources"]
-        child_raw["source_roots"] = raw_scope["source_roots"]
-        policy = policy_from_mapping(child_raw)
-        for key, value in (("sources", raw_scope["sources"]), ("source_roots", raw_scope["source_roots"])):
-            if not isinstance(value, list) or not all(isinstance(path, str) and path for path in value):
-                raise PolicyError(f"scope {name!r} `{key}` must be a list of non-empty paths")
-        scopes.append(ArchitectureScope(name, policy, public, depends_on))
+    scopes = [_scope_from_raw(name, raw_scope, raw) for name, raw_scope in raw_scopes.items()]
 
     first = scopes[0].policy
     return replace(
