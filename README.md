@@ -64,6 +64,11 @@ __arbor__ = {"ring": "adapters"}
 (`path` and `path.*`), so a project that already assigns layers in tach need not duplicate them. Explicit `classify`
 entries stay first and win. Don't also `generate` `tach.toml` from that policy: the file would become both source and output.
 
+It also reads tach's top-level `layers` (outermost first). When the policy has no `rings`, they become `rings` innermost-first,
+and each ring may import every ring inside it, so `layers = ["cli", "application", "model"]` is the whole ring order with no
+`[ring.*]` tables. A `[ring.<name>]` table still overrides: its own `may_import` wins, and one that only sets `external` or
+`forbid` keeps the derived `may_import`. An explicit `rings` list is the author's and nothing is derived from it.
+
 A valid module-level `__arbor__` takes precedence over `classify`; the ring must be declared in the policy.
 An absent annotation uses the first matching `classify` glob. In a multi-scope config, the ring must belong to the module's owning scope. A malformed annotation or unknown ring reports
 `invalid-arbor-annotation` and falls back to `classify`, so an already-classified module keeps all its ring checks.

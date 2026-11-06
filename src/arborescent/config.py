@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import tomllib
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -89,18 +89,26 @@ def _with_derived_classify(fs: FileSystem, root: Path, raw: Mapping[str, Any]) -
     explicit = raw.get("classify", {})
     if not isinstance(explicit, Mapping):
         raise PolicyError("`classify` must map module globs to rings")
-    layers, unlayered = _tach_classify(fs, root / source, source)
+    tach = _read_tach(fs, root / source, source)
+    layers, unlayered = tach.layer_of, tach.unlayered
     derived = {pattern: ring for pattern, ring in layers.items() if pattern not in explicit}
     explicit_rings = {pattern: ring for pattern, ring in explicit.items() if isinstance(ring, str)}
     inferred = _shared_parent_rings({**layers, **explicit_rings}, unlayered)  # an explicit descendant's ring counts as one of the children's
     derived.update({package: ring for package, ring in inferred.items() if package not in explicit and package not in layers})
-    return {**{k: v for k, v in raw.items() if k != "classify_from"}, "classify": {**explicit, **derived}}
+    kept = {k: v for k, v in raw.items() if k != "classify_from"}
+    return _with_tach_rings({**kept, "classify": {**explicit, **derived}}, tach.order)
 
 
-def _tach_classify(fs: FileSystem, path: Path, label: str) -> tuple[dict[str, str], set[str]]:
-    """Each tach `[[modules]]` with a `layer` becomes `path` and `path.*` entries, mirroring tach's own layers.
+@dataclass(frozen=True)
+class _TachFacts:
+    layer_of: dict[str, str]  # `path` and `path.*` -> layer, for each tach module that has one
+    unlayered: set[str]  # paths of tach modules without a layer
+    order: list[str]  # tach's top-level `layers`, outermost first
 
-    Also returns the paths of tach modules that have no layer: a package holding one is not wholly classified."""
+
+def _read_tach(fs: FileSystem, path: Path, label: str) -> _TachFacts:
+    """What `classify_from` takes from a tach.toml: each `[[modules]]` `layer` becomes `path` and `path.*` entries, mirroring tach's
+    own layers; also the modules without a layer (a package holding one is not wholly classified) and the layer order."""
     try:
         data = tomllib.loads(fs.read_text(path))
     except (OSError, tomllib.TOMLDecodeError) as error:
@@ -116,7 +124,28 @@ def _tach_classify(fs: FileSystem, path: Path, label: str) -> tuple[dict[str, st
             out[module_path + ".*"] = layer
         else:
             unlayered.add(module_path)
-    return out, unlayered
+    layers = data.get("layers", [])
+    order = [layer for layer in layers if isinstance(layer, str) and layer] if isinstance(layers, list) else []
+    return _TachFacts(out, unlayered, order)
+
+
+def _with_tach_rings(raw: dict[str, Any], order: Sequence[str]) -> dict[str, Any]:
+    """Without `rings`, take them from tach's `layers` (innermost first) and let each ring import every ring inside it.
+
+    An explicit `rings` list is the author's and is left alone, so is an explicit `may_import`; a `[ring.<name>]` table that only
+    sets other keys (`external`, `forbid`) still gets the derived `may_import`."""
+    if not order or "rings" in raw:
+        return raw
+    rings = list(reversed(order))
+    tables = raw.get("ring", {})
+    if not isinstance(tables, Mapping):
+        return raw  # malformed: the policy validator reports it
+    merged: dict[str, Any] = dict(tables)
+    for position, name in enumerate(rings):
+        table = merged.get(name, {})
+        if isinstance(table, Mapping):
+            merged[name] = {"may_import": rings[:position], **table}
+    return {**raw, "rings": rings, "ring": merged}
 
 
 def _shared_parent_rings(rings: Mapping[str, str], unlayered: Collection[str]) -> dict[str, str]:

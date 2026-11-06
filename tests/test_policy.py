@@ -610,3 +610,40 @@ def test_classify_from_infers_each_level_of_nested_packages_independently(tmp_pa
     tach = '[[modules]]\npath = "a.b.one"\nlayer = "x"\n[[modules]]\npath = "a.c.two"\nlayer = "y"\n'
     policy = _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["x", "y"]\n', tach)
     assert (policy.ring_of("a.b"), policy.ring_of("a.c"), policy.ring_of("a")) == ("x", "y", None)
+
+
+TACH_ONION = 'layers = ["cli", "application", "model"]\n[[modules]]\npath = "pkg.core"\nlayer = "model"\n'
+
+
+def _rules(policy):  # type: ignore[no-untyped-def]
+    return {ring.name: ring.may_import for ring in policy.rings}
+
+
+def test_classify_from_derives_rings_innermost_first_and_each_may_import_from_tach_layers(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    policy = _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\n', TACH_ONION)
+    assert [ring.name for ring in policy.rings] == ["model", "application", "cli"]  # tach lists the outermost layer first
+    assert _rules(policy) == {"model": frozenset(), "application": frozenset({"model"}), "cli": frozenset({"model", "application"})}
+
+
+def test_classify_from_keeps_explicit_rings_and_may_import_over_the_derived_ones(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    explicit = 'classify_from = "tach.toml"\n[ring.cli]\nmay_import = ["model"]\n[ring.application]\nexternal = ["json"]\n'
+    policy = _classify_from_repo(tmp_path, explicit, TACH_ONION)
+    assert _rules(policy)["cli"] == frozenset({"model"})  # explicit wins, even though tach order would allow application
+    assert _rules(policy)["application"] == frozenset({"model"})  # a table with other keys still gets the derived may_import
+    assert next(ring for ring in policy.rings if ring.name == "application").external == frozenset({"json"})
+
+
+def test_classify_from_leaves_an_explicit_rings_list_alone(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    policy = _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["model", "cli", "application"]\n', TACH_ONION)
+    assert [ring.name for ring in policy.rings] == ["model", "cli", "application"]
+    assert _rules(policy) == {"model": frozenset(), "cli": frozenset(), "application": frozenset()}  # nothing derived: the author owns the order
+
+
+def test_classify_from_without_tach_layers_derives_no_rings(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    with pytest.raises(PolicyError):
+        _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\n', '[[modules]]\npath = "pkg.core"\nlayer = "model"\n')
+
+
+def test_classify_from_derives_rings_per_scope(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    policy = _classify_from_repo(tmp_path, '[scopes.alpha]\nsources = ["pkg"]\nsource_roots = ["."]\nclassify_from = "tach.toml"\n', TACH_ONION)
+    assert [ring.name for ring in policy.scope("alpha").policy.rings] == ["model", "application", "cli"]
