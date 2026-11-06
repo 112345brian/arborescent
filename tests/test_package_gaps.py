@@ -132,6 +132,19 @@ def test_only_a_strict_policy_with_scopes_is_unaffected_by_the_asset_universe_of
     assert not any(rule == Rule.PACKAGE_UNOWNED_ASSET for rule, _ in package_findings(tmp_path))
 
 
+def test_the_catalog_file_itself_is_not_an_unowned_asset(tmp_path: Path) -> None:
+    repo(tmp_path)
+    found = package_findings(tmp_path, sources=["app", "."])
+    assert ("package-unowned-asset", "packages.toml") not in found
+
+
+def test_root_assets_are_exempt_from_the_unowned_check(tmp_path: Path) -> None:
+    catalog = CATALOG + '\n[[assets]]\npattern = "LICENSE"\npackage = "@root"\n'
+    repo(tmp_path, {"LICENSE": "MIT\n", "NOTICE": "x\n", "packages.toml": catalog})
+    unowned = [subject for rule, subject in package_findings(tmp_path, sources=["app", "."]) if rule == Rule.PACKAGE_UNOWNED_ASSET]
+    assert "LICENSE" not in unowned and "NOTICE" in unowned
+
+
 def test_policy_excludes_and_generated_output_are_not_assets(tmp_path: Path) -> None:
     repo(tmp_path, {"app/skipme/a.txt": "x", "app/__pycache__/m.cpython-313.pyc": "x", "app/build/out.bin": "x"})
     rules = [v for v in package_findings(tmp_path, exclude=["skipme"]) if v[0] == Rule.PACKAGE_UNOWNED_ASSET]

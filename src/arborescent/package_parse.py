@@ -17,6 +17,7 @@ from .package_fields import (
 from .package_model import (
     HOME_KINDS,
     MANIFEST_NAME,
+    ROOT_OWNER,
     AssetRule,
     CatalogDocument,
     CatalogError,
@@ -54,7 +55,7 @@ def parse_catalog(data: Mapping[str, Any]) -> CatalogDocument:
         if not isinstance(item, dict):
             raise CatalogError(f"assets entry {index} must be a table")
         rule = AssetRule(glob_pattern(required(item, "pattern"), f"assets entry {index} pattern"), required(item, "package"))
-        if rule.package not in known:
+        if rule.package != ROOT_OWNER and rule.package not in known:
             raise CatalogError(f"assets pattern {rule.pattern!r} names unknown package {rule.package}")
         rules.append(rule)
     return CatalogDocument(packages, tuple(rules))

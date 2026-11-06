@@ -37,6 +37,8 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- `[[assets]] package = "@root"` gives repository-level files (LICENSE, CI, lock file) to the workspace instead of a package, so they are
+  not `package-unowned-asset` and are never extracted. The catalog file is no longer an asset itself (#115).
 - `importable_by`: the inverse of `module_forbid_imports`. `"paths" = ["container", "ingest.*"]` lets only those modules import `paths`
   (and its submodules); a module not listed is unrestricted, a stale key or glob is reported, and the new `restricted-import`
   rule is mutation-tested by `selftest` (#111).

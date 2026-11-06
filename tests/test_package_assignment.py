@@ -7,9 +7,14 @@ from typing import Any
 import pytest
 
 from arborescent.domain import INFORMATIONAL_RULES, Rule, Violation
-from arborescent.package_assignment import RepositoryFacts, assignment_violations
+from arborescent.package_assignment import (
+    RepositoryFacts,
+    assignment_violations,
+    owners_of,
+)
 from arborescent.package_fields import glob_match
 from arborescent.package_model import (
+    ROOT_OWNER,
     AssetRule,
     CatalogDocument,
     CatalogError,
@@ -62,6 +67,26 @@ def test_an_asset_matching_no_path_and_no_glob_is_unowned() -> None:
     catalog = CatalogDocument((package("core", "src/core"),), (AssetRule("src/web/**", "core"),))
     [violation] = found(catalog, facts(assets=("src/core/t.html", "src/web/x.css", "src/other/y.sql")), Rule.PACKAGE_UNOWNED_ASSET)
     assert violation.subject == "src/other/y.sql"
+
+
+def test_an_asset_given_to_the_workspace_root_is_owned_not_unowned() -> None:
+    catalog = CatalogDocument((package("core", "src/core"),), (AssetRule("LICENSE", ROOT_OWNER), AssetRule(".github/**", ROOT_OWNER)))
+    data = facts(assets=("LICENSE", ".github/workflows/ci.yml", "README.md"))
+    [violation] = found(catalog, data, Rule.PACKAGE_UNOWNED_ASSET)
+    assert violation.subject == "README.md"
+    assert not found(catalog, data, Rule.PACKAGE_MULTIPLY_ASSIGNED_ASSET)
+
+
+def test_an_asset_inside_a_package_path_and_given_to_the_root_is_doubly_assigned() -> None:
+    catalog = CatalogDocument((package("core", "src/core"),), (AssetRule("src/core/**/*.md", ROOT_OWNER),))
+    [violation] = found(catalog, facts(assets=("src/core/NOTES.md",)), Rule.PACKAGE_MULTIPLY_ASSIGNED_ASSET)
+    assert "@root" in violation.detail and "core" in violation.detail
+
+
+def test_a_root_asset_is_never_a_package_owner_of_a_module() -> None:
+    catalog = CatalogDocument((package("core", "src/core"),), (AssetRule("**", ROOT_OWNER),))
+    assert owners_of(catalog, "src/core/a.py") == ("core",)
+    assert owners_of(catalog, "LICENSE", asset=True) == (ROOT_OWNER,)
 
 
 def test_asset_globs_are_first_match_wins_so_they_never_double_claim() -> None:
@@ -169,6 +194,11 @@ def catalog_data(**extra: Any) -> dict[str, Any]:
         }],
         **extra,
     }
+
+
+def test_parse_catalog_accepts_the_root_owner_for_assets_but_not_as_a_package_id() -> None:
+    document = parse_catalog(catalog_data(assets=[{"pattern": "LICENSE", "package": "@root"}]))
+    assert [(rule.pattern, rule.package) for rule in document.assets] == [("LICENSE", ROOT_OWNER)]
 
 
 def test_parse_catalog_reads_ordered_asset_rules() -> None:
