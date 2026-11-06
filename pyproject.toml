@@ -153,6 +153,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.driver_rewrite" = "application"
 "arborescent.module_forbid_probes" = "application"
 "arborescent.importable_by_probes" = "application"
+"arborescent.owned_literal_probes" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
@@ -199,6 +200,12 @@ docs-sync = "docs/architecture.md"
 # Only the command line installs and reports the pre-push hook; `selftest` injects an outside import (importable_by_probes).
 [tool.arborescent.importable_by]
 "arborescent.git_hook" = ["arborescent.cli"]
+
+# The environment variable that points at a local config belongs to the module that reads it; `selftest` spells it elsewhere.
+[[tool.arborescent.owned_literal]]
+literal = "ARBORESCENT_LOCAL_CONFIG"
+modules = ["arborescent.local_targets"]
+reason = "the one reader of the local-config environment variable"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -72,6 +72,7 @@ class Rule(StrEnum):
     EFFECT_PATCH = "effect-patch"
     INTERNAL_IMPORT = "internal-import"
     RESTRICTED_IMPORT = "restricted-import"
+    LITERAL_OUTSIDE_OWNER = "literal-outside-owner"
     NON_ABSTRACT_PORT = "non-abstract-port"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
@@ -213,6 +214,19 @@ class RingRule:
 
 
 @dataclass(frozen=True)
+class OwnedLiteral:
+    """A string only some modules and rings may spell (an environment variable, a protocol key): #112."""
+
+    literal: str
+    modules: tuple[str, ...] = ()  # module globs; empty means any module
+    rings: tuple[str, ...] = ()  # ring names; empty means any ring
+    reason: str = ""
+
+    def permits(self, module: str, ring: str | None) -> bool:
+        return (not self.modules or any(in_unit(module, glob) for glob in self.modules)) and (not self.rings or ring in self.rings)
+
+
+@dataclass(frozen=True)
 class ArchitectureScope:
     """One independently governed source tree and its import boundary."""
 
@@ -253,6 +267,7 @@ class Policy:
     scan_vendor_paths: tuple[str, ...] = ()  # vendor_roots: scanned even when scan_vendors is off
     child_policy_mode: str = "certify"  # "certify" keeps child-owned policy; "parent" overrides it
     module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    owned_literals: tuple[OwnedLiteral, ...] = ()
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution

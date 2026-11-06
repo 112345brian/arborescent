@@ -37,6 +37,10 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- `owned_literal`: `[[tool.arborescent.owned_literal]] literal = "APP_CONFIG", modules = [...], rings = [...], reason = "..."` lets only
+  those modules (and rings) spell an identifier-like string, such as an environment variable name; the new `literal-outside-owner` rule
+  names the module, ring and line, reports an owner glob that matches no module, and is mutation-tested by `selftest`. The scan cache is
+  rebuilt once (#112). Not done: putting the variable name into `effect-env` messages.
 - A package whose modules still sit beside other packages' modules (a flat layout before a move into a workspace) can be declared:
   `root` may be the target folder when every owned path sets `destination`; the root-coverage error now says so (#114).
 - `[[assets]] package = "@root"` gives repository-level files (LICENSE, CI, lock file) to the workspace instead of a package, so they are
