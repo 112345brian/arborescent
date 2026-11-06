@@ -37,6 +37,12 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- `importable_by`: the inverse of `module_forbid_imports`. `"paths" = ["container", "ingest.*"]` lets only those modules import `paths`
+  (and its submodules); a module not listed is unrestricted, a stale key or glob is reported, and the new `restricted-import`
+  rule is mutation-tested by `selftest` (#111).
+- `classify_from` also derives `rings` (innermost first) from the tach.toml's `layers`, and a default `may_import` of every inner ring for
+  each, when the policy has no `rings`; explicit `[ring.<name>]` settings still win and an explicit `rings` list is left alone
+  (#106).
 - The `strict` preset (the default) installs a `pre-push` git hook when you run `generate` or `check`. It runs `arborescent check
   --require-tools --require-profile`, so a push that would fail CI is blocked locally. A `pre-push` hook Arborescent did not write is
   left alone with a warning; `standard` and `relaxed` install nothing. `FileSystem` gained `make_executable`.

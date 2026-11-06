@@ -186,6 +186,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         scan_vendor_paths=_string_list(raw, "vendor_roots"),
         child_policy_mode=_child_policy_mode(raw),
         module_forbid_imports=tuple((pattern, tuple(targets)) for pattern, targets in raw_module_forbids.items()),
+        importable_by=_importable_by(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
@@ -226,7 +227,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "io_modules", "groups",
-    "module_forbid_imports", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -409,6 +410,18 @@ def _dev_tool_paths(raw: Mapping[str, Any]) -> tuple[str, ...]:
             raise PolicyError(f"`dev_tools` entry {entry!r} must be a folder or file below the repository root (no `.`, `..` or absolute path)")
         out.append("/".join(parts))
     return tuple(out)
+
+
+def _importable_by(raw: Mapping[str, Any]) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    table = raw.get("importable_by", {})
+    if not isinstance(table, Mapping) or any(
+        not isinstance(pattern, str) or not pattern or not isinstance(importers, list) or not importers
+        or not all(isinstance(glob, str) and glob for glob in importers)
+        for pattern, importers in table.items()
+    ):
+        raise PolicyError("`importable_by` must map module globs to non-empty lists of importer module globs")
+    checked = cast("Mapping[str, list[str]]", table)
+    return tuple((pattern, tuple(importers)) for pattern, importers in checked.items())
 
 
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:

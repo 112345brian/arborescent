@@ -48,6 +48,7 @@ def test_rule_id_strings_never_change() -> None:
             "effect-dynamic-import",
             "effect-patch",
             "internal-import",
+            "restricted-import",
             "non-abstract-port",
             "circular-import",
             "external-import",

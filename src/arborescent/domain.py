@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
@@ -71,6 +71,7 @@ class Rule(StrEnum):
     EFFECT_DYNAMIC_IMPORT = "effect-dynamic-import"
     EFFECT_PATCH = "effect-patch"
     INTERNAL_IMPORT = "internal-import"
+    RESTRICTED_IMPORT = "restricted-import"
     NON_ABSTRACT_PORT = "non-abstract-port"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
@@ -228,6 +229,17 @@ class ChildArbor:
     path: str
 
 
+def _validate_pattern_table(setting: str, table: Sequence[tuple[str, tuple[str, ...]]], what: str) -> None:
+    for pattern, names in table:
+        if not pattern or not names:
+            raise PolicyError(f"`{setting}` needs non-empty module patterns and {what} lists")
+
+
+def in_unit(module: str, pattern: str) -> bool:
+    """Whether ``module`` is the module ``pattern`` names, one of its submodules, or matches it as a glob."""
+    return module == pattern or module.startswith(pattern + ".") or fnmatch.fnmatchcase(module, pattern)
+
+
 @dataclass(frozen=True)
 class Policy:
     """The single source of truth that the three tool configs and Arborescent's own checks derive from."""
@@ -241,6 +253,7 @@ class Policy:
     scan_vendor_paths: tuple[str, ...] = ()  # vendor_roots: scanned even when scan_vendors is off
     child_policy_mode: str = "certify"  # "certify" keeps child-owned policy; "parent" overrides it
     module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
     forbid_everywhere: tuple[str, ...] = ()
@@ -278,9 +291,8 @@ class Policy:
         if self.package_pyproject and self.package_catalog is None:
             raise PolicyError("`package_pyproject` derives from the packages in `package_catalog`, which is not set")
         _validate_rings(self.rings, self.classify, bool(self.scopes))
-        for pattern, targets in self.module_forbid_imports:
-            if not pattern or not targets:
-                raise PolicyError("`module_forbid_imports` needs non-empty module patterns and target lists")
+        _validate_pattern_table("module_forbid_imports", self.module_forbid_imports, "target")
+        _validate_pattern_table("importable_by", self.importable_by, "importer")
         _validate_disabled_tools(self.disabled_tools)
         if self.require_arbor_annotations and "arbor-annotations" in self.disabled_tools:
             raise PolicyError(
@@ -433,6 +445,15 @@ class Policy:
     def forbidden_imports(self, module: str) -> frozenset[str]:
         """Module-specific internal import restrictions, additive across matching globs."""
         return frozenset(target for pattern, targets in self.module_forbid_imports if fnmatch.fnmatchcase(module, pattern) for target in targets)
+
+    def restricted_importers(self, importer: str, target: str) -> tuple[str, ...] | None:
+        """The importer globs that forbid ``importer`` from importing ``target`` under ``importable_by``, or None when it is allowed.
+
+        A module inside a restricted unit (the module itself or its submodules) may always import within it."""
+        for pattern, allowed in self.importable_by:
+            if in_unit(target, pattern) and not in_unit(importer, pattern) and not any(fnmatch.fnmatchcase(importer, glob) for glob in allowed):
+                return allowed
+        return None
 
     def forbids_module_import(self, module: str, target: str) -> str | None:
         """Return the configured target restriction that matches an imported module, if any."""

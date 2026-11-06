@@ -89,6 +89,10 @@ path = "src/arborescent/installer_adapter.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/importable_by_probes.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/module_forbid_probes.py"
 role = "source"
 

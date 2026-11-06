@@ -15,6 +15,7 @@ from typing import Protocol
 from .domain import NOISE_DIRS, ArchitectureScope, Mutation, Policy, Rule
 from .engine import Services, package_checks, run_own
 from .facts import ModuleInfo
+from .importable_by_probes import importable_by_mutations
 from .module_forbid_probes import module_forbid_mutations
 from .ports import PackageProbes
 
@@ -123,6 +124,9 @@ def plan(
         forbid_found, forbid_skipped = module_forbid_mutations(local_policy, local_paths, local_known)
         out.extend(forbid_found)
         skipped.extend(forbid_skipped)
+        importable_found, importable_skipped = importable_by_mutations(local_policy, local_paths, local_known)
+        out.extend(importable_found)
+        skipped.extend(importable_skipped)
         if local_policy.entry_scripts:
             entry_host = next((
                 name for name in sorted(local_known)
