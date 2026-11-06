@@ -172,20 +172,28 @@ def _storage_category(target: str) -> str | None:
     return None
 
 
-def _effect_category(target: str) -> str | None:
+_EXACT_EFFECTS: dict[str, str] = {
+    target: category
+    for category, targets in (
+        ("env", ("os.environ", "os.getenv")),
+        ("clock", ("time.time", "datetime.datetime.now", "datetime.datetime.utcnow", "datetime.datetime.today", "datetime.date.today")),
+        ("identity", ("uuid.uuid1", "uuid.uuid4")),
+        ("sleep", ("time.sleep", "asyncio.sleep")),
+    )
+    for target in targets
+}
+
+
+def _basic_category(target: str) -> str | None:
     if target in OS_BRANCH_ATTRS:
         return "os-branching"
-    if target in {"os.environ", "os.getenv"}:
-        return "env"
-    if target in {"time.time", "datetime.datetime.now", "datetime.datetime.utcnow", "datetime.datetime.today", "datetime.date.today"}:
-        return "clock"
-    if target in {"uuid.uuid1", "uuid.uuid4"}:
-        return "identity"
     if target.startswith(("random.", "secrets.")):
         return "randomness"
-    if target in {"time.sleep", "asyncio.sleep"}:
-        return "sleep"
-    return _storage_category(target) or _concurrency_category(target) or _import_category(target)
+    return _EXACT_EFFECTS.get(target)
+
+
+def _effect_category(target: str) -> str | None:
+    return _basic_category(target) or _storage_category(target) or _concurrency_category(target) or _import_category(target)
 
 
 def _concurrency_category(target: str) -> str | None:
@@ -211,22 +219,30 @@ _SEAM_ANNOTATIONS = frozenset({"Callable", "Mapping", "MutableMapping"})
 def _is_seam_annotation(node: ast.expr | None) -> bool:
     """Whether a parameter annotation says "a callable or a mapping", looking through Optional/Union/`|` and string forms."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        try:
-            return _is_seam_annotation(ast.parse(node.value, mode="eval").body)
-        except SyntaxError:
-            return False
+        return _is_seam_string(node.value)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
         return _is_seam_annotation(node.left) or _is_seam_annotation(node.right)
     if isinstance(node, ast.Subscript):
-        base = node.value
-        name = base.attr if isinstance(base, ast.Attribute) else base.id if isinstance(base, ast.Name) else ""
-        if name in {"Optional", "Union", "Annotated"}:
-            inner = node.slice
-            return any(_is_seam_annotation(item) for item in (inner.elts if isinstance(inner, ast.Tuple) else [inner]))
-        return _is_seam_annotation(base)
+        return _is_seam_subscript(node)
     if isinstance(node, ast.Attribute):
         return node.attr in _SEAM_ANNOTATIONS
     return isinstance(node, ast.Name) and node.id in _SEAM_ANNOTATIONS
+
+
+def _is_seam_string(text: str) -> bool:
+    try:
+        return _is_seam_annotation(ast.parse(text, mode="eval").body)
+    except SyntaxError:
+        return False
+
+
+def _is_seam_subscript(node: ast.Subscript) -> bool:
+    base = node.value
+    name = base.attr if isinstance(base, ast.Attribute) else base.id if isinstance(base, ast.Name) else ""
+    if name in {"Optional", "Union", "Annotated"}:
+        inner = node.slice
+        return any(_is_seam_annotation(item) for item in (inner.elts if isinstance(inner, ast.Tuple) else [inner]))
+    return _is_seam_annotation(base)
 
 
 def _injection_defaults(tree: ast.AST) -> dict[int, int]:
@@ -283,6 +299,16 @@ def _os_branch_imports(node: ast.ImportFrom) -> list[tuple[EffectUse, str]]:
     ]
 
 
+def _reference_use(node: ast.Attribute | ast.Name, aliases: dict[str, str], seams: dict[int, int]) -> EffectUse | None:
+    """A name or attribute chain that resolves to an effectful target, with whether it sits in an injection default."""
+    target = _dotted(node, aliases)
+    category = _effect_category(target) if target is not None else None
+    if target is None or category is None:
+        return None
+    seam = seams.get(id(node), 0) if category in _INJECTABLE_EFFECTS else 0
+    return EffectUse(node.lineno, category, target, seam)
+
+
 def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     aliases = _aliases(tree)
     seams = _injection_defaults(tree)
@@ -294,22 +320,16 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
             for use, bound_name in _os_branch_imports(node):
                 uses.add(use)
                 imported_os_names.add(bound_name)
-        if isinstance(node, ast.Attribute | ast.Name):
-            if isinstance(node, ast.Name) and (node.id in imported_os_names or (node.id == "open" and "open" in rebound)):
-                continue
-            target = _dotted(node, aliases)
-            if target is not None:
-                category = _effect_category(target)
-                if category is not None:
-                    seam = seams.get(id(node), 0) if category in _INJECTABLE_EFFECTS else 0
-                    uses.add(EffectUse(node.lineno, category, target, seam))
-        path_use = _path_io_use(node, aliases)
-        if path_use is not None:
-            uses.add(path_use)
-        patch = _patch_use(node, aliases)
-        if patch is not None:
-            uses.add(patch)
+        found = [_path_io_use(node, aliases), _patch_use(node, aliases)]
+        if isinstance(node, ast.Attribute | ast.Name) and not _is_shadowed(node, imported_os_names, rebound):
+            found.append(_reference_use(node, aliases, seams))
+        uses.update(use for use in found if use is not None)
     return tuple(sorted(uses))
+
+
+def _is_shadowed(node: ast.Attribute | ast.Name, imported_os_names: set[str], rebound: set[str]) -> bool:
+    """A bare name that is an imported OS-branching name (already reported at its import) or a rebound ``open``."""
+    return isinstance(node, ast.Name) and (node.id in imported_os_names or (node.id == "open" and "open" in rebound))
 
 
 def _patch_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
@@ -441,35 +461,44 @@ def _find_arbor_assignments(stmts: list[ast.stmt], conditional: bool) -> list[tu
     return found
 
 
+def _arbor_dictionary(found: list[tuple[ast.expr | None, bool]]) -> dict[str, object] | str:
+    """The module's ``__arbor__`` literal dictionary, or the error message saying why it is not usable."""
+    if any(conditional for _, conditional in found):
+        return "__arbor__ must not be assigned inside conditional code"
+    value = found[-1][0]
+    try:
+        annotation = ast.literal_eval(value) if value is not None else None
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return "__arbor__ must be a literal dictionary"
+    if not isinstance(annotation, dict):
+        return "__arbor__ must be a dictionary"
+    unknown = sorted(set(annotation) - _ARBOR_LEGAL_KEYS)
+    if unknown:
+        return f"__arbor__ has unknown key(s): {', '.join(map(repr, unknown))}"
+    return {str(key): item for key, item in annotation.items()}
+
+
+def _arbor_fields(annotation: dict[str, object]) -> tuple[str | None, str | None, str | None]:
+    if "role" in annotation and annotation.get("role") != DEV_TOOL_ROLE:
+        return None, f'__arbor__."role" must be "{DEV_TOOL_ROLE}"', None
+    role = DEV_TOOL_ROLE if "role" in annotation else None
+    if "ring" not in annotation:
+        return None, (None if role is not None else '__arbor__ dictionary is missing "ring"'), role
+    ring = annotation["ring"]
+    if not isinstance(ring, str):
+        return None, '__arbor__."ring" must be a string', None
+    return ring, None, role
+
+
 def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None, str | None]:
     """``(ring, error, role)`` from the module's ``__arbor__`` assignment."""
     found = _find_arbor_assignments(list(tree.body), False)
     if not found:
         return None, None, None
-    if any(conditional for _, conditional in found):
-        return None, "__arbor__ must not be assigned inside conditional code", None
-    value = found[-1][0]
-    try:
-        annotation = ast.literal_eval(value) if value is not None else None
-    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
-        return None, "__arbor__ must be a literal dictionary", None
-    if not isinstance(annotation, dict):
-        return None, "__arbor__ must be a dictionary", None
-    unknown = sorted(set(annotation) - _ARBOR_LEGAL_KEYS)
-    if unknown:
-        return None, f"__arbor__ has unknown key(s): {', '.join(map(repr, unknown))}", None
-    declared_role = annotation.get("role")
-    if "role" in annotation and declared_role != DEV_TOOL_ROLE:
-        return None, f'__arbor__."role" must be "{DEV_TOOL_ROLE}"', None
-    role = DEV_TOOL_ROLE if "role" in annotation else None
-    if "ring" not in annotation:
-        if role is not None:
-            return None, None, role
-        return None, '__arbor__ dictionary is missing "ring"', None
-    ring: object = annotation["ring"]
-    if not isinstance(ring, str):
-        return None, '__arbor__."ring" must be a string', None
-    return ring, None, role
+    annotation = _arbor_dictionary(found)
+    if isinstance(annotation, str):
+        return None, annotation, None
+    return _arbor_fields(annotation)
 
 
 def _script_deps(source: str) -> tuple[str, ...] | None:
