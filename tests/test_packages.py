@@ -235,3 +235,45 @@ role = "source"
         )
 
 
+
+
+FLAT_CATALOG = """
+[[packages]]
+id = "core"
+name = "Core"
+kind = "domain-library"
+repository = "org/repo"
+root = "{root}"
+summary = "Core."
+[packages.home]
+kind = "workspace-member"
+path = "core"
+[[packages.paths]]
+path = "privacy.py"
+role = "source"
+{destination}
+[[packages.paths]]
+path = "rules.py"
+role = "source"
+{destination2}
+"""
+
+
+def test_a_flat_layout_package_can_name_its_target_root_when_every_path_has_a_destination(tmp_path: Path) -> None:
+    _write(tmp_path, {"privacy.py": "", "rules.py": "", "other.py": ""})
+    catalog = _catalog(tmp_path, FLAT_CATALOG.format(
+        root="core/src/core", destination='destination = "core/src/core/privacy.py"', destination2='destination = "core/src/core/rules.py"',
+    ))
+    assert [package.root for package in catalog.packages] == ["core/src/core"]
+
+
+def test_a_flat_layout_path_without_a_destination_is_refused_and_the_message_says_how_to_fix_it(tmp_path: Path) -> None:
+    _write(tmp_path, {"privacy.py": "", "rules.py": ""})
+    with pytest.raises(CatalogError, match=r"destination"):
+        _catalog(tmp_path, FLAT_CATALOG.format(root="core/src/core", destination='destination = "core/src/core/privacy.py"', destination2=""))
+
+
+def test_a_package_with_no_path_in_its_root_and_no_destination_is_still_refused(tmp_path: Path) -> None:
+    _write(tmp_path, {"privacy.py": "", "rules.py": ""})
+    with pytest.raises(CatalogError, match="destination"):
+        _catalog(tmp_path, FLAT_CATALOG.format(root="core/src/core", destination="", destination2=""))

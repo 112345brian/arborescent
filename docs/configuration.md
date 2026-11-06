@@ -367,6 +367,22 @@ from = "app.core"
 to = "core"
 ```
 
+**Before the move (a flat layout).** `root` is where the package will live, so it may be a folder that does not exist yet.
+When no owned path sits inside `root`, every path must set `destination`, which says where that path lands; the catalog is then
+accepted and the assignment checks (`package-undeclared-dependency`, `package-spans-rings`, private imports) run on the
+layout as it is today, which is how the move can be guarded before it is made:
+
+```toml
+[[packages]]
+id = "core"
+root = "core/src/core"                  # the target folder, not yet created
+# ... name, kind, repository, summary
+[[packages.paths]]
+path = "privacy.py"                     # where the module sits today, beside other packages' modules
+role = "source"
+destination = "core/src/core/privacy.py"
+```
+
 All four keys are optional; a missing one is a named gap in the export when it matters (`public` only when another package imports the package), never a guess. See
 [migration-export.md](migration-export.md) for the document, the schema, the gap codes, a `git filter-repo` recipe and the
 comparison with blinkered's `blinkered.toml`.

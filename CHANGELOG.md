@@ -37,6 +37,8 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- A package whose modules still sit beside other packages' modules (a flat layout before a move into a workspace) can be declared:
+  `root` may be the target folder when every owned path sets `destination`; the root-coverage error now says so (#114).
 - `[[assets]] package = "@root"` gives repository-level files (LICENSE, CI, lock file) to the workspace instead of a package, so they are
   not `package-unowned-asset` and are never extracted. The catalog file is no longer an asset itself (#115).
 - `importable_by`: the inverse of `module_forbid_imports`. `"paths" = ["container", "ingest.*"]` lets only those modules import `paths`
