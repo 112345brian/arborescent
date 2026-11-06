@@ -180,6 +180,7 @@ _EXACT_EFFECTS: dict[str, str] = {
         ("clock", ("time.time", "datetime.datetime.now", "datetime.datetime.utcnow", "datetime.datetime.today", "datetime.date.today")),
         ("identity", ("uuid.uuid1", "uuid.uuid4")),
         ("sleep", ("time.sleep", "asyncio.sleep")),
+        ("console", ("print", "input", "sys.stdout.write", "sys.stderr.write")),
     )
     for target in targets
 }
@@ -211,7 +212,9 @@ def _import_category(target: str) -> str | None:
     return None
 
 
-_INJECTABLE_EFFECTS = frozenset({"clock", "env", "identity", "randomness", "sleep", "threads", "process"})
+_INJECTABLE_EFFECTS = frozenset({"clock", "env", "identity", "randomness", "sleep", "threads", "process", "console"})
+# Builtins a module may rebind (a parameter named `input`, a local `print` helper); a bare reference to a rebound one is not the builtin.
+_SHADOWABLE_BUILTINS = frozenset({"open", "print", "input"})
 
 
 _SEAM_ANNOTATIONS = frozenset({"Callable", "Mapping", "MutableMapping"})
@@ -325,12 +328,51 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
         if isinstance(node, ast.Attribute | ast.Name) and not _is_shadowed(node, imported_os_names, rebound):
             found.append(_reference_use(node, aliases, seams))
         uses.update(use for use in found if use is not None)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            uses.update(_global_uses(node))
     return tuple(sorted(uses))
+
+
+def _own_nodes(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+    """Every node in the function's own body, not descending into nested functions, lambdas or classes (they have their own scope)."""
+    found: list[ast.AST] = []
+    pending: list[ast.AST] = list(function.body)
+    while pending:
+        node = pending.pop()
+        found.append(node)
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda):
+            pending.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def _global_uses(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[EffectUse]:
+    """``global x`` in a function that also assigns ``x``: it rebinds module state. A bare declaration that only reads is not a use."""
+    nodes = _own_nodes(function)
+    declared = {name for node in nodes if isinstance(node, ast.Global) for name in node.names}
+    assigned: dict[str, int] = {}
+    for node in nodes:
+        for name, line in _bound_names(node):
+            if name in declared:
+                assigned[name] = min(assigned.get(name, line), line)
+    return [EffectUse(line, "global", f"global {name}") for name, line in sorted(assigned.items())]
+
+
+def _bound_names(node: ast.AST) -> list[tuple[str, int]]:
+    """The (name, line) pairs this one node binds, deletes or defines in its enclosing scope."""
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+        return [(node.id, node.lineno)]
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        return [(node.name, node.lineno)]  # a nested def or class statement binds its name in the enclosing scope
+    if isinstance(node, ast.Import | ast.ImportFrom):
+        return [(item.asname or item.name.split(".")[0], node.lineno) for item in node.names]
+    if isinstance(node, ast.ExceptHandler) and node.name is not None:
+        return [(node.name, node.lineno)]
+    return []
 
 
 def _is_shadowed(node: ast.Attribute | ast.Name, imported_os_names: set[str], rebound: set[str]) -> bool:
     """A bare name that is an imported OS-branching name (already reported at its import) or a rebound ``open``."""
-    return isinstance(node, ast.Name) and (node.id in imported_os_names or (node.id == "open" and "open" in rebound))
+    return isinstance(node, ast.Name) and (node.id in imported_os_names or (node.id in _SHADOWABLE_BUILTINS and node.id in rebound))
 
 
 def _patch_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:

@@ -11,7 +11,7 @@ from typing import Literal
 __all__ = ["DEFAULT_PRESET", "EFFECT_CATEGORIES", "PRESETS", "Preset", "Scope"]
 
 EFFECT_CATEGORIES: frozenset[str] = frozenset(
-    {"clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "filesystem", "dynamic-import", "patch"}
+    {"clock", "env", "identity", "randomness", "sleep", "threads", "process", "console", "global", "database", "filesystem", "dynamic-import", "patch"}
 )
 
 # Which imports outside the project need an entry in the importing ring's ``external`` allow-list.

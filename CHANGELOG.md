@@ -37,6 +37,18 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- Two effect categories, `console` and `global`, for `forbid` (rules `effect-console` and `effect-global`) (#103). `console` is
+  `print`, `input`, `sys.stdout.write` and `sys.stderr.write`; a module that rebinds `print` or `input` (a parameter named `input`)
+  is not counted, and a bare default such as `out=print` is the injection seam, like the other injectable effects. `global` is a
+  function that declares `global x` and then assigns, deletes, imports or defines `x`; a declaration that only reads is not a use.
+  **Behavior change:** the innermost ring (and every ring under the `strict` preset) now forbids both by default, so existing
+  `print` calls and `global` rebinds there are new findings. Add `forbid = [...]` to the ring without them, or baseline them.
+- `effect-via-import`: a module whose ring forbids an effect now inherits it from the modules it imports. The finding names the
+  import chain and the use (`app.service -> app.mid -> app.leaf; app.leaf uses print (line 2)`). It follows runtime imports (not
+  `if TYPE_CHECKING` ones; importing `pkg.sub` also runs `pkg/__init__`), reports one finding per module and category, and treats a
+  ring that forbids the effect as a barrier, so a direct use is never reported twice. Limits: module granularity (a helper that
+  mixes pure and effectful functions taints every importer) and calls on objects of unknown type. **Behavior change:** a project
+  whose middle rings forbid an effect that an inner-facing ring is allowed to use will see new findings.
 - `owned_literal`: `[[tool.arborescent.owned_literal]] literal = "APP_CONFIG", modules = [...], rings = [...], reason = "..."` lets only
   those modules (and rings) spell an identifier-like string, such as an environment variable name; the new `literal-outside-owner` rule
   names the module, ring and line, reports an owner glob that matches no module, and is mutation-tested by `selftest`. The scan cache is

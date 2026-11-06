@@ -25,6 +25,7 @@ from .domain import (
     dist_name,
     in_unit,
 )
+from .effect_reach import Lookup, effect_via_import
 from .facts import EffectUse, ModuleInfo, resolve_targets
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
@@ -486,6 +487,7 @@ def check_modules(
         out += _os_branching(local_policy, name, ring, rule, info)
         out += _effect_uses(context, name, ring, info, known)
         out += _abstraction_violations(name, ring, rule, info)
+    out += effect_via_import(modules, known, Lookup(context.resolve_ring, context.policy_for, context.scope_name, context.tool_modules))
     return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
 
 

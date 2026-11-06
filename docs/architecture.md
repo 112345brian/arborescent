@@ -69,6 +69,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.stdlib` | `single` | domain |
 | `arborescent.presets` | `single` | domain |
 | `arborescent.rules` | `single` | domain |
+| `arborescent.effect_reach` | `single` | domain |
 | `arborescent.package_model` | `single` | domain |
 | `arborescent.package_fields` | `single` | domain |
 | `arborescent.package_parse` | `single` | domain |

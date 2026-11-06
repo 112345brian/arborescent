@@ -125,6 +125,10 @@ path = "src/arborescent/rules.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/effect_reach.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/scanner.py"
 role = "source"
 

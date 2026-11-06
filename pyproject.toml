@@ -104,6 +104,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.domain" = "domain"
 "arborescent.facts" = "domain"
 "arborescent.rules" = "domain"
+"arborescent.effect_reach" = "domain"
 "arborescent.presets" = "domain"
 "arborescent.stdlib" = "domain"
 "arborescent.package_model" = "domain"

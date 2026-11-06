@@ -19,7 +19,8 @@ def run(root: Path, **overrides: Any) -> list[Any]:
 
 
 def effects(found: list[Any]) -> set[tuple[str, str]]:
-    return {(finding.rule, finding.subject) for finding in found if finding.rule.startswith("effect-")}
+    # The direct rules only: `effect-via-import` has its own tests (test_effect_via_import.py).
+    return {(finding.rule, finding.subject) for finding in found if finding.rule.startswith("effect-") and finding.rule != "effect-via-import"}
 
 
 def test_innermost_ring_forbids_effects_and_outermost_allows_them(repo: Path) -> None:
