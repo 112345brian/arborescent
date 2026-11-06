@@ -467,7 +467,7 @@ def _disabled_tools(raw: Mapping[str, Any]) -> tuple[str, ...]:
 def _ruff_overrides(raw: object) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise PolicyError("`ruff` must be a table of generated Ruff overrides")
-    allowed = {"extend-select", "ignore", "per-file-ignores", "max-complexity", "max-args", "max-branches", "max-statements"}
+    allowed = {"extend-select", "ignore", "per-file-ignores", "max-complexity", "max-args", "max-branches", "max-returns", "max-statements"}
     unknown = set(raw) - allowed
     if unknown:
         raise PolicyError(f"unknown `[tool.arborescent.ruff]` setting(s): {sorted(unknown)}")
@@ -482,7 +482,7 @@ def _ruff_overrides(raw: object) -> dict[str, Any]:
         for pattern, codes in per_file.items()
     ):
         raise PolicyError("`per-file-ignores` in `[tool.arborescent.ruff]` must map file globs to rule lists")
-    for key in ("max-complexity", "max-args", "max-branches", "max-statements"):
+    for key in ("max-complexity", "max-args", "max-branches", "max-returns", "max-statements"):
         if key in raw and (not isinstance(raw[key], int) or isinstance(raw[key], bool) or raw[key] < 1):
             raise PolicyError(f"`{key}` in `[tool.arborescent.ruff]` must be a positive integer")
     return dict(raw)

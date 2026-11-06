@@ -25,6 +25,23 @@ _RUFF_SELECT = (
     "YTT", "T20", "F", "B",
 )
 _RUFF_IGNORE = frozenset({"PIE807"})
+# `[tool.arborescent.ruff]` key -> (Ruff table, Ruff key). The pylint keys share one table.
+_RUFF_LIMITS = {
+    "max-complexity": ("mccabe", "max-complexity"),
+    "max-args": ("pylint", "max-args"),
+    "max-branches": ("pylint", "max-branches"),
+    "max-returns": ("pylint", "max-returns"),
+    "max-statements": ("pylint", "max-statements"),
+}
+
+
+def _ruff_limit_tables(limits: Mapping[str, int]) -> list[str]:
+    """The ``[lint.mccabe]`` / ``[lint.pylint]`` tables for the limits that are set, each table once."""
+    tables: dict[str, list[str]] = {}
+    for key, (section, output_key) in _RUFF_LIMITS.items():
+        if key in limits:
+            tables.setdefault(section, []).append(f"{output_key} = {limits[key]}")
+    return [line for section, rows in tables.items() for line in ("", f"[lint.{section}]", *rows)]
 
 
 def _ruff_ignores(
@@ -73,7 +90,7 @@ def ruff(
         "",
         "[lint]",
         "preview = true",
-        f"select = {toml_list(list(dict.fromkeys([*_RUFF_SELECT, *overrides.get('extend-select', [])])))}",
+        f"select = {toml_list(list(dict.fromkeys([*_RUFF_SELECT, *policy.preset.ruff_select, *overrides.get('extend-select', [])])))}",
     ]
     ignored = {*_RUFF_IGNORE, *overrides.get("ignore", [])}
     if ignored:
@@ -81,15 +98,7 @@ def ruff(
     if ignores:
         lines += ["", "[lint.per-file-ignores]"]
         lines += [f"{toml_quote(pattern)} = {toml_list(sorted(codes))}" for pattern, codes in sorted(ignores.items())]
-    thresholds = {
-        "max-complexity": ("mccabe", "max-complexity"),
-        "max-args": ("pylint", "max-args"),
-        "max-branches": ("pylint", "max-branches"),
-        "max-statements": ("pylint", "max-statements"),
-    }
-    for key, (section, output_key) in thresholds.items():
-        if key in overrides:
-            lines += ["", f"[lint.{section}]", f"{output_key} = {overrides[key]}"]
+    lines += _ruff_limit_tables({**policy.preset.ruff_limits, **{key: overrides[key] for key in _RUFF_LIMITS if key in overrides}})
     return "\n".join(lines) + "\n"
 
 
