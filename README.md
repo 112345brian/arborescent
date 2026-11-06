@@ -172,7 +172,11 @@ layering, classification (every module needs a ring) and lazy-import detection a
 The `strict` preset also installs a git hook: `arborescent generate` and `arborescent check` write `pre-push` (where git
 looks for it, so `core.hooksPath` and worktrees are honoured) that runs `arborescent check --require-tools --require-profile`,
 so a push that CI would reject is stopped locally. An existing `pre-push` that Arborescent did not write is never changed; a
-warning says the push is not gated. `standard` and `relaxed` install nothing.
+warning says the push is not gated. `standard` and `relaxed` install nothing. Set `git_hook = true` or `git_hook = false` in
+`[tool.arborescent]` to choose this independently of the preset: `true` installs the hook under any preset, and `false`
+removes an Arborescent-managed hook (a foreign one is still left alone either way) the next time `generate` or `check` runs.
+To skip just this one push without disabling the hook, run `ARBORESCENT_SKIP_HOOK=1 git push`; `git push --no-verify` skips
+every hook (including anyone else's) instead.
 
 The I/O stdlib set (`os`, `subprocess`, `socket`, `sqlite3`, `pathlib`, ...: see `arborescent.presets.IO_MODULES`) also drives
 the generated import-linter bans. Replace it per project with `io_modules = ["os", "subprocess", ...]` (an empty list means

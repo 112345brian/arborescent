@@ -252,7 +252,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         package_pyproject=_package_pyproject(raw),
         modularity=_modularity(raw),
         children=_child_arbors(raw),
-        preset=_preset_with_middle_forbid(PRESETS[preset_name], raw),
+        preset=_preset_overrides(PRESETS[preset_name], raw),
         io_modules=frozenset(io_modules),
     )
 
@@ -265,7 +265,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
-    "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "io_modules", "groups",
+    "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
     "module_forbid_imports", "importable_by", "owned_literal", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
@@ -398,18 +398,22 @@ def _tool_options(raw: Mapping[str, Any]) -> tuple[str, str, object, list[str], 
     return preset_name, python, checkers, cast("list[str]", io_modules), disabled_tools, suggestion_threshold
 
 
-def _preset_with_middle_forbid(preset: Preset, raw: Mapping[str, Any]) -> Preset:
-    """The preset, with ``middle_forbid`` replaced when the policy sets it, so effects can be enforced under any preset."""
-    if "middle_forbid" not in raw:
-        return preset
-    value: object = raw["middle_forbid"]
-    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
-        raise PolicyError("`middle_forbid` must be a list of non-empty effect categories")
-    categories = frozenset(cast("list[str]", value))
-    unknown = categories - EFFECT_CATEGORIES
-    if unknown:
-        raise PolicyError(f"unknown effect category in `middle_forbid`: {sorted(unknown)}")
-    return replace(preset, middle_forbid=categories)
+def _preset_overrides(preset: Preset, raw: Mapping[str, Any]) -> Preset:
+    """The preset, with ``middle_forbid`` and/or ``git_hook`` replaced when the policy sets them explicitly, so
+    either can be chosen independently of the preset name."""
+    overrides: dict[str, Any] = {}
+    if "middle_forbid" in raw:
+        value: object = raw["middle_forbid"]
+        if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
+            raise PolicyError("`middle_forbid` must be a list of non-empty effect categories")
+        categories = frozenset(cast("list[str]", value))
+        unknown = categories - EFFECT_CATEGORIES
+        if unknown:
+            raise PolicyError(f"unknown effect category in `middle_forbid`: {sorted(unknown)}")
+        overrides["middle_forbid"] = categories
+    if "git_hook" in raw:
+        overrides["git_hook"] = _boolean_option(raw, "git_hook", preset.git_hook)
+    return replace(preset, **overrides) if overrides else preset
 
 
 def _boolean_option(raw: Mapping[str, Any], key: str, default: bool) -> bool:
@@ -511,6 +515,8 @@ def _customization_labels(
         customizations.append("thresholds")
     if raw.get("preset", DEFAULT_PRESET) != DEFAULT_PRESET:
         customizations.append("preset")
+    if "git_hook" in raw:
+        customizations.append("git hook")
     if "exclude" in raw and raw.get("exclude"):
         customizations.append("exclude")
     if raw_module_forbids:

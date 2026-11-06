@@ -10,9 +10,15 @@ from pathlib import Path
 import pytest
 from arborescent_helpers import mini_policy
 
-from arborescent.domain import ToolResult
+from arborescent.config import policy_from_mapping
+from arborescent.domain import PolicyError, ToolResult
 from arborescent.filesystem_adapter import LocalFileSystem
-from arborescent.git_hook import HOOK_MARKER, ensure_git_hook, render_hook
+from arborescent.git_hook import (
+    HOOK_MARKER,
+    SKIP_VARIABLE,
+    ensure_git_hook,
+    render_hook,
+)
 from arborescent.presets import PRESETS
 from arborescent.testing import FakeFileSystem, FakeToolRunner
 
@@ -52,7 +58,66 @@ def test_standard_and_relaxed_presets_leave_git_alone() -> None:
         fs, runner = repo_fs(), git_says()
         outcome = ensure_git_hook(mini_policy(preset=preset), ROOT, fs, runner)
         assert outcome.status == "not-strict"
-        assert not fs.exists(HOOK) and runner.calls == []
+        assert not fs.exists(HOOK)
+
+
+def test_git_hook_true_installs_under_a_preset_that_normally_would_not() -> None:
+    fs, runner = repo_fs(), git_says()
+    outcome = ensure_git_hook(mini_policy(preset="relaxed", git_hook=True), ROOT, fs, runner)
+    assert outcome.status == "installed" and HOOK_MARKER in fs.read_text(HOOK)
+
+
+def test_git_hook_false_removes_a_hook_the_strict_preset_had_installed() -> None:
+    fs, runner = repo_fs(), git_says()
+    _ = ensure_git_hook(mini_policy(), ROOT, fs, runner)
+    assert fs.is_file(HOOK)
+    outcome = ensure_git_hook(mini_policy(git_hook=False), ROOT, fs, runner)
+    assert outcome.status == "removed" and outcome.path == HOOK
+    assert not fs.exists(HOOK)
+
+
+def test_git_hook_false_with_no_existing_hook_does_nothing() -> None:
+    fs, runner = repo_fs(), git_says()
+    outcome = ensure_git_hook(mini_policy(git_hook=False), ROOT, fs, runner)
+    assert outcome.status == "not-strict" and not fs.exists(HOOK)
+
+
+def test_git_hook_false_never_removes_a_hook_we_did_not_write() -> None:
+    fs, runner = repo_fs(), git_says()
+    fs.mkdir(HOOK.parent)
+    fs.write_text(HOOK, "#!/bin/sh\necho mine\n")
+    outcome = ensure_git_hook(mini_policy(git_hook=False), ROOT, fs, runner)
+    assert outcome.status == "foreign" and fs.read_text(HOOK) == "#!/bin/sh\necho mine\n"
+
+
+def test_git_hook_is_reported_as_a_customization() -> None:
+    assert "git hook" in mini_policy(git_hook=False).customization_labels
+    assert "git hook" not in mini_policy().customization_labels
+
+
+def test_git_hook_rejects_non_boolean_values() -> None:
+    with pytest.raises(PolicyError, match="git_hook"):
+        mini_policy(git_hook="yes")
+
+
+def test_git_hook_cannot_be_combined_with_scopes_at_the_root() -> None:
+    scope = {"rings": ["domain"], "classify": {}, "sources": ["a"], "source_roots": ["a"]}
+    with pytest.raises(PolicyError, match="git_hook"):
+        policy_from_mapping({"git_hook": False, "scopes": {"a": scope}})
+
+
+def test_git_hook_is_set_per_scope() -> None:
+    scope = {"rings": ["domain"], "classify": {}, "preset": "relaxed"}
+    raw = {
+        "scopes": {
+            "a": {**scope, "sources": ["a/src"], "source_roots": ["a/src"], "git_hook": True},
+            "b": {**scope, "sources": ["b/src"], "source_roots": ["b/src"]},
+        }
+    }
+    policy = policy_from_mapping(raw)
+
+    assert policy.scope("a").policy.preset.git_hook
+    assert not policy.scope("b").policy.preset.git_hook
 
 
 def test_a_second_run_changes_nothing() -> None:
@@ -144,7 +209,9 @@ def test_every_caller_of_ensure_git_hook_looks_at_the_outcome() -> None:
                 assert not (isinstance(func, ast.Name) and func.id == "ensure_git_hook"), f"{path.name} discards the outcome"
 
 
-def _run_hook(tmp_path: Path, interpreter: str, *, venv: str | None = None) -> tuple[int, str, str]:
+def _run_hook(
+    tmp_path: Path, interpreter: str, *, venv: str | None = None, env: dict[str, str] | None = None
+) -> tuple[int, str, str]:
     """Run the rendered hook under ``sh`` with fake interpreters; return its exit code, stderr and what the interpreters were asked."""
     log = tmp_path / "calls.log"
     bin_dir = tmp_path / "bin"
@@ -156,7 +223,9 @@ def _run_hook(tmp_path: Path, interpreter: str, *, venv: str | None = None) -> t
         _fake_python(tmp_path / ".venv" / "bin" / "python", venv, log, "venv")
     script = tmp_path / "pre-push"
     script.write_text(render_hook(""), encoding="utf-8")
-    done = subprocess.run(["sh", str(script)], cwd=tmp_path, env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, capture_output=True, text=True, check=False)
+    done = subprocess.run(
+        ["sh", str(script)], cwd=tmp_path, env={"PATH": f"{bin_dir}:/usr/bin:/bin", **(env or {})}, capture_output=True, text=True, check=False
+    )
     return done.returncode, done.stderr, log.read_text(encoding="utf-8") if log.exists() else ""
 
 
@@ -203,3 +272,11 @@ def test_the_project_virtualenv_is_preferred_over_the_path_python(tmp_path: Path
 def test_the_path_python_is_used_when_there_is_no_virtualenv(tmp_path: Path) -> None:
     code, _, calls = _run_hook(tmp_path, "ok")
     assert code == 0 and "path:-m arborescent check" in calls
+
+
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="needs a POSIX shell")
+def test_the_skip_variable_bypasses_this_push_without_running_any_python(tmp_path: Path) -> None:
+    """``ARBORESCENT_SKIP_HOOK=1 git push`` skips only this check, unlike ``--no-verify`` which skips every hook."""
+    code, stderr, calls = _run_hook(tmp_path, "violations", env={SKIP_VARIABLE: "1"})
+    assert code == 0 and SKIP_VARIABLE in stderr and "skipping" in stderr
+    assert calls == ""  # no interpreter was even looked for

@@ -37,6 +37,12 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- `git_hook = true` / `git_hook = false` in `[tool.arborescent]` chooses the `pre-push` hook independently of the preset:
+  `true` makes `generate` and `check` install it under any preset, `false` makes them remove an Arborescent-managed one
+  (a hook Arborescent did not write is still never touched, in either direction). Previously only the `strict` preset
+  installed it, and switching away from `strict` left a stale hook behind. Settable per scope, like `middle_forbid`.
+  `ARBORESCENT_SKIP_HOOK=1 git push` skips the hook for one push only, leaving other hooks and the `git_hook` setting
+  alone; `git push --no-verify` remains git's own way to skip every hook.
 - `owned_literal`: `[[tool.arborescent.owned_literal]] literal = "APP_CONFIG", modules = [...], rings = [...], reason = "..."` lets only
   those modules (and rings) spell an identifier-like string, such as an environment variable name; the new `literal-outside-owner` rule
   names the module, ring and line, reports an owner glob that matches no module, and is mutation-tested by `selftest`. The scan cache is

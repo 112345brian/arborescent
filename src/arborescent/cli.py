@@ -351,13 +351,15 @@ def _generate(policy: Policy, root: Path, svc: Services) -> int:
 
 
 def _report_git_hook(outcome: HookOutcome) -> None:
-    """Say what the strict preset's pre-push hook did; a hook that is already right, not wanted or not possible is silent."""
+    """Say what the pre-push hook did; a hook that is already right, not wanted or not possible is silent."""
     if outcome.status in ("installed", "updated"):
-        print(f"{outcome.status} git hook {outcome.path} (strict preset: blocks a push that would fail `arborescent check`)")
+        print(f"{outcome.status} git hook {outcome.path} (git_hook: blocks a push that would fail `arborescent check`)")
+    elif outcome.status == "removed":
+        print(f"removed git hook {outcome.path} (git_hook is now off)")
     elif outcome.status == "foreign":
         print(
             f"arborescent: {outcome.path} exists and is not Arborescent's, so it was left alone; "
-            "the strict preset cannot block a failing push until it runs `arborescent check --require-tools --require-profile`",
+            "git_hook cannot block a failing push until it runs `arborescent check --require-tools --require-profile`",
             file=sys.stderr,
         )
 

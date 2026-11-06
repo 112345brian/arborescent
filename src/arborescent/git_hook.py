@@ -1,6 +1,8 @@
 """The strict preset's git hook: a pre-push hook that runs the same ``check`` CI runs, so a push that would fail CI is
-stopped on the developer's machine. Installed when a repository is configured or checked under a preset with ``git_hook``;
-a hook somebody else wrote is never touched."""
+stopped on the developer's machine. Installed when a repository is configured or checked under a preset with ``git_hook``
+(or an explicit ``git_hook = true`` override), and removed again if ``git_hook`` is later turned off. A hook somebody
+else wrote is never touched, in either direction. ``ARBORESCENT_SKIP_HOOK=1 git push`` skips this one check for one push
+without touching other hooks; ``git push --no-verify`` is git's own way to skip every hook instead."""
 
 from __future__ import annotations
 
@@ -12,12 +14,13 @@ from typing import Literal
 from .domain import Policy
 from .ports import FileSystem, ToolRunner
 
-__all__ = ["HOOK_MARKER", "HookOutcome", "ensure_git_hook", "render_hook"]
+__all__ = ["HOOK_MARKER", "SKIP_VARIABLE", "HookOutcome", "ensure_git_hook", "render_hook"]
 
 HOOK_NAME = "pre-push"
 HOOK_MARKER = "# arborescent-managed git hook: rewritten by `arborescent check` and `arborescent generate`"
+SKIP_VARIABLE = "ARBORESCENT_SKIP_HOOK"  # one push, this check only; `git push --no-verify` skips every hook instead
 
-HookStatus = Literal["not-strict", "no-git", "installed", "updated", "current", "foreign"]
+HookStatus = Literal["not-strict", "no-git", "installed", "updated", "current", "foreign", "removed"]
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,11 @@ def render_hook(prefix: str) -> str:
     return (
         "#!/bin/sh\n"
         f"{HOOK_MARKER}\n"
+        # One push, this check only (other hooks still run); `git push --no-verify` is the native way to skip every hook.
+        f'if [ -n "${SKIP_VARIABLE}" ]; then\n'
+        f'  echo "arborescent pre-push: {SKIP_VARIABLE} is set; skipping the check for this push" >&2\n'
+        "  exit 0\n"
+        "fi\n"
         f"{enter}"
         # The project's own virtualenv first: the python on PATH is often not the one arborescent is installed in.
         "if [ -x .venv/bin/python ]; then PY=.venv/bin/python\n"
@@ -50,22 +58,24 @@ def render_hook(prefix: str) -> str:
 
 
 def ensure_git_hook(policy: Policy, root: Path, fs: FileSystem, runner: ToolRunner) -> HookOutcome:
-    """Install or refresh the hook when the preset asks for one. Never raises for an unusual repository: the outcome says what happened."""
-    if not policy.preset.git_hook:
-        return HookOutcome("not-strict")
+    """Install, refresh or remove the hook to match ``git_hook``. Never raises for an unusual repository: the
+    outcome says what happened. A hook somebody else wrote (or one that can't be read) is never touched, whichever
+    way ``git_hook`` is set."""
     located = _locate(root, runner)
     if located is None:
         return HookOutcome("no-git")
     path, prefix = located
+    managed = _managed_contents(path, fs)
+    if not policy.preset.git_hook:
+        if managed is None:
+            return HookOutcome("foreign", path) if fs.is_file(path) else HookOutcome("not-strict")
+        fs.remove_file(path)
+        return HookOutcome("removed", path)
     wanted = render_hook(prefix)
     if fs.is_file(path):
-        try:
-            current = fs.read_text(path)
-        except (OSError, UnicodeDecodeError):
+        if managed is None:
             return HookOutcome("foreign", path)
-        if HOOK_MARKER not in current:
-            return HookOutcome("foreign", path)
-        if current == wanted:
+        if managed == wanted:
             return HookOutcome("current", path)
         status: HookStatus = "updated"
     else:
@@ -74,6 +84,17 @@ def ensure_git_hook(policy: Policy, root: Path, fs: FileSystem, runner: ToolRunn
     fs.write_text(path, wanted)
     fs.make_executable(path)
     return HookOutcome(status, path)
+
+
+def _managed_contents(path: Path, fs: FileSystem) -> str | None:
+    """The hook's current text, if it is Arborescent-managed (carries the marker); None if absent, unreadable or foreign."""
+    if not fs.is_file(path):
+        return None
+    try:
+        current = fs.read_text(path)
+    except (OSError, UnicodeDecodeError):
+        return None
+    return current if HOOK_MARKER in current else None
 
 
 def _locate(root: Path, runner: ToolRunner) -> tuple[Path, str] | None:

@@ -27,6 +27,7 @@ settings. The two forms cannot be mixed.
 | `importable_by` | `{}` | Module glob -> importer globs: the inverse of `module_forbid_imports` (see below). A listed module, and its submodules, may be imported only by modules matching one of the globs. |
 | `preset` | `"strict"` | How much of the external and OS rules applies: `strict`, `standard` or `relaxed` (see below). |
 | `middle_forbid` | the preset's | Effect categories middle rings may not use, replacing the preset default (see below). |
+| `git_hook` | the preset's | Whether `generate` and `check` manage the `pre-push` hook, replacing the preset default (see below). `true` installs it under any preset; `false` removes an Arborescent-managed one. A hook Arborescent did not write is never touched either way. |
 | `io_modules` | built-in set | Stdlib modules that count as I/O, process or OS. Replaces the default set; `[]` means none. |
 | `groups` | `{}` | Named lists, used as `"@name"` inside any `may_import` or `external` list. |
 | `dependencies` | `{}` | Import name -> distribution name, where they differ (`yaml = "pyyaml"`). Used for entry-script and manifest checks. |
@@ -657,6 +658,11 @@ effect categories without the allow-lists `standard` and `strict` also require. 
 
 `io_modules` also drives the generated import-linter contracts, which ban the I/O modules a ring does not list. Under
 `relaxed` the contracts ban only declared third-party packages.
+
+Only `strict` installs the `pre-push` hook by default; `git_hook = true` replaces that default under any preset, and
+`git_hook = false` removes an Arborescent-managed hook (never a foreign one) the next time `generate` or `check` runs. In
+a scoped policy the key is set per scope, like `middle_forbid`. `ARBORESCENT_SKIP_HOOK=1 git push` skips the hook for one
+push without touching other hooks or the `git_hook` setting; `git push --no-verify` is git's own way to skip every hook.
 
 ## Rules Arborescent checks itself
 
