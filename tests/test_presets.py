@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -141,3 +142,42 @@ def test_tach_external_exclude_land_in_the_tach_external_exclude() -> None:
     files = generate(mini_policy(tach_external_exclude=["livekit", "sentry_sdk"]), NAMES, [])
     assert 'exclude = ["livekit", "sentry_sdk"]' in files["tach.toml"]
     assert "exclude = []" in generate(mini_policy(), NAMES, [])["tach.toml"]
+
+
+# --- strict also tightens the generated Ruff limits ---------------------------------------------------------------
+
+
+def ruff_lint(**overrides: Any) -> dict[str, Any]:
+    return tomllib.loads(generate(mini_policy(**overrides), NAMES, [])["ruff.toml"])["lint"]
+
+
+def test_strict_generates_tighter_function_limits_than_ruffs_defaults() -> None:
+    lint = ruff_lint()
+    assert lint["mccabe"]["max-complexity"] == 8
+    assert lint["pylint"] == {"max-args": 5, "max-branches": 10, "max-returns": 6, "max-statements": 40}
+    assert {"C901", "PLR0911", "PLR0912", "PLR0913", "PLR0915"} <= set(lint["select"])
+
+
+@pytest.mark.parametrize("preset", ["standard", "relaxed"])
+def test_other_presets_keep_ruffs_default_limits_and_do_not_select_the_returns_rule(preset: str) -> None:
+    lint = ruff_lint(preset=preset)
+    assert "mccabe" not in lint and "pylint" not in lint
+    assert "PLR0911" not in lint["select"] and "C901" in lint["select"]
+
+
+def test_a_project_override_wins_over_the_preset_limit_and_unset_limits_stay_strict() -> None:
+    lint = ruff_lint(ruff={"max-complexity": 12, "max-returns": 7})
+    assert lint["mccabe"]["max-complexity"] == 12
+    assert lint["pylint"] == {"max-args": 5, "max-branches": 10, "max-returns": 7, "max-statements": 40}
+
+
+def test_several_pylint_limits_share_one_table() -> None:
+    """Each overridden pylint key used to open its own `[lint.pylint]` header, which is invalid TOML."""
+    text = generate(mini_policy(preset="relaxed", ruff={"max-args": 3, "max-branches": 4}), NAMES, [])["ruff.toml"]
+    assert text.count("[lint.pylint]") == 1 and tomllib.loads(text)["lint"]["pylint"] == {"max-args": 3, "max-branches": 4}
+
+
+def test_max_returns_is_a_validated_ruff_override() -> None:
+    assert policy_from_mapping({**MINI, "ruff": {"max-returns": 3}}).ruff_overrides["max-returns"] == 3
+    with pytest.raises(PolicyError, match=r"max-returns.*positive integer"):
+        policy_from_mapping({**MINI, "ruff": {"max-returns": 0}})

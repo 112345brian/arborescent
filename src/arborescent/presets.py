@@ -4,8 +4,8 @@ how strict it is."""
 
 from __future__ import annotations
 
-from collections.abc import Collection
-from dataclasses import dataclass
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field
 from typing import Literal
 
 __all__ = ["DEFAULT_PRESET", "EFFECT_CATEGORIES", "PRESETS", "Preset", "Scope"]
@@ -39,6 +39,8 @@ class Preset:
     os_branching: bool  # True: only rings marked ``os_branching`` may read os.name / sys.platform
     middle_forbid: frozenset[str]
     git_hook: bool = False  # True: configuring or checking a repo also installs the pre-push hook that runs ``check``
+    ruff_select: tuple[str, ...] = ()  # Ruff rules the generated ruff.toml selects on top of the shared set
+    ruff_limits: Mapping[str, int] = field(default_factory=dict)  # function-size limits the generated ruff.toml sets, keyed like `[tool.arborescent.ruff]`
 
     @property
     def bans_io(self) -> bool:
@@ -54,10 +56,17 @@ class Preset:
         return self.external_scope == "io" and top in io_modules
 
 
+# Small functions are the cheapest architecture there is: each limit is tighter than Ruff's default (complexity 10, branches 12,
+# statements 50) except `max-args` and `max-returns`, which restate it so the rule is on and the number is visible in ruff.toml.
+STRICT_RUFF_LIMITS: Mapping[str, int] = {"max-complexity": 8, "max-args": 5, "max-branches": 10, "max-returns": 6, "max-statements": 40}
+
 PRESETS: dict[str, Preset] = {
     p.name: p
     for p in (
-        Preset("strict", "every external import, stdlib included, must be allow-listed per ring; OS branching limited", "all", True, EFFECT_CATEGORIES, git_hook=True),
+        Preset(
+            "strict", "every external import, stdlib included, must be allow-listed per ring; OS branching limited", "all", True, EFFECT_CATEGORIES,
+            git_hook=True, ruff_select=("PLR0911",), ruff_limits=STRICT_RUFF_LIMITS,
+        ),
         Preset("standard", "third-party and I/O stdlib must be allow-listed; other stdlib is free; OS branching limited", "io", True, frozenset({"env", "sleep", "threads", "process"})),
         Preset("relaxed", "only third-party packages are allow-listed; layering and classification still enforced", "third-party", False, frozenset()),
     )

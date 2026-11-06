@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import tomllib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -89,27 +89,53 @@ def _with_derived_classify(fs: FileSystem, root: Path, raw: Mapping[str, Any]) -
     explicit = raw.get("classify", {})
     if not isinstance(explicit, Mapping):
         raise PolicyError("`classify` must map module globs to rings")
-    derived = {
-        pattern: ring
-        for pattern, ring in _tach_classify(fs, root / source, source).items()
-        if pattern not in explicit
-    }
+    layers, unlayered = _tach_classify(fs, root / source, source)
+    derived = {pattern: ring for pattern, ring in layers.items() if pattern not in explicit}
+    explicit_rings = {pattern: ring for pattern, ring in explicit.items() if isinstance(ring, str)}
+    inferred = _shared_parent_rings({**layers, **explicit_rings}, unlayered)  # an explicit descendant's ring counts as one of the children's
+    derived.update({package: ring for package, ring in inferred.items() if package not in explicit and package not in layers})
     return {**{k: v for k, v in raw.items() if k != "classify_from"}, "classify": {**explicit, **derived}}
 
 
-def _tach_classify(fs: FileSystem, path: Path, label: str) -> dict[str, str]:
-    """Each tach `[[modules]]` with a `layer` becomes `path` and `path.*` entries, mirroring tach's own layers."""
+def _tach_classify(fs: FileSystem, path: Path, label: str) -> tuple[dict[str, str], set[str]]:
+    """Each tach `[[modules]]` with a `layer` becomes `path` and `path.*` entries, mirroring tach's own layers.
+
+    Also returns the paths of tach modules that have no layer: a package holding one is not wholly classified."""
     try:
         data = tomllib.loads(fs.read_text(path))
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise PolicyError(f"`classify_from` could not read {label}: {error}") from error
     out: dict[str, str] = {}
+    unlayered: set[str] = set()
     for module in data.get("modules", []):
         module_path, layer = module.get("path"), module.get("layer")
-        if isinstance(module_path, str) and isinstance(layer, str) and module_path and layer:
+        if not isinstance(module_path, str) or not module_path:
+            continue
+        if isinstance(layer, str) and layer:
             out[module_path] = layer
             out[module_path + ".*"] = layer
-    return out
+        else:
+            unlayered.add(module_path)
+    return out, unlayered
+
+
+def _shared_parent_rings(rings: Mapping[str, str], unlayered: Collection[str]) -> dict[str, str]:
+    """A package nobody names gets the one ring all of its classified descendants share (its `__init__`).
+
+    ``rings`` maps module patterns to rings (globs are ignored); a package with any descendant that has no ring, or with
+    descendants in two rings, is left out: then the choice is the author's."""
+    below: dict[str, set[str]] = {}
+    for module_path, ring in rings.items():
+        if "*" not in module_path:
+            for package in _parent_packages(module_path):
+                below.setdefault(package, set()).add(ring)
+    blocked = {package for module_path in unlayered for package in _parent_packages(module_path)}
+    return {package: next(iter(found)) for package, found in below.items() if len(found) == 1 and package not in blocked}
+
+
+def _parent_packages(module_path: str) -> list[str]:
+    parts = module_path.split(".")
+    return [".".join(parts[:end]) for end in range(1, len(parts))]
 
 
 def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Path | None:
@@ -441,7 +467,7 @@ def _disabled_tools(raw: Mapping[str, Any]) -> tuple[str, ...]:
 def _ruff_overrides(raw: object) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise PolicyError("`ruff` must be a table of generated Ruff overrides")
-    allowed = {"extend-select", "ignore", "per-file-ignores", "max-complexity", "max-args", "max-branches", "max-statements"}
+    allowed = {"extend-select", "ignore", "per-file-ignores", "max-complexity", "max-args", "max-branches", "max-returns", "max-statements"}
     unknown = set(raw) - allowed
     if unknown:
         raise PolicyError(f"unknown `[tool.arborescent.ruff]` setting(s): {sorted(unknown)}")
@@ -456,7 +482,7 @@ def _ruff_overrides(raw: object) -> dict[str, Any]:
         for pattern, codes in per_file.items()
     ):
         raise PolicyError("`per-file-ignores` in `[tool.arborescent.ruff]` must map file globs to rule lists")
-    for key in ("max-complexity", "max-args", "max-branches", "max-statements"):
+    for key in ("max-complexity", "max-args", "max-branches", "max-returns", "max-statements"):
         if key in raw and (not isinstance(raw[key], int) or isinstance(raw[key], bool) or raw[key] < 1):
             raise PolicyError(f"`{key}` in `[tool.arborescent.ruff]` must be a positive integer")
     return dict(raw)

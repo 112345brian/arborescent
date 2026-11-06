@@ -4,7 +4,27 @@
 
 ## Unreleased
 
+### Fixed
+- `from pkg import submodule` is now an import of `pkg.submodule` only, not also of the package's `__init__`; the package edge
+  remains when any imported name is not a submodule (or is `*`). Both spellings of one import now agree (#109).
+  This includes the relative `from . import sibling, Hints`, which now also depends on the package (it reads `Hints` off its
+  `__init__`) where it used to resolve to the sibling alone. Package splitting (`resolve_runtime_targets`) still carries
+  `pkg/__init__` with every importer of a submodule, since importing it runs that file.
+- `classify_from` now classifies a package that tach never names as a module (only its submodules) with the one ring all its
+  classified descendants share, so its `__init__.py` is no longer `unclassified`; when the descendants disagree it stays
+  unclassified, and an explicit `classify` entry or a tach module for the package still wins (#107). A package that holds a tach
+  module without a `layer`, or an explicitly classified descendant in another ring, is not inferred either.
+- The strict preset's pre-push hook runs the project's `.venv` interpreter when there is one, and when the interpreter it finds
+  has no `arborescent` installed it prints a warning and lets the push through instead of failing every push with "No module
+  named arborescent". An installed but broken `arborescent`, and every real `check` failure, still block the push.
+
 ### Changed
+- The `strict` preset now generates tighter Ruff function limits: complexity 8 (Ruff: 10), branches 10 (12), statements 40 (50),
+  returns 6 and args 5 stated explicitly, and selects `PLR0911` (too many returns). `standard` and `relaxed` are unchanged.
+  A new `max-returns` key joins the `[tool.arborescent.ruff]` overrides, and several pylint limits now share one `[lint.pylint]`
+  table (each used to open its own, which is invalid TOML). An existing `ruff.toml` is not overwritten: delete it and run
+  `arborescent generate` to adopt the limits. Arborescent's own 30 functions over them are recorded in the baseline to be
+  worked down.
 - `packages migrate` now rewrites `from <old> import <module>` (also with `as`, several names, `from app import core` for a
   renamed `app.core`, and `from <old> import *`) instead of refusing it: a small LibCST transformer in the adapter rewrites the
   statement before `RenameCommand` runs, keeping every name bound to the same module under the same name (#71). It still

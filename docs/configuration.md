@@ -266,7 +266,11 @@ and `invalid-arbor-annotation` findings are not emitted. Other architecture chec
 minimum-profile certification, even when the remaining enabled checks pass and the project is `CONSISTENT`.
 
 `[tool.arborescent.ruff]` composes overrides over the optional generated Ruff preset; it never replaces that preset. It accepts
-`extend-select`, `ignore`, `per-file-ignores`, `max-complexity`, `max-args`, `max-branches`, and `max-statements`.
+`extend-select`, `ignore`, `per-file-ignores`, `max-complexity`, `max-args`, `max-branches`, `max-returns`, and `max-statements`.
+Under the `strict` preset the generated `ruff.toml` already sets them tighter than Ruff's defaults (complexity 8, branches 10,
+statements 40, returns 6, args 5) and selects `PLR0911`; `standard` and `relaxed` keep Ruff's defaults. A key you set here wins
+over the preset's value for that key only. `generate` never overwrites an existing `ruff.toml`, so an existing project picks
+the new limits up by deleting its generated `ruff.toml` and running `arborescent generate` again.
 The base includes correctness, typing, security, modernization, path, and performance rule families in addition to
 complexity and architecture-aware rules. Ruff's broad test-assertion and subprocess-wrapper warnings are scoped so
 tests remain idiomatic and real process adapters can declare their deliberate subprocess boundary. `PIE807` is ignored

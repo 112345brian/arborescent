@@ -559,3 +559,54 @@ def test_forbidden_modules_is_a_scope_key_and_not_a_root_key_with_scopes() -> No
     assert policy_from_mapping(raw).scope("shared").policy.forbidden_modules == ()
     with pytest.raises(PolicyError, match="cannot be combined with `scopes`"):
         policy_from_mapping({**_scoped_raw(), "forbidden_modules": ["x"]})
+
+
+def test_classify_from_gives_an_unnamed_package_the_ring_its_children_share(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tach = '[[modules]]\npath = "ingest.facts"\nlayer = "pipeline"\n[[modules]]\npath = "ingest.shared.deep"\nlayer = "pipeline"\n'
+    policy = _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["pipeline"]\n', tach)
+    assert policy.ring_of("ingest") == "pipeline"  # #107: the package's own __init__
+    assert policy.ring_of("ingest.shared") == "pipeline"  # an intermediate package no tach module names
+    assert policy.ring_of("other") is None
+
+
+def test_classify_from_leaves_an_unnamed_package_unclassified_when_children_disagree(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    policy = _classify_from_repo(
+        tmp_path, 'classify_from = "tach.toml"\nrings = ["domain", "composition"]\n', TACH_LAYERS,
+    )
+    assert policy.ring_of("pkg") is None
+
+
+def test_classify_from_keeps_a_package_tach_names_itself(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tach = '[[modules]]\npath = "ingest"\nlayer = "composition"\n[[modules]]\npath = "ingest.facts"\nlayer = "pipeline"\n'
+    policy = _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["pipeline", "composition"]\n', tach)
+    assert policy.ring_of("ingest") == "composition"  # not overwritten by the children's shared ring
+
+
+def test_classify_from_does_not_infer_a_ring_for_a_package_with_an_explicit_entry(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tach = '[[modules]]\npath = "ingest.facts"\nlayer = "pipeline"\n'
+    policy = _classify_from_repo(
+        tmp_path, 'classify_from = "tach.toml"\nrings = ["pipeline", "composition"]\n[classify]\n"ingest" = "composition"\n', tach,
+    )
+    assert policy.ring_of("ingest") == "composition"
+
+
+def test_classify_from_leaves_a_package_unclassified_when_a_sibling_module_has_no_layer(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tach = '[[modules]]\npath = "ingest.facts"\nlayer = "pipeline"\n[[modules]]\npath = "ingest.scratch"\n'
+    policy = _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["pipeline"]\n', tach)
+    assert policy.ring_of("ingest.facts") == "pipeline"
+    assert policy.ring_of("ingest") is None  # half the package was left unlayered on purpose
+
+
+def test_classify_from_counts_an_explicit_descendant_when_inferring_the_package_ring(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tach = '[[modules]]\npath = "ingest.facts"\nlayer = "pipeline"\n'
+    policy = _classify_from_repo(
+        tmp_path, 'classify_from = "tach.toml"\nrings = ["pipeline", "composition"]\n[classify]\n"ingest.cli" = "composition"\n', tach,
+    )
+    assert policy.ring_of("ingest.cli") == "composition"
+    assert policy.ring_of("ingest") is None  # its children now disagree
+
+
+def test_classify_from_infers_each_level_of_nested_packages_independently(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    tach = '[[modules]]\npath = "a.b.one"\nlayer = "x"\n[[modules]]\npath = "a.c.two"\nlayer = "y"\n'
+    policy = _classify_from_repo(tmp_path, 'classify_from = "tach.toml"\nrings = ["x", "y"]\n', tach)
+    assert (policy.ring_of("a.b"), policy.ring_of("a.c"), policy.ring_of("a")) == ("x", "y", None)

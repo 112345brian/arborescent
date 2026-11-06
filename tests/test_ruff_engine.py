@@ -24,7 +24,7 @@ def test_generate_writes_a_ring_aware_ruff_config_and_excludes_vendor_trees() ->
     assert config["lint"]["select"] == [
         "PLC0415", "BLE001", "E722", "C901", "PLR0912", "PLR0913", "PLR0915", "TID252", "PLW1514",
         "A", "ANN", "ASYNC", "C4", "DTZ", "I", "PERF", "PIE", "PTH", "RET", "RUF", "S", "SIM", "UP",
-        "YTT", "T20", "F", "B",
+        "YTT", "T20", "F", "B", "PLR0911",
     ]
     assert "PIE807" in config["lint"]["ignore"]
     assert any("app/main" in pattern and "T20" in rules for pattern, rules in config["lint"]["per-file-ignores"].items())

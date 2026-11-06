@@ -6,7 +6,7 @@ from collections.abc import Collection, Mapping
 from pathlib import Path, PurePosixPath
 
 from .domain import Policy
-from .facts import ModuleInfo, resolve_targets
+from .facts import ModuleInfo, resolve_runtime_targets
 from .package_manifest import load_extracted_package
 from .package_model import CatalogError
 from .package_preservation import PartFacts
@@ -25,7 +25,7 @@ def module_imports(modules: Mapping[str, ModuleInfo], known: Collection[str]) ->
         targets = {
             target
             for imp in info.facts.imports
-            for target in resolve_targets(name, info.is_package, imp, known, tops)[0]
+            for target in resolve_runtime_targets(name, info.is_package, imp, known, tops)[0]
             if target in known and target != name
         }
         out[name] = tuple(sorted(targets))
