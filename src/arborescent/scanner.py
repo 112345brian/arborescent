@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 import tomllib
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -225,6 +225,74 @@ def _facts_from_json(raw: list[Any]) -> SourceFacts:
     )
 
 
+def _is_selected(only: frozenset[str] | None, entry_scripts: Collection[str], module: str, rel: str) -> bool:
+    return only is None or rel in only or module in entry_scripts
+
+
+def _parse_files(
+    root: Path,
+    files: list[tuple[str, bool, str]],
+    cache: dict[str, list[Any]],
+    only_wanted: set[str] | None,
+) -> tuple[dict[str, ModuleInfo], dict[str, str], dict[str, list[Any]], int]:
+    """Parse (or load from the cache) every discovered file, or only the wanted ones when `only_wanted` is given."""
+    modules: dict[str, ModuleInfo] = {}
+    paths: dict[str, str] = {}
+    fresh: dict[str, list[Any]] = {}
+    parsed = 0
+    for module, is_pkg, rel in files:
+        paths[module] = rel
+        if only_wanted is not None and module not in only_wanted:
+            continue
+        data = (root / rel).read_bytes()
+        digest = hashlib.blake2b(data, digest_size=16).hexdigest()
+        hit = cache.get(rel)
+        if hit is not None and hit[0] == digest:
+            facts = _facts_from_json(hit[1])
+            fresh[rel] = hit
+        else:
+            facts = extract(data.decode("utf-8-sig"), rel)
+            fresh[rel] = [digest, _facts_to_json(facts)]
+            parsed += 1
+        modules[module] = ModuleInfo(module, rel, is_pkg, facts)
+    return modules, paths, fresh, parsed
+
+
+def _store_cache(
+    cache_file: Path | None, cache: dict[str, list[Any]], fresh: dict[str, list[Any]], only: frozenset[str] | None, parsed: int
+) -> None:
+    if cache_file and (parsed > 0 or (only is None and len(fresh) != len(cache))):
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        merged = fresh if only is None else {**cache, **fresh}
+        _ = cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "files": merged}), encoding="utf-8")
+
+
+def _annotated_modules(
+    files: list[tuple[str, bool, str]],
+    arbor_index: dict[str, tuple[str | None, str | None]],
+    ring_names: set[str],
+    selected: Callable[[str, str], bool],
+) -> set[str]:
+    """Modules whose valid ``__arbor__`` ring is a policy ring and that the run selected."""
+    return {
+        module for module, _, rel in files
+        if arbor_index[module][0] in ring_names and arbor_index[module][1] is None and selected(module, rel)
+    }
+
+
+def _still_unclassified(
+    policy: Policy,
+    unclassified: tuple[tuple[str, str], ...],
+    arbor_index: dict[str, tuple[str | None, str | None]],
+    ring_names: set[str],
+) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        item for item in unclassified
+        if (policy.scopes and policy.scope_for_path(item[1]) is None)
+        or arbor_index[item[0]][0] not in ring_names or arbor_index[item[0]][1] is not None
+    )
+
+
 class FsScanner:
     """Walk the policy's sources, parse each file once, reuse facts for unchanged content."""
 
@@ -254,36 +322,12 @@ class FsScanner:
         wanted = {
             m
             for m, _, rel in files
-            if (only is None or rel in only or m in entry_scripts)
-            and _is_enforced_source(policy, m, rel)
+            if _is_selected(only, entry_scripts, m, rel) and _is_enforced_source(policy, m, rel)
         }
         dev_tool_modules = frozenset(m for m, _, rel in files if policy.is_dev_tool_path(rel))
         wanted |= {m for m, _, rel in files if m in dev_tool_modules and (only is None or rel in only)}
-        modules: dict[str, ModuleInfo] = {}
-        paths: dict[str, str] = {}
-        parsed = 0
-        dirty = False
-        fresh: dict[str, list[Any]] = {}
-        for module, is_pkg, rel in files:
-            paths[module] = rel
-            if not annotations_enabled and module not in wanted:
-                continue
-            data = (root / rel).read_bytes()
-            digest = hashlib.blake2b(data, digest_size=16).hexdigest()
-            hit = cache.get(rel)
-            if hit is not None and hit[0] == digest:
-                facts = _facts_from_json(hit[1])
-                fresh[rel] = hit
-            else:
-                facts = extract(data.decode("utf-8-sig"), rel)
-                fresh[rel] = [digest, _facts_to_json(facts)]
-                parsed += 1
-                dirty = True
-            modules[module] = ModuleInfo(module, rel, is_pkg, facts)
-        if cache_file and (dirty or (only is None and len(fresh) != len(cache))):
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-            merged = fresh if only is None else {**cache, **fresh}
-            _ = cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "files": merged}), encoding="utf-8")
+        modules, paths, fresh, parsed = _parse_files(root, files, cache, None if annotations_enabled else wanted)
+        _store_cache(cache_file, cache, fresh, only, parsed)
         misplaced = _misplaced_dev_tools(files, modules, dev_tool_modules) if annotations_enabled else ()
         if annotations_enabled:
             # This pass covers every discovered file, including unchanged import
@@ -292,17 +336,9 @@ class FsScanner:
                 module: (info.facts.arbor_ring, info.facts.arbor_error)
                 for module, info in modules.items()
             }
-            wanted.update(
-                module for module, _, rel in files
-                if arbor_index[module][0] in ring_names and arbor_index[module][1] is None
-                and (only is None or rel in only or module in entry_scripts)
-            )
+            wanted |= _annotated_modules(files, arbor_index, ring_names, lambda module, rel: _is_selected(only, entry_scripts, module, rel))
             modules = {module: info for module, info in modules.items() if module in wanted}
-            unclassified = tuple(
-                item for item in unclassified
-                if (policy.scopes and policy.scope_for_path(item[1]) is None)
-                or arbor_index[item[0]][0] not in ring_names or arbor_index[item[0]][1] is not None
-            )
+            unclassified = _still_unclassified(policy, unclassified, arbor_index, ring_names)
         entry = {s: modules[s].facts.script_deps for s in entry_scripts if s in modules}
         if only is not None:
             unclassified = tuple(item for item in unclassified if item[1] in only or item[0] in only)
@@ -321,38 +357,19 @@ class FsScanner:
         tuple[tuple[str, str], ...],
         tuple[tuple[str, str], ...],
     ]:
-        found: dict[str, tuple[str, bool, str]] = {}
-        excluded: dict[str, int] = {}
-        noise_files: list[str] = []
-        unclassified: list[tuple[str, str]] = []
-        vendors: dict[str, list[str]] = {}
         all_paths, tracked = _listed_paths(root, self._runner)
-        excluded_children = _child_policy_paths(root, policy)
-        excluded_paths = (*policy.exclude, *excluded_children)
-        for rel in all_paths:
-            if excluded_by_policy(rel, excluded_paths):
-                if rel.endswith(".py"):
-                    folder = _excluded_folder(rel, excluded_paths)
-                    excluded[folder] = excluded.get(folder, 0) + 1
-                continue
-            if _noise_parent(rel, tracked):
-                if rel.endswith(".py"):
-                    noise_files.append(rel)
-                continue
-            vendor = _skipped_vendor(rel, policy)
-            if vendor is not None:
-                vendors.setdefault(vendor, []).append(rel)
+        excluded_paths = (*policy.exclude, *_child_policy_paths(root, policy))
+        excluded, noise_files, vendors = _sift_paths(all_paths, tracked, policy, excluded_paths)
 
         vendor_folders = _fingerprint_vendors(vendors, root, excluded)
 
-        py_paths = [rel for rel in all_paths if rel.endswith(".py")]
-        for rel in py_paths:
-            if (
-                excluded_by_policy(rel, excluded_paths)
-                or _noise_parent(rel, tracked)
-                or _skipped_vendor(rel, policy) is not None
-            ):
-                continue
+        kept = [
+            rel for rel in all_paths
+            if rel.endswith(".py") and not _is_skipped(rel, policy, tracked, excluded_paths)
+        ]
+        found: dict[str, tuple[str, bool, str]] = {}
+        unclassified: list[tuple[str, str]] = []
+        for rel in kept:
             _add_discovered(found, policy, rel)
             module = next((name for name, _, path in found.values() if path == rel), None)
             if module is not None and _is_unclassified(policy, module, rel):
@@ -365,6 +382,31 @@ class FsScanner:
             tuple(sorted(unclassified)),
             tuple(vendor_folders),
         )
+
+
+def _is_skipped(rel: str, policy: Policy, tracked: bool, excluded_paths: tuple[str, ...]) -> bool:
+    return excluded_by_policy(rel, excluded_paths) or _noise_parent(rel, tracked) or _skipped_vendor(rel, policy) is not None
+
+
+def _sift_paths(
+    all_paths: list[str], tracked: bool, policy: Policy, excluded_paths: tuple[str, ...]
+) -> tuple[dict[str, int], list[str], dict[str, list[str]]]:
+    """Count the Python files each excluded folder hides, collect noise files, and group the skipped vendor folders."""
+    excluded: dict[str, int] = {}
+    noise_files: list[str] = []
+    vendors: dict[str, list[str]] = {}
+    for rel in all_paths:
+        is_python = rel.endswith(".py")
+        if excluded_by_policy(rel, excluded_paths):
+            if is_python:
+                folder = _excluded_folder(rel, excluded_paths)
+                excluded[folder] = excluded.get(folder, 0) + 1
+        elif _noise_parent(rel, tracked):
+            if is_python:
+                noise_files.append(rel)
+        elif (vendor := _skipped_vendor(rel, policy)) is not None:
+            vendors.setdefault(vendor, []).append(rel)
+    return excluded, noise_files, vendors
 
 
 def _child_policy_paths(root: Path, policy: Policy) -> tuple[str, ...]:
