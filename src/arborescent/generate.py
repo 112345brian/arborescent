@@ -44,6 +44,18 @@ def _ruff_limit_tables(limits: Mapping[str, int]) -> list[str]:
     return [line for section, rows in tables.items() for line in ("", f"[lint.{section}]", *rows)]
 
 
+def _is_outermost_ring(
+    policy: Policy, module: str, arbor_index: Mapping[str, tuple[str | None, str | None]], scope_by_module: Mapping[str, str]
+) -> bool:
+    """Whether the module sits in its policy's (or its scope's) last ring, where printing is allowed."""
+    if not policy.scopes:
+        return policy.resolve_ring(arbor_index, module) == policy.rings[-1].name
+    scope_name = scope_by_module.get(module)
+    if scope_name is None:
+        return False
+    return RuleContext(policy, arbor_index, scope_by_module).resolve_ring(module) == policy.scope(scope_name).policy.rings[-1].name
+
+
 def _ruff_ignores(
     policy: Policy, names: Sequence[str], arbor_index: Mapping[str, tuple[str | None, str | None]] = {},
     scope_by_module: Mapping[str, str] = {},
@@ -54,15 +66,10 @@ def _ruff_ignores(
     for pattern in ("**/pyproject.toml", "**/ruff.toml"):
         ignores.setdefault(pattern, set()).add("RUF201")  # generated configs intentionally use stable rule codes
     for module in names:
-        if policy.scopes:
-            scope_name = scope_by_module.get(module)
-            if scope_name is None or RuleContext(policy, arbor_index, scope_by_module).resolve_ring(module) != policy.scope(scope_name).policy.rings[-1].name:
-                continue
-        elif policy.resolve_ring(arbor_index, module) != policy.rings[-1].name:
-            continue
-        base = module.replace(".", "/")
-        for pattern in (f"**/{base}.py", f"**/{base}/**.py"):
-            ignores.setdefault(pattern, set()).add("T20")
+        if _is_outermost_ring(policy, module, arbor_index, scope_by_module):
+            base = module.replace(".", "/")
+            for pattern in (f"**/{base}.py", f"**/{base}/**.py"):
+                ignores.setdefault(pattern, set()).add("T20")
     overrides = policy.ruff_overrides
     for pattern, codes in overrides.get("per-file-ignores", {}).items():
         ignores.setdefault(pattern, set()).update(codes)

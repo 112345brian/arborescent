@@ -110,8 +110,12 @@ def load_local_targets(fs: FileSystem, location: ConfigLocation, known_ids: Sequ
         if location.explicit:
             raise LocalTargetsError(f"{path} does not exist; it was named by {location.via}")
         return LocalTargets(location)
+    return LocalTargets(location, _directories(path, _targets_table(path, fs.read_text(path)), known_ids))
+
+
+def _targets_table(path: Path, text: str) -> dict[str, object]:
     try:
-        data = tomllib.loads(fs.read_text(path))
+        data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise LocalTargetsError(f"{path} is not valid TOML: {exc}") from exc
     unknown = sorted(set(data) - {"targets"})
@@ -120,6 +124,10 @@ def load_local_targets(fs: FileSystem, location: ConfigLocation, known_ids: Sequ
     table: object = data.get("targets", {})
     if not isinstance(table, dict):
         raise LocalTargetsError(f"{path}: `targets` must be a table mapping a package id to a directory")
+    return {str(key): value for key, value in table.items()}
+
+
+def _directories(path: Path, table: dict[str, object], known_ids: Sequence[str]) -> dict[str, Path]:
     directories: dict[str, Path] = {}
     for package_id, value in sorted(table.items()):
         if not isinstance(value, str) or not value.strip():
@@ -130,7 +138,7 @@ def load_local_targets(fs: FileSystem, location: ConfigLocation, known_ids: Sequ
             )
         directory = Path(value)
         directories[package_id] = directory if directory.is_absolute() else path.parent / directory
-    return LocalTargets(location, directories)
+    return directories
 
 
 def choose_target(package_id: str, flag: Path | None, targets: LocalTargets | None) -> ChosenTarget | None:

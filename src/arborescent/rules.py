@@ -15,6 +15,7 @@ from typing import NamedTuple
 from .domain import (
     ALL,
     EFFECT_RULES,
+    ArchitectureScope,
     Policy,
     PolicyError,
     RingRule,
@@ -318,30 +319,44 @@ def _scope_imports(context: RuleContext, source: str, line: int, targets: Collec
     return out
 
 
+def _leak_source(context: RuleContext, source: str) -> tuple[str, str, frozenset[str]] | None:
+    """``(scope, ring, forbidden effects)`` for a source module that could leak an effect; None when nothing can."""
+    scope_name = context.scope_name(source)
+    ring = context.resolve_ring(source) if scope_name is not None else None
+    if scope_name is None or ring is None:
+        return None
+    forbidden = context.policy.scope(scope_name).policy.forbidden_effects(ring)
+    return (scope_name, ring, forbidden) if forbidden else None
+
+
+def _foreign_public_module(
+    context: RuleContext, modules: Mapping[str, ModuleInfo], source_scope_name: str, target: str
+) -> tuple[str, ArchitectureScope, ModuleInfo] | None:
+    """The scope and facts of ``target`` when it is a declared-public module of another scope that was scanned."""
+    target_scope_name = context.scope_name(target)
+    if target_scope_name is None or target_scope_name == source_scope_name:
+        return None
+    target_scope = context.policy.scope(target_scope_name)
+    info = modules.get(target)
+    if info is None or not any(fnmatch.fnmatchcase(target, pattern) for pattern in target_scope.public):
+        return None
+    return target_scope_name, target_scope, info
+
+
 def _scope_effect_leaks(
     context: RuleContext, modules: Mapping[str, ModuleInfo], source: str, line: int, targets: Collection[str],
 ) -> list[Violation]:
     """One-hop leak: a declared-public module in another scope uses an effect this scope's ring forbids."""
-    source_scope_name = context.scope_name(source)
-    if source_scope_name is None:
+    leak_source = _leak_source(context, source)
+    if leak_source is None:
         return []
-    source_ring = context.resolve_ring(source)
-    if source_ring is None:
-        return []
-    forbidden = context.policy.scope(source_scope_name).policy.forbidden_effects(source_ring)
-    if not forbidden:
-        return []
+    source_scope_name, source_ring, forbidden = leak_source
     out: list[Violation] = []
     for target in filter(None, targets):
-        target_scope_name = context.scope_name(target)
-        if target_scope_name is None or target_scope_name == source_scope_name:
+        foreign = _foreign_public_module(context, modules, source_scope_name, target)
+        if foreign is None:
             continue
-        target_scope = context.policy.scope(target_scope_name)
-        if not any(fnmatch.fnmatchcase(target, pattern) for pattern in target_scope.public):
-            continue
-        info = modules.get(target)
-        if info is None:
-            continue
+        target_scope_name, target_scope, info = foreign
         seen: set[str] = set()
         for use in info.facts.effect_uses:
             if use.category not in forbidden or use.category in seen or not target_scope.policy.counts_effect_seam(use.seam):

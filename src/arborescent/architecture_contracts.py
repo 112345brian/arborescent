@@ -9,7 +9,15 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Collection, Mapping, Sequence
 
-from .domain import ALL, Allowance, ArchitectureContracts, Contract, ModuleLayer, Policy
+from .domain import (
+    ALL,
+    Allowance,
+    ArchitectureContracts,
+    ArchitectureScope,
+    Contract,
+    ModuleLayer,
+    Policy,
+)
 from .ports import PackageBoundaries
 from .rules import RuleContext
 
@@ -90,28 +98,39 @@ def _forbidden(policy: Policy, names: Sequence[str], module_leaves: Sequence[str
     return out
 
 
-def _scoped_forbidden(policy: Policy, module_leaves: Sequence[str], context: RuleContext) -> list[Contract]:
-    scope_by_module = context.scope_by_module
+def _scope_ring_members(policy: Policy, module_leaves: Sequence[str], context: RuleContext) -> dict[str, dict[str, list[str]]]:
     by_scope: dict[str, dict[str, list[str]]] = {s.name: {r.name: [] for r in s.policy.rings} for s in policy.scopes}
     for name in module_leaves:
-        scope_name = scope_by_module.get(name)
+        scope_name = context.scope_by_module.get(name)
         ring = context.resolve_ring(name) if scope_name is not None else None
         if scope_name is not None and ring is not None:
             by_scope[scope_name][ring].append(name)
+    return by_scope
+
+
+def _hidden_from_scope(policy: Policy, scope: ArchitectureScope, module_leaves: Sequence[str], scope_by_module: Mapping[str, str]) -> list[str]:
+    """Modules of other scopes that ``scope`` may not import: undeclared dependency, or not on the owner's public surface."""
+    hidden: list[str] = []
+    for module in module_leaves:
+        target = scope_by_module.get(module)
+        if target is None or target == scope.name:
+            continue
+        public = any(fnmatch.fnmatchcase(module, pattern) for pattern in policy.scope(target).public)
+        if target not in scope.depends_on or not public:
+            hidden.append(module)
+    return hidden
+
+
+def _scoped_forbidden(policy: Policy, module_leaves: Sequence[str], context: RuleContext) -> list[Contract]:
+    scope_by_module = context.scope_by_module
+    by_scope = _scope_ring_members(policy, module_leaves, context)
     out: list[Contract] = []
     for scope in policy.scopes:
         out += _ring_forbidden(scope.name, scope.policy, by_scope[scope.name])
         own = [m for m in module_leaves if scope_by_module.get(m) == scope.name]
         if own and scope.policy.forbid_everywhere:
             out.append((f"{scope.name} scope imports no forbidden package", own, list(scope.policy.forbid_everywhere)))
-        hidden = []
-        for module in module_leaves:
-            target = scope_by_module.get(module)
-            if target is None or target == scope.name:
-                continue
-            public = any(fnmatch.fnmatchcase(module, pattern) for pattern in policy.scope(target).public)
-            if target not in scope.depends_on or not public:
-                hidden.append(module)
+        hidden = _hidden_from_scope(policy, scope, module_leaves, scope_by_module)
         if own and hidden:
             out.append((f"{scope.name} scope imports only declared public modules", own, hidden))
     return out

@@ -70,12 +70,7 @@ def record(
     reason: str | None = None,
 ) -> int:
     """Create or shrink a baseline; growth requires a one-time adoption or an explicit reason."""
-    if adopt is not None and allow_growth:
-        raise BaselineError("`--adopt` and `--allow-growth` cannot be used together")
-    if reason is not None and not allow_growth:
-        raise BaselineError("`--reason` requires `--allow-growth`")
-    if allow_growth and (reason is None or not reason.strip()):
-        raise BaselineError("`--allow-growth` requires a non-empty `--reason`")
+    _validate_record_options(adopt, allow_growth, reason)
     current = {v.key for v in violations}
     if not fs.is_file(path):
         fs.write_json(path, {"version": VERSION, "violations": sorted(current), "growth": []})
@@ -87,24 +82,39 @@ def record(
     if not isinstance(old_violations, list) or not isinstance(existing_growth, list):
         raise ValueError("baseline violations and growth must be arrays")
     old = {str(key) for key in old_violations}
-    growth = list(existing_growth)
-    added = current - old
-    if adopt is not None:
-        family_old = {key for key in old if _in_family(key, adopt)}
-        if family_old:
-            raise BaselineError(f"baseline already contains {adopt!r} family entries; adoption is allowed once per family")
-        other_new = {key for key in added if not _in_family(key, adopt)}
-        if other_new:
-            raise BaselineError(f"`--adopt {adopt}` cannot record findings outside that family: {', '.join(sorted(other_new))}")
-        added = current - old
-        if added:
-            growth.append({"reason": f"adopt {adopt} family", "added": sorted(added)})
-    elif added and not allow_growth:
-        raise BaselineError(f"baseline growth refused; {len(added)} new violation(s); use `--allow-growth --reason TEXT`")
-    if allow_growth and added:
-        growth.append({"reason": reason.strip() if reason is not None else "", "added": sorted(added)})
+    growth = [*existing_growth, *_growth_entries(old, current, adopt, allow_growth, reason)]
     fs.write_json(path, {"version": VERSION, "violations": sorted(current), "growth": growth})
     return len(current)
+
+
+def _validate_record_options(adopt: str | None, allow_growth: bool, reason: str | None) -> None:
+    if adopt is not None and allow_growth:
+        raise BaselineError("`--adopt` and `--allow-growth` cannot be used together")
+    if reason is not None and not allow_growth:
+        raise BaselineError("`--reason` requires `--allow-growth`")
+    if allow_growth and (reason is None or not reason.strip()):
+        raise BaselineError("`--allow-growth` requires a non-empty `--reason`")
+
+
+def _growth_entries(old: set[str], current: set[str], adopt: str | None, allow_growth: bool, reason: str | None) -> list[dict[str, object]]:
+    """The growth-log entries a recording adds: none when the baseline only shrinks, or a refusal when growth is not allowed."""
+    added = current - old
+    if adopt is not None:
+        return _adoption_entries(old, added, adopt)
+    if added and not allow_growth:
+        raise BaselineError(f"baseline growth refused; {len(added)} new violation(s); use `--allow-growth --reason TEXT`")
+    if allow_growth and added:
+        return [{"reason": reason.strip() if reason is not None else "", "added": sorted(added)}]
+    return []
+
+
+def _adoption_entries(old: set[str], added: set[str], adopt: str) -> list[dict[str, object]]:
+    if any(_in_family(key, adopt) for key in old):
+        raise BaselineError(f"baseline already contains {adopt!r} family entries; adoption is allowed once per family")
+    other_new = {key for key in added if not _in_family(key, adopt)}
+    if other_new:
+        raise BaselineError(f"`--adopt {adopt}` cannot record findings outside that family: {', '.join(sorted(other_new))}")
+    return [{"reason": f"adopt {adopt} family", "added": sorted(added)}] if added else []
 
 
 def _in_family(key: str, family: str) -> bool:

@@ -141,37 +141,11 @@ class Ruff:
         return result.returncode == 0
 
     def violations(self, result: ToolResult, root: Path, fs: FileSystem) -> list[Violation]:
-        if result.returncode != 0:
-            raise ValueError(f"ruff exited with status {result.returncode}")
-        try:
-            diagnostics = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"ruff output is not complete JSON: {exc}") from exc
-        if not isinstance(diagnostics, list):
-            raise ValueError("ruff JSON output must be a list")
-
         counts: dict[tuple[str, str, str, str], int] = {}
         found: list[Violation] = []
-        for item in diagnostics:
-            if not isinstance(item, dict):
-                raise ValueError("ruff diagnostic must be an object")
-            code = item.get("code")
-            if not isinstance(code, str) or not code:
-                raise ValueError("ruff diagnostic has no rule code")
-            if code == "E902":
-                raise ValueError("ruff E902 file read errors cannot be baselined")
-            filename = item.get("filename")
-            message = item.get("message")
-            location = item.get("location")
-            row = location.get("row") if isinstance(location, dict) else None
-            if not isinstance(filename, str) or not isinstance(message, str) or not isinstance(row, int) or row < 1:
-                raise ValueError("ruff diagnostic is missing filename, message, or source location")
-            path = Path(filename)
-            if path.is_absolute():
-                try:
-                    path = path.relative_to(root)
-                except ValueError as exc:
-                    raise ValueError(f"ruff reported a file outside the project root: {filename}") from exc
+        for item in _ruff_diagnostics(result):
+            code, filename, message, row = _ruff_fields(item)
+            path = _ruff_path(filename, root)
             relative = path.as_posix().removeprefix("./")
             lines = fs.read_text(root / path).splitlines()
             if row > len(lines):
@@ -183,6 +157,46 @@ class Ruff:
             suffix = "" if counts[count_key] == 1 else f"#{counts[count_key]}"
             found.append(Violation(f"ruff-{code}", relative, f"{message}|{fingerprint}{suffix}"))
         return found
+
+
+def _ruff_diagnostics(result: ToolResult) -> list[object]:
+    if result.returncode != 0:
+        raise ValueError(f"ruff exited with status {result.returncode}")
+    try:
+        diagnostics = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"ruff output is not complete JSON: {exc}") from exc
+    if not isinstance(diagnostics, list):
+        raise ValueError("ruff JSON output must be a list")
+    return list(diagnostics)
+
+
+def _ruff_fields(item: object) -> tuple[str, str, str, int]:
+    """``(code, filename, message, row)`` of one ruff diagnostic, or a ValueError saying what is missing."""
+    if not isinstance(item, dict):
+        raise ValueError("ruff diagnostic must be an object")
+    code = item.get("code")
+    if not isinstance(code, str) or not code:
+        raise ValueError("ruff diagnostic has no rule code")
+    if code == "E902":
+        raise ValueError("ruff E902 file read errors cannot be baselined")
+    filename = item.get("filename")
+    message = item.get("message")
+    location = item.get("location")
+    row = location.get("row") if isinstance(location, dict) else None
+    if not isinstance(filename, str) or not isinstance(message, str) or not isinstance(row, int) or row < 1:
+        raise ValueError("ruff diagnostic is missing filename, message, or source location")
+    return code, filename, message, row
+
+
+def _ruff_path(filename: str, root: Path) -> Path:
+    path = Path(filename)
+    if not path.is_absolute():
+        return path
+    try:
+        return path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"ruff reported a file outside the project root: {filename}") from exc
 
 
 def default_engines(output_dir: str = ".") -> list[Engine]:
