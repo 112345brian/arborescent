@@ -24,7 +24,8 @@ def effects(found: list[Any]) -> set[tuple[str, str]]:
 
 def test_innermost_ring_forbids_effects_and_outermost_allows_them(repo: Path) -> None:
     source = "import os, time, uuid\nos.getenv('MODE')\ntime.time()\nuuid.uuid4()\n"
-    write_files(repo, {"app/domain.py": source, "app/main.py": source})
+    # ports and adapters neutralized: they otherwise import domain and would also inherit its effects (effect-via-import).
+    write_files(repo, {"app/domain.py": source, "app/main.py": source, "app/ports.py": "X = 1\n", "app/adapters.py": "X = 1\n"})
     policy_rings = ring_with(
         domain={"external": ["os", "time", "uuid"]},
         composition={"may_import": ["*"], "external": ["os", "time", "uuid"]},
@@ -40,7 +41,8 @@ def test_innermost_ring_forbids_effects_and_outermost_allows_them(repo: Path) ->
 
 
 def test_per_ring_forbid_override_replaces_the_preset_default(repo: Path) -> None:
-    write_files(repo, {"app/ports.py": "import time\ntime.time()\n"})
+    # adapters neutralized: it otherwise imports ports and would also inherit the clock effect (effect-via-import).
+    write_files(repo, {"app/ports.py": "import time\ntime.time()\n", "app/adapters.py": "X = 1\n"})
     open_policy = ring_with(ports={"may_import": ["domain"], "external": ["time"], "forbid": []})
     targeted_policy = ring_with(ports={"may_import": ["domain"], "external": ["time"], "forbid": ["clock"]})
 
@@ -49,7 +51,7 @@ def test_per_ring_forbid_override_replaces_the_preset_default(repo: Path) -> Non
 
 
 def test_any_forbidden_effect_also_forbids_dynamic_import(repo: Path) -> None:
-    write_files(repo, {"app/ports.py": "import importlib\nimportlib.import_module('app.adapters')\n"})
+    write_files(repo, {"app/ports.py": "import importlib\nimportlib.import_module('app.adapters')\n", "app/adapters.py": "X = 1\n"})
     policy_rings = ring_with(ports={"may_import": ["domain"], "external": ["importlib"], "forbid": ["clock"]})
 
     assert effects(run(repo, ring=policy_rings)) == {("effect-dynamic-import", "app.ports")}
@@ -149,7 +151,7 @@ def test_relaxed_preset_enforces_no_middle_ring_effects_by_default(repo: Path) -
 
 
 def test_middle_forbid_opts_a_relaxed_policy_into_effect_enforcement_without_io_allow_lists(repo: Path) -> None:
-    write_files(repo, {"app/ports.py": "import time, os\ntime.time()\nos.getcwd()\n"})
+    write_files(repo, {"app/ports.py": "import time, os\ntime.time()\nos.getcwd()\n", "app/adapters.py": "X = 1\n"})
 
     found = run(repo, preset="relaxed", middle_forbid=["clock"])
 
@@ -158,7 +160,7 @@ def test_middle_forbid_opts_a_relaxed_policy_into_effect_enforcement_without_io_
 
 
 def test_a_ring_forbid_table_still_beats_the_middle_forbid_key(repo: Path) -> None:
-    write_files(repo, {"app/ports.py": "import time\ntime.time()\n"})
+    write_files(repo, {"app/ports.py": "import time\ntime.time()\n", "app/adapters.py": "X = 1\n"})
     open_ring = ring_with(ports={"may_import": ["domain"], "forbid": []})
 
     assert effects(run(repo, preset="relaxed", middle_forbid=["clock"], ring=open_ring)) == set()
@@ -212,7 +214,7 @@ def test_database_and_filesystem_access_are_effects_a_ring_can_forbid(repo: Path
         "    Path(path).write_text('x')\n"
         "    shutil.copy(path, path)\n"
     )
-    write_files(repo, {"app/ports.py": source})
+    write_files(repo, {"app/ports.py": source, "app/adapters.py": "X = 1\n"})
     ports = ring_with(ports={"may_import": ["domain"], "external": ["shutil", "sqlite3", "pathlib"], "forbid": ["database", "filesystem"]})
 
     assert effects(run(repo, ring=ports)) == {("effect-database", "app.ports"), ("effect-filesystem", "app.ports")}
@@ -221,7 +223,10 @@ def test_database_and_filesystem_access_are_effects_a_ring_can_forbid(repo: Path
 
 
 def test_filesystem_and_database_effects_are_forbidden_in_the_innermost_ring_by_default(repo: Path) -> None:
-    write_files(repo, {"app/domain.py": "import sqlite3\ndef read(p):\n    sqlite3.connect(p)\n    return open(p).read()\n"})
+    write_files(repo, {
+        "app/domain.py": "import sqlite3\ndef read(p):\n    sqlite3.connect(p)\n    return open(p).read()\n",
+        "app/ports.py": "X = 1\n", "app/adapters.py": "X = 1\n",
+    })
     domain = ring_with(domain={"external": ["sqlite3"]})
     allowed = ring_with(domain={"external": ["sqlite3"], "forbid": []})
 
@@ -243,7 +248,10 @@ def test_a_local_named_open_and_non_io_helpers_are_not_filesystem_use(repo: Path
 
 
 def test_tempfile_and_shutil_file_operations_are_filesystem_use(repo: Path) -> None:
-    write_files(repo, {"app/domain.py": "import shutil, tempfile\ndef f():\n    tempfile.mkdtemp()\n    shutil.rmtree('x')\n"})
+    write_files(repo, {
+        "app/domain.py": "import shutil, tempfile\ndef f():\n    tempfile.mkdtemp()\n    shutil.rmtree('x')\n",
+        "app/ports.py": "X = 1\n", "app/adapters.py": "X = 1\n",
+    })
     domain = ring_with(domain={"external": ["shutil", "tempfile"], "forbid": ["filesystem"]})
 
     assert effects(run(repo, ring=domain)) == {("effect-filesystem", "app.domain")}
@@ -267,7 +275,7 @@ SEAM_SOURCE = (
     [("injection", set()), ("typed", {("effect-clock", "app.domain")}), ("count", {("effect-clock", "app.domain")})],
 )
 def test_effect_defaults_decides_whether_a_parameter_default_is_a_use(repo: Path, mode: str, expected: set[tuple[str, str]]) -> None:
-    write_files(repo, {"app/domain.py": SEAM_SOURCE})
+    write_files(repo, {"app/domain.py": SEAM_SOURCE, "app/ports.py": "X = 1\n", "app/adapters.py": "X = 1\n"})
     domain = ring_with(domain={"external": ["time", "typing"]})
 
     assert effects(run(repo, ring=domain, effect_defaults=mode)) == expected
@@ -284,3 +292,91 @@ def test_effect_defaults_counts_each_seam_kind_by_mode(repo: Path) -> None:
 def test_effect_defaults_rejects_unknown_modes() -> None:
     with pytest.raises(PolicyError, match="effect_defaults"):
         mini_policy(effect_defaults="sometimes")
+
+
+def test_console_effect_flags_print_input_and_stream_writes(repo: Path) -> None:
+    source = "import sys\ndef f():\n    print('hi')\n    input()\n    sys.stdout.write('x')\n    sys.stderr.write('y')\n"
+    write_files(repo, {"app/domain.py": source, "app/ports.py": "X = 1\n", "app/adapters.py": "X = 1\n"})
+    domain = ring_with(domain={"external": ["sys"], "forbid": ["console"]})
+
+    assert effects(run(repo, ring=domain)) == {("effect-console", "app.domain")}
+
+
+def test_console_effect_is_allowed_in_the_outermost_ring_by_default(repo: Path) -> None:
+    write_files(repo, {"app/main.py": "def f():\n    print('hi')\n"})
+
+    assert effects(run(repo)) == set()
+
+
+def test_a_local_print_or_input_is_not_console_use(repo: Path) -> None:
+    source = "def f(print):\n    return print\ndef g():\n    input = 1\n    return input\n"
+    write_files(repo, {"app/domain.py": source})
+    domain = ring_with(domain={"forbid": ["console"]})
+
+    assert effects(run(repo, ring=domain)) == set()
+
+
+def test_global_effect_flags_a_function_that_rebinds_a_module_global(repo: Path) -> None:
+    source = (
+        "_cache: dict[str, int] = {}\n"
+        "def set_cache(value):\n    global _cache\n    _cache = value\n"
+        "def read_cache():\n    global _cache\n    return _cache\n"
+    )
+    write_files(repo, {"app/domain.py": source, "app/ports.py": "X = 1\n", "app/adapters.py": "X = 1\n"})
+    domain = ring_with(domain={"forbid": ["global"]})
+
+    assert effects(run(repo, ring=domain)) == {("effect-global", "app.domain")}
+
+
+def test_global_effect_is_not_confused_by_a_same_named_comprehension_variable(repo: Path) -> None:
+    source = "def f():\n    global x\n    return [x for x in range(3)]\n"
+    write_files(repo, {"app/domain.py": source})
+    domain = ring_with(domain={"forbid": ["global"]})
+
+    assert effects(run(repo, ring=domain)) == set()
+
+
+def test_effect_via_import_propagates_one_and_two_hops_with_a_chain(repo: Path) -> None:
+    write_files(repo, {
+        "app/domain.py": "import os\ndef read():\n    return os.getenv('MODE')\n",
+        "app/ports.py": "from . import domain\n",
+        "app/adapters.py": "from . import ports\n",
+    })
+    ring = ring_with(
+        domain={"external": ["os"], "forbid": ["env"]},
+        ports={"may_import": ["domain"], "external": [], "forbid": ["env"]},
+        adapters={"may_import": ["domain", "ports"], "external": [], "forbid": ["env"]},
+    )
+    by_subject = {v.subject: v.detail for v in run(repo, ring=ring) if v.rule == "effect-via-import"}
+
+    assert by_subject.keys() == {"app.ports", "app.adapters"}
+    assert "app.domain" in by_subject["app.ports"] and "app.ports -> app.domain" not in by_subject["app.ports"]
+    assert "app.ports -> app.domain" in by_subject["app.adapters"]
+
+
+def test_effect_via_import_is_not_reported_when_the_importing_ring_allows_it(repo: Path) -> None:
+    write_files(repo, {
+        "app/domain.py": "import os\ndef read():\n    return os.getenv('MODE')\n",
+        "app/ports.py": "from . import domain\n",
+        "app/adapters.py": "X = 1\n",
+    })
+    ring = ring_with(
+        domain={"external": ["os"], "forbid": ["env"]},
+        ports={"may_import": ["domain"], "external": [], "forbid": []},
+    )
+
+    assert effects(run(repo, ring=ring)) == {("effect-env", "app.domain")}
+
+
+def test_effect_via_import_does_not_propagate_through_a_type_checking_import(repo: Path) -> None:
+    write_files(repo, {
+        "app/domain.py": "import os\ndef read():\n    return os.getenv('MODE')\n",
+        "app/ports.py": "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from . import domain\n",
+        "app/adapters.py": "X = 1\n",
+    })
+    ring = ring_with(
+        domain={"external": ["os"], "forbid": ["env"]},
+        ports={"may_import": ["domain"], "external": ["typing"], "forbid": ["env"]},
+    )
+
+    assert effects(run(repo, ring=ring)) == {("effect-env", "app.domain")}

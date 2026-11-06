@@ -177,9 +177,13 @@ _EXACT_EFFECTS: dict[str, str] = {
     target: category
     for category, targets in (
         ("env", ("os.environ", "os.getenv")),
-        ("clock", ("time.time", "datetime.datetime.now", "datetime.datetime.utcnow", "datetime.datetime.today", "datetime.date.today")),
+        ("clock", (
+            "time.time", "time.gmtime", "time.localtime", "time.strftime",
+            "datetime.datetime.now", "datetime.datetime.utcnow", "datetime.datetime.today", "datetime.date.today",
+        )),
         ("identity", ("uuid.uuid1", "uuid.uuid4")),
         ("sleep", ("time.sleep", "asyncio.sleep")),
+        ("console", ("print", "input", "sys.stdout.write", "sys.stderr.write")),
     )
     for target in targets
 }
@@ -310,11 +314,43 @@ def _reference_use(node: ast.Attribute | ast.Name, aliases: dict[str, str], seam
     return EffectUse(node.lineno, category, target, seam)
 
 
+_SCOPE_BOUNDARIES = (
+    ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
+)
+
+
+def _own_scope_nodes(func: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterable[ast.AST]:
+    """Every node directly in ``func``'s own scope: its body, but not a nested function/lambda/class/comprehension's
+    (each of those is its own scope, so a ``global`` declared in ``func`` cannot reach an assignment inside one)."""
+    stack = list(ast.iter_child_nodes(func))
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, _SCOPE_BOUNDARIES):
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def _global_effect_uses(tree: ast.AST) -> list[EffectUse]:
+    """A function that both declares ``global x`` and assigns ``x`` (plain, augmented or in a ``for``/``with``
+    target) mutates module state from inside a call; one that only reads a global is not a use."""
+    uses: list[EffectUse] = []
+    for func in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
+        declared: set[str] = set()
+        assigned: dict[str, int] = {}
+        for node in _own_scope_nodes(func):
+            if isinstance(node, ast.Global):
+                declared.update(node.names)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                assigned.setdefault(node.id, node.lineno)
+        uses.extend(EffectUse(assigned[name], "global", f"{func.name}.{name}") for name in sorted(declared & assigned.keys()))
+    return uses
+
+
 def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     aliases = _aliases(tree)
     seams = _injection_defaults(tree)
     rebound = _rebound_names(tree)
-    uses: set[EffectUse] = set()
+    uses: set[EffectUse] = set(_global_effect_uses(tree))
     imported_os_names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -328,9 +364,15 @@ def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
     return tuple(sorted(uses))
 
 
+_SHADOWABLE_BUILTINS = frozenset({"open", "print", "input"})
+
+
 def _is_shadowed(node: ast.Attribute | ast.Name, imported_os_names: set[str], rebound: set[str]) -> bool:
-    """A bare name that is an imported OS-branching name (already reported at its import) or a rebound ``open``."""
-    return isinstance(node, ast.Name) and (node.id in imported_os_names or (node.id == "open" and "open" in rebound))
+    """A bare name that is an imported OS-branching name (already reported at its import) or a rebound builtin
+    (``open``, ``print`` or ``input``) the module defines its own meaning for."""
+    return isinstance(node, ast.Name) and (
+        node.id in imported_os_names or (node.id in _SHADOWABLE_BUILTINS and node.id in rebound)
+    )
 
 
 def _patch_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:

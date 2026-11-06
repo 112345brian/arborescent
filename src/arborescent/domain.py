@@ -70,6 +70,9 @@ class Rule(StrEnum):
     EFFECT_FILESYSTEM = "effect-filesystem"
     EFFECT_DYNAMIC_IMPORT = "effect-dynamic-import"
     EFFECT_PATCH = "effect-patch"
+    EFFECT_CONSOLE = "effect-console"
+    EFFECT_GLOBAL = "effect-global"
+    EFFECT_VIA_IMPORT = "effect-via-import"
     INTERNAL_IMPORT = "internal-import"
     RESTRICTED_IMPORT = "restricted-import"
     LITERAL_OUTSIDE_OWNER = "literal-outside-owner"
@@ -127,6 +130,8 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "filesystem": Rule.EFFECT_FILESYSTEM,
     "dynamic-import": Rule.EFFECT_DYNAMIC_IMPORT,
     "patch": Rule.EFFECT_PATCH,
+    "console": Rule.EFFECT_CONSOLE,
+    "global": Rule.EFFECT_GLOBAL,
 }
 
 # Findings that are reported but never fail a check and never enter the baseline: a package spanning rings is normal.

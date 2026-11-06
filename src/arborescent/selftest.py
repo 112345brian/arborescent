@@ -75,6 +75,7 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.EFFECT_FILESYSTEM: "effect-filesystem is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_DYNAMIC_IMPORT: "effect-dynamic-import is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_PATCH: "effect-patch requires a configured tests folder and project-package target; covered by focused rule tests",
+    Rule.EFFECT_CONSOLE: "effect-console is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.SCOPE_IMPORT: "cross-scope boundaries are mutation-tested when a project configures multiple scopes",
     Rule.SCOPE_EFFECT_LEAK: "cross-scope effect leaks are mutation-tested when a project configures multiple "
     "scopes with a declared public dependency",
@@ -131,6 +132,9 @@ def plan(
         out.append(Mutation(
             Rule.CIRCULAR_IMPORT, "a module importing itself", paths[circular_anchor], f"import {circular_anchor}",
         ))
+    import_found, import_skipped = _import_propagation_mutations(policy, scan)
+    out.extend(import_found)
+    skipped.extend(import_skipped)
     if policy.scopes:
         out.extend(_scope_boundary_mutations(policy, paths, known, owners))
         out.extend(_scope_effect_mutations(policy, scan))
@@ -201,6 +205,66 @@ def _scope_boundary_mutations(
                 ))
                 break
     return mutations
+
+
+def _import_propagation_mutations(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
+    """Probe ``effect-via-import``: a new import of a sibling that directly uses a forbidden effect, within one scope."""
+    paths, known, arbor_index, modules, owners = scan.paths, scan.known, scan.arbor_index, scan.modules, scan.scope_by_module
+    local_policies = (
+        tuple((scope.name, scope.policy, frozenset(name for name in known if owners.get(name) == scope.name)) for scope in policy.scopes)
+        if policy.scopes else (("", policy, known),)
+    )
+    out: list[Mutation] = []
+    skipped: list[str] = []
+    for scope_name, local_policy, local_known in local_policies:
+        mutation = _one_import_propagation_mutation(local_policy, local_known, paths, arbor_index, modules)
+        if mutation is None:
+            skipped.append(f"effect-via-import: {scope_name or 'policy'} has no ring/import pair to mutate")
+        else:
+            out.append(mutation)
+    return out, skipped
+
+
+def _one_import_propagation_mutation(
+    policy: Policy, known: Collection[str], paths: Mapping[str, str],
+    arbor_index: Mapping[str, tuple[str | None, str | None]], modules: Mapping[str, ModuleInfo],
+) -> Mutation | None:
+    for ring in policy.rings:
+        forbidden = policy.forbidden_effects(ring.name)
+        if not forbidden:
+            continue
+        hosts = sorted(
+            name for name in known
+            if name in paths and not paths[name].endswith("__init__.py") and policy.resolve_ring(arbor_index, name) == ring.name
+        )
+        for host in hosts:
+            host_info = modules.get(host)
+            if host_info is None:
+                continue
+            leak = _leaking_sibling(policy, forbidden, known, modules, (host, host_info))
+            if leak is None:
+                continue
+            target, category = leak
+            return Mutation(
+                Rule.EFFECT_VIA_IMPORT,
+                f"{ring.name}: new import of {target}, which uses the forbidden {category} effect",
+                paths[host], f"import {target}",
+            )
+    return None
+
+
+def _leaking_sibling(
+    policy: Policy, forbidden: frozenset[str], known: Collection[str], modules: Mapping[str, ModuleInfo], host: tuple[str, ModuleInfo],
+) -> tuple[str, str] | None:
+    """A module within reach that isn't already imported by ``host`` and directly uses a forbidden effect."""
+    host_name, host_info = host
+    for name in sorted(known):
+        if name == host_name or name not in modules or _already_imports(host_info, name):
+            continue
+        for use in modules[name].facts.effect_uses:
+            if use.category in forbidden and policy.counts_effect_seam(use.seam):
+                return name, use.category
+    return None
 
 
 def _scope_effect_mutations(policy: Policy, scan: ScanView) -> list[Mutation]:
@@ -382,16 +446,24 @@ def _anchor_mutations(anchor: str, host: str) -> list[Mutation]:
 
 
 def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
-    if "clock" not in policy.forbidden_effects(ring):
-        return []
-    return [
-        Mutation(
+    forbidden = policy.forbidden_effects(ring)
+    out: list[Mutation] = []
+    if "clock" in forbidden:
+        out.append(Mutation(
             Rule.EFFECT_CLOCK,
             f"{ring}: ambient clock use",
             host,
             "import time\n_arborescent_probe = time.time()",
-        )
-    ]
+        ))
+    if "global" in forbidden:
+        out.append(Mutation(
+            Rule.EFFECT_GLOBAL,
+            f"{ring}: a function rebinds a module global",
+            host,
+            "_arborescent_probe_value = None\n\n\ndef _arborescent_probe_global() -> None:\n    "
+            "global _arborescent_probe_value\n    _arborescent_probe_value = 1",
+        ))
+    return out
 
 
 def _abstraction_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:

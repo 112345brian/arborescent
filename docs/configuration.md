@@ -630,7 +630,7 @@ Migrating an existing classify-only project:
 | `may_import` | `[]` | Inner rings this ring may import; `["*"]` means every inner ring. A ring may always import itself. An outer ring in this list is a policy error (the onion rule). |
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
-| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `filesystem`, `dynamic-import`, or `patch`. |
+| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `filesystem`, `dynamic-import`, `patch`, `console`, or `global`. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 
 A ring that is not given a table has no inner imports, no external imports and no OS branching. If `forbid` is omitted,
@@ -693,6 +693,9 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-filesystem` | a ring that forbids `filesystem` calls `open`, `os` file operations (`os.remove`, `os.listdir`, `os.walk`, ...), `shutil`, `tempfile`, `glob`, or reads/writes through `Path(...)` (`read_text`, `write_text`, `mkdir`, `glob`, ...). Direct references only: a `Path` held in a variable or a call routed through a wrapper is not seen |
 | `effect-dynamic-import` | a ring that forbids any effect uses `importlib` or `__import__` |
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
+| `effect-console` | a ring that forbids `console` calls `print`, `input`, `sys.stdout.write` or `sys.stderr.write` |
+| `effect-global` | a ring that forbids `global` has a function that declares `global x` and then assigns `x` (a read-only `global` is not a use) |
+| `effect-via-import` | a ring forbids an effect that a module it imports (directly or through that module's own imports, same scope, not an `if TYPE_CHECKING` import) uses directly; the message names the import chain |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
@@ -733,6 +736,12 @@ only `secrets-guard`; set `effect-patch` directly to enable this check without a
 check `secrets-guard` makes).
 `noqa` comments do not suppress native effect findings. Suppression and reasoned `discard()` counts are always reported;
 increases need `baseline --allow-growth --reason` (or one-time family adoption), while removals can shrink the baseline.
+
+`effect-via-import` propagates at module granularity: a module that mixes a forbidden effect with other code taints
+every importer, even one that only uses the clean part, until a function-level call-graph check exists. It also stops
+at calls on an object of unknown type (it cannot tell what `helper.do_it()` does when `helper`'s type is not known
+statically) and does not cross scope boundaries (that is `scope-effect-leak`, one hop, checked separately) or an
+`if TYPE_CHECKING` import (nothing runs there to inherit from).
 
 ### Checking `classify` against a module's facts
 

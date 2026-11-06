@@ -216,8 +216,10 @@ def test_broken_annotation_keeps_all_classified_module_checks(repo: Path, annota
     source = "from . import adapters\nimport os, time, requests\nos.name\ntime.time()\n"
     write_files(repo, {"app/domain.py": source})
     before = run(repo)
+    # domain's new import of adapters makes a cycle, and adapters already imports domain back (MINI_FILES), so
+    # adapters (forbidding clock like every ring by default) now also inherits domain's clock effect.
     assert rules(before) == {
-        "internal-import", "external-import", "os-branching", "effect-clock", "circular-import",
+        "internal-import", "external-import", "os-branching", "effect-clock", "circular-import", "effect-via-import",
     }
 
     write_files(repo, {"app/domain.py": source + annotation + "\n"})

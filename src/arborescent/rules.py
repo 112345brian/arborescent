@@ -25,7 +25,7 @@ from .domain import (
     dist_name,
     in_unit,
 )
-from .facts import EffectUse, ModuleInfo, resolve_targets
+from .facts import EffectUse, ModuleInfo, RawImport, resolve_targets
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
@@ -452,6 +452,8 @@ def check_modules(
     out = _wildcard_findings(policy)
     third_party_by_scope: dict[str | None, ThirdParty] = {}
     import_graph: dict[str, set[str]] = {name: set() for name in modules}
+    effect_graph: dict[str, set[str]] = {name: set() for name in modules}
+    pending_effect_edges: list[_EffectEdge] = []
     for name, info in sorted(modules.items()):
         local_policy = context.policy_for(name)
         is_tool = name in context.tool_modules  # developer tooling: no ring, may import product code
@@ -477,6 +479,7 @@ def check_modules(
                 target for target in internal
                 if target in modules and context.scope_name(target) == context.scope_name(name)
             )
+            _record_effect_edge(context, effect_graph, pending_effect_edges, _EffectImport(local_policy, name, ring, imp, internal))
             if error is not None:
                 out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
             out += _scope_imports(context, name, imp.line, internal)
@@ -486,7 +489,106 @@ def check_modules(
         out += _os_branching(local_policy, name, ring, rule, info)
         out += _effect_uses(context, name, ring, info, known)
         out += _abstraction_violations(name, ring, rule, info)
+    out += _effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
     return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
+
+
+_NON_PROPAGATING_EFFECTS = frozenset({"os-branching", "patch"})  # not a ring effect, or meaningless once removed from its own module
+
+
+class _EffectEdge(NamedTuple):
+    """One import edge a forbidden effect could propagate along: ``name``'s policy forbidding it in ``ring``."""
+
+    policy: Policy
+    name: str
+    ring: str
+    line: int
+    targets: list[str]
+
+
+class _EffectImport(NamedTuple):
+    policy: Policy
+    name: str
+    ring: str
+    imp: RawImport
+    internal: list[str]
+
+
+def _record_effect_edge(
+    context: RuleContext, effect_graph: dict[str, set[str]], pending: list[_EffectEdge], edge: _EffectImport,
+) -> None:
+    """A type-only import never runs, so it carries no effect; everything else, within the same scope, does."""
+    if edge.imp.type_only:
+        return
+    targets = [
+        target for target in edge.internal
+        if target in effect_graph and target != edge.name and context.scope_name(target) == context.scope_name(edge.name)
+    ]
+    effect_graph[edge.name].update(targets)
+    pending.append(_EffectEdge(edge.policy, edge.name, edge.ring, edge.imp.line, targets))
+
+
+def _direct_propagating_effects(policy: Policy, info: ModuleInfo) -> frozenset[str]:
+    return frozenset(
+        use.category for use in info.facts.effect_uses
+        if use.category not in _NON_PROPAGATING_EFFECTS and policy.counts_effect_seam(use.seam)
+    )
+
+
+def _effect_via_import_violations(
+    context: RuleContext, modules: Mapping[str, ModuleInfo], effect_graph: Mapping[str, Collection[str]], edges: Collection[_EffectEdge],
+) -> list[Violation]:
+    reachable = _effect_reachable(context, modules, effect_graph)
+    out: list[Violation] = []
+    for edge in edges:
+        out += _effect_via_import(edge, reachable)
+    return out
+
+
+def _effect_reachable(
+    context: RuleContext, modules: Mapping[str, ModuleInfo], effect_graph: Mapping[str, Collection[str]],
+) -> dict[str, dict[str, tuple[str, ...]]]:
+    """module -> {effect category: the chain of modules, starting with itself, down to the one that directly uses it}.
+
+    Only edges in ``effect_graph`` (first-party, non-type-only, same scope) propagate. A cycle stops recursion rather
+    than looping; the modules on it still get whatever their own direct effects and acyclic imports contribute."""
+    memo: dict[str, dict[str, tuple[str, ...]]] = {}
+    visiting: set[str] = set()
+
+    def compute(name: str) -> dict[str, tuple[str, ...]]:
+        if name in memo:
+            return memo[name]
+        if name in visiting:
+            return {}
+        visiting.add(name)
+        info = modules.get(name)
+        local_policy = context.policy_for(name)
+        result = dict.fromkeys(_direct_propagating_effects(local_policy, info), (name,)) if local_policy is not None and info is not None else {}
+        for target in sorted(effect_graph.get(name, ())):
+            for category, chain in compute(target).items():
+                if category not in result:
+                    result[category] = (name, *chain)
+        visiting.discard(name)
+        memo[name] = result
+        return result
+
+    return {name: compute(name) for name in modules}
+
+
+def _effect_via_import(edge: _EffectEdge, reachable: Mapping[str, Mapping[str, tuple[str, ...]]]) -> list[Violation]:
+    forbidden = edge.policy.forbidden_effects(edge.ring)
+    if not forbidden:
+        return []
+    out: list[Violation] = []
+    for target in edge.targets:
+        seen: set[str] = set()
+        for category, chain in reachable.get(target, {}).items():
+            if category not in forbidden or category in seen:
+                continue
+            seen.add(category)
+            detail = f"[{edge.ring}] imports {target!r}; effect {category} reaches it via {' -> '.join(chain)}; inject a port instead"
+            out.append(Violation(Rule.EFFECT_VIA_IMPORT, edge.name, detail, edge.line))
+    return out
 
 
 def fits_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, known: Collection[str]) -> bool:

@@ -37,6 +37,14 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- Three new effect categories and rules, closing a gap where I/O reaching an inner ring through an otherwise-allowed
+  helper import went undetected (#103): `console` (`print`, `input`, `sys.stdout.write`, `sys.stderr.write`;
+  `effect-console`), `global` (a function that declares `global x` and then assigns `x`; a read-only `global` is not a
+  use; `effect-global`), and `effect-via-import` — a module that imports another module (same scope, not an
+  `if TYPE_CHECKING` import) that itself uses, or itself imports something that uses, an effect this module's ring
+  forbids, naming the import chain. Clock reads through `time.gmtime`, `time.localtime` and `time.strftime` are now
+  also detected. Propagation is module-granularity (a mixed helper taints every importer) and stops at calls on an
+  object of unknown type; see docs/configuration.md for the documented limits.
 - `git_hook = true` / `git_hook = false` in `[tool.arborescent]` chooses the `pre-push` hook independently of the preset:
   `true` makes `generate` and `check` install it under any preset, `false` makes them remove an Arborescent-managed one
   (a hook Arborescent did not write is still never touched, in either direction). Previously only the `strict` preset
