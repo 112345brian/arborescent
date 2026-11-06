@@ -18,6 +18,7 @@ from .generated_config import has_own_importlinter_config, is_generated
 PROFILE = "v1"
 RUFF_VERSION = "0.17.2"
 TACH_VERSION = "0.35.3"
+_VERIFIED_TOOLS = (("ruff", RUFF_VERSION), ("tach", TACH_VERSION))
 REQUIRED_RUFF = (
     "BLE001", "E722", "F401", "B006", "C901", "PLR0912", "PLR0913", "PLR0915", "TID252",
     "PLW1514", "DTZ001", "T201", "PLC0415",
@@ -102,19 +103,34 @@ def _native_scope_minimum(scope_name: str, policy: Policy) -> list[str]:
     return failures
 
 
+def _installed_version(root: Path, runner: ToolRunner, executable: str) -> str:
+    result = runner.run([executable, "--version"], root)
+    return result.stdout.strip().split()[-1] if result.returncode == 0 and result.stdout.strip() else "unknown"
+
+
 def _tool_versions(root: Path, runner: ToolRunner, disabled_tools: tuple[str, ...] = ()) -> list[str]:
-    failures: list[str] = []
-    for executable, expected in (("ruff", RUFF_VERSION), ("tach", TACH_VERSION)):
-        if executable in disabled_tools:
+    """A missing tool fails the profile; a version other than the verified one is only a warning (see version_warnings)."""
+    return [
+        f"{executable} is not installed"
+        for executable, _ in _VERIFIED_TOOLS
+        if executable not in disabled_tools and not runner.available(executable)
+    ]
+
+
+def version_warnings(root: Path, runner: ToolRunner, disabled_tools: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """Installed tools whose version differs from the one the profile was verified against.
+
+    Informational: the behavioral probes decide whether the required rules actually work, so a newer
+    patch release must not block a push.
+    """
+    warnings: list[str] = []
+    for executable, expected in _VERIFIED_TOOLS:
+        if executable in disabled_tools or not runner.available(executable):
             continue
-        if not runner.available(executable):
-            failures.append(f"{executable} is not installed")
-            continue
-        result = runner.run([executable, "--version"], root)
-        actual = result.stdout.strip().split()[-1] if result.returncode == 0 and result.stdout.strip() else "unknown"
+        actual = _installed_version(root, runner, executable)
         if actual != expected:
-            failures.append(f"{executable} version {actual}; profile {PROFILE} requires {expected}")
-    return failures
+            warnings.append(f"{executable} version {actual}; profile {PROFILE} was verified with {expected}")
+    return tuple(warnings)
 
 
 def _ruff_probes(root: Path, sources: tuple[str, ...], runner: ToolRunner, fs: FileSystem) -> list[str]:

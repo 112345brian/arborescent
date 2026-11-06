@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from . import baseline as ratchet_mod
-from .certification import PROFILE, certify, tach_multi_root_note
+from .certification import PROFILE, certify, tach_multi_root_note, version_warnings
 from .classify_audit import audit_classification
 from .config import find_child_policy
 from .domain import (
@@ -99,6 +99,7 @@ class CheckReport:
     discard_counts: dict[str, int] = field(default_factory=lambda: {})
     profile: str | None = None
     profile_failures: tuple[str, ...] = ()
+    profile_warnings: tuple[str, ...] = ()
     modularity_failures: tuple[str, ...] = ()
     visibility_failures: tuple[str, ...] = ()
     modularity_certified: bool = False
@@ -500,6 +501,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         if opts.require_profile:
             report.profile = PROFILE
             report.profile_failures = certify(root, policy, scan, services.runner, services.fs)
+            report.profile_warnings = version_warnings(root, services.runner, policy.disabled_tools)
         report.engines.extend(_child_arbor_runs(policy, root, services, opts))
     finally:
         pool.shutdown(wait=True, cancel_futures=True)

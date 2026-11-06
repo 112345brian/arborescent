@@ -279,8 +279,9 @@ A `modules` glob that matches no module is reported, and `selftest` spells each 
 
 Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
 and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
-and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (Ruff 0.17.2,
-Tach 0.35.3) and behaviorally probes the required Ruff rules.
+and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (verified with Ruff 0.17.2,
+Tach 0.35.3) and behaviorally probes the required Ruff rules. A different installed Ruff or Tach version prints
+`PROFILE WARN` and does not fail the check; a missing tool or a rule whose probe no longer fires still fails.
 
 Use `disabled_tools` for tools this project deliberately does not use, so their absence does not keep appearing as a
 setup hint or prompt. Disabled tools are skipped even with `--require-tools`; certification still fails if its required

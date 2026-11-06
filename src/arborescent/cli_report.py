@@ -38,6 +38,8 @@ def _print_excluded(report: CheckReport) -> None:
 
 
 def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: str | None = None) -> None:
+    for warning in report.profile_warnings:
+        print(f"PROFILE WARN {warning}")
     for failure in report.profile_failures:
         print(f"PROFILE FAIL {failure}")
     _print_modularity(report)

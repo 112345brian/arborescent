@@ -14,8 +14,10 @@ from arborescent.certification import (
     _tach_probes,
     certify,
     tach_multi_root_note,
+    version_warnings,
 )
 from arborescent.config import policy_from_mapping
+from arborescent.domain import ToolResult
 from arborescent.engine import Options, run_check
 from arborescent.installer_adapter import _toml_array_close
 from arborescent.testing import FakeToolRunner
@@ -178,3 +180,22 @@ def test_disabled_tach_requires_installed_and_configured_import_linter(tmp_path:
     write_files(tmp_path, {"pyproject.toml": "[project]\nname = 'x'\n"})
     unconfigured = certify(tmp_path, policy, scan, FakeToolRunner({"lint-imports"}), fs)
     assert any("no contracts configured" in failure for failure in unconfigured)
+
+
+def test_other_tool_versions_warn_but_never_fail(tmp_path: Path) -> None:
+    newer = FakeToolRunner(
+        {"ruff", "tach"}, {"ruff": ToolResult(0, "ruff 0.17.3", ""), "tach": ToolResult(0, "tach 0.35.3", "")}
+    )
+    warnings = version_warnings(tmp_path, newer)
+    assert len(warnings) == 1
+    assert "ruff version 0.17.3" in warnings[0]
+    assert "verified with 0.17.2" in warnings[0]
+    assert version_warnings(tmp_path, newer, ("ruff",)) == ()
+    # A missing tool is still a failure, never merely a warning.
+    assert version_warnings(tmp_path, FakeToolRunner(set())) == ()
+    write_files(tmp_path, MINI_FILES)
+    policy = mini_policy()
+    scan = FsScanner().scan(policy, tmp_path)
+    failures = certify(tmp_path, policy, scan, newer, LocalFileSystem())
+    assert not any("requires 0.17.2" in failure or "version 0.17.3" in failure for failure in failures)
+    assert any("not installed" in failure for failure in certify(tmp_path, policy, scan, FakeToolRunner(set()), LocalFileSystem()))
