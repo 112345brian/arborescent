@@ -110,30 +110,9 @@ def plan(
     )
     for _, local_policy, local_known in local_policies:
         local_paths = {name: paths[name] for name in local_known if name in paths}
-        for ring in local_policy.rings:
-            ring_mutations, ring_skipped = _ring_mutations(local_policy, ring.name, local_paths, local_known, arbor_index)
-            out.extend(ring_mutations)
-            skipped.extend(ring_skipped)
-        annotation_mutations, annotation_skipped = _arbor_annotation_mutations(local_policy, local_paths, local_known, arbor_index)
-        out.extend(annotation_mutations)
-        skipped.extend(annotation_skipped)
-        require_mutations, require_skipped = _require_annotation_plan(local_policy, local_known, local_paths, arbor_index)
-        out.extend(require_mutations)
-        skipped.extend(require_skipped)
-        forbid_found, forbid_skipped = module_forbid_mutations(local_policy, local_paths, local_known)
-        out.extend(forbid_found)
-        skipped.extend(forbid_skipped)
-        if local_policy.entry_scripts:
-            entry_host = next((
-                name for name in sorted(local_known)
-                if local_policy.resolve_ring(arbor_index, name) is not None and name not in local_policy.entry_scripts
-            ), None)
-            if entry_host is not None:
-                out.append(Mutation(
-                    Rule.UNDECLARED_ENTRY_DEPENDENCY,
-                    "a project module imports a package the scripts don't declare",
-                    local_paths[entry_host], "import arborescent_probe_dist",
-                ))
+        found, local_skipped = _local_mutations(local_policy, local_paths, local_known, arbor_index)
+        out.extend(found)
+        skipped.extend(local_skipped)
     anchor = next(iter(sorted(known)), None)
     circular_anchor = next((
         name
@@ -158,6 +137,43 @@ def plan(
         out.extend(package_found)
         skipped.extend(package_skipped)
     return out, sorted(set(skipped))
+
+
+def _local_mutations(
+    local_policy: Policy, local_paths: dict[str, str], local_known: frozenset[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[list[Mutation], list[str]]:
+    """The mutations for one policy (the whole policy, or one scope of it), plus the ones that cannot be built."""
+    out: list[Mutation] = []
+    skipped: list[str] = []
+    steps = [
+        _ring_mutations(local_policy, ring.name, local_paths, local_known, arbor_index) for ring in local_policy.rings
+    ]
+    steps.append(_arbor_annotation_mutations(local_policy, local_paths, local_known, arbor_index))
+    steps.append(_require_annotation_plan(local_policy, local_known, local_paths, arbor_index))
+    steps.append(module_forbid_mutations(local_policy, local_paths, local_known))
+    for found, step_skipped in steps:
+        out.extend(found)
+        skipped.extend(step_skipped)
+    out.extend(_entry_dependency_mutations(local_policy, local_paths, local_known, arbor_index))
+    return out, skipped
+
+
+def _entry_dependency_mutations(
+    local_policy: Policy, local_paths: dict[str, str], local_known: frozenset[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> list[Mutation]:
+    if not local_policy.entry_scripts:
+        return []
+    entry_host = next((
+        name for name in sorted(local_known)
+        if local_policy.resolve_ring(arbor_index, name) is not None and name not in local_policy.entry_scripts
+    ), None)
+    if entry_host is None:
+        return []
+    return [Mutation(
+        Rule.UNDECLARED_ENTRY_DEPENDENCY,
+        "a project module imports a package the scripts don't declare",
+        local_paths[entry_host], "import arborescent_probe_dist",
+    )]
 
 
 def _scope_boundary_mutations(

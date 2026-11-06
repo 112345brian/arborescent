@@ -18,7 +18,7 @@ from __future__ import annotations
 import fnmatch
 import re
 import tomllib
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
@@ -302,20 +302,27 @@ def source_root_drift(fs: FileSystem, root: Path, policy: Policy, files: Sequenc
             data = tomllib.loads(fs.read_text(path))
         except tomllib.TOMLDecodeError:
             continue
-        copies: list[tuple[str, list[str], list[str], bool]] = []  # (label, wanted, found, exact)
-        if path.name == "tach.toml" and "source_roots" in data:
-            copies.append(("source_roots", roots, _strings(data["source_roots"]), True))
-        if path.name == "pyproject.toml":
-            wheel = data.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("wheel", {})
-            pytest_options = data.get("tool", {}).get("pytest", {}).get("ini_options", {})
-            for label, wanted, table in (("hatch sources", roots, wheel.get("sources")), ("hatch packages", sources, wheel.get("packages")), ("pytest pythonpath", roots, pytest_options.get("pythonpath"))):
-                if table is not None:
-                    copies.append((label, wanted, _strings(table), False))
-        for label, wanted, found, exact in copies:
+        for label, wanted, found, exact in _config_copies(path.name, data, roots, sources):
             out += [Violation(Rule.SOURCE_ROOT_DRIFT, name, f"{label} lacks {item!r}, which arborescent's policy lists") for item in wanted if item not in found]
             if exact:
                 out += [Violation(Rule.SOURCE_ROOT_DRIFT, name, f"{label} lists {item!r}, which arborescent's policy does not") for item in found if item not in wanted]
     return out
+
+
+def _config_copies(
+    filename: str, data: Mapping[str, Any], roots: list[str], sources: list[str]
+) -> list[tuple[str, list[str], list[str], bool]]:
+    """The copies of the policy's roots in one config file: ``(label, wanted, found, exact)``."""
+    copies: list[tuple[str, list[str], list[str], bool]] = []
+    if filename == "tach.toml" and "source_roots" in data:
+        copies.append(("source_roots", roots, _strings(data["source_roots"]), True))
+    if filename == "pyproject.toml":
+        wheel = data.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("wheel", {})
+        pytest_options = data.get("tool", {}).get("pytest", {}).get("ini_options", {})
+        for label, wanted, table in (("hatch sources", roots, wheel.get("sources")), ("hatch packages", sources, wheel.get("packages")), ("pytest pythonpath", roots, pytest_options.get("pythonpath"))):
+            if table is not None:
+                copies.append((label, wanted, _strings(table), False))
+    return copies
 
 
 PRACTICES = (
@@ -324,34 +331,37 @@ PRACTICES = (
 )  # fmt: skip
 
 
+def _string_items(value: object) -> list[str]:
+    return [str(item) for item in cast("list[object]", value)] if isinstance(value, list) else []
+
+
+def _stale_config_findings(fs: FileSystem, root: Path, cfg: Mapping[str, object]) -> list[Violation]:
+    allow = cfg.get("stale-config-path-allow", [])
+    return stale_config_paths(fs, root, _string_items(cfg[Rule.STALE_CONFIG_PATH]), _string_items(allow))
+
+
+def _source_root_findings(fs: FileSystem, root: Path, policy: Policy, value: object) -> list[Violation]:
+    files = _string_items(value) if isinstance(value, list) else ["tach.toml", "pyproject.toml"]
+    return source_root_drift(fs, root, policy, files)
+
+
 def run_practices(
     policy: Policy, root: Path, runner: ToolRunner, fs: FileSystem, scan: ScanResult,
 ) -> list[Violation]:
-    modules = scan.modules
-    known = scan.known
     cfg = policy.practices
+    manifest = cfg.get(Rule.UNDECLARED_IMPORTS)
+    checks: list[tuple[str, Callable[[], list[Violation]]]] = [
+        (Rule.GITIGNORE_SHADOW, lambda: gitignore_shadow(root, runner, _string_items(cfg[Rule.GITIGNORE_SHADOW]))),
+        (Rule.SIBLING_VERSIONS, lambda: sibling_versions(fs, root, str(cfg[Rule.SIBLING_VERSIONS]))),
+        (Rule.SECRETS_GUARD, lambda: secrets_guard(fs, root, str(cfg[Rule.SECRETS_GUARD]))),
+        (Rule.DOCS_SYNC, lambda: docs_sync(fs, root, str(cfg[Rule.DOCS_SYNC]), policy, scan)),
+        (Rule.CRLF, lambda: crlf(fs, root, list(cfg[Rule.CRLF]))),
+        (Rule.UNDECLARED_IMPORTS, lambda: undeclared_imports(fs, root, policy, scan.modules, scan.known, manifest if isinstance(manifest, str) else "pyproject.toml")),
+        (Rule.STALE_CONFIG_PATH, lambda: _stale_config_findings(fs, root, cfg)),
+        (Rule.SOURCE_ROOT_DRIFT, lambda: _source_root_findings(fs, root, policy, cfg[Rule.SOURCE_ROOT_DRIFT])),
+    ]
     out: list[Violation] = []
-    if cfg.get(Rule.GITIGNORE_SHADOW):
-        value = cfg[Rule.GITIGNORE_SHADOW]
-        items = cast("list[object]", value) if isinstance(value, list) else []
-        allow = [str(a) for a in items]
-        out += gitignore_shadow(root, runner, allow)
-    if cfg.get(Rule.SIBLING_VERSIONS):
-        out += sibling_versions(fs, root, str(cfg[Rule.SIBLING_VERSIONS]))
-    if cfg.get(Rule.SECRETS_GUARD):
-        out += secrets_guard(fs, root, str(cfg[Rule.SECRETS_GUARD]))
-    if cfg.get(Rule.DOCS_SYNC):
-        out += docs_sync(fs, root, str(cfg[Rule.DOCS_SYNC]), policy, scan)
-    if cfg.get(Rule.CRLF):
-        out += crlf(fs, root, list(cfg[Rule.CRLF]))
-    if cfg.get(Rule.UNDECLARED_IMPORTS):
-        manifest = cfg[Rule.UNDECLARED_IMPORTS] if isinstance(cfg[Rule.UNDECLARED_IMPORTS], str) else "pyproject.toml"
-        out += undeclared_imports(fs, root, policy, modules, known, manifest)
-    if cfg.get(Rule.STALE_CONFIG_PATH):
-        files = [str(f) for f in cast("list[object]", cfg[Rule.STALE_CONFIG_PATH])] if isinstance(cfg[Rule.STALE_CONFIG_PATH], list) else []
-        allow = cfg.get("stale-config-path-allow", [])
-        out += stale_config_paths(fs, root, files, [str(a) for a in cast("list[object]", allow)] if isinstance(allow, list) else [])
-    if cfg.get(Rule.SOURCE_ROOT_DRIFT):
-        value = cfg[Rule.SOURCE_ROOT_DRIFT]
-        out += source_root_drift(fs, root, policy, [str(f) for f in cast("list[object]", value)] if isinstance(value, list) else ["tach.toml", "pyproject.toml"])
+    for rule, check in checks:
+        if cfg.get(rule):
+            out += check()
     return out
