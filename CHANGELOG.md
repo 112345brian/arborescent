@@ -37,6 +37,8 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- A package whose modules still sit beside other packages' modules (a flat layout before a move into a workspace) can be declared:
+  `root` may be the target folder when every owned path sets `destination`; the root-coverage error now says so (#114).
 - `importable_by`: the inverse of `module_forbid_imports`. `"paths" = ["container", "ingest.*"]` lets only those modules import `paths`
   (and its submodules); a module not listed is unrestricted, a stale key or glob is reported, and the new `restricted-import`
   rule is mutation-tested by `selftest` (#111).

@@ -50,11 +50,13 @@ def _validate_package_header(package: PackageDescriptor) -> None:
     if not any(item.role == "source" for item in package.paths):
         raise CatalogError(f"package {package.id} must declare a source path")
     package_root = PurePosixPath(package.root)
-    if not any(
-        within(PurePosixPath(item.path), package_root) for item in package.paths
+    # `root` is where the package will live. Before a move it need not exist, so long as every path says where it lands.
+    if not any(within(PurePosixPath(item.path), package_root) for item in package.paths) and any(
+        item.destination is None for item in package.paths
     ):
         raise CatalogError(
-            f"package {package.id} root must be covered by an owned path"
+            f"package {package.id} root {package.root!r} must be covered by an owned path, "
+            "or every owned path must set destination (a package not yet moved into its root)"
         )
 
 
