@@ -162,9 +162,13 @@ def semantics_of(package: PackageDescriptor) -> PackageSemantics:
     )
 
 
+# An ``[[assets]]`` owner that is no package: the repository itself (LICENSE, CI files, the lock file). Never extracted.
+ROOT_OWNER = "@root"
+
+
 @dataclass(frozen=True, slots=True)
 class AssetRule:
-    """A non-Python file glob owned by a package; rules are tried in order and the first match wins."""
+    """A non-Python file glob owned by a package (or by ``@root``); rules are tried in order and the first match wins."""
 
     pattern: str
     package: str

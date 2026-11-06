@@ -116,5 +116,7 @@ def asset_paths(policy: Policy, root: Path, fs: FileSystem) -> tuple[str, ...]:
                 continue
             if is_generated(fs, root, path) or excluded_by_policy(rel, policy.exclude):
                 continue
+            if rel == (policy.package_catalog or "packages.toml"):
+                continue  # the catalog describes the packages; it is not owned by one
             found.add(rel)
     return tuple(sorted(found))

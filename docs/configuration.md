@@ -312,6 +312,17 @@ pattern = "src/**/templates/*.html"
 package = "web"
 ```
 
+Repository-level files (`LICENSE`, `README.md`, CI workflows, the lock file) belong to no package. Give them to the
+workspace with `package = "@root"`: they are then not unowned, and are never carried into a package on extraction. `@root`
+is only an `[[assets]]` owner, not a package id; a root-owned file that a package path also contains is a double claim.
+The catalog file itself (`package_catalog`) is never an asset.
+
+```toml
+[[assets]]
+pattern = ".github/**"
+package = "@root"
+```
+
 Findings that name a package pair (`package-multiply-assigned-*`, `package-undeclared-dependency`) are failures like any
 other rule and can be baselined. `package-spans-rings` is printed as a `NOTE` and neither fails the check nor enters
 the baseline. `selftest` probes each rule when `package_catalog` is set: a new unowned module or asset, a second
