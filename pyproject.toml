@@ -152,6 +152,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.local_targets" = "application"
 "arborescent.driver_rewrite" = "application"
 "arborescent.module_forbid_probes" = "application"
+"arborescent.importable_by_probes" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
@@ -194,6 +195,10 @@ docs-sync = "docs/architecture.md"
 "src/arborescent/cli_install.py" = ["T20"]
 "src/arborescent/cli_report.py" = ["T20"]
 "src/arborescent/cli_migrate.py" = ["T20"]
+
+# Only the command line installs and reports the pre-push hook; `selftest` injects an outside import (importable_by_probes).
+[tool.arborescent.importable_by]
+"arborescent.git_hook" = ["arborescent.cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

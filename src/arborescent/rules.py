@@ -22,6 +22,7 @@ from .domain import (
     Rule,
     Violation,
     dist_name,
+    in_unit,
 )
 from .facts import EffectUse, ModuleInfo, resolve_targets
 
@@ -145,10 +146,35 @@ def _internal_imports(
         if banned is not None:
             out.append(Violation(Rule.INTERNAL_IMPORT, name, f"[{name}] imports forbidden module {target}; {banned!r} is forbidden by module policy", line, target))
             continue
+        restriction = _restricted_import(policy, name, target, line)
+        if restriction is not None:
+            out.append(restriction)
+            continue
         target_ring = context.resolve_ring(target)
         if target_ring is not None and target_ring not in allowed:
             detail = f"[{ring}] imports {target} [{target_ring}]; {ring} may import only {sorted(allowed)}"
             out.append(Violation(Rule.INTERNAL_IMPORT, name, detail, line, target))
+    return out
+
+
+def _restricted_import(policy: Policy, name: str, target: str, line: int) -> Violation | None:
+    allowed = policy.restricted_importers(name, target)
+    if allowed is None:
+        return None
+    return Violation(Rule.RESTRICTED_IMPORT, name, f"[{name}] imports {target}, which is importable only by {list(allowed)}", line, target)
+
+
+def _stale_importable_by(policy: Policy, modules: Collection[str]) -> list[Violation]:
+    """Each `importable_by` key or importer glob that matches no module: a rename would otherwise leave the rule restricting nothing."""
+    out: list[Violation] = []
+    for pattern, allowed in policy.importable_by:
+        if not any(in_unit(module, pattern) for module in modules):
+            out.append(Violation(Rule.RESTRICTED_IMPORT, pattern, f"`importable_by` key {pattern!r} matches no module"))
+        out += [
+            Violation(Rule.RESTRICTED_IMPORT, pattern, f"`importable_by` importer glob {glob!r} (for {pattern!r}) matches no module")
+            for glob in allowed
+            if not any(in_unit(module, glob) for module in modules)
+        ]
     return out
 
 
@@ -458,7 +484,7 @@ def _finalize_checks(
     policy = context.policy
     if not policy.scopes:
         circular = _circular_imports(import_graph) if policy.forbid_circular_imports else []
-        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {}))
+        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {})) + _stale_importable_by(policy, known)
     out: list[Violation] = []
     for scope in policy.scopes:
         local_graph = {
@@ -468,6 +494,7 @@ def _finalize_checks(
         if scope.policy.forbid_circular_imports:
             out.extend(_circular_imports(local_graph))
         out.extend(_entry_dependencies(scope.policy, known, entry_deps, third_party_by_scope.get(scope.name, {})))
+        out.extend(_stale_importable_by(scope.policy, [name for name in known if context.scope_name(name) == scope.name]))
     return out
 
 

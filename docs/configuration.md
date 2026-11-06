@@ -24,6 +24,7 @@ settings. The two forms cannot be mixed.
 | `vendor_roots` | `[]` | Folders whose child folders are vendored packages. Each child `X` becomes a source root (`<root>/X/src` if it exists, else `<root>/X`) added to `sources` and `source_roots`, and the folder is scanned even though its name is a vendor convention, so a vendored package is not reported as external. Other vendor folders stay excluded. Not allowed with `scopes`. |
 | `library_roots` | `[]` | Same expansion for editable in-repo libraries (for example `libs`); the folders are scanned normally. Not allowed with `scopes`. |
 | `module_forbid_imports` | `{}` | Module glob -> internal module/package names this module may not import, in addition to ring rules. |
+| `importable_by` | `{}` | Module glob -> importer globs: the inverse of `module_forbid_imports` (see below). A listed module, and its submodules, may be imported only by modules matching one of the globs. |
 | `preset` | `"strict"` | How much of the external and OS rules applies: `strict`, `standard` or `relaxed` (see below). |
 | `middle_forbid` | the preset's | Effect categories middle rings may not use, replacing the preset default (see below). |
 | `io_modules` | built-in set | Stdlib modules that count as I/O, process or OS. Replaces the default set; `[]` means none. |
@@ -68,7 +69,7 @@ repository component. Each scope requires non-empty `sources`, `source_roots` an
 | `public` | `[]` | Dotted module patterns consumers may import from this scope. |
 | `depends_on` | `[]` | Scope names this scope may import. Each cross-scope import must target a declared dependency and match its `public` patterns. |
 | `preset`, `middle_forbid`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
-| `module_forbid_imports`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbidden_modules`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
+| `module_forbid_imports`, `importable_by`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbidden_modules`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
 
 Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
 `ruff`, `practices`, `exclude` and `children` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
@@ -246,6 +247,20 @@ There is no per-file suppression. Function size and complexity remain Ruff rules
 `module_forbid_imports` adds focused internal import restrictions without changing the module's ring. For example,
 `"bootstrap.adapters" = ["bootstrap.launcher"]` blocks that package and its descendants only in the named adapter
 module (or matching module glob).
+
+`importable_by` says who may import a module, so a new module cannot escape by not being listed:
+
+```toml
+[tool.arborescent.importable_by]
+"paths" = ["container", "build", "ingest.*"]
+"private_git" = ["*_service", "composition_root*"]
+```
+
+A module not listed is unrestricted. A listed one (and its submodules) may be imported only by a module matching one of its globs;
+the restricted unit's own modules may always import each other, and every matching restriction must allow the importer. Every
+spelling of the import counts (`import`, `from pkg import mod`, relative, lazy, `TYPE_CHECKING`). Each key or importer glob that
+matches no module is reported as `restricted-import`, so a rename cannot leave the list restricting nothing; `selftest` injects one
+disallowed import per entry.
 
 Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
 and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
@@ -630,6 +645,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-dynamic-import` | a ring that forbids any effect uses `importlib` or `__import__` |
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
+| `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
 | `scope-effect-leak` | a module imports another scope's declared-`public` module, and that module uses an effect the importing ring forbids (one hop, not transitive) |

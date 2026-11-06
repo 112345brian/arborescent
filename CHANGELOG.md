@@ -37,6 +37,9 @@
   `effect_defaults` (`injection` default, `typed` to require a `Callable`/`Mapping` annotation, `count` for the old behavior) controls it. The scan cache is rebuilt once.
 
 ### Added
+- `importable_by`: the inverse of `module_forbid_imports`. `"paths" = ["container", "ingest.*"]` lets only those modules import `paths`
+  (and its submodules); a module not listed is unrestricted, a stale key or glob is reported, and the new `restricted-import`
+  rule is mutation-tested by `selftest` (#111).
 - `classify_from` also derives `rings` (innermost first) from the tach.toml's `layers`, and a default `may_import` of every inner ring for
   each, when the policy has no `rings`; explicit `[ring.<name>]` settings still win and an explicit `rings` list is left alone
   (#106).

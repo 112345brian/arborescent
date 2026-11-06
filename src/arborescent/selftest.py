@@ -15,6 +15,7 @@ from typing import Protocol
 from .domain import NOISE_DIRS, ArchitectureScope, Mutation, Policy, Rule
 from .engine import Services, package_checks, run_own
 from .facts import ModuleInfo
+from .importable_by_probes import importable_by_mutations
 from .module_forbid_probes import module_forbid_mutations
 from .ports import PackageProbes
 
@@ -151,6 +152,7 @@ def _local_mutations(
     steps.append(_arbor_annotation_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(_require_annotation_plan(local_policy, local_known, local_paths, arbor_index))
     steps.append(module_forbid_mutations(local_policy, local_paths, local_known))
+    steps.append(importable_by_mutations(local_policy, local_paths, local_known))
     for found, step_skipped in steps:
         out.extend(found)
         skipped.extend(step_skipped)
