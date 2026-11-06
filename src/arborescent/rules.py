@@ -16,6 +16,7 @@ from .domain import (
     ALL,
     EFFECT_RULES,
     ArchitectureScope,
+    OwnedLiteral,
     Policy,
     PolicyError,
     RingRule,
@@ -162,6 +163,39 @@ def _restricted_import(policy: Policy, name: str, target: str, line: int) -> Vio
     if allowed is None:
         return None
     return Violation(Rule.RESTRICTED_IMPORT, name, f"[{name}] imports {target}, which is importable only by {list(allowed)}", line, target)
+
+
+def _owned_literal_findings(context: RuleContext, name: str, info: ModuleInfo) -> list[Violation]:
+    """A module spelling a literal that the policy gives to other modules or rings (#112)."""
+    local_policy = context.policy_for(name)
+    if local_policy is None or not local_policy.owned_literals:
+        return []
+    ring = context.resolve_ring(name)
+    owned = {item.literal: item for item in local_policy.owned_literals}
+    return [
+        Violation(
+            Rule.LITERAL_OUTSIDE_OWNER, name,
+            f"[{name}] (ring {ring or 'none'}) spells {value!r}, which belongs to {_owner_text(owned[value])}"
+            + (f": {owned[value].reason}" if owned[value].reason else ""),
+            line,
+        )
+        for line, value in info.facts.string_literals
+        if value in owned and not owned[value].permits(name, ring)
+    ]
+
+
+def _owner_text(item: OwnedLiteral) -> str:
+    parts = [f"modules {list(item.modules)}"] if item.modules else []
+    return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
+
+
+def _stale_owned_literals(policy: Policy, modules: Collection[str]) -> list[Violation]:
+    """An owner glob that matches no module: after a rename the literal would be owned by nobody."""
+    return [
+        Violation(Rule.LITERAL_OUTSIDE_OWNER, item.literal, f"`owned_literal` {item.literal!r}: modules glob {glob!r} matches no module")
+        for item in policy.owned_literals for glob in item.modules
+        if not any(in_unit(module, glob) for module in modules)
+    ]
 
 
 def _stale_importable_by(policy: Policy, modules: Collection[str]) -> list[Violation]:
@@ -422,6 +456,7 @@ def check_modules(
         local_policy = context.policy_for(name)
         is_tool = name in context.tool_modules  # developer tooling: no ring, may import product code
         out += _module_preamble(context, name, info, known, tops)
+        out += _owned_literal_findings(context, name, info)
         if is_tool:
             out += _dev_tool_findings(context, name, info, _ImportEnv(modules, known, tops, import_graph))
             continue
@@ -484,7 +519,7 @@ def _finalize_checks(
     policy = context.policy
     if not policy.scopes:
         circular = _circular_imports(import_graph) if policy.forbid_circular_imports else []
-        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {})) + _stale_importable_by(policy, known)
+        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {})) + _stale_importable_by(policy, known) + _stale_owned_literals(policy, known)
     out: list[Violation] = []
     for scope in policy.scopes:
         local_graph = {
@@ -494,7 +529,9 @@ def _finalize_checks(
         if scope.policy.forbid_circular_imports:
             out.extend(_circular_imports(local_graph))
         out.extend(_entry_dependencies(scope.policy, known, entry_deps, third_party_by_scope.get(scope.name, {})))
-        out.extend(_stale_importable_by(scope.policy, [name for name in known if context.scope_name(name) == scope.name]))
+        scope_modules = [name for name in known if context.scope_name(name) == scope.name]
+        out.extend(_stale_importable_by(scope.policy, scope_modules))
+        out.extend(_stale_owned_literals(scope.policy, scope_modules))
     return out
 
 

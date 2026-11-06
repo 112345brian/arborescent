@@ -99,6 +99,7 @@ class SourceFacts:
     arbor_role: str | None = None  # `__arbor__ = {"role": "dev_tool"}`: the module claims to be developer tooling
     file_refs: tuple[int, ...] = ()  # lines that read `__file__`: a location-dependent path breaks when the module moves
     main_guard: int = 0  # line of a top-level `if __name__ == "__main__":`, 0 when there is none: the module is also a program
+    string_literals: tuple[tuple[int, str], ...] = ()  # (line, value) of identifier-like string constants, docstrings excluded (#112)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -534,7 +535,25 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         arbor_role,
         _file_ref_lines(tree),
         _main_guard_line(tree),
+        _string_literals(tree),
     )
+
+
+_LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")
+_DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _string_literals(tree: ast.Module) -> tuple[tuple[int, str], ...]:
+    """Identifier-like string constants (an environment variable, a key, a protocol name); a docstring is prose, not a spelling."""
+    docstrings = {
+        id(node.body[0].value) for node in ast.walk(tree)
+        if isinstance(node, _DOCSTRING_OWNERS) and node.body and isinstance(node.body[0], ast.Expr)
+    }
+    return tuple(sorted({
+        (node.lineno, node.value) for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
+        and _LITERAL_NAME.fullmatch(node.value)
+    }))
 
 
 def _is_main_guard(test: ast.expr) -> bool:

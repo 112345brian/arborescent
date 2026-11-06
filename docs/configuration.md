@@ -262,6 +262,21 @@ spelling of the import counts (`import`, `from pkg import mod`, relative, lazy, 
 matches no module is reported as `restricted-import`, so a rename cannot leave the list restricting nothing; `selftest` injects one
 disallowed import per entry.
 
+`owned_literal` gives a string to the modules and rings that may spell it. A protocol shared by a parent adapter and a loader
+(an environment variable name, a message key) then cannot leak into an inner ring, and a third module cannot copy it and drift:
+
+```toml
+[[tool.arborescent.owned_literal]]
+literal = "KNOWLEDGE_CONFIG"
+modules = ["paths", "script_runner"]     # module globs; the only modules that may spell it
+rings = ["infrastructure"]               # and no module outside these rings (either list may be left out, not both)
+reason = "the protocol between the process adapter and the config loader"
+```
+
+`literal-outside-owner` names the module, its ring and the line of each other spelling, and repeats the `reason`. Only
+identifier-like strings (letters, digits, `_`, `.`, `-`, at most 80 characters) are recorded, and docstrings are not spellings.
+A `modules` glob that matches no module is reported, and `selftest` spells each literal in a module that does not own it.
+
 Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
 and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
 and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (Ruff 0.17.2,
@@ -673,6 +688,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
+| `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
 | `scope-effect-leak` | a module imports another scope's declared-`public` module, and that module uses an effect the importing ring forbids (one hop, not transitive) |

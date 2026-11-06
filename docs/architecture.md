@@ -114,6 +114,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.driver_rewrite` | `single` | application |
 | `arborescent.module_forbid_probes` | `single` | application |
 | `arborescent.importable_by_probes` | `single` | application |
+| `arborescent.owned_literal_probes` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |

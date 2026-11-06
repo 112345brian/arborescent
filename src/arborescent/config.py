@@ -9,9 +9,18 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
-from .domain import ArchitectureScope, ChildArbor, Policy, PolicyError, RingRule
+from .domain import (
+    ArchitectureScope,
+    ChildArbor,
+    OwnedLiteral,
+    Policy,
+    PolicyError,
+    RingRule,
+)
 from .ports import FileSystem
 from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Preset
+
+_LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")  # mirrors the scanner: only identifier-like strings are recorded
 
 __all__ = ["find_child_policy", "find_policy", "load_policy", "policy_from_mapping"]
 
@@ -216,6 +225,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         child_policy_mode=_child_policy_mode(raw),
         module_forbid_imports=tuple((pattern, tuple(targets)) for pattern, targets in raw_module_forbids.items()),
         importable_by=_importable_by(raw),
+        owned_literals=_owned_literals(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
@@ -256,7 +266,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -454,6 +464,27 @@ def _importable_by(raw: Mapping[str, Any]) -> tuple[tuple[str, tuple[str, ...]],
         raise PolicyError("`importable_by` must map module globs to non-empty lists of importer module globs")
     checked = cast("Mapping[str, list[str]]", table)
     return tuple((pattern, tuple(importers)) for pattern, importers in checked.items())
+
+
+def _owned_literals(raw: Mapping[str, Any]) -> tuple[OwnedLiteral, ...]:
+    entries = raw.get("owned_literal", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in entries):
+        raise PolicyError("`owned_literal` must be an array of tables: [[tool.arborescent.owned_literal]]")
+    return tuple(_owned_literal(cast("Mapping[str, Any]", entry)) for entry in entries)
+
+
+def _owned_literal(entry: Mapping[str, Any]) -> OwnedLiteral:
+    literal, reason = entry.get("literal"), entry.get("reason", "")
+    names = {key: entry.get(key, []) for key in ("modules", "rings")}
+    if not isinstance(literal, str) or not _LITERAL_NAME.fullmatch(literal):
+        raise PolicyError("`owned_literal` needs a `literal` that is identifier-like (letters, digits, `_`, `.`, `-`; at most 80)")
+    if not isinstance(reason, str) or any(
+        not isinstance(value, list) or not all(isinstance(item, str) and item for item in value) for value in names.values()
+    ):
+        raise PolicyError(f"`owned_literal` {literal!r}: `modules` and `rings` are lists of non-empty strings, `reason` a string")
+    if not names["modules"] and not names["rings"]:
+        raise PolicyError(f"`owned_literal` {literal!r} needs `modules` or `rings`, or it restricts nothing")
+    return OwnedLiteral(literal, tuple(names["modules"]), tuple(names["rings"]), reason)
 
 
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:
