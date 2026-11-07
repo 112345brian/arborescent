@@ -2,6 +2,16 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## 0.5.1 — 2026-11-06
+
+### Changed
+- `selftest`'s mutation loop (54 full, cold, uncached checks of this package's own 72 modules) now runs across a
+  process pool instead of sequentially, cutting `test_arborescent_probes_its_own_package_rules` from ~76s to ~13s
+  locally. The pool sits behind a new `Parallel` port (`ProcessPoolParallel`), since the application ring forbids
+  the process effect directly; `Services.parallel` defaults to `None`, so every other `selftest` caller keeps the
+  original sequential, same-process behavior (several rely on `monkeypatch` to simulate a removed rule, which only
+  works in-process). Only the CLI's `selftest` command and this package's own self-test opt in.
+
 ## 0.5.0 — 2026-11-06
 
 ### Fixed
