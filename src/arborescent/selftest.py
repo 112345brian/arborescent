@@ -226,7 +226,7 @@ def _leaking_public_dependency(
             if info is None or _already_imports(host_info, name):
                 continue
             for use in info.facts.effect_uses:
-                if use.category in forbidden and scope.policy.counts_effect_seam(use.seam):
+                if use.category in forbidden and dependency.policy.counts_effect_seam(use.seam):
                     return name, use.category
     return None
 

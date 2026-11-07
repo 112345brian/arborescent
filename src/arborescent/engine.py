@@ -430,15 +430,14 @@ def _plan_engines(
 
     ``files`` is None for a whole-repository run and the changed Python files for ``--changed``."""
     checker = pick_checker(policy, services, opts.type_checker)
-    only = files
     futures: list[Future[EngineRun] | EngineRun] = []
     if opts.tools:
         active_engines = [engine for engine in services.engines if not tool_is_disabled(policy, engine)]
         active_checker = None if tool_is_disabled(policy, checker) else checker
         for engine in (*active_engines, *((active_checker,) if active_checker is not None else ())):
-            if only is not None and not files:
+            if files is not None and not files:
                 futures.append(EngineRun(engine.name, "skipped", 0.0, ["no changed Python files"]))
-            elif only is not None and not getattr(engine, "supports_changed", True):
+            elif files is not None and not getattr(engine, "supports_changed", True):
                 futures.append(EngineRun(engine.name, "skipped", 0.0, ["graph-wide engine skipped in --changed mode"]))
             else:
                 futures.append(pool.submit(_tool, services, engine, files or [], root / getattr(engine, "working_directory", "."), opts))

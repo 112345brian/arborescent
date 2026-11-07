@@ -480,12 +480,12 @@ def _list_dev_tools(policy: Policy, root: Path, svc: Services) -> int:
 
 
 def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
-    if args.list_dev_tools:
-        return _list_dev_tools(policy, root, svc)
     conflict = _core_mode_conflict(args)
     if conflict is not None:
         print(f"arborescent check: {conflict}", file=sys.stderr)
         return 2
+    if args.list_dev_tools:
+        return _list_dev_tools(policy, root, svc)
     args.no_tools = args.no_tools or args.engines == "core"
     install_status = 0
     if args.install_tools:

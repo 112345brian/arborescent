@@ -152,3 +152,40 @@ def test_circular_import_probe_uses_a_scope_that_enforces_cycles(tmp_path: Path)
     circular = [mutation for mutation in mutations if mutation.rule == Rule.CIRCULAR_IMPORT]
     assert len(circular) == 1
     assert circular[0].file == "libs/beta/src/beta/b.py"
+
+
+def test_scope_effect_leak_mutation_uses_the_dependency_scopes_own_effect_defaults(tmp_path: Path) -> None:
+    """The leak probe must check the seam under the scope that owns the leaking public module (`beta`), not the
+    importing scope (`alpha`): `alpha` stays "injection" in both cases, so a leak only shows up once `beta` itself
+    is set to "count"."""
+    write_files(tmp_path, {
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+        "libs/beta/src/beta/api.py": (
+            "import time\nfrom typing import Callable\n"
+            "def now(clock: Callable[[], float] = time.time) -> float:\n    return clock()\n"
+        ),
+    })
+
+    def scopes(beta_effect_defaults: str) -> dict[str, object]:
+        return {
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain", "adapters"], "classify": {"alpha.core": "domain"},
+                "depends_on": ["beta"],
+            },
+            "beta": {
+                "sources": ["libs/beta/src/beta"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain", "adapters"], "classify": {"beta.api": "adapters"},
+                "public": ["beta.api"], "effect_defaults": beta_effect_defaults,
+            },
+        }
+
+    not_leaking = policy_from_mapping({"scopes": scopes("injection")})
+    leaking = policy_from_mapping({"scopes": scopes("count")})
+
+    assert not any(
+        m.rule == Rule.SCOPE_EFFECT_LEAK for m in plan(not_leaking, FsScanner().scan(not_leaking, tmp_path))[0]
+    )
+    assert any(
+        m.rule == Rule.SCOPE_EFFECT_LEAK for m in plan(leaking, FsScanner().scan(leaking, tmp_path))[0]
+    )

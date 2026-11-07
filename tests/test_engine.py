@@ -609,6 +609,17 @@ def test_core_mode_rejects_options_that_demand_an_engine(repo: Path, flag: str, 
     assert "core mode" in capsys.readouterr().err
 
 
+def test_list_dev_tools_still_rejects_a_core_mode_conflict_first(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`--list-dev-tools` must not bypass `_core_mode_conflict`: it used to return before that check ever ran."""
+    cfg = repo / "arborescent.toml"
+    cfg.write_text(CORE_POLICY, encoding="utf-8")
+
+    status = main(["--config", str(cfg), "check", "--engines", "core", "--require-tools", "--list-dev-tools"], services())
+
+    assert status == 2
+    assert "core mode" in capsys.readouterr().err
+
+
 def test_list_dev_tools_prints_each_path_with_its_modules_and_flags_misplaced_ones(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_files(repo, {"app/__init__.py": "", "app/main.py": '__arbor__ = {"role": "dev_tool"}\n', "devtools/__init__.py": "", "devtools/scan.py": ""})
     cfg = repo / "arborescent.toml"
