@@ -39,6 +39,9 @@ IO_MODULES: frozenset[str] = frozenset(
 )  # fmt: skip
 
 
+# Structural, type-level stdlib every ring may import under any scope (#128): they are how a pure data model is written
+# at all and depend on nothing outside the language. ``collections`` covers ``collections.abc``.
+STRUCTURAL_STDLIB: frozenset[str] = frozenset({"__future__", "typing", "dataclasses", "collections", "enum", "abc"})
 @dataclass(frozen=True)
 class Preset:
     name: str
@@ -57,6 +60,8 @@ class Preset:
 
     def restricts(self, top: str, is_stdlib: bool, io_modules: Collection[str]) -> bool:
         """Whether importing external package ``top`` requires an allow-list entry."""
+        if is_stdlib and top in STRUCTURAL_STDLIB:
+            return False
         if self.external_scope == "all":
             return True
         if not is_stdlib:

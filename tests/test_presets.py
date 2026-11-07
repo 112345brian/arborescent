@@ -41,6 +41,13 @@ def test_strict_restricts_plain_stdlib_too(repo: Path) -> None:
     assert found_rules(repo) == {("app.domain", "external-import")}
 
 
+def test_strict_leaves_structural_stdlib_free_but_still_restricts_the_rest(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "from __future__ import annotations\nimport typing, dataclasses, enum, abc\nfrom collections.abc import Sequence\n"})
+    assert found_rules(repo) == set()
+    write_files(repo, {"app/domain.py": "from __future__ import annotations\nimport json\n"})
+    assert found_rules(repo) == {("app.domain", "external-import")}
+
+
 def test_strict_import_linter_bans_the_io_modules_per_ring() -> None:
     text = linter_text()
     assert '"subprocess"' in text and '"sqlite3"' in text

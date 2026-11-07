@@ -9,6 +9,8 @@
   tree has unrelated new violations; the growth log is untouched (#131).
 - `network` effect category (`effect-network`): `forbid = ["network"]` now catches `urllib.request`, `http.client`,
   `http.server`, `socket` and `requests`/`httpx` verb calls, independent of preset (#129).
+- `strict` no longer requires allow-listing `__future__`, `typing`, `dataclasses`, `collections`, `enum` or `abc`;
+  every other stdlib and third-party import is still allow-listed (#128).
 
 ## 0.5.1 — 2026-11-06
 
