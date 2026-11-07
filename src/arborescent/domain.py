@@ -115,6 +115,7 @@ class Rule(StrEnum):
     PACKAGE_DEPENDENCY_CYCLE = "package-dependency-cycle"
     PACKAGE_UNUSED_DEPENDENCY = "package-unused-dependency"
     PACKAGE_OWNS_EVERYTHING = "package-owns-everything"
+    PACKAGE_NEVER_DEPENDED_ON = "package-never-depended-on"
     TACH_INVISIBLE_IMPORT = "tach-invisible-import"
     # annotation preservation (`package_parts`): a split part keeps the catalog's annotations and public contracts
     PACKAGE_SEMANTICS_DRIFT = "package-semantics-drift"
@@ -146,7 +147,7 @@ EFFECT_RULES: Mapping[str, Rule] = {
 # Findings that are reported but never fail a check and never enter the baseline: a package spanning rings is normal.
 # A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
-    Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING,
+    Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
     Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS,
 })
 

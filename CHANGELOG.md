@@ -11,6 +11,8 @@
   `http.server`, `socket` and `requests`/`httpx` verb calls, independent of preset (#129).
 - `strict` no longer requires allow-listing `__future__`, `typing`, `dataclasses`, `collections`, `enum` or `abc`;
   every other stdlib and third-party import is still allow-listed (#128).
+- `package-never-depended-on` (information): flags a package that depends on nothing and that no other package declares
+  or imports (#130).
 
 ## 0.5.1 — 2026-11-06
 

@@ -95,7 +95,7 @@ def test_asset_globs_are_first_match_wins_so_they_never_double_claim() -> None:
         (AssetRule("data/**", "a"), AssetRule("data/**/*.sql", "b")),
     )
     data = facts(assets=("data/x/q.sql",))
-    assert assignment_violations(catalog, data) == []
+    assert found(catalog, data, Rule.PACKAGE_MULTIPLY_ASSIGNED_ASSET) == []
 
 
 def test_an_asset_inside_one_package_path_and_matched_by_another_packages_glob_is_doubly_assigned() -> None:
@@ -291,3 +291,18 @@ def test_a_real_partition_or_a_single_module_does_not_own_everything() -> None:
     assert found(CatalogDocument((package("all", "src"),)), facts({"a.x": "src/a/x.py"}), Rule.PACKAGE_OWNS_EVERYTHING) == []
     unassigned = facts({"a.x": "src/a/x.py", "b.y": "elsewhere/y.py"})
     assert found(CatalogDocument((package("all", "src"),)), unassigned, Rule.PACKAGE_OWNS_EVERYTHING) == []
+
+
+def test_a_package_nothing_depends_on_or_imports_is_information() -> None:
+    catalog = CatalogDocument((package("app", "src/app", depends_on=("lib",)), package("lib", "src/lib"), package("orphan", "src/orphan")))
+    data = facts({"app.a": "src/app/a.py", "lib.b": "src/lib/b.py", "orphan.c": "src/orphan/c.py"}, imports={"app.a": ("lib.b",)})
+    [violation] = found(catalog, data, Rule.PACKAGE_NEVER_DEPENDED_ON)
+    assert violation.subject == "orphan" and Rule.PACKAGE_NEVER_DEPENDED_ON in INFORMATIONAL_RULES
+
+
+def test_a_consumer_a_declared_or_imported_package_and_a_single_package_are_not_orphans() -> None:
+    declared = two_packages(("lib",))
+    assert [v.subject for v in found(declared, facts({}), Rule.PACKAGE_NEVER_DEPENDED_ON)] == []
+    imported = facts({"app.a": "src/app/a.py", "lib.b": "src/lib/b.py"}, imports={"app.a": ("lib.b",)})
+    assert found(two_packages(), imported, Rule.PACKAGE_NEVER_DEPENDED_ON) == []
+    assert found(CatalogDocument((package("all", "src"),)), facts({}), Rule.PACKAGE_NEVER_DEPENDED_ON) == []

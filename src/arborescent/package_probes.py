@@ -145,6 +145,7 @@ def _dependency_probes(catalog_file: str, context: PackageContext, skipped: list
         Rule.PACKAGE_UNUSED_DEPENDENCY, f"a package listing {first} in depends_on without importing it", catalog_file,
         _probe_package(depends_on=(first,)),
     )
+    skipped.append(f"{Rule.PACKAGE_NEVER_DEPENDED_ON}: information-only and depends on the whole catalog graph; covered by unit tests")
     skipped.append(f"{Rule.PACKAGE_OWNS_EVERYTHING}: a probe can only append to the catalog, and appended packages cannot take ownership away; covered by unit tests")
     return [cycle, unused]
 

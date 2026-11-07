@@ -73,6 +73,7 @@ def assignment_violations(catalog: CatalogDocument, facts: RepositoryFacts) -> l
     out += _dependency_cycle(catalog)
     out += _unused_dependencies(catalog, facts, sole)
     out += _owns_everything(catalog, facts, sole)
+    out += _never_depended_on(catalog, facts, sole)
     return out
 
 
@@ -159,6 +160,29 @@ def _unused_dependencies(catalog: CatalogDocument, facts: RepositoryFacts, sole:
         for package in catalog.packages
         for dependency in package.depends_on
         if dependency not in used.get(package.id, set())
+    ]
+
+
+def _never_depended_on(catalog: CatalogDocument, facts: RepositoryFacts, sole: Mapping[str, str]) -> list[Violation]:
+    """A package that depends on nothing and that no other package declares or imports is dead weight the other package checks
+    cannot see (#130). Information: a package with its own ``depends_on`` is a consumer or entrypoint, not an orphan, and a
+    single-package catalog has nobody to depend on it."""
+    if len(catalog.packages) < 2:
+        return []
+    reached = {dependency for package in catalog.packages for dependency in package.depends_on}
+    consumers: set[str] = set()
+    for module, owner in sole.items():
+        targets = {sole[t] for t in facts.imports.get(module, ()) if t in sole and sole[t] != owner}
+        reached |= targets
+        if targets:
+            consumers.add(owner)
+    return [
+        Violation(
+            Rule.PACKAGE_NEVER_DEPENDED_ON, package.id,
+            f"package {package.id!r} depends on nothing and no other package declares or imports it; it may be dead weight",
+        )
+        for package in catalog.packages
+        if not package.depends_on and package.id not in reached and package.id not in consumers
     ]
 
 

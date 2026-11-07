@@ -721,6 +721,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `package-undeclared-dependency` | a module imports a module of another package that its own package does not list in `depends_on` |
 | `package-dependency-cycle` | packages list each other (directly or through others) in `depends_on`, so none can be split or released first; the same check `packages validate` makes |
 | `package-unused-dependency` | information only: a package lists a package in `depends_on` that none of its modules imports, which widens what it may import unnoticed (a plugin or runtime-loaded dependency can be real without a static import) |
+| `package-never-depended-on` | information only: a package that depends on nothing and that no other package lists in `depends_on` or imports from (a vendored package nothing uses). A package with its own `depends_on` is treated as an entrypoint and never flagged |
 | `package-owns-everything` | information only: one package owns every module (two or more), so the ownership and dependency checks have no boundary between packages to check (rings and imports are still enforced). Never fails, here or in `--require-modularity` |
 | `package-semantics-drift` | a part's manifest names a package the catalog lacks, or a semantic field or a path's role or metadata differs from the catalog |
 | `package-membership-drift` | a module of an included package is missing from its part, or a part holds a module the catalog gives elsewhere or nowhere |

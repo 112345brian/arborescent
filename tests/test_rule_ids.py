@@ -89,6 +89,7 @@ def test_rule_id_strings_never_change() -> None:
             "package-dependency-cycle",
             "package-unused-dependency",
             "package-owns-everything",
+            "package-never-depended-on",
             "tach-invisible-import",
             "package-semantics-drift",
             "package-membership-drift",
