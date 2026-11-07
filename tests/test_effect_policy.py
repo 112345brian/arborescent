@@ -396,3 +396,15 @@ def test_network_calls_are_an_effect_a_ring_can_forbid_but_urllib_parse_is_not(r
     parse_only = "import urllib.parse\ndef f(u):\n    return urllib.parse.quote(u)\n"
     write_files(repo, {"app/ports.py": parse_only})
     assert effects(run(repo, ring=ports)) == set()
+
+
+def test_a_ring_mismatched_internal_import_lists_the_whole_move_closure_and_keeps_its_baseline_key(repo: Path) -> None:
+    write_files(repo, {
+        "app/domain.py": "import json\nimport app.ports\n",
+        "app/ports.py": "import app.adapters\n",
+        "app/adapters.py": "import psutil\n",
+    })
+    [finding] = [f for f in run(repo) if f.rule == "internal-import" and f.target == "app.ports"]
+    assert "also move: ['app.adapters', 'app.ports']" in finding.render()
+    assert "allow externals: ['json', 'psutil']" in finding.render()
+    assert finding.key == f"internal-import|app.domain|{finding.detail}"  # the hint never reaches the baseline key

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import fnmatch
 from collections.abc import Collection, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import NamedTuple
 
 from .domain import (
@@ -498,7 +498,61 @@ def check_modules(
         out += _effect_uses(context, name, ring, info, known)
         out += _abstraction_violations(name, ring, rule, info)
     out += _effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
+    out = _with_move_closures(out, context, modules, known, tops)
     return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
+
+
+def _with_move_closures(
+    found: list[Violation], context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], tops: Collection[str],
+) -> list[Violation]:
+    """Ring-mismatch ``internal-import`` findings gain the whole closure of what a move would drag along (#133)."""
+    return [
+        replace(v, hint=hint) if v.rule == Rule.INTERNAL_IMPORT and v.target and (hint := _move_closure(context, modules, known, tops, v)) else v
+        for v in found
+    ]
+
+
+def _move_closure(context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], tops: Collection[str], violation: Violation) -> str:
+    name = violation.subject
+    ring, policy = context.resolve_ring(name), context.policy_for(name)
+    if ring is None or policy is None or " may import only " not in violation.detail:
+        return ""
+    move: list[str] = []
+    externals: set[str] = set()
+    seen, queue = {name}, [name]
+    while queue:
+        current = queue.pop()
+        for imp in modules[current].facts.imports if current in modules else ():
+            internal, external, _ = resolve_targets(current, modules[current].is_package, imp, known, tops)
+            externals.update(_restricted_externals(policy, ring, external))
+            for target in _outside_ring(context, modules, name, ring, internal):
+                if target not in seen:
+                    seen.add(target)
+                    move.append(target)
+                    queue.append(target)
+    return _closure_text(name, ring, move, externals)
+
+
+def _closure_text(name: str, ring: str, move: list[str], externals: set[str]) -> str:
+    if not move and not externals:
+        return ""
+    parts = [f"to make {name} live in {ring}, also move: {sorted(move) or 'nothing'}"]
+    if externals:
+        parts.append(f"and allow externals: {sorted(externals)}")
+    return " (" + "; ".join(parts) + ")"
+
+
+def _restricted_externals(policy: Policy, ring: str, tops: Collection[str]) -> list[str]:
+    allowed = policy.ring(ring).external
+    return [top for top in tops if ALL not in allowed and top not in allowed and policy.restricts_external(top, top in policy.stdlib)]
+
+
+def _outside_ring(context: RuleContext, modules: Mapping[str, ModuleInfo], name: str, ring: str, targets: Collection[str]) -> list[str]:
+    allowed = context.require_policy(name).allowed_rings(ring)
+    return [
+        t for t in targets
+        if t in modules and context.scope_name(t) == context.scope_name(name) and context.resolve_ring(t) not in allowed
+    ]
 
 
 _NON_PROPAGATING_EFFECTS = frozenset({"os-branching", "patch"})  # not a ring effect, or meaningless once removed from its own module

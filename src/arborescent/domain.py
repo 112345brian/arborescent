@@ -185,6 +185,7 @@ class Violation:
     detail: str
     line: int = 0
     target: str = field(default="", compare=False)  # the imported module, for import findings; not part of the key
+    hint: str = field(default="", compare=False)  # extra advice appended when rendered (#133); not part of the key
 
     @property
     def key(self) -> str:
@@ -193,7 +194,7 @@ class Violation:
     def render(self) -> str:
         where = f"{self.subject}:{self.line}" if self.line else self.subject
         hint = _RENDER_HINTS.get(self.rule, "")
-        return f"{where}: [{self.rule}] {self.detail}{hint}"
+        return f"{where}: [{self.rule}] {self.detail}{hint}{self.hint}"
 
 
 _RENDER_HINTS = {
