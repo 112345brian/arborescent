@@ -20,7 +20,7 @@ from .facts import ModuleInfo, resolve_targets
 from .rules import RuleContext, fits_ring
 from .taint import TaintResult
 
-__all__ = ["audit_classification"]
+__all__ = ["audit_classification", "suggest_ring"]
 
 _SHOWN = 3
 
@@ -117,6 +117,33 @@ def _program_and_library(subject: _Subject) -> Violation | None:
         f"{_taint_detail(subject.taint, subject.name)}"
     )
     return Violation(Rule.CLASSIFY_FACTS, subject.name, detail, guard)
+
+
+def _evidence(info: ModuleInfo, known: Collection[str], name: str) -> str:
+    tops = {m.split(".")[0] for m in known}
+    internal: set[str] = set()
+    external: set[str] = set()
+    for imp in info.facts.imports:
+        inner, outer, _ = resolve_targets(name, info.is_package, imp, known, tops)
+        internal.update(inner)
+        external.update(outer)
+    effects = sorted({f"{use.category} ({use.target}, line {use.line})" for use in info.facts.effect_uses if use.seam == 0})
+    return (
+        f"{len(internal)} project import(s), externals {sorted(external) or 'none'}, "
+        f"effects {', '.join(effects) if effects else 'none'}"
+    )
+
+
+def suggest_ring(context: RuleContext, name: str, info: ModuleInfo, known: Collection[str]) -> str:
+    """#132: the innermost ring whose rules this module already passes, with the facts behind it (``discover --suggest``)."""
+    policy = context.policy_for(name)
+    if policy is None:
+        return "no ring suggestion: the module has no owning architecture scope"
+    evidence = _evidence(info, known, name)
+    for ring in policy.rings:
+        if fits_ring(context, name, info, ring.name, known):
+            return f"tightest ring: {ring.name} ({evidence})"
+    return f"no ring passes every rule as written ({evidence})"
 
 
 def audit_classification(

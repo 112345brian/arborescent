@@ -15,6 +15,10 @@
   or imports (#130).
 - A ring-mismatched `internal-import` now ends with the whole closure a move would drag along (the project modules to
   move too, and the externals to allow), instead of one edge per run. The baseline key is unchanged (#133).
+- `arborescent discover --suggest` prints, per module with no ring, the innermost ring its imports and effects already
+  satisfy and the facts behind it (project imports, externals, effect calls). Rings looser than a module's facts need
+  are already reported by `classify-facts` (#132). Splitting a module that mixes pure functions and an effect wrapper is
+  not covered.
 
 ## 0.5.1 — 2026-11-06
 

@@ -18,6 +18,7 @@ from .adapters import (
 )
 from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
+from .classify_audit import suggest_ring
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
@@ -182,10 +183,11 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
     )
     b.add_argument("--reason", help="explain why new baseline keys are being recorded")
     b.add_argument("--prune", action="store_true", help="only remove stale entries; never adds, works while the tree has new violations")
-    sub.add_parser(
+    discover = sub.add_parser(
         "discover",
         help="list in-scope Python files that still need a ring classification",
     )
+    discover.add_argument("--suggest", action="store_true", help="per module, print the tightest ring its imports and effects permit, with the evidence")
     annotate = sub.add_parser(
         "annotate",
         help="migrate classify matches into explicit __arbor__ annotations (dry-run by default)",
@@ -310,7 +312,7 @@ def _dispatch(
         "generate": lambda: _generate(policy, root, svc),
         "install-tools": lambda: _install_tools(args, policy, root, svc),
         "baseline": lambda: _baseline(args, policy, root, svc),
-        "discover": lambda: _discover(policy, root, svc),
+        "discover": lambda: _discover(policy, root, svc, args.suggest),
         "annotate": lambda: _annotate(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),
     }
@@ -416,27 +418,44 @@ def _baseline(
     return 0
 
 
-def _discover(policy: Policy, root: Path, svc: Services) -> int:
+def _discover(policy: Policy, root: Path, svc: Services, suggest: bool = False) -> int:
     _, scan = run_own(policy, root, svc, practices=False)
     if policy.scopes:
-        return _discover_scoped(policy, scan)
+        return _discover_scoped(policy, scan, suggest)
     by_folder: dict[str, list[str]] = {}
     for _, path in scan.unclassified:
         folder = Path(path).parent.as_posix()
         by_folder.setdefault(folder, []).append(path)
     suggested = policy.rings[-1].name
-    if not by_folder:
+    if by_folder:
+        print("Unclassified Python files:")
+    else:
         print("discover: no unclassified Python files")
-        return 0
-    print("Unclassified Python files:")
     for folder, paths in sorted(by_folder.items()):
         print(f"{folder}/ ({len(paths)} file(s)); suggested ring: {suggested}")
         for path in sorted(paths):
             print(f"  {path}")
+    if suggest:
+        _print_ring_suggestions(policy, scan, dict(scan.unclassified))
     return 0
 
 
-def _discover_scoped(policy: Policy, scan: ScanResult) -> int:
+def _print_ring_suggestions(policy: Policy, scan: ScanResult, candidates: dict[str, str]) -> None:
+    context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
+    # modules inside `sources` that no classify rule or annotation reaches are only reported by `check`, not listed above
+    candidates = candidates | {
+        module: scan.paths[module] for module in scan.modules
+        if module in scan.paths and context.policy_for(module) is not None and context.resolve_ring(module) is None
+    }
+    if not candidates:
+        return
+    print("Ring suggestions (from imports and effects; a prompt to look, not a verdict):")
+    for module, path in sorted(candidates.items(), key=lambda item: item[1]):
+        info = scan.modules.get(module)
+        print(f"  {path}: {suggest_ring(context, module, info, scan.known) if info is not None else 'not parsed (outside the configured sources)'}")
+
+
+def _discover_scoped(policy: Policy, scan: ScanResult, suggest: bool = False) -> int:
     by_scope_folder: dict[tuple[str, str], list[str]] = {}
     candidates = dict(scan.unclassified)
     indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
@@ -465,6 +484,8 @@ def _discover_scoped(policy: Policy, scan: ScanResult) -> int:
         )
         for path in sorted(paths):
             print(f"  {path}")
+    if suggest:
+        _print_ring_suggestions(policy, scan, candidates)
     return 0
 
 

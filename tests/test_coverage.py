@@ -146,3 +146,23 @@ def test_module_missing_from_the_tach_layers_is_unclassified_not_silently_exempt
 
     assert {v.subject for v in found if v.rule == "unclassified"} >= {"app.routes.jobs_contract"}
     assert "app.routes.jobs" not in {v.subject for v in found if v.rule == "unclassified"}
+
+
+def test_discover_suggest_names_the_innermost_ring_a_module_with_no_io_fits(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    write_files(repo, {"scripts/pure.py": "VALUE = 1\n", "scripts/clock.py": "import time\n\ndef now():\n    return time.time()\n"})
+    runner = GitFiles(["app/__init__.py", "app/domain.py", "scripts/pure.py", "scripts/clock.py"])
+    config = repo / "arborescent.toml"
+    config.write_text(
+        'sources = ["app", "scripts"]\nrings = ["domain", "composition"]\n'
+        '[ring.domain]\nexternal = []\n[ring.composition]\nmay_import = ["*"]\nexternal = ["*"]\n'
+        '[classify]\n"app" = "domain"\n"app.*" = "domain"\n',
+        encoding="utf-8",
+    )
+    services = Services(FsScanner(runner=runner), runner, list(all_checkers().values()), LocalFileSystem(), SystemClock(), default_engines())
+
+    assert main(["--config", str(config), "discover", "--suggest"], services) == 0
+
+    out = capsys.readouterr().out
+    lines = {line.strip().split(":")[0]: line for line in out.splitlines() if "tightest ring" in line}
+    assert "tightest ring: domain" in lines["scripts/pure.py"] and "effects none" in lines["scripts/pure.py"]
+    assert "tightest ring: composition" in lines["scripts/clock.py"] and "clock (time.time" in lines["scripts/clock.py"]
