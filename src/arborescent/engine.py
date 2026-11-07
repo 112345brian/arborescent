@@ -32,6 +32,7 @@ from .ports import (
     FileSystem,
     ModuleScanner,
     PackageChecks,
+    Parallel,
     RootAwareEngine,
     ScanResult,
     ToolRunner,
@@ -59,6 +60,7 @@ class Services:
     clock: Clock
     engines: Sequence[Engine]  # run beside the chosen type checker (import-linter, tach); see arborescent.engines. No default: a forgotten list used to skip them silently
     packages: PackageChecks | None = None  # the package-annotation layer; needed only when the policy sets `package_catalog`
+    parallel: Parallel | None = None  # runs selftest's mutations across cores; None keeps them sequential
 
 
 @dataclass(frozen=True)

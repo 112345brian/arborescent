@@ -9,7 +9,13 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from . import baseline as ratchet_mod
-from .adapters import FsScanner, LocalFileSystem, SubprocessToolRunner, SystemClock
+from .adapters import (
+    FsScanner,
+    LocalFileSystem,
+    ProcessPoolParallel,
+    SubprocessToolRunner,
+    SystemClock,
+)
 from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .cli_install import _install_tools, _setup_install_command
@@ -56,6 +62,7 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
         SystemClock(),
         default_engines(output_dir),
         AnnotationPackageChecks(),
+        ProcessPoolParallel(),
     )
 
 

@@ -119,6 +119,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |
 | `arborescent.filesystem_adapter` | `single` | adapters |
+| `arborescent.parallel_adapter` | `single` | adapters |
 | `arborescent.scanner` | `single` | adapters |
 | `arborescent.tool_runner` | `single` | adapters |
 | `arborescent.engines` | `single` | adapters |

@@ -485,25 +485,63 @@ def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     checks = package_checks(policy, services)
     probes = None if checks is None else checks.probes(policy, root, services.fs, scan, services.scanner)
     mutations, skipped = plan(policy, scan, probes)
-    report = SelfTestReport([], [], skipped)
     fs = services.fs
     with fs.temporary_directory("arborescent-selftest-") as tmp:
         work = tmp / "copy"
         fs.copy_tree(root, work, ignore=_SKIP_COPY)
         baseline = {v.key for v in run_own(policy, work, services, practices=False)[0]}
-        for m in mutations:
-            target = work / m.file
-            original = fs.read_bytes(target) if fs.exists(target) and not m.new_file else None
+        if services.parallel is None:
+            killed, survived = _run_mutations_sequential(policy, work, services, baseline, mutations)
+        else:
+            jobs = [(policy, root, services, baseline, m) for m in mutations]
+            killed, survived = _collect(mutations, services.parallel.map(_mutate_and_check, jobs))
+    return SelfTestReport(killed, survived, skipped)
+
+
+def _collect(mutations: list[Mutation], killed_flags: list[bool]) -> tuple[list[str], list[str]]:
+    killed: list[str] = []
+    survived: list[str] = []
+    for m, was_killed in zip(mutations, killed_flags, strict=True):
+        (killed if was_killed else survived).append(f"[{m.rule}] {m.label}")
+    return killed, survived
+
+
+def _run_mutations_sequential(
+    policy: Policy, work: Path, services: Services, baseline: frozenset[str], mutations: list[Mutation],
+) -> tuple[list[str], list[str]]:
+    """One shared mutated copy, mutated and reverted in place: cheapest when there are few mutations to run."""
+    fs = services.fs
+    killed: list[str] = []
+    survived: list[str] = []
+    for m in mutations:
+        target = work / m.file
+        original = fs.read_bytes(target) if fs.exists(target) and not m.new_file else None
+        if m.new_file:
+            fs.write_text(target, "X = 1\n")
+        else:
+            fs.write_bytes(target, (original or b"") + b"\n" + m.append.encode() + b"\n")
+        try:
+            after = {v.key for v in run_own(policy, work, services, practices=False)[0] if v.rule == m.rule}
+        finally:
             if m.new_file:
-                fs.write_text(target, "X = 1\n")
+                fs.remove_file(target)
             else:
-                fs.write_bytes(target, (original or b"") + b"\n" + m.append.encode() + b"\n")
-            try:
-                after = {v.key for v in run_own(policy, work, services, practices=False)[0] if v.rule == m.rule}
-            finally:
-                if m.new_file:
-                    fs.remove_file(target)
-                else:
-                    fs.write_bytes(target, original or b"")
-            (report.killed if after - baseline else report.survived).append(f"[{m.rule}] {m.label}")
-    return report
+                fs.write_bytes(target, original or b"")
+        (killed if after - baseline else survived).append(f"[{m.rule}] {m.label}")
+    return killed, survived
+
+
+def _mutate_and_check(policy: Policy, root: Path, services: Services, baseline: frozenset[str], mutation: Mutation) -> bool:
+    """Runs in a worker process: copy ``root``, apply one mutation, check, and report whether it was killed."""
+    fs = services.fs
+    with fs.temporary_directory("arborescent-selftest-mutation-") as tmp:
+        work = tmp / "copy"
+        fs.copy_tree(root, work, ignore=_SKIP_COPY)
+        target = work / mutation.file
+        if mutation.new_file:
+            fs.write_text(target, "X = 1\n")
+        else:
+            original = fs.read_bytes(target) if fs.exists(target) else b""
+            fs.write_bytes(target, original + b"\n" + mutation.append.encode() + b"\n")
+        after = {v.key for v in run_own(policy, work, services, practices=False)[0] if v.rule == mutation.rule}
+    return bool(after - baseline)

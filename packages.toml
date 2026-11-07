@@ -105,6 +105,10 @@ path = "src/arborescent/mutation.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/parallel_adapter.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/path_exclusion.py"
 role = "source"
 

@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 from arborescent_helpers import CLASSIFY, mini_policy, ring_with, services, write_files
 
-from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.adapters import (
+    FsScanner,
+    LocalFileSystem,
+    ProcessPoolParallel,
+    SystemClock,
+)
 from arborescent.config import load_policy
 from arborescent.domain import Rule, Violation
 from arborescent.engine import Services, write_generated
@@ -208,7 +214,9 @@ def test_arborescent_probes_its_own_package_rules() -> None:
     ones it cannot are skipped with a reason, never silently; nothing may survive."""
     policy, root = load_policy(LocalFileSystem(), ROOT / "pyproject.toml")
     assert policy.package_catalog == "packages.toml"
-    report = selftest(policy, root, services())
+    # 54 mutations, each a cold, uncached full check of all 72 of this package's own files: the one selftest
+    # call big enough that running them across processes is worth it (see ProcessPoolParallel).
+    report = selftest(policy, root, replace(services(), parallel=ProcessPoolParallel()))
     assert report.survived == []
     for rule in (
         "package-release-policy-missing",

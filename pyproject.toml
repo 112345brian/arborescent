@@ -91,7 +91,7 @@ forbid = ["clock", "dynamic-import", "env", "identity", "patch", "process", "ran
 
 [tool.arborescent.ring.adapters]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "contextlib", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "libcst", "arborescent"]
+external = ["@pure", "pathlib", "contextlib", "concurrent", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "libcst", "arborescent"]
 os_branching = true
 forbid = ["clock", "dynamic-import", "env", "identity", "patch", "randomness", "sleep", "threads"]
 
@@ -159,6 +159,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
 "arborescent.filesystem_adapter" = "adapters"
+"arborescent.parallel_adapter" = "adapters"
 "arborescent.scanner" = "adapters"
 "arborescent.tool_runner" = "adapters"
 "arborescent.typecheckers" = "adapters"

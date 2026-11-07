@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeVar, runtime_checkable
 
 from .domain import (
     Allowance,
@@ -19,9 +19,23 @@ from .domain import (
 from .facts import ModuleInfo
 
 __all__ = [
-    "Clock", "ContractRenderer", "Engine", "FileSystem", "ModuleScanner", "PackageBoundaries", "PackageChecks", "PackageProbes", "RootAwareEngine",
-    "ScanResult", "ToolRunner", "TypeChecker", "ViolationEngine",
+    "Clock",
+    "ContractRenderer",
+    "Engine",
+    "FileSystem",
+    "ModuleScanner",
+    "PackageBoundaries",
+    "PackageChecks",
+    "PackageProbes",
+    "Parallel",
+    "RootAwareEngine",
+    "ScanResult",
+    "ToolRunner",
+    "TypeChecker",
+    "ViolationEngine",
 ]
+
+R = TypeVar("R")
 
 
 class ToolRunner(Protocol):
@@ -79,6 +93,12 @@ class FileSystem(Protocol):
     def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = ()) -> None: ...  # ``ignore``: name globs to skip
 
     def temporary_directory(self, prefix: str, parent: Path | None = None) -> AbstractContextManager[Path]: ...  # removed with its contents on exit
+
+
+class Parallel(Protocol):
+    """Runs independent, side-effect-free jobs, in process isolation when that is worth it; order is preserved."""
+
+    def map(self, fn: Callable[..., R], jobs: Sequence[tuple[object, ...]]) -> list[R]: ...  # fn(*args) for each args in jobs
 
 
 class Engine(Protocol):
