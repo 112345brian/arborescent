@@ -2,9 +2,14 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
-## Unreleased
+## 0.5.0 — 2026-11-06
 
 ### Fixed
+- `_dev_tool_findings` checked `dev_tools_forbid` effects against the root policy instead of the tool module's own scope,
+  so a scope-level `effect_defaults` override was silently ignored there; `selftest`'s scope-effect-leak mutation probe
+  had the same bug the other way around, checking the importing scope's `effect_defaults` instead of the scope that
+  owns the leaking module. `check --list-dev-tools` also returned before validating a core-mode flag conflict, instead
+  of after.
 - `from pkg import submodule` is now an import of `pkg.submodule` only, not also of the package's `__init__`; the package edge
   remains when any imported name is not a submodule (or is `*`). Both spellings of one import now agree (#109).
   This includes the relative `from . import sibling, Hints`, which now also depends on the package (it reads `Hints` off its
@@ -45,6 +50,16 @@
   forbids, naming the import chain. Clock reads through `time.gmtime`, `time.localtime` and `time.strftime` are now
   also detected. Propagation is module-granularity (a mixed helper taints every importer) and stops at calls on an
   object of unknown type; see docs/configuration.md for the documented limits.
+- Function-level call-graph taint (#98), the sharper complement to `effect-via-import`'s module granularity: a
+  whole-repository pass resolves, for every function and method, the names it calls (`self.method()`, a same-function
+  `x = C(); x.method()` constructor pattern, import aliases, and names re-exported through a package's `__init__.py`),
+  then marks a function tainted when it calls an I/O primitive directly or calls another tainted function, iterated to
+  a fixed point. The seed list is `taint_seeds` (default: every `effect-*` category except `patch` and `global`, plus a
+  `network` primitive list `effect-*` does not cover: `urllib.request`, `http.client`, `http.server`, `socket`). Feeds
+  `classify-facts`' "could sit in an inner ring" and "program and library" notes with the specific tainted function
+  instead of just the module; informational only, never baselined, skipped under `--changed`. Documented limits (no
+  type inference, no `getattr`/decorators/callbacks, no inheritance, module-level only, same-function-only constructor
+  tracking, no lazy imports) are in docs/configuration.md.
 - `git_hook = true` / `git_hook = false` in `[tool.arborescent]` chooses the `pre-push` hook independently of the preset:
   `true` makes `generate` and `check` install it under any preset, `false` makes them remove an Arborescent-managed one
   (a hook Arborescent did not write is still never touched, in either direction). Previously only the `strict` preset
