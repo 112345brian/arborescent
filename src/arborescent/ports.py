@@ -219,3 +219,6 @@ class ModuleScanner(Protocol):
     def scan(self, policy: Policy, root: Path, only: frozenset[str] | None = None) -> ScanResult: ...
 
     def uncached(self) -> ModuleScanner: ...  # same scanner without persistent state (mutation tests)
+
+    @property
+    def cache_dir(self) -> Path | None: ...  # where this scanner's own cache lives; other whole-repo passes keep a sibling file here

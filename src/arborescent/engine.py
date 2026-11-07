@@ -170,9 +170,9 @@ def run_own(
 
 
 def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult) -> TaintResult:
-    """#98: re-reads each scanned module's source (not cached: see ``taint``'s own module docstring) and runs the
-    whole-repository call-graph pass. A module whose file cannot be read contributes no facts, same as one the
-    taint pass itself failed to parse."""
+    """#98: re-reads each scanned module's source and runs the whole-repository call-graph pass, reusing the
+    scanner's cache directory (a sibling ``taint.json``) so an unchanged file skips re-parsing. A module whose
+    file cannot be read contributes no facts, same as one the taint pass itself failed to parse."""
     sources: dict[str, str] = {}
     for name, path in scan.paths.items():
         if name not in scan.modules:
@@ -181,7 +181,9 @@ def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult)
             sources[name] = services.fs.read_text(root / path)
         except OSError:
             continue
-    return compute_taint(scan.modules, sources, scan.known, policy.taint_seeds)
+    cache_dir = services.scanner.cache_dir
+    cache_file = cache_dir / "taint.json" if cache_dir else None
+    return compute_taint(scan.modules, sources, scan.known, policy.taint_seeds, cache_file)
 
 
 def _dev_tool_counts(policy: Policy, scan: ScanResult) -> dict[str, int]:

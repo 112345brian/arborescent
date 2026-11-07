@@ -8,9 +8,10 @@ call a function (in this file or another) that does, through an actual, resolvab
 Two stages, kept separate on purpose (see the module docstring on why ``classify_audit`` keeps its own
 whole-repository pass distinct from the per-file scan):
 
-1. :func:`_extract_file` — per file, cacheable by content hash like ``SourceFacts`` (not yet wired to the
-   scanner's cache; it depends only on ``(module, is_package, text, known)``, so adding that cache later is a
-   mechanical follow-up, not a redesign).
+1. :func:`_extract_file` — per file, cached by content hash in its own file (``taint.json``, alongside the
+   scanner's ``scan.json``, same cache directory) rather than the scanner's cache: it depends only on
+   ``(module, is_package, text, known)`` plus the active seed list, not on anything ring- or policy-shaped, so
+   sharing a cache file with ``SourceFacts`` would mean invalidating on changes that do not affect this pass.
 2. :func:`compute_taint` — whole repository: builds the call graph across files and iterates it to a fixed
    point. This is the "own cache, not per-file" pass the issue asks for; nothing here is baselined, and it is
    skipped under ``--changed`` by the caller, the same way ``classify_audit.audit_classification`` is.
@@ -40,13 +41,19 @@ What is and is not followed, by design (see "Non-goals" in #98):
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from .facts import ModuleInfo, effect_category_of
 from .presets import DEFAULT_TAINT_SEEDS
 
 __all__ = ["DEFAULT_TAINT_SEEDS", "TaintResult", "TaintedFunction", "compute_taint"]
+
+_CACHE_VERSION = 1
 
 # Real I/O, but not a stdlib-wide `effect_category_of` match: only these specific submodules/functions count.
 # `urllib.parse`, `http.HTTPStatus` and the rest of `urllib`/`http` are not network I/O (see the module docstring
@@ -310,6 +317,72 @@ def _extract_file(module: str, is_package: bool, text: str, known: Collection[st
     return _FileFacts(module, funcs, classes, symbol_aliases, module_aliases)
 
 
+def _func_info_to_json(fi: _FuncInfo) -> list[Any]:
+    return [fi.line, [[category, target] for category, target in fi.direct_hits], [[c.module, c.name, c.cls] for c in fi.candidates]]
+
+
+def _func_info_from_json(raw: list[Any]) -> _FuncInfo:
+    hits = tuple((category, target) for category, target in raw[1])
+    candidates = tuple(_CallCandidate(c[0], c[1], c[2]) for c in raw[2])
+    return _FuncInfo(raw[0], hits, candidates)
+
+
+def _file_facts_to_json(ff: _FileFacts) -> list[Any]:
+    return [
+        ff.module,
+        {name: _func_info_to_json(fi) for name, fi in ff.funcs.items()},
+        {cls: {name: _func_info_to_json(fi) for name, fi in methods.items()} for cls, methods in ff.classes.items()},
+        {name: [origin[0], origin[1]] for name, origin in ff.symbol_aliases.items()},
+        dict(ff.module_aliases),
+    ]
+
+
+def _file_facts_from_json(raw: list[Any]) -> _FileFacts:
+    funcs = {name: _func_info_from_json(fi) for name, fi in raw[1].items()}
+    classes = {cls: {name: _func_info_from_json(fi) for name, fi in methods.items()} for cls, methods in raw[2].items()}
+    symbol_aliases = {name: (origin[0], origin[1]) for name, origin in raw[3].items()}
+    return _FileFacts(raw[0], funcs, classes, symbol_aliases, dict(raw[4]))
+
+
+def _load_file_cache(cache_file: Path | None, seeds_key: str) -> dict[str, list[Any]]:
+    """Content-hash cache of per-file facts, keyed by module; wholesale-invalidated if the seed list changed."""
+    if not (cache_file and cache_file.is_file()):
+        return {}
+    try:
+        loaded = json.loads(cache_file.read_text(encoding="utf-8"))
+        if loaded.get("v") != _CACHE_VERSION or loaded.get("seeds") != seeds_key:
+            return {}
+        return loaded["files"]
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+def _store_file_cache(cache_file: Path | None, seeds_key: str, fresh: dict[str, list[Any]]) -> None:
+    if cache_file:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "seeds": seeds_key, "files": fresh}), encoding="utf-8")
+
+
+def _extract_files_cached(
+    modules: Mapping[str, ModuleInfo], sources: Mapping[str, str], known: Collection[str],
+    seeds: frozenset[str], cache: Mapping[str, list[Any]],
+) -> tuple[dict[str, _FileFacts], dict[str, list[Any]]]:
+    """Reuse a module's cached facts when its text digest still matches; re-extract (and re-cache) otherwise."""
+    files: dict[str, _FileFacts] = {}
+    fresh: dict[str, list[Any]] = {}
+    for name, info in modules.items():
+        text = sources.get(name)
+        if text is None:
+            continue
+        digest = hashlib.blake2b(text.encode("utf-8"), digest_size=16).hexdigest()
+        hit = cache.get(name)
+        ff = _file_facts_from_json(hit[1]) if hit is not None and hit[0] == digest else _extract_file(name, info.is_package, text, known, seeds)
+        if ff is not None:
+            files[name] = ff
+            fresh[name] = [digest, _file_facts_to_json(ff)]
+    return files, fresh
+
+
 @dataclass(frozen=True)
 class _ModuleIndex:
     funcs: Mapping[str, str]  # name -> func id
@@ -433,17 +506,19 @@ def _line_of(files: Mapping[str, _FileFacts], module: str, qualname: str) -> int
 
 def compute_taint(
     modules: Mapping[str, ModuleInfo], sources: Mapping[str, str], known: Collection[str], seeds: Collection[str] = DEFAULT_TAINT_SEEDS,
+    cache_file: Path | None = None,
 ) -> TaintResult:
     """Whole-repository pass: which functions call an I/O primitive directly, or call (through a resolvable
     expression) a function that does, iterated to a fixed point. ``sources`` is the file text for every module
     in ``modules`` this pass can read; a module missing from it, or one that fails to parse, contributes no
-    facts and no edges (it is simply not in the call graph), never an error.
+    facts and no edges (it is simply not in the call graph), never an error. ``cache_file``, when given, skips
+    re-parsing and re-walking a module's AST when its text has not changed since the last run.
     """
     seed_set = frozenset(seeds)
-    files = {
-        name: ff for name, info in modules.items()
-        if name in sources and (ff := _extract_file(name, info.is_package, sources[name], known, seed_set)) is not None
-    }
+    seeds_key = ",".join(sorted(seed_set))
+    cache = _load_file_cache(cache_file, seeds_key)
+    files, fresh = _extract_files_cached(modules, sources, known, seed_set, cache)
+    _store_file_cache(cache_file, seeds_key, fresh)
     index = _build_index(files)
     graph, direct = _build_graph(files, index)
     tainted = _propagate(graph, direct)

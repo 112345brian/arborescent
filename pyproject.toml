@@ -75,7 +75,7 @@ type_checkers = ["ty", "pyright"]
 pure = ["__future__", "collections", "dataclasses", "enum", "fnmatch", "re", "typing", "ast", "sys", "tomllib", "io", "tokenize", "posixpath", "json"]
 
 [tool.arborescent.ring.domain]
-external = ["@pure", "pathlib", "arborescent"]
+external = ["@pure", "pathlib", "hashlib", "arborescent"]
 
 [tool.arborescent.ring.ports]
 may_import = ["domain"]

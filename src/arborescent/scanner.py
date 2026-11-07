@@ -302,6 +302,11 @@ class FsScanner:
         self._cache_dir = cache_dir
         self._runner = runner or SubprocessToolRunner()
 
+    @property
+    def cache_dir(self) -> Path | None:
+        """Where this scanner's own cache lives, or None when caching is off; other passes keep a sibling file here."""
+        return self._cache_dir
+
     def uncached(self) -> FsScanner:
         return FsScanner(None, self._runner)
 
