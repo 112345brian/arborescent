@@ -2,7 +2,7 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
-## Unreleased
+## 0.6.0 — 2026-11-07
 
 ### Added
 - `arborescent baseline --prune` removes stale baseline entries without recording anything new, so it works while the
