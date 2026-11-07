@@ -563,7 +563,10 @@ def _effect_reachable(
         visiting.add(name)
         info = modules.get(name)
         local_policy = context.policy_for(name)
-        result = dict.fromkeys(_direct_propagating_effects(local_policy, info), (name,)) if local_policy is not None and info is not None else {}
+        result: dict[str, tuple[str, ...]] = (
+            dict.fromkeys(_direct_propagating_effects(local_policy, info), (name,))
+            if local_policy is not None and info is not None else {}
+        )
         for target in sorted(effect_graph.get(name, ())):
             for category, chain in compute(target).items():
                 if category not in result:
