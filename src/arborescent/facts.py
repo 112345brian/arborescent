@@ -13,7 +13,10 @@ import tomllib
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
-__all__ = ["DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef", "extract", "resolve_runtime_targets", "resolve_targets"]
+__all__ = [
+    "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef",
+    "effect_category_of", "extract", "resolve_runtime_targets", "resolve_targets",
+]
 
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
 _ABSTRACT_BASE_NAMES = frozenset({"ABC", "abc.ABC", "Protocol", "typing.Protocol", "typing_extensions.Protocol"})
@@ -199,6 +202,15 @@ def _basic_category(target: str) -> str | None:
 
 def _effect_category(target: str) -> str | None:
     return _basic_category(target) or _storage_category(target) or _concurrency_category(target) or _import_category(target)
+
+
+def effect_category_of(target: str) -> str | None:
+    """Public form of :func:`_effect_category`: the effect category a canonical dotted call target belongs to, if any.
+
+    Used by ``taint`` (#98) to seed its I/O-primitive list from the same table ``effect-*`` and ``effect-via-import``
+    (#103) already use, so a call to ``print`` or ``open`` is recognised consistently everywhere.
+    """
+    return _effect_category(target)
 
 
 def _concurrency_category(target: str) -> str | None:

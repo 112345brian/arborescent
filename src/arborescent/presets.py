@@ -8,7 +8,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
-__all__ = ["DEFAULT_PRESET", "EFFECT_CATEGORIES", "PRESETS", "Preset", "Scope"]
+__all__ = ["DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "PRESETS", "TAINT_SEED_CATEGORIES", "Preset", "Scope"]
 
 EFFECT_CATEGORIES: frozenset[str] = frozenset(
     {
@@ -16,6 +16,13 @@ EFFECT_CATEGORIES: frozenset[str] = frozenset(
         "console", "global",
     }
 )
+
+# #98 (function-level taint): which effect categories count as an I/O primitive a function can be seeded with.
+# ``patch`` (test-only) and ``global`` (module-state mutation, not I/O) are excluded; ``network`` is not an
+# ``effect-*`` category (facts.py has no stdlib-wide match for it, see taint.py's own targeted list) but is an
+# I/O primitive, so it is added here instead.
+TAINT_SEED_CATEGORIES: frozenset[str] = (EFFECT_CATEGORIES - {"patch", "global"}) | {"network"}
+DEFAULT_TAINT_SEEDS: tuple[str, ...] = tuple(sorted(TAINT_SEED_CATEGORIES))
 
 # Which imports outside the project need an entry in the importing ring's ``external`` allow-list.
 #   "all"          every one, stdlib included

@@ -127,6 +127,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.driver_libcst_scan` | `single` | adapters |
 | `arborescent.tach_visibility` | `single` | domain |
 | `arborescent.classify_audit` | `single` | domain |
+| `arborescent.taint` | `single` | domain |
 | `arborescent.testing` | `single` | adapters |
 | `arborescent.typecheckers` | `single` | adapters |
 | `arborescent.__main__` | `single` | composition |

@@ -43,6 +43,7 @@ settings. The two forms cannot be mixed.
 | `dev_tools_forbid` | `["process"]` | Effect categories (`clock`, `env`, `process`, `filesystem`, …) that `dev_tools` modules may not use. The default reports raw `subprocess` use in tooling; `[]` allows everything. Reported as the matching `effect-*` rule. |
 | `dev_tools_may_import` | `[]` | Dotted-module globs of product modules that `dev_tools` modules may import. Empty means any; otherwise an import of another product module is `dev-tool-product-import`. |
 | `effect_defaults` | `"injection"` | How a bare parameter default that names an effect (`now=datetime.now`) counts. `"injection"`: never a use. `"typed"`: not a use only when the parameter is annotated `Callable` or `Mapping` (alone, in `Optional`/`Union`/`\|`, or as a string), so `x: int = datetime.now` still counts. `"count"`: always a use. Calls, aliases and lambda-wrapped defaults always count; applies to `clock`, `env`, `identity`, `randomness`, `sleep`, `threads` and `process`. Settable per scope. |
+| `taint_seeds` | every `effect-*` category except `patch` and `global`, plus `network` | Which I/O primitives the function-level taint pass (#98, below `classify-facts`) seeds a function as reaching. `[]` turns the pass into a no-op. Root-level (shared by all scopes). |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
@@ -738,10 +739,44 @@ check `secrets-guard` makes).
 increases need `baseline --allow-growth --reason` (or one-time family adoption), while removals can shrink the baseline.
 
 `effect-via-import` propagates at module granularity: a module that mixes a forbidden effect with other code taints
-every importer, even one that only uses the clean part, until a function-level call-graph check exists. It also stops
-at calls on an object of unknown type (it cannot tell what `helper.do_it()` does when `helper`'s type is not known
-statically) and does not cross scope boundaries (that is `scope-effect-leak`, one hop, checked separately) or an
-`if TYPE_CHECKING` import (nothing runs there to inherit from).
+every importer, even one that only uses the clean part. It also stops at calls on an object of unknown type (it
+cannot tell what `helper.do_it()` does when `helper`'s type is not known statically) and does not cross scope
+boundaries (that is `scope-effect-leak`, one hop, checked separately) or an `if TYPE_CHECKING` import (nothing runs
+there to inherit from). The function-level taint pass below (#98) is the sharper, same-granularity complement: it
+names which function actually calls the effectful code, instead of flagging every importer of the module that holds it.
+
+### Function-level taint: which functions actually reach I/O
+
+A whole-repository pass, informational only (feeds `classify-facts` below; never fails `check`, never baselined, and
+skipped under `--changed` since it compares a module's functions with the ones its calls resolve to). For every
+module-level function and method, it resolves the names the function calls — including `self.method()`, a
+same-function `x = C(); x.method()` constructor pattern, an import alias, and a name re-exported through a
+package's `__init__.py` — and marks a function tainted when it calls an I/O primitive directly or calls a function
+that is itself tainted, iterated to a fixed point. The seed list is `taint_seeds` (default: every `effect-*`
+category except `patch` (test-only) and `global` (state mutation, not I/O), plus `network` — `urllib.request`,
+`http.client`, `http.server` and `socket`, which `effect-*` does not cover since they are specific submodules, not
+a whole stdlib package match).
+
+What it does not see, by design:
+
+- **No type inference.** A call through an object of unknown static type (`self._fs.exists()`, a parameter, a
+  return value) is not followed — the same limit `effect-via-import` documents for `helper.do_it()`. `Path(...).read_text()`
+  and similar are real I/O but a method call on a call's *result*, not an import alias; recognising them needs a
+  type this pass does not have, so they are a known false negative.
+- **No `getattr`, decorators, or callbacks.** A function only ever passed as a value and invoked through another
+  name is not tainted by that alone (a non-goal, not an oversight: proving purity is out of scope).
+- **No inheritance.** `self.method()` resolves only to a method defined directly on the enclosing class, never one
+  inherited from a base class.
+- **Module-level only.** A nested `def` inside a function, or a class defined inside a function, is invisible to
+  this pass, and so is anything it calls.
+- **Constructor tracking is a same-function approximation.** It follows a plain `name = Call(...)` left to right
+  until `name` is rebound; it does not follow the variable across branches, loop bodies, or into another function.
+- **Lazy imports are not read.** Only module-level `import`/`from ... import` lines bind a name this pass follows;
+  a function-local import is invisible to it (as it is to `_aliases`-based effect detection generally).
+
+The result names the tainted functions on the `classify-facts` notes it already produces: "could sit in an inner
+ring" and "program and library" each append `; reaches I/O through a call from ...` when the pass found one, so the
+note names the function to look at instead of leaving the module-level claim unqualified.
 
 ### Checking `classify` against a module's facts
 
@@ -754,9 +789,9 @@ signal compares a module with its importers and peers. Three signals:
 
 | signal | stated precisely | limits |
 |---|---|---|
-| could sit in an inner ring | the module defines at least one top-level class or function, has no `__main__` guard, defines no abstract class or stub function, is not an `entry_scripts` module, and passes every per-module rule of a more inner ring (internal imports, external packages, OS branching, effects, `require_abstract`). The note names the innermost such ring. | The scanner does not see `open()`, `print()`, `input()`, calls through objects that do I/O, or what a function does with its arguments, so "passes the rules" is weaker than "is pure". If your rings share one external allow-list, nearly everything fits the inner ring and the note carries no information. A ring can be right for its role (an adapter that only drives a port) even though its facts fit an inner one. |
+| could sit in an inner ring | the module defines at least one top-level class or function, has no `__main__` guard, defines no abstract class or stub function, is not an `entry_scripts` module, and passes every per-module rule of a more inner ring (internal imports, external packages, OS branching, effects, `require_abstract`). The note names the innermost such ring, and the function-level taint pass below appends which of the module's own functions it found reaching I/O, if any. | The scanner does not see `open()`, `print()`, `input()`, calls through objects that do I/O, or what a function does with its arguments, so "passes the rules" is weaker than "is pure" (the taint pass narrows this, it does not close it — see its own limits below). If your rings share one external allow-list, nearly everything fits the inner ring and the note carries no information. A ring can be right for its role (an adapter that only drives a port) even though its facts fit an inner one. |
 | composition-shaped | the module is not in the outermost ring, and the outermost ring may import every ring (`may_import = ["*"]`); the module defines functions and no class, no other module imports it, and it imports two or more distinct modules of its own ring plus at least one module of an inner ring. | It shows the shape of an entrypoint that wires adapters to a use case, not that it constructs or calls anything. Nothing is said about what the wiring does. A leaf script that is meant to be an adapter will match. |
-| program and library | the module has a top-level `if __name__ == "__main__":` and at least one other module imports it, and it is not in the outermost ring when that ring may import every ring (where programs belong). | It cannot tell which functions are pure and which read a database, so it reports the mix, not the part that should move. A `__main__` guard that only calls `main()` still counts. |
+| program and library | the module has a top-level `if __name__ == "__main__":` and at least one other module imports it, and it is not in the outermost ring when that ring may import every ring (where programs belong). The function-level taint pass below appends which of the module's own functions reach I/O, if any. | It cannot tell which functions are pure and which read a database beyond what the taint pass resolves, so it reports the mix, not every part that should move. A `__main__` guard that only calls `main()` still counts. |
 
 None of these is a verdict. Each is a prompt to open the file and decide.
 

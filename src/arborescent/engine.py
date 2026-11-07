@@ -42,6 +42,7 @@ from .practices import run_practices
 from .rules import RuleContext, check_modules
 from .suggestions import Suggestion, file_size_suggestions
 from .tach_visibility import invisible_import_violations
+from .taint import TaintResult, compute_taint
 
 if TYPE_CHECKING:
     from .facts import ModuleInfo
@@ -156,7 +157,7 @@ def run_own(
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
     found += _inventory_violations(scan.modules)
     if only is None:  # the signals compare a module with its importers and peers: a whole-repository fact
-        found += audit_classification(indexes, scan.modules, scan.known)
+        found += audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
     if "tach" not in policy.disabled_tools:
         found += invisible_import_violations(scan.modules.values())
     if practices and only is None:
@@ -166,6 +167,21 @@ def run_own(
         if checks is not None:
             found += checks.gap_violations(policy, root, services.fs, scan, services.scanner)
     return found, scan
+
+
+def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult) -> TaintResult:
+    """#98: re-reads each scanned module's source (not cached: see ``taint``'s own module docstring) and runs the
+    whole-repository call-graph pass. A module whose file cannot be read contributes no facts, same as one the
+    taint pass itself failed to parse."""
+    sources: dict[str, str] = {}
+    for name, path in scan.paths.items():
+        if name not in scan.modules:
+            continue
+        try:
+            sources[name] = services.fs.read_text(root / path)
+        except OSError:
+            continue
+    return compute_taint(scan.modules, sources, scan.known, policy.taint_seeds)
 
 
 def _dev_tool_counts(policy: Policy, scan: ScanResult) -> dict[str, int]:

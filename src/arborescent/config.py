@@ -18,7 +18,15 @@ from .domain import (
     RingRule,
 )
 from .ports import FileSystem
-from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Preset
+from .presets import (
+    DEFAULT_PRESET,
+    DEFAULT_TAINT_SEEDS,
+    EFFECT_CATEGORIES,
+    IO_MODULES,
+    PRESETS,
+    TAINT_SEED_CATEGORIES,
+    Preset,
+)
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")  # mirrors the scanner: only identifier-like strings are recorded
 
@@ -254,7 +262,18 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         children=_child_arbors(raw),
         preset=_preset_overrides(PRESETS[preset_name], raw),
         io_modules=frozenset(io_modules),
+        taint_seeds=_taint_seeds(raw),
     )
+
+
+def _taint_seeds(raw: Mapping[str, Any]) -> tuple[str, ...]:
+    if "taint_seeds" not in raw:
+        return DEFAULT_TAINT_SEEDS
+    categories = _string_list(raw, "taint_seeds")
+    unknown = set(categories) - TAINT_SEED_CATEGORIES
+    if unknown:
+        raise PolicyError(f"unknown effect category in `taint_seeds`: {sorted(unknown)}")
+    return categories
 
 
 _SCOPED_ROOT_GLOBALS = frozenset({
@@ -262,7 +281,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
-    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import",
+    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",

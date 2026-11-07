@@ -141,6 +141,10 @@ path = "src/arborescent/classify_audit.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/taint.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/stdlib.py"
 role = "source"
 

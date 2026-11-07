@@ -10,7 +10,14 @@ from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
-from .presets import DEFAULT_PRESET, EFFECT_CATEGORIES, IO_MODULES, PRESETS, Preset
+from .presets import (
+    DEFAULT_PRESET,
+    DEFAULT_TAINT_SEEDS,
+    EFFECT_CATEGORIES,
+    IO_MODULES,
+    PRESETS,
+    Preset,
+)
 from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 
 __all__ = [
@@ -303,6 +310,7 @@ class Policy:
     package_parts: tuple[str, ...] = ()  # opt-in: extracted part trees (inside the repository) checked against the catalog
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
     modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
+    taint_seeds: tuple[str, ...] = DEFAULT_TAINT_SEEDS  # #98: effect categories (plus "network") a function-level call can be seeded with
 
     def __post_init__(self) -> None:
         _validate_package_catalog(self.package_catalog)

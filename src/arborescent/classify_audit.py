@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from .domain import ALL, Policy, Rule, Violation
 from .facts import ModuleInfo, resolve_targets
 from .rules import RuleContext, fits_ring
+from .taint import TaintResult
 
 __all__ = ["audit_classification"]
 
@@ -28,6 +29,12 @@ def _names(modules: Collection[str]) -> str:
     ordered = sorted(modules)
     more = f" and {len(ordered) - _SHOWN} more" if len(ordered) > _SHOWN else ""
     return ", ".join(ordered[:_SHOWN]) + more
+
+
+def _taint_detail(taint: TaintResult, name: str) -> str:
+    """#98: which of ``name``'s own functions a call-graph taint pass found reaching an I/O primitive, if any."""
+    reaching = taint.by_module.get(name, ())
+    return "" if not reaching else f"; reaches I/O through a call from {_names(reaching)}"
 
 
 def _internal_targets(context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str]) -> dict[str, set[str]]:
@@ -54,6 +61,7 @@ class _Subject:
     ring: str
     targets: Mapping[str, set[str]]  # module -> first-party modules it imports
     importers: Mapping[str, set[str]]  # module -> first-party modules that import it
+    taint: TaintResult
 
     @property
     def outermost_may_import_all(self) -> bool:
@@ -70,7 +78,8 @@ def _inner_ring(subject: _Subject, known: Collection[str]) -> Violation | None:
     for candidate in names[: names.index(subject.ring)]:
         if fits_ring(subject.context, subject.name, subject.info, candidate, known):
             detail = (
-                f"[{subject.ring}] could sit in ring {candidate!r}: its imports, external packages and effects all pass that ring's rules"
+                f"[{subject.ring}] could sit in ring {candidate!r}: its imports, external packages and effects all pass that ring's "
+                f"rules{_taint_detail(subject.taint, subject.name)}"
             )
             return Violation(Rule.CLASSIFY_FACTS, subject.name, detail)
     return None
@@ -105,11 +114,14 @@ def _program_and_library(subject: _Subject) -> Violation | None:
     detail = (
         f"[{subject.ring}] runs as a program (`if __name__ == \"__main__\"`, line {guard}) and is imported by "
         f"{len(importers)} module(s) ({_names(importers)}): its command-line code and its importable code share one ring"
+        f"{_taint_detail(subject.taint, subject.name)}"
     )
     return Violation(Rule.CLASSIFY_FACTS, subject.name, detail, guard)
 
 
-def audit_classification(context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str]) -> list[Violation]:
+def audit_classification(
+    context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], taint: TaintResult | None = None,
+) -> list[Violation]:
     targets = _internal_targets(context, modules, known)
     importers: dict[str, set[str]] = {name: set() for name in modules}
     for source, found in targets.items():
@@ -121,7 +133,7 @@ def audit_classification(context: RuleContext, modules: Mapping[str, ModuleInfo]
         ring = context.resolve_ring(name)
         if policy is None or ring is None:
             continue
-        subject = _Subject(context, policy, name, info, ring, targets, importers)
+        subject = _Subject(context, policy, name, info, ring, targets, importers, taint or TaintResult())
         found = (_inner_ring(subject, known), _composition_shaped(subject), _program_and_library(subject))
         out += [v for v in found if v is not None]
     return out
