@@ -9,6 +9,7 @@ from arborescent_helpers import mini_policy, write_files
 from test_coverage import GitFiles, make_services
 
 from arborescent.adapters import FsScanner
+from arborescent.config import policy_from_mapping
 from arborescent.domain import PolicyError
 from arborescent.engine import run_own
 from arborescent.facts import extract
@@ -183,3 +184,38 @@ def test_dev_tools_may_import_limits_which_product_modules_tooling_reaches(repo:
 
     assert [r for r in found if r[0] == "dev-tool-product-import"] == [("dev-tool-product-import", "devtools.scan", 2)]
     assert not [r for r in rows(repo, dev_tools=["devtools"]) if r[0] == "dev-tool-product-import"]
+
+
+def test_dev_tools_forbid_uses_the_tool_modules_own_scope_effect_defaults(tmp_path: Path) -> None:
+    """A dev tool's `dev_tools_forbid` check must read the scope that owns it, not whichever scope happens to be
+    first in the (scoped) root policy: `beta` is first here and stays "injection", so if the check read the root
+    policy instead of `alpha`'s own "count", the seam below would never count as a use."""
+    write_files(tmp_path, {
+        "libs/beta/src/beta/api.py": "VALUE = 1\n",
+        "libs/alpha/src/alpha/core.py": "VALUE = 1\n",
+        "libs/alpha/src/devtools/scan.py": (
+            "import time\nfrom typing import Callable\n"
+            "def now(clock: Callable[[], float] = time.time) -> float:\n    return clock()\n"
+        ),
+    })
+    raw = {
+        "dev_tools": ["libs/alpha/src/devtools"],
+        "dev_tools_forbid": ["clock"],
+        "scopes": {
+            "beta": {
+                "sources": ["libs/beta/src/beta"], "source_roots": ["libs/beta/src"],
+                "rings": ["domain"], "classify": {"beta.api": "domain"},
+            },
+            "alpha": {
+                "sources": ["libs/alpha/src/alpha", "libs/alpha/src/devtools"], "source_roots": ["libs/alpha/src"],
+                "rings": ["domain"], "classify": {"alpha.core": "domain"},
+                "effect_defaults": "count",
+            },
+        },
+    }
+    policy = policy_from_mapping(raw)
+    assert policy.effect_defaults == "injection"  # the root policy mirrors beta's (first scope's) default, not alpha's
+
+    found, _ = run_own(policy, tmp_path, make_services(GitFiles(available=False)), practices=False)
+
+    assert ("effect-clock", "devtools.scan") in {(v.rule, v.subject) for v in found}

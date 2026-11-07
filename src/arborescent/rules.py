@@ -76,6 +76,11 @@ class RuleContext:
         return policy.annotation_required_violation(self.arbor_index, name) if policy is not None else None
 
 
+def _most_specific(targets: Collection[str]) -> list[str]:
+    """`from pkg import a` resolves to both `pkg` and `pkg.a`: judge the most specific only (no other target nests under it)."""
+    return [target for target in targets if not any(other.startswith(target + ".") for other in targets)]
+
+
 def _dev_tool_imports(
     context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], tops: Collection[str],
 ) -> list[Violation]:
@@ -83,9 +88,9 @@ def _dev_tool_imports(
     for imp in info.facts.imports if context.tool_modules else ():
         internal, _, _ = resolve_targets(name, info.is_package, imp, known, tops)
         hits = [target for target in internal if target in context.tool_modules]
-        out.extend(  # `from devtools import scan` resolves to the package and the submodule: report the most specific one
+        out.extend(
             Violation(Rule.DEV_TOOL_IMPORT, name, f"imports dev tool {target}; developer tooling may import product code, never the reverse", imp.line, target)
-            for target in hits if not any(other.startswith(target + ".") for other in hits)
+            for target in _most_specific(hits)
         )
     return out
 
@@ -100,7 +105,7 @@ class _ImportEnv(NamedTuple):
 def _dev_tool_findings(context: RuleContext, name: str, info: ModuleInfo, env: _ImportEnv) -> list[Violation]:
     """Ring and external-import rules do not apply to tooling; unresolvable imports, import cycles, `dev_tools_forbid`
     effects and `dev_tools_may_import` still do."""
-    out = _dev_tool_effects(context.policy, name, info)
+    out = _dev_tool_effects(context.policy_for(name) or context.policy, name, info)
     for imp in info.facts.imports:
         internal, _, error = resolve_targets(name, info.is_package, imp, env.known, env.tops)
         out += _dev_tool_product_imports(context, name, imp.line, internal)
@@ -114,6 +119,9 @@ def _dev_tool_findings(context: RuleContext, name: str, info: ModuleInfo, env: _
 
 
 def _dev_tool_effects(policy: Policy, name: str, info: ModuleInfo) -> list[Violation]:
+    # `counts_effect_seam` is also called ad hoc in `_effect_uses`, `_patch_violation` and `_scope_effect_leaks`
+    # (selftest.py's `_leaking_public_dependency` too); centralizing it (e.g. `SourceFacts.counted_effect_uses`)
+    # would remove the risk of one of these call sites using the wrong scope's policy, as two of them once did.
     return [
         Violation(EFFECT_RULES[use.category], name, f"[dev tool] effect {use.category} uses {use.target}; tooling may not use it (`dev_tools_forbid`)", use.line)
         for use in info.facts.effect_uses
@@ -124,10 +132,10 @@ def _dev_tool_effects(policy: Policy, name: str, info: ModuleInfo) -> list[Viola
 def _dev_tool_product_imports(context: RuleContext, name: str, line: int, targets: Collection[str]) -> list[Violation]:
     policy = context.policy
     product = [target for target in targets if target not in context.tool_modules]
-    return [  # `from app import domain` resolves to `app` and `app.domain`: judge the most specific only
+    return [
         Violation(Rule.DEV_TOOL_PRODUCT_IMPORT, name, f"dev tool imports product module {target}, which `dev_tools_may_import` does not allow", line, target)
-        for target in product
-        if not any(other.startswith(target + ".") for other in product) and not policy.tool_may_import(target)
+        for target in _most_specific(product)
+        if not policy.tool_may_import(target)
     ]
 
 

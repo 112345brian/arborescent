@@ -417,6 +417,12 @@ def _tool_options(raw: Mapping[str, Any]) -> tuple[str, str, object, list[str], 
     return preset_name, python, checkers, cast("list[str]", io_modules), disabled_tools, suggestion_threshold
 
 
+def _validate_effect_categories(categories: Collection[str], label: str) -> None:
+    unknown = set(categories) - EFFECT_CATEGORIES
+    if unknown:
+        raise PolicyError(f"unknown effect category in {label}: {sorted(unknown)}")
+
+
 def _preset_overrides(preset: Preset, raw: Mapping[str, Any]) -> Preset:
     """The preset, with ``middle_forbid`` and/or ``git_hook`` replaced when the policy sets them explicitly, so
     either can be chosen independently of the preset name."""
@@ -426,9 +432,7 @@ def _preset_overrides(preset: Preset, raw: Mapping[str, Any]) -> Preset:
         if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
             raise PolicyError("`middle_forbid` must be a list of non-empty effect categories")
         categories = frozenset(cast("list[str]", value))
-        unknown = categories - EFFECT_CATEGORIES
-        if unknown:
-            raise PolicyError(f"unknown effect category in `middle_forbid`: {sorted(unknown)}")
+        _validate_effect_categories(categories, "`middle_forbid`")
         overrides["middle_forbid"] = categories
     if "git_hook" in raw:
         overrides["git_hook"] = _boolean_option(raw, "git_hook", preset.git_hook)
@@ -460,9 +464,7 @@ def _effect_list(raw: Mapping[str, Any], key: str, default: tuple[str, ...]) -> 
     if key not in raw:
         return default
     categories = _string_list(raw, key)
-    unknown = set(categories) - EFFECT_CATEGORIES
-    if unknown:
-        raise PolicyError(f"unknown effect category in `{key}`: {sorted(unknown)}")
+    _validate_effect_categories(categories, f"`{key}`")
     return categories
 
 
@@ -603,9 +605,7 @@ def _ring_from_mapping(
         raise PolicyError(f"`forbid` in [ring.{name}] must be a list of non-empty effect categories")
     forbid = expand(cast("Sequence[str]", raw_forbid)) if has_forbid else None
     if forbid is not None:
-        unknown_effects = forbid - EFFECT_CATEGORIES
-        if unknown_effects:
-            raise PolicyError(f"unknown effect category in [ring.{name}].forbid: {sorted(unknown_effects)}")
+        _validate_effect_categories(forbid, f"[ring.{name}].forbid")
     return RingRule(
         name,
         expand(table.get("may_import", [])),
