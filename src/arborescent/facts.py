@@ -22,6 +22,15 @@ OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
 _ABSTRACT_BASE_NAMES = frozenset({"ABC", "abc.ABC", "Protocol", "typing.Protocol", "typing_extensions.Protocol"})
 _ABC_META_NAMES = frozenset({"ABCMeta", "abc.ABCMeta"})
 _DATABASE_PACKAGES = ("sqlite3.", "psycopg.", "psycopg2.", "asyncpg.", "pymysql.", "mysql.connector.", "sqlalchemy.", "pymongo.", "redis.", "aiosqlite.")
+# Real network I/O only: `urllib.parse` and `http.HTTPStatus` are not (#129).
+_NETWORK_PREFIXES = ("urllib.request.", "http.client.", "http.server.", "socket.")
+# Third-party clients are matched by explicit call name, not prefix, so a local variable that shadows an
+# unimported library name (`requests = [1]; requests.append(2)`) is not network use.
+_HTTP_VERBS = ("get", "post", "put", "patch", "delete", "head", "options", "request")
+_NETWORK_APIS = frozenset(
+    {"urllib.request.urlopen", "requests.Session", "httpx.Client", "httpx.AsyncClient", "aiohttp.ClientSession", "urllib3.PoolManager"}
+    | {f"{lib}.{verb}" for lib in ("requests", "httpx") for verb in _HTTP_VERBS}
+)
 _FILESYSTEM_APIS = frozenset({
     "open", "io.open", "os.open", "os.remove", "os.unlink", "os.rename", "os.replace", "os.mkdir", "os.makedirs", "os.rmdir",
     "os.removedirs", "os.listdir", "os.scandir", "os.walk", "os.stat", "os.chmod", "os.symlink", "os.truncate", "glob.glob", "glob.iglob",
@@ -173,6 +182,8 @@ def _storage_category(target: str) -> str | None:
         return "database"
     if target in _FILESYSTEM_APIS:
         return "filesystem"
+    if target in _NETWORK_APIS or target.startswith(_NETWORK_PREFIXES):
+        return "network"
     return None
 
 

@@ -7,6 +7,8 @@
 ### Added
 - `arborescent baseline --prune` removes stale baseline entries without recording anything new, so it works while the
   tree has unrelated new violations; the growth log is untouched (#131).
+- `network` effect category (`effect-network`): `forbid = ["network"]` now catches `urllib.request`, `http.client`,
+  `http.server`, `socket` and `requests`/`httpx` verb calls, independent of preset (#129).
 
 ## 0.5.1 — 2026-11-06
 

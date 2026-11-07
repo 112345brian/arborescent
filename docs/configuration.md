@@ -690,6 +690,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-sleep` | a ring that forbids `sleep` calls `time.sleep` or `asyncio.sleep` |
 | `effect-threads` | a ring that forbids `threads` uses `threading` or constructs a `ThreadPoolExecutor` |
 | `effect-process` | a ring that forbids `process` starts a process or shell command through `subprocess`, `multiprocessing`, `ProcessPoolExecutor`, or direct `os` spawn/exec APIs |
+| `effect-network` | a ring that forbids `network` calls `urllib.request`, `http.client`, `http.server`, `socket`, `requests`, `httpx`, `aiohttp` or `urllib3` (a call probe, not an import ban) |
 | `effect-database` | a ring that forbids `database` uses `sqlite3`, `psycopg`, `psycopg2`, `asyncpg`, `pymysql`, `mysql.connector`, `sqlalchemy`, `pymongo`, `redis` or `aiosqlite` |
 | `effect-filesystem` | a ring that forbids `filesystem` calls `open`, `os` file operations (`os.remove`, `os.listdir`, `os.walk`, ...), `shutil`, `tempfile`, `glob`, or reads/writes through `Path(...)` (`read_text`, `write_text`, `mkdir`, `glob`, ...). Direct references only: a `Path` held in a variable or a call routed through a wrapper is not seen |
 | `effect-dynamic-import` | a ring that forbids any effect uses `importlib` or `__import__` |

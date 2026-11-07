@@ -380,3 +380,19 @@ def test_effect_via_import_does_not_propagate_through_a_type_checking_import(rep
     )
 
     assert effects(run(repo, ring=ring)) == {("effect-env", "app.domain")}
+
+
+def test_network_calls_are_an_effect_a_ring_can_forbid_but_urllib_parse_is_not(repo: Path) -> None:
+    source = (
+        "import socket, urllib.parse, urllib.request\n"
+        "def fetch(url):\n"
+        "    urllib.parse.quote(url)\n"
+        "    socket.socket()\n"
+        "    return urllib.request.urlopen(url)\n"
+    )
+    write_files(repo, {"app/ports.py": source, "app/adapters.py": "X = 1\n"})
+    ports = ring_with(ports={"may_import": ["domain"], "external": ["socket", "urllib.parse", "urllib.request"], "forbid": ["network"]})
+    assert effects(run(repo, ring=ports)) == {("effect-network", "app.ports")}
+    parse_only = "import urllib.parse\ndef f(u):\n    return urllib.parse.quote(u)\n"
+    write_files(repo, {"app/ports.py": parse_only})
+    assert effects(run(repo, ring=ports)) == set()

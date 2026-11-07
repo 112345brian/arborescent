@@ -12,16 +12,14 @@ __all__ = ["DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "PRESET
 
 EFFECT_CATEGORIES: frozenset[str] = frozenset(
     {
-        "clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "filesystem", "dynamic-import", "patch",
+        "clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "network", "filesystem", "dynamic-import", "patch",
         "console", "global",
     }
 )
 
 # #98 (function-level taint): which effect categories count as an I/O primitive a function can be seeded with.
-# ``patch`` (test-only) and ``global`` (module-state mutation, not I/O) are excluded; ``network`` is not an
-# ``effect-*`` category (facts.py has no stdlib-wide match for it, see taint.py's own targeted list) but is an
-# I/O primitive, so it is added here instead.
-TAINT_SEED_CATEGORIES: frozenset[str] = (EFFECT_CATEGORIES - {"patch", "global"}) | {"network"}
+# ``patch`` (test-only) and ``global`` (module-state mutation, not I/O) are excluded.
+TAINT_SEED_CATEGORIES: frozenset[str] = EFFECT_CATEGORIES - {"patch", "global"}
 DEFAULT_TAINT_SEEDS: tuple[str, ...] = tuple(sorted(TAINT_SEED_CATEGORIES))
 
 # Which imports outside the project need an entry in the importing ring's ``external`` allow-list.

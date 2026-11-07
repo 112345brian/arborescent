@@ -71,6 +71,7 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.DEV_TOOL_IMPORT: "needs a `dev_tools` path in the policy; covered by focused rule tests",
     Rule.DEV_TOOL_PRODUCT_IMPORT: "needs `dev_tools` and `dev_tools_may_import` in the policy; covered by focused rule tests",
     Rule.DEV_TOOL_MISPLACED: "needs a `dev_tools` path in the policy; covered by focused rule tests",
+    Rule.EFFECT_NETWORK: "effect-network is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_DATABASE: "effect-database is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_FILESYSTEM: "effect-filesystem is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_DYNAMIC_IMPORT: "effect-dynamic-import is exercised by focused rule tests; the selftest probes the clock effect family",

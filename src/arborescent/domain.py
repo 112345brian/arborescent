@@ -74,6 +74,7 @@ class Rule(StrEnum):
     DEV_TOOL_MISPLACED = "dev-tool-misplaced"
     DEV_TOOL_PRODUCT_IMPORT = "dev-tool-product-import"
     EFFECT_DATABASE = "effect-database"
+    EFFECT_NETWORK = "effect-network"
     EFFECT_FILESYSTEM = "effect-filesystem"
     EFFECT_DYNAMIC_IMPORT = "effect-dynamic-import"
     EFFECT_PATCH = "effect-patch"
@@ -134,6 +135,7 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "threads": Rule.EFFECT_THREADS,
     "process": Rule.EFFECT_PROCESS,
     "database": Rule.EFFECT_DATABASE,
+    "network": Rule.EFFECT_NETWORK,
     "filesystem": Rule.EFFECT_FILESYSTEM,
     "dynamic-import": Rule.EFFECT_DYNAMIC_IMPORT,
     "patch": Rule.EFFECT_PATCH,
