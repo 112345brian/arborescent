@@ -10,7 +10,7 @@ from pathlib import Path
 from .domain import PolicyError, Rule, Violation
 from .ports import FileSystem
 
-__all__ = ["Ratchet", "apply", "growth_consistent", "internal_import_summary", "load", "record", "save"]
+__all__ = ["Ratchet", "apply", "growth_consistent", "internal_import_summary", "load", "prune", "record", "save"]
 
 VERSION = 2
 
@@ -85,6 +85,21 @@ def record(
     growth = [*existing_growth, *_growth_entries(old, current, adopt, allow_growth, reason)]
     fs.write_json(path, {"version": VERSION, "violations": sorted(current), "growth": growth})
     return len(current)
+
+
+def prune(fs: FileSystem, path: Path, violations: Iterable[Violation]) -> int:
+    """Drop baseline entries that no longer occur; never add one, never touch the growth log. Returns how many were removed."""
+    if not fs.is_file(path):
+        return 0
+    doc = document(fs, path)
+    old_violations = doc["violations"]
+    if not isinstance(old_violations, list):
+        raise ValueError("baseline violations must be an array")
+    old = {str(key) for key in old_violations}
+    kept = old & {v.key for v in violations}
+    if kept != old:
+        fs.write_json(path, {**doc, "violations": sorted(kept)})
+    return len(old - kept)
 
 
 def _validate_record_options(adopt: str | None, allow_growth: bool, reason: str | None) -> None:

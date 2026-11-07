@@ -226,3 +226,22 @@ def test_suppression_and_discard_counts_are_reported_and_ratcheted(repo: Path, c
     assert "app.domain: noqa-coded=1, type-ignore-blanket=1" in output
     assert "discard calls by module" in output
     assert "app.domain: 2" in output
+
+
+def test_prune_removes_stale_entries_without_adding_new_ones_or_touching_growth() -> None:
+    fs, path = filesystem()
+    baseline.record(fs, path, [v("internal-import", "a"), v("internal-import", "b")])
+    baseline.record(fs, path, [v("internal-import", "a"), v("internal-import", "b"), v("internal-import", "c")], allow_growth=True, reason="why")
+    growth_before = baseline.document(fs, path)["growth"]
+    # "b" is gone; "n" is a brand-new violation that must NOT be recorded.
+    removed = baseline.prune(fs, path, [v("internal-import", "a"), v("internal-import", "c"), v("internal-import", "n")])
+    doc = baseline.document(fs, path)
+    assert removed == 1
+    assert sorted(str(k) for k in doc["violations"]) == sorted(v("internal-import", s).key for s in ("a", "c"))  # type: ignore[union-attr]
+    assert doc["growth"] == growth_before
+
+
+def test_prune_without_a_baseline_is_a_noop() -> None:
+    fs, path = filesystem()
+    assert baseline.prune(fs, path, [v("internal-import", "a")]) == 0
+    assert not fs.is_file(path)

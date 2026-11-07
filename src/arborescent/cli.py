@@ -181,6 +181,7 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
         help="allow baseline growth with a required reason",
     )
     b.add_argument("--reason", help="explain why new baseline keys are being recorded")
+    b.add_argument("--prune", action="store_true", help="only remove stale entries; never adds, works while the tree has new violations")
     sub.add_parser(
         "discover",
         help="list in-scope Python files that still need a ring classification",
@@ -394,6 +395,12 @@ def _baseline(
         raise PolicyError(
             f"unknown adoption family {args.adopt!r}; choose from {sorted(families)}"
         )
+    if args.prune:
+        if args.adopt is not None or args.allow_growth or args.reason is not None:
+            raise PolicyError("`--prune` cannot be combined with `--adopt`, `--allow-growth` or `--reason`")
+        removed = ratchet_mod.prune(svc.fs, root / policy.baseline, found)
+        print(f"baseline: pruned {removed} stale entr{'y' if removed == 1 else 'ies'} from {policy.baseline}")
+        return 0
     count = ratchet_mod.record(
         svc.fs,
         root / policy.baseline,

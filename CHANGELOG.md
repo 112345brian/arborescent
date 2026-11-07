@@ -2,6 +2,12 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- `arborescent baseline --prune` removes stale baseline entries without recording anything new, so it works while the
+  tree has unrelated new violations; the growth log is untouched (#131).
+
 ## 0.5.1 — 2026-11-06
 
 ### Changed
