@@ -489,7 +489,7 @@ def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
     with fs.temporary_directory("arborescent-selftest-") as tmp:
         work = tmp / "copy"
         fs.copy_tree(root, work, ignore=_SKIP_COPY)
-        baseline = {v.key for v in run_own(policy, work, services, practices=False)[0]}
+        baseline = frozenset(v.key for v in run_own(policy, work, services, practices=False)[0])
         if services.parallel is None:
             killed, survived = _run_mutations_sequential(policy, work, services, baseline, mutations)
         else:
