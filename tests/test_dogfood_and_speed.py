@@ -64,14 +64,18 @@ def test_warm_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> N
 
 
 def test_cold_own_checks_on_a_small_repo_stay_within_budget(tmp_path: Path) -> None:
+    """A single cold run is one sample on a shared CI runner: a GC pause or scheduling blip fails it on noise alone.
+    Take the min of a few fresh-cache runs, as the warm test above already does."""
     policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
-    t0 = time.perf_counter()
-    _, scan = run_own(policy, root, own_services(tmp_path / "cache"), practices=False)
-    cold = time.perf_counter() - t0
+    best_cold = None
+    for i in range(3):
+        t0 = time.perf_counter()
+        _, scan = run_own(policy, root, own_services(tmp_path / f"cache{i}"), practices=False)
+        cold = time.perf_counter() - t0
+        assert scan.parsed == len(scan.known)
+        best_cold = cold if best_cold is None else min(best_cold, cold)
     budget = max(1.0, COLD_BUDGET_SECONDS_PER_FILE * scan.parsed)
-    assert scan.parsed == len(scan.known) and cold < budget, (
-        f"cold {cold * 1000:.0f} ms for {scan.parsed} files (budget {budget * 1000:.0f} ms)"
-    )
+    assert best_cold < budget, f"cold {best_cold * 1000:.0f} ms for {scan.parsed} files (budget {budget * 1000:.0f} ms)"
 
 
 def test_no_file_is_parsed_twice_in_one_run(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
