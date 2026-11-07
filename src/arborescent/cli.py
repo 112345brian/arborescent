@@ -23,7 +23,7 @@ from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
-from .domain import Policy, PolicyError, path_under
+from .domain import Policy, PolicyError, Violation, path_under
 from .driver_filter_repo import FilterRepo
 from .driver_libcst import LibCstRename
 from .driver_port import ImportRewriter, MigrationLibrary
@@ -374,6 +374,18 @@ def _report_git_hook(outcome: HookOutcome) -> None:
         )
 
 
+def _stale_engine_findings(svc: Services, root: Path, policy: Policy) -> list[Violation]:
+    """``--prune`` judges every baseline entry, so each engine that owns a baselined rule family must be re-run, or its
+    still-valid entries would look stale and be dropped."""
+    rules = {key.split("|", 1)[0] for key in ratchet_mod.load(svc.fs, root / policy.baseline)}
+    names = {item.name for item in (*svc.engines, *svc.checkers)} - {"ruff"}  # `_baseline` already re-ran ruff for its entries
+    extra: list[Violation] = []
+    for name in sorted(names):
+        if any(r == name or r.startswith(f"{name}-") for r in rules):
+            extra += run_engine(svc, name, root).violations
+    return extra
+
+
 def _baseline(
     args: argparse.Namespace, policy: Policy, root: Path, svc: Services
 ) -> int:
@@ -398,6 +410,7 @@ def _baseline(
             f"unknown adoption family {args.adopt!r}; choose from {sorted(families)}"
         )
     if args.prune:
+        found = [*found, *_stale_engine_findings(svc, root, policy)]
         if args.adopt is not None or args.allow_growth or args.reason is not None:
             raise PolicyError("`--prune` cannot be combined with `--adopt`, `--allow-growth` or `--reason`")
         removed = ratchet_mod.prune(svc.fs, root / policy.baseline, found)

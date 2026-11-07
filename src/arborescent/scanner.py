@@ -27,7 +27,7 @@ from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 13
+_CACHE_VERSION = 14
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 

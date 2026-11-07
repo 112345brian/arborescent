@@ -53,24 +53,12 @@ from .presets import DEFAULT_TAINT_SEEDS
 
 __all__ = ["DEFAULT_TAINT_SEEDS", "TaintResult", "TaintedFunction", "compute_taint"]
 
-_CACHE_VERSION = 1
-
-# Real I/O, but not a stdlib-wide `effect_category_of` match: only these specific submodules/functions count.
-# `urllib.parse`, `http.HTTPStatus` and the rest of `urllib`/`http` are not network I/O (see the module docstring
-# of facts.py's effect scan for the same rule applied to filesystem APIs).
-_NETWORK_PREFIXES = ("urllib.request.", "http.client.", "http.server.", "socket.")
-_NETWORK_EXACT = frozenset({"urllib.request.urlopen", "http.client.HTTPConnection", "http.client.HTTPSConnection"})
+_CACHE_VERSION = 2
 
 _SCOPE_BOUNDARIES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 
-def _is_network(target: str) -> bool:
-    return target in _NETWORK_EXACT or target.startswith(_NETWORK_PREFIXES)
-
-
 def _io_category(target: str, seeds: frozenset[str]) -> str | None:
-    if "network" in seeds and _is_network(target):
-        return "network"
     category = effect_category_of(target)
     return category if category is not None and category in seeds else None
 
