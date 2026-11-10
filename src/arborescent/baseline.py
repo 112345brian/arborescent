@@ -11,8 +11,8 @@ from .domain import PolicyError, Rule, Violation
 from .ports import FileSystem
 
 __all__ = [
-    "Ratchet", "apply", "growth_consistent", "internal_import_summary", "load", "prune", "record", "save", "stamp_approval", "growth_count",
-    "values_growth_problems",
+    "Ratchet", "apply", "growth_consistent", "growth_count", "internal_import_summary", "load", "prune", "record", "save",
+    "stamp_approval", "values_growth_problems",
 ]
 
 VERSION = 2

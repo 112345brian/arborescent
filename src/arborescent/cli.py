@@ -614,7 +614,8 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
 
 def _growth_approver(args: argparse.Namespace) -> str | None:
     """Who is on record as approving growth: required for ``--allow-growth``; an adoption is attributed to itself."""
-    approver: str | None = args.approved_by
+    raw = args.approved_by
+    approver = raw if isinstance(raw, str) else None
     if approver is not None and not (approver.strip() and args.allow_growth):
         raise PolicyError("`--approved-by` needs a non-blank value and `--allow-growth`")
     if args.allow_growth and approver is None:
