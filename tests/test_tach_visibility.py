@@ -7,14 +7,14 @@ from pathlib import Path
 from arborescent_helpers import mini_policy, services, write_files
 
 from arborescent.domain import INFORMATIONAL_RULES, TACH_EXCLUDED_FOLDERS, Rule
-from arborescent.engine import (  # pyright: ignore[reportPrivateUsage]
+from arborescent.engine import (
     Options,
-    _child_arbor_command,
     blocking,
+    child_arbor_command,
     run_check,
     run_own,
 )
-from arborescent.tach_visibility import _TACH_EXCLUDED_PARTS  # pyright: ignore[reportPrivateUsage]
+from arborescent.tach_visibility import TACH_EXCLUDED_PARTS
 
 DYNAMIC = "import importlib\n\n\ndef load(name):\n    return importlib.import_module(name)\n\n\ndef raw(name):\n    return __import__(name)\n"
 
@@ -41,7 +41,7 @@ def test_folders_tach_skips_are_not_reported(repo: Path) -> None:
 
 def test_the_excluded_folders_are_the_shared_constant_not_a_second_copy() -> None:
     """#59's own excluded-folder set must stay the generated tach.toml `exclude` (engines.py): one shared list, not two."""
-    assert frozenset(TACH_EXCLUDED_FOLDERS) == _TACH_EXCLUDED_PARTS
+    assert frozenset(TACH_EXCLUDED_FOLDERS) == TACH_EXCLUDED_PARTS
 
 
 def test_disabling_tach_silences_the_report(repo: Path) -> None:
@@ -77,5 +77,5 @@ def test_require_visible_passes_when_nothing_is_hidden(repo: Path) -> None:
 
 
 def test_the_flag_reaches_child_arbor_runs() -> None:
-    argv = _child_arbor_command(Path("child/arborescent.toml"), Options(require_visible=True))
+    argv = child_arbor_command(Path("child/arborescent.toml"), Options(require_visible=True))
     assert "--require-visible" in argv

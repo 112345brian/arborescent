@@ -97,15 +97,15 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="install without prompting (explicitly mutates this environment)",
     )
-    _add_check_parser(sub)
-    _add_maintenance_parsers(sub)
-    _add_packages_parser(sub)
-    _add_bench_parser(sub)
+    _add_check_parser(sub.add_parser)
+    _add_maintenance_parsers(sub.add_parser)
+    _add_packages_parser(sub.add_parser)
+    _add_bench_parser(sub.add_parser)
     return p
 
 
-def _add_check_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
-    c = sub.add_parser(
+def _add_check_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
+    c = add_parser(
         "check", help="drift, engines (parallel), own checks, baseline ratchet"
     )
     c.add_argument(
@@ -182,8 +182,8 @@ def _add_check_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     c.add_argument("--no-cache", action="store_true")
 
 
-def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
-    b = sub.add_parser(
+def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
+    b = add_parser(
         "baseline", help="create or shrink the baseline; growth must be explicit"
     )
     b.add_argument("--adopt", metavar="FAMILY", help="adopt one new rule family once")
@@ -196,12 +196,12 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
     b.add_argument("--approved-by", metavar="WHO", help="who approved the growth: a name or issue URL (required with --allow-growth)")
     b.add_argument("--prune", action="store_true", help="only remove stale entries; never adds, works while the tree has new violations")
     add_report_parser(b)
-    discover = sub.add_parser(
+    discover = add_parser(
         "discover",
         help="list in-scope Python files that still need a ring classification",
     )
     discover.add_argument("--suggest", action="store_true", help="per module, print the tightest ring its imports and effects permit, with the evidence")
-    annotate = sub.add_parser(
+    annotate = add_parser(
         "annotate",
         help="migrate classify matches into explicit __arbor__ annotations (dry-run by default)",
     )
@@ -210,14 +210,14 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
         action="store_true",
         help="write the annotations instead of printing what would change",
     )
-    sub.add_parser("selftest", help="mutation-test the rules")
-    add_coupling_parser(sub.add_parser)
-    sub.add_parser("cycles", help="report import cycles, the edges to cut and the function-level imports that only break a cycle")
-    add_ratchet_parser(sub.add_parser)
+    add_parser("selftest", help="mutation-test the rules")
+    add_coupling_parser(add_parser)
+    add_parser("cycles", help="report import cycles, the edges to cut and the function-level imports that only break a cycle")
+    add_ratchet_parser(add_parser)
 
 
-def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
-    packages = sub.add_parser(
+def _add_packages_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
+    packages = add_parser(
         "packages", help="validate, list or extract declared package metadata"
     )
     package_actions = packages.add_subparsers(dest="package_action", required=True)
@@ -243,11 +243,11 @@ def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         help="exit 1 when the export still has an annotation gap of severity error",
     )
     _ = package_actions.add_parser("schema", help="print the JSON Schema the export validates against")
-    add_migrate_parser(package_actions)
+    add_migrate_parser(package_actions.add_parser)
 
 
-def _add_bench_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
-    b = sub.add_parser(
+def _add_bench_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
+    b = add_parser(
         "bench", help="time every engine, cold and warm, on prepared codebases"
     )
     b.add_argument(

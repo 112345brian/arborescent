@@ -16,7 +16,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 from .domain import Rule, Violation, dist_name
 from .package_model import CatalogDocument, CatalogError, PackageDescriptor, is_git_url
@@ -216,13 +216,13 @@ def _table(data: Mapping[str, Any], dotted: str) -> Mapping[str, Any]:
 def _requirement_names(items: object) -> set[str]:
     if not isinstance(items, list):
         return set()
-    return {dist_name(_NAME.split(str(item).strip(), maxsplit=1)[0]) for item in items}  # pyright: ignore[reportUnknownVariableType]
+    return {dist_name(_NAME.split(str(item).strip(), maxsplit=1)[0]) for item in cast("list[object]", items)}
 
 
 def _strings(value: object) -> set[str]:
     if not isinstance(value, list):
         return set()
-    return {PurePosixPath(str(item)).as_posix() for item in value}  # pyright: ignore[reportUnknownVariableType]
+    return {PurePosixPath(str(item)).as_posix() for item in cast("list[object]", value)}
 
 
 def _drift(path: str, name: str, actual: object, expected: object, why: str) -> Violation:
@@ -265,7 +265,7 @@ def _source_drift(project: DerivedProject, package: PackageDescriptor, actual: M
     present = {dist_name(key): (key, value) for key, value in actual.items()}
     for name, entry in sorted(project.sources.items()):
         key, value = present.get(dist_name(name), (name, None))
-        value = value if isinstance(value, dict) else {}
+        value = cast("dict[str, object]", value) if isinstance(value, dict) else {}
         agrees = (
             value == {"workspace": True} if entry.get("workspace") is True
             else "workspace" not in value and value.get("git") == entry["git"] and bool(value)
@@ -275,6 +275,6 @@ def _source_drift(project: DerivedProject, package: PackageDescriptor, actual: M
             out.append(_drift(project.path, "tool.uv.sources", f"{key} = {value or 'missing'}", f"{name} = {dict(entry)}",
                               f"{package.id!r} `depends_on` {name!r}, and {name!r}'s `home` decides workspace or own repository"))
     for key, value in sorted(actual.items()):
-        if dist_name(key) not in {dist_name(n) for n in project.sources} and isinstance(value, dict) and value.get("workspace") is True:  # pyright: ignore[reportUnknownMemberType]
+        if dist_name(key) not in {dist_name(n) for n in project.sources} and isinstance(value, dict) and cast("dict[str, object]", value).get("workspace") is True:
             out.append(_drift(project.path, "tool.uv.sources", f"{key} = a workspace source", "none", f"{package.id!r} does not list {key!r} in `depends_on`"))
     return out

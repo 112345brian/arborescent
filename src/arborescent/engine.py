@@ -401,7 +401,7 @@ def _tool(services: Services, engine: Engine, files: Sequence[str], root: Path, 
     return EngineRun(name, status, result.seconds, text[-15:] if status == "fail" else text[-1:], findings)
 
 
-def _child_arbor_command(config_path: Path, opts: Options) -> list[str]:
+def child_arbor_command(config_path: Path, opts: Options) -> list[str]:
     argv = [sys.executable, "-m", "arborescent", "--config", str(config_path.resolve()), "check"]
     flags = (
         (not opts.tools, "--no-tools"),
@@ -438,7 +438,7 @@ def _child_arbor_runs(policy: Policy, root: Path, services: Services, opts: Opti
             runs.append(EngineRun(name, "fail", 0.0, [f"{sys.executable} is not available to run the child policy"]))
             continue
 
-        argv = _child_arbor_command(config_path, opts)
+        argv = child_arbor_command(config_path, opts)
         result = services.runner.run(argv, child_root)
         output = (result.stdout + result.stderr).strip().splitlines()
         status = "ok" if result.returncode == 0 else "fail"
