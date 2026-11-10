@@ -23,7 +23,7 @@ from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
-from .domain import Policy, PolicyError, Violation, path_under
+from .domain import Policy, PolicyError, Rule, Violation, path_under
 from .driver_filter_repo import FilterRepo
 from .driver_libcst import LibCstRename
 from .driver_port import ImportRewriter, MigrationLibrary
@@ -167,6 +167,13 @@ def _add_check_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "--growth-against",
         metavar="REF",
         help="verify baseline growth entries against a git ref",
+    )
+    c.add_argument(
+        "--rule",
+        action="append",
+        default=[],
+        metavar="FAMILY",
+        help="run and exit on this rule family only (repeatable; the families `baseline --adopt` accepts, or any rule id)",
     )
     c.add_argument("--no-cache", action="store_true")
 
@@ -567,7 +574,16 @@ def _list_dev_tools(policy: Policy, root: Path, svc: Services) -> int:
     return 1 if scan.misplaced_dev_tools else 0
 
 
+def _validate_rule_selection(rules: list[str], svc: Services) -> None:
+    """A typo in `--rule` must fail, not select nothing and report green."""
+    known = {rule.value for rule in Rule} | {item.name for item in (*svc.engines, *svc.checkers)} | {"coverage", "effects", "suppressions", "discard"}
+    unknown = sorted(r for r in rules if r not in known and not r.startswith("ruff-") and not any(k.startswith(f"{r}-") for k in known))
+    if unknown:
+        raise PolicyError(f"unknown rule family {unknown[0]!r}; choose from {sorted(known)}")
+
+
 def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    _validate_rule_selection(args.rule, svc)
     conflict = _core_mode_conflict(args)
     if conflict is not None:
         print(f"arborescent check: {conflict}", file=sys.stderr)
@@ -597,6 +613,7 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         require_visible=args.require_visible,
         growth_against=args.growth_against,
         no_cache=args.no_cache,
+        rules=tuple(args.rule),
     )
     report = run_check(policy, root, svc, opts)
     _print_rule_label(policy)

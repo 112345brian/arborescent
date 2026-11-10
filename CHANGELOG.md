@@ -13,6 +13,9 @@
 ### Changed
 - Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they
   are newer than the ref.
+- `arborescent check --rule FAMILY` (repeatable) runs and exits on one rule family, and `check` prints a
+  `by rule: … N (M new)` line splitting findings by rule with how many the baseline does not cover (#137). Selecting by
+  ring and a `type_checking` option for `internal-import` are not part of this change.
 
 ## 0.6.0 — 2026-11-07
 

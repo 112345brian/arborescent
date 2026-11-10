@@ -75,6 +75,7 @@ class Options:
     require_modularity: bool = False  # fail unless the policy keeps `modularity = "ready"` and no package gap is open
     growth_against: str | None = None
     no_cache: bool = False
+    rules: tuple[str, ...] = ()  # rule families to run and exit on; empty selects everything (#137)
 
 
 @dataclass
@@ -109,10 +110,17 @@ class CheckReport:
     partial: bool = False
     seconds: float = 0.0
     tool_checks_enabled: bool = True
+    rules: tuple[str, ...] = ()  # the `--rule` selection this report was filtered to
+
+    def _engine_fails(self, run: EngineRun) -> bool:
+        """With a selection, an engine failing only on findings outside it is not this run's failure; one with no findings (a crash) still is."""
+        if run.status != "fail":
+            return False
+        return not self.rules or not run.violations or any(ratchet_mod.in_any_family(v.key, self.rules) for v in run.violations)
 
     @property
     def ok(self) -> bool:
-        engines_ok = all(e.status != "fail" for e in self.engines)
+        engines_ok = not any(self._engine_fails(e) for e in self.engines)
         return engines_ok and not self.profile_failures and not self.modularity_failures and not self.visibility_failures and (self.ratchet is None or self.ratchet.ok)
 
     @property
@@ -476,6 +484,15 @@ def _plan_engines(policy: Policy, services: Services, opts: Options, files: Sequ
     return futures
 
 
+def _apply_ratchet(report: CheckReport, base: set[str], rules: tuple[str, ...], complete: bool) -> ratchet_mod.Ratchet:
+    """Narrow findings and the baseline to the `--rule` families first, so nothing outside them is new or stale (#137)."""
+    if rules:
+        report.rules = rules
+        report.violations = [v for v in report.violations if ratchet_mod.in_any_family(v.key, rules)]
+        base = {key for key in base if ratchet_mod.in_any_family(key, rules)}
+    return ratchet_mod.apply(report.violations, base, complete=complete)
+
+
 def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
     opts = opts if opts is not None else Options()
     if opts.require_profile and not opts.require_tools:
@@ -517,7 +534,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         if not opts.tools or ruff_skipped:
             # Ruff is the only external engine whose findings enter the baseline; absent output cannot prove them stale.
             base = {key for key in base if not key.split("|", 1)[0].startswith("ruff-")}
-        report.ratchet = ratchet_mod.apply(report.violations, base, complete=only is None)
+        report.ratchet = _apply_ratchet(report, base, opts.rules, only is None)
         if opts.require_profile:
             report.profile = PROFILE
             report.profile_failures = certify(root, policy, scan, services.runner, services.fs)
