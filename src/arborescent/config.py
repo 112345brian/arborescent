@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from .coupling_policy import DEFAULT_BASELINE, DEFAULT_HUB_FAN_IN, CouplingPolicy
-from .package_constraints import ConstraintError, PackageConstraints, parse_package_constraints
 from .domain import (
     ArchitectureScope,
     ChildArbor,
@@ -20,6 +19,11 @@ from .domain import (
     PolicyError,
     ResultDiscard,
     RingRule,
+)
+from .package_constraints import (
+    ConstraintError,
+    PackageConstraints,
+    parse_package_constraints,
 )
 from .ports import FileSystem
 from .presets import (

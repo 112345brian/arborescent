@@ -38,7 +38,7 @@ def test_the_catalog_allow_list_is_still_exactly_the_descriptor_fields() -> None
 def test_constraints_are_not_packages_toml_metadata(key: str) -> None:
     """Separate from ``packages.toml``: a catalog entry carrying them is still an unknown key."""
     assert key not in PACKAGE_KEYS
-    with pytest.raises(CatalogError, match=f"unknown key.*'{key}'"):
+    with pytest.raises(CatalogError, match=rf"unknown key.*'{key}'"):
         parse_catalog({"packages": [{"id": "p", **_entry(), key: True}]})
 
 
@@ -97,41 +97,41 @@ def test_the_constraints_load_from_arborescent_toml_and_from_pyproject(tmp_path:
 
 
 def test_a_misspelt_effect_name_is_rejected_and_named() -> None:
-    with pytest.raises(PolicyError, match="netwrok"):
+    with pytest.raises(PolicyError, match=r"netwrok"):
         _ = constraints(forbid_effects=["netwrok"])
 
 
 @pytest.mark.parametrize("value", ["true", 1, 0, None, ["true"]])
 def test_a_non_bool_must_be_pure_is_rejected(value: object) -> None:
-    with pytest.raises(PolicyError, match="must_be_pure.*boolean"):
+    with pytest.raises(PolicyError, match=r"must_be_pure.*boolean"):
         _ = constraints(must_be_pure=value)
 
 
 @pytest.mark.parametrize("value", ["network", 3, True, {"network": 1}, [1], [""], ["network", None]])
 def test_forbid_effects_must_be_a_list_of_effect_names(value: object) -> None:
-    with pytest.raises(PolicyError, match="forbid_effects"):
+    with pytest.raises(PolicyError, match=r"forbid_effects"):
         _ = constraints(forbid_effects=value)
 
 
 def test_an_unknown_constraint_key_is_an_error() -> None:
-    with pytest.raises(PolicyError, match="unknown key.*must_be_pur"):
+    with pytest.raises(PolicyError, match=r"unknown key.*must_be_pur"):
         _ = constraints(must_be_pur=True)
 
 
 def test_an_unknown_key_under_package_is_an_error() -> None:
-    with pytest.raises(PolicyError, match="unknown key.*constraint"):
+    with pytest.raises(PolicyError, match=r"unknown key.*constraint"):
         _ = policy_with({"constraint": {}})
 
 
 @pytest.mark.parametrize("package", [[], "x", 1, True])
 def test_package_must_be_a_table(package: object) -> None:
-    with pytest.raises(PolicyError, match="`package` must be a table"):
+    with pytest.raises(PolicyError, match=r"`package` must be a table"):
         _ = policy_with(package)
 
 
 @pytest.mark.parametrize("table", [[], "x", 1, True])
 def test_constraints_must_be_a_table(table: object) -> None:
-    with pytest.raises(PolicyError, match="`package.constraints` must be a table"):
+    with pytest.raises(PolicyError, match=r"`package.constraints` must be a table"):
         _ = policy_with({"constraints": table})
 
 
@@ -142,5 +142,5 @@ def test_constraints_are_not_an_arbor_annotation_or_a_scope_key() -> None:
         "package": {"constraints": {"must_be_pure": True}},
     }
     assert policy_from_mapping(scoped).package_constraints == PackageConstraints(True, ())
-    with pytest.raises(PolicyError, match="unknown key"):
+    with pytest.raises(PolicyError, match=r"unknown key"):
         _ = policy_from_mapping({**scoped, "package": {"constraints": {"must_be_pure": True}, "x": 1}})
