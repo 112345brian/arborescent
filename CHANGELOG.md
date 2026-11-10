@@ -16,6 +16,8 @@
 - `arborescent check --rule FAMILY` (repeatable) runs and exits on one rule family, and `check` prints a
   `by rule: … N (M new)` line splitting findings by rule with how many the baseline does not cover (#137). Selecting by
   ring and a `type_checking` option for `internal-import` are not part of this change.
+- `forwarded-import`: a module forbidden by `module_forbid_imports` from importing C can no longer satisfy the rule by
+  importing a pass-through wrapper of C; the wrapper import is reported against the importer (#138).
 
 ## 0.6.0 — 2026-11-07
 
