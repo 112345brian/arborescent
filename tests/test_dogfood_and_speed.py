@@ -43,7 +43,9 @@ def test_arborescent_passes_its_own_policy_and_reports_generated_preset_drift_ad
 # the work is linear in the number of files. A fixed total turned the repository growing into a failure (on a slow runner 66
 # modules took 1.12 s cold and 101 ms warm), while a per-file slowdown of the scanner or the cache still trips them.
 BUDGET_ANCHOR_FILES = 32
-COLD_BUDGET_SECONDS_PER_FILE = 1.0 / BUDGET_ANCHOR_FILES
+# 1.2 s per 32 files: the #136/#138/#140/#149 fact passes cost ~6% per file (15.8 -> 16.8 ms/file locally); 3.11 CI runners
+# measured 32.8 ms/file against the old 31.25. A real per-file regression beyond this still trips it.
+COLD_BUDGET_SECONDS_PER_FILE = 1.2 / BUDGET_ANCHOR_FILES
 WARM_BUDGET_SECONDS_PER_FILE = 0.15 / BUDGET_ANCHOR_FILES  # Windows CI measured 3.2 ms/file warm against 3.1; a re-parse costs ~31 ms/file
 
 
