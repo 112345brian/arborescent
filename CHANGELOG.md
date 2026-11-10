@@ -29,6 +29,9 @@
 ## 0.6.0 — 2026-11-07
 
 ### Added
+- `reexport-ratio` (opt-in per ring via `max_reexport_ratio`): flags a module whose public surface is mostly first-party
+  imports, so relocating an import into a pass-through module no longer clears `internal-import` edges for free (#136).
+  The transitive form (`A -> B -> C` through a pass-through) is left to #138.
 - `arborescent baseline --prune` removes stale baseline entries without recording anything new, so it works while the
   tree has unrelated new violations; the growth log is untouched (#131).
 - `network` effect category (`effect-network`): `forbid = ["network"]` now catches `urllib.request`, `http.client`,

@@ -63,6 +63,7 @@ def test_rule_id_strings_never_change() -> None:
             "literal-outside-owner",
             "non-abstract-port",
             "weakly-typed-port",
+            "reexport-ratio",
             "circular-import",
             "external-import",
             "os-branching",
