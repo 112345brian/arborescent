@@ -299,6 +299,7 @@ class Policy:
     type_checkers: tuple[str, ...] = ("ty",)
     output_dir: str = "."
     baseline: str = "arborescent-baseline.json"
+    ratchet_files: tuple[str, ...] = ()  # numeric ratchets checked by `check --growth-against`
     suggestion_threshold: int = 300
     ruff_overrides: Mapping[str, Any] = field(default_factory=lambda: {})
     customization_labels: tuple[str, ...] = ()

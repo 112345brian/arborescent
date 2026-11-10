@@ -56,7 +56,7 @@ def test_check_prints_the_summary_for_baselined_import_violations_only(repo: Pat
     config = write_policy(repo)
     write_files(repo, {"app/domain.py": "from . import adapters, ports\n"})
     svc = _svc(LocalFileSystem())
-    assert main(["--config", str(config), "baseline", "--allow-growth", "--reason", "cap"], svc) == 0
+    assert main(["--config", str(config), "baseline", "--allow-growth", "--reason", "cap", "--approved-by", "t"], svc) == 0
     _ = capsys.readouterr()
 
     assert main(["--config", str(config), "check", "--no-tools"], svc) == 0
@@ -70,5 +70,5 @@ def test_check_prints_the_summary_for_baselined_import_violations_only(repo: Pat
 def test_the_baseline_command_prints_the_summary_too(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     config = write_policy(repo)
     write_files(repo, {"app/domain.py": "from . import adapters\n"})
-    assert main(["--config", str(config), "baseline", "--allow-growth", "--reason", "cap"], _svc(LocalFileSystem())) == 0
+    assert main(["--config", str(config), "baseline", "--allow-growth", "--reason", "cap", "--approved-by", "t"], _svc(LocalFileSystem())) == 0
     assert "baselined internal-import: 1 entry, 1 importing module, 1 distinct target" in capsys.readouterr().out

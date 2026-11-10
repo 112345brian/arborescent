@@ -48,6 +48,7 @@ settings. The two forms cannot be mixed.
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
+| `ratchet_files` | `[]` | Extra numeric ratchet JSON files (`{"values": {"name": 3}, "growth": []}`) checked by `check --growth-against`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
 | `modularity` | `"ready"` | Needs `package_catalog` for `"report"`. `"ready"`: every package gap fails `check`. `"report"`: gaps are shown as notes and never fail. Independent of `preset`; `--require-modularity` certifies it (see [Strict linting and strict modularity](#strict-linting-and-strict-modularity)). |
@@ -823,13 +824,17 @@ check goes in `stale-config-path-allow`. `source-root-drift` reports a missing e
 `arborescent baseline` creates a baseline the first time. On later runs it removes stale entries, but refuses to add new
 ones. To adopt one previously unrecorded rule family, use `arborescent baseline --adopt FAMILY`; adoption is allowed only
 when that family has no existing baseline entries. Other growth requires
-`arborescent baseline --allow-growth --reason "why this debt is accepted"`. The version-2 JSON baseline records each
+`arborescent baseline --allow-growth --reason "why this debt is accepted" --approved-by "name or issue URL"`. The version-2 JSON baseline records each
 growth reason and the exact keys it added; version-1 baselines still load and are upgraded when written.
 
 `arborescent check --growth-against REF` compares the baseline at `REF` with the working baseline and requires every new
 key to match the keys in growth-log entries appended since that ref. This checks consistency; it does not prove the
 command wrote the file. A person could edit both the baseline and its log by hand, so review of baseline changes
-remains part of the protection (for example, require review through `CODEOWNERS`).
+remains part of the protection (for example, require review through `CODEOWNERS`). Each new growth entry must carry a
+non-blank `reason` and `approved-by`; the tool cannot verify the claim, but a false one is now an explicit, attributable
+string. Files listed in `ratchet_files` get the same check per name: an added or raised value needs a `growth` entry
+`{"key": NAME, "reason": ..., "approved-by": ...}` appended since the ref. To catch two branches that each raise a
+ratchet, run `check --growth-against <target-branch>` on the merge result in CI, not only on each branch.
 
 A shrink-only cap on imports (`module_forbid_imports` with the baseline) is sized in baseline entries, and `from pkg import mod`
 records two entries (`pkg` and `pkg.mod`). After `check` and `baseline`, one line sizes the baselined `internal-import` entries
@@ -883,8 +888,8 @@ projects, its dependency group and lockfile.
 ### `arborescent baseline`
 
 Create the initial baseline or shrink it by removing findings that no longer occur. New findings are rejected by
-default. `--adopt FAMILY` adopts a previously unrecorded family once; `--allow-growth --reason TEXT` records other
-intentional baseline growth and its reason.
+default. `--adopt FAMILY` adopts a previously unrecorded family once; `--allow-growth --reason TEXT --approved-by WHO` records other
+intentional baseline growth, its reason and its approver.
 
 ### `arborescent discover`
 

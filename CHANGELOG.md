@@ -2,6 +2,18 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- Baseline growth entries now carry `approved-by`: `baseline --allow-growth` requires `--approved-by WHO` (adoption
+  records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
+- `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an
+  added or raised value needs an attributed growth entry appended since the ref (#139).
+
+### Changed
+- Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they
+  are newer than the ref.
+
 ## 0.6.0 — 2026-11-07
 
 ### Added

@@ -182,6 +182,7 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
         help="allow baseline growth with a required reason",
     )
     b.add_argument("--reason", help="explain why new baseline keys are being recorded")
+    b.add_argument("--approved-by", metavar="WHO", help="who approved the growth: a name or issue URL (required with --allow-growth)")
     b.add_argument("--prune", action="store_true", help="only remove stale entries; never adds, works while the tree has new violations")
     discover = sub.add_parser(
         "discover",
@@ -411,11 +412,14 @@ def _baseline(
         )
     if args.prune:
         found = [*found, *_stale_engine_findings(svc, root, policy)]
-        if args.adopt is not None or args.allow_growth or args.reason is not None:
-            raise PolicyError("`--prune` cannot be combined with `--adopt`, `--allow-growth` or `--reason`")
+        if args.adopt is not None or args.allow_growth or args.reason is not None or args.approved_by is not None:
+            raise PolicyError("`--prune` cannot be combined with `--adopt`, `--allow-growth`, `--reason` or `--approved-by`")
         removed = ratchet_mod.prune(svc.fs, root / policy.baseline, found)
         print(f"baseline: pruned {removed} stale entr{'y' if removed == 1 else 'ies'} from {policy.baseline}")
         return 0
+    approved_by = _growth_approver(args)
+    path = root / policy.baseline
+    logged = len(ratchet_mod.document(svc.fs, path)["growth"])  # pyright: ignore[reportArgumentType]
     count = ratchet_mod.record(
         svc.fs,
         root / policy.baseline,
@@ -424,6 +428,8 @@ def _baseline(
         allow_growth=args.allow_growth,
         reason=args.reason,
     )
+    if approved_by is not None:
+        ratchet_mod.stamp_approval(svc.fs, path, approved_by, logged)
     print(f"baseline: recorded {count} violation(s) in {policy.baseline}")
     summary = ratchet_mod.internal_import_summary(found)
     if summary is not None:
@@ -606,34 +612,48 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
     return 1 if install_status else (0 if report.ok else 1)
 
 
+def _growth_approver(args: argparse.Namespace) -> str | None:
+    """Who is on record as approving growth: required for ``--allow-growth``; an adoption is attributed to itself."""
+    approver = args.approved_by
+    if approver is not None and not (approver.strip() and args.allow_growth):
+        raise PolicyError("`--approved-by` needs a non-blank value and `--allow-growth`")
+    if args.allow_growth and approver is None:
+        raise PolicyError("`--allow-growth` requires `--approved-by` (a name or issue URL)")
+    if args.adopt is not None:
+        return f"arborescent baseline --adopt {args.adopt}"
+    return approver
+
+
+def _json_at_ref(ref: str, path: str, root: Path, svc: Services) -> dict[str, object]:
+    """The JSON object stored at ``path`` in git ``ref``; ValueError when it cannot be read."""
+    git = svc.runner.run(["git", "show", f"{ref}:{path}"], root)
+    if git.returncode != 0:
+        raise ValueError(f"could not read {path} at {ref}: {git.stderr.strip() or git.stdout.strip()}")
+    with svc.fs.temporary_directory("arborescent-growth-") as temp:
+        copy = temp / "ratchet.json"
+        svc.fs.write_text(copy, git.stdout)
+        data = svc.fs.read_json(copy)
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} at {ref} is not a JSON object")
+    return data
+
+
 def _growth_check(ref: str, policy: Policy, root: Path, svc: Services) -> EngineRun:
     started = svc.clock.now()
-    git = svc.runner.run(["git", "show", f"{ref}:{policy.baseline}"], root)
-    if git.returncode != 0:
-        lines = [
-            f"could not read {policy.baseline} at {ref}: {git.stderr.strip() or git.stdout.strip()}"
-        ]
-        return EngineRun(
-            "baseline growth log", "fail", svc.clock.now() - started, lines
-        )
+    lines: list[str] = []
     try:
         current = ratchet_mod.document(svc.fs, root / policy.baseline)
-        with svc.fs.temporary_directory("arborescent-growth-") as temp:
-            baseline_at_ref = temp / "baseline.json"
-            svc.fs.write_text(baseline_at_ref, git.stdout)
-            at_ref = svc.fs.read_json(baseline_at_ref)
-        if not isinstance(at_ref, dict):
-            raise ValueError("baseline at ref is not a JSON object")
-        if not ratchet_mod.growth_consistent(current, at_ref):
-            lines = [
-                f"baseline changes since {ref} are not fully accounted for by new growth log entries"
-            ]
-            status = "fail"
-        else:
-            lines, status = [f"growth log matches baseline changes since {ref}"], "ok"
-    except (ValueError, TypeError) as exc:
-        lines, status = [f"could not verify baseline growth: {exc}"], "fail"
-    return EngineRun("baseline growth log", status, svc.clock.now() - started, lines)
+        if not ratchet_mod.growth_consistent(current, _json_at_ref(ref, policy.baseline, root, svc)):
+            lines.append(f"baseline changes since {ref} are not fully accounted for by new growth log entries with a reason and approved-by")
+        for name in policy.ratchet_files:
+            current_values = svc.fs.read_json(root / name)
+            if not isinstance(current_values, dict):
+                raise ValueError(f"{name} is not a JSON object")
+            lines.extend(f"{name}: {p}" for p in ratchet_mod.values_growth_problems(current_values, _json_at_ref(ref, name, root, svc)))
+    except (ValueError, TypeError, OSError) as exc:
+        lines.append(f"could not verify ratchet growth: {exc}")
+    status = "fail" if lines else "ok"
+    return EngineRun("baseline growth log", status, svc.clock.now() - started, lines or [f"growth logs match ratchet changes since {ref}"])
 
 
 if __name__ == "__main__":
