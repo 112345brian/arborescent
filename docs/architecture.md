@@ -105,6 +105,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.architecture_contracts` | `single` | application |
 | `arborescent.practices` | `single` | application |
 | `arborescent.selftest` | `single` | application |
+| `arborescent.admission_probes` | `single` | application |
 | `arborescent.suggestions` | `single` | application |
 | `arborescent.packages` | `single` | application |
 | `arborescent.package_tree` | `single` | application |
@@ -152,6 +153,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.cli_migrate` | `single` | composition |
 | `arborescent.cli_coupling` | `single` | composition |
 | `arborescent.cli_cycles` | `single` | composition |
+| `arborescent.cli_admit` | `single` | composition |
 
 ## Data flow of `arborescent check`
 

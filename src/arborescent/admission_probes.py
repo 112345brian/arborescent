@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
-from .classify_audit import admit_check
+from .classify_audit import admit_check, with_reason
 from .domain import Policy
 from .facts import ModuleInfo, extract
 from .rules import RuleContext
@@ -42,6 +42,6 @@ def admission_probes(
     killed: list[str] = []
     survived: list[str] = []
     for label, info, ring, reason, expected in cases:
-        outcome = admit_check(context, info.name, info, ring, known, reason)
+        outcome = admit_check(context, info.name, with_reason(info, reason), ring, known)
         (killed if outcome.admitted == expected else survived).append(f"[admission] {label}")
     return killed, survived, []

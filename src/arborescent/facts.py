@@ -821,7 +821,7 @@ def _dynamic_imports(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple
     """Every ``importlib.import_module(...)`` / ``__import__(...)`` call: its literal absolute target, or ``""`` when it cannot be read statically (#161)."""
     out: set[tuple[int, str]] = set()
     for node in nodes:
-        if not isinstance(node, ast.Call) or (name := _dotted(node.func, aliases)) not in _DYNAMIC_IMPORT_CALLS:
+        if not isinstance(node, ast.Call) or _dotted(node.func, aliases) not in _DYNAMIC_IMPORT_CALLS:
             continue
         target = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
         literal = target.value if isinstance(target, ast.Constant) and isinstance(target.value, str) else ""

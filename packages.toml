@@ -177,6 +177,10 @@ path = "src/arborescent/selftest.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/admission_probes.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/tach_visibility.py"
 role = "source"
 
@@ -391,6 +395,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/cli_cycles.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_admit.py"
 role = "source"
 
 [[packages.paths]]

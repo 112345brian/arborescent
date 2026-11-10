@@ -20,7 +20,7 @@ from .facts import ModuleInfo, RawImport, resolve_targets
 from .rules import RuleContext, fits_ring
 from .taint import TaintResult
 
-__all__ = ["AdmissionOutcome", "admission_warnings", "admit_check", "audit_classification", "suggest_ring"]
+__all__ = ["AdmissionOutcome", "admission_warnings", "admit_check", "audit_classification", "suggest_ring", "with_reason"]
 
 _SHOWN = 3
 
@@ -166,17 +166,18 @@ def _strict_info(info: ModuleInfo) -> ModuleInfo:
     return replace(info, facts=replace(info.facts, imports=info.facts.imports + extra))
 
 
-def _usable_reason(reason: str | None) -> str | None:
-    return reason.strip() if reason is not None and reason.strip() and "\x00" not in reason else None
+def with_reason(info: ModuleInfo, reason: str | None) -> ModuleInfo:
+    """``info`` carrying ``reason`` as its ``ring_reason``; a blank or NUL-bearing reason counts as none and the file's own stays."""
+    if reason is None or not reason.strip() or "\x00" in reason:
+        return info
+    return replace(info, facts=replace(info.facts, arbor_reason=reason.strip()))
 
 
-def admit_check(
-    context: RuleContext, name: str, info: ModuleInfo, ring: str, known: Collection[str], reason: str | None = None,
-) -> AdmissionOutcome:
+def admit_check(context: RuleContext, name: str, info: ModuleInfo, ring: str, known: Collection[str]) -> AdmissionOutcome:
     """#161: the strict, function-level admission test for ``name`` entering ``ring``.
 
     Every import counts (function-local, ``TYPE_CHECKING``, and a dynamic import with a literal target). A dynamic import whose
-    target is not a literal cannot be seen, so it refuses unless a ``ring_reason`` (``reason``, else the file's own) is recorded.
+    target is not a literal cannot be seen, so it refuses unless the module records a ``ring_reason`` (see ``with_reason``).
     A tighter ring that also fits refuses unless a reason is recorded; a reason with nothing tighter to excuse is noted as stale.
     """
     evidence = _evidence(info, known, name)
@@ -186,7 +187,7 @@ def admit_check(
     names = [r.name for r in policy.rings]
     if ring not in names:
         return AdmissionOutcome(name, ring, False, (f"unknown ring {ring!r}; this module's rings are {names}",), (), evidence)
-    given = _usable_reason(reason) or info.facts.arbor_reason  # a blank or NUL-bearing reason counts as none
+    given = info.facts.arbor_reason
     strict = _strict_info(info)
     refusals: list[str] = []
     notes: list[str] = []

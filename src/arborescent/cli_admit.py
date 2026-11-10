@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .annotate import insert_annotation
-from .classify_audit import admission_warnings, admit_check
+from .classify_audit import admission_warnings, admit_check, with_reason
 from .domain import Policy
 from .engine import Services, run_own
 from .facts import extract
@@ -35,7 +35,7 @@ def run_admit(args: argparse.Namespace, policy: Policy, root: Path, svc: Service
         print(f"admit: {info.path}: {info.facts.arbor_error}")
         return 1
     context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
-    outcome = admit_check(context, args.module, info, args.ring, scan.known, args.reason)
+    outcome = admit_check(context, args.module, with_reason(info, args.reason), args.ring, scan.known)
     print(f"evidence: {outcome.evidence}")
     for note in outcome.notes:
         print(f"note: {note}")

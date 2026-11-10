@@ -6,11 +6,22 @@ import ast
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import MINI_FILES, mini_policy, ring_with, services, write_files
+from arborescent_helpers import (
+    MINI_FILES,
+    mini_policy,
+    ring_with,
+    services,
+    write_files,
+)
 
-from arborescent.adapters import FsScanner
 import arborescent.admission_probes as probes
-from arborescent.classify_audit import AdmissionOutcome, admission_warnings, admit_check
+from arborescent.adapters import FsScanner
+from arborescent.classify_audit import (
+    AdmissionOutcome,
+    admission_warnings,
+    admit_check,
+    with_reason,
+)
 from arborescent.cli import main
 from arborescent.facts import ModuleInfo, extract
 from arborescent.rules import RuleContext
@@ -33,7 +44,7 @@ def outcome(root: Path, source: str, ring: str, reason: str | None = None) -> Ad
     policy = mini_policy(ring=ring_with(composition={"may_import": ["*"], "external": ["*"]}))
     scan = FsScanner().scan(policy, root)
     context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
-    return admit_check(context, "app.mod", scan.modules["app.mod"], ring, sorted(scan.known), reason)
+    return admit_check(context, "app.mod", with_reason(scan.modules["app.mod"], reason), ring, sorted(scan.known))
 
 
 def refusals(root: Path, source: str, ring: str, reason: str | None = None) -> list[str]:
@@ -276,6 +287,6 @@ def test_a_broken_gate_would_survive_the_probes(repo: Path, monkeypatch: pytest.
     policy = mini_policy()
     scan = FsScanner().scan(policy, repo)
     real = probes.admit_check
-    monkeypatch.setattr(probes, "admit_check", lambda *a, **k: AdmissionOutcome(a[1], a[3], True, (), (), real(*a, **k).evidence))
+    monkeypatch.setattr(probes, "admit_check", lambda *a: AdmissionOutcome(a[1], a[3], True, (), (), real(*a).evidence))
     _, survived, _ = probes.admission_probes(policy, scan.arbor_index, scan.scope_by_module, scan.known)
     assert survived
