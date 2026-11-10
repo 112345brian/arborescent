@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from .coupling_policy import DEFAULT_BASELINE, DEFAULT_HUB_FAN_IN, CouplingPolicy
+from .package_constraints import ConstraintError, PackageConstraints, parse_package_constraints
 from .domain import (
     ArchitectureScope,
     ChildArbor,
@@ -273,8 +274,16 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         io_modules=frozenset(io_modules),
         taint_seeds=_taint_seeds(raw),
         coupling=_coupling(raw),
+        package_constraints=_package_constraints(raw),
         ratchets=ratchet_specs(raw.get("ratchet", {})),
     )
+
+
+def _package_constraints(raw: Mapping[str, Any]) -> PackageConstraints:
+    try:
+        return parse_package_constraints(raw)
+    except ConstraintError as exc:
+        raise PolicyError(str(exc)) from exc
 
 
 def _coupling(raw: Mapping[str, Any]) -> CouplingPolicy:
@@ -314,7 +323,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
-    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling",
+    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling", "package",
     "ratchet",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
@@ -363,6 +372,7 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
     return replace(
         first,
         coupling=_coupling(raw),
+        package_constraints=_package_constraints(raw),
         rings=(),
         classify=(),
         sources=tuple(path for scope in scopes for path in scope.policy.sources),

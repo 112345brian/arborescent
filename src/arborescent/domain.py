@@ -11,6 +11,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from .coupling_policy import CouplingPolicy
+from .package_constraints import PackageConstraints
 from .presets import (
     DEFAULT_PRESET,
     DEFAULT_TAINT_SEEDS,
@@ -374,6 +375,7 @@ class Policy:
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
     modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
     coupling: CouplingPolicy = field(default_factory=CouplingPolicy)  # #148: entrypoints and hub threshold for `arborescent coupling`
+    package_constraints: PackageConstraints = field(default_factory=PackageConstraints)  # #164: `[package.constraints]`, parsed only, not enforced
     ratchets: tuple[RatchetSpec, ...] = ()  # #147: `[ratchet.<name>]` counters compared with their baseline by `check`
     taint_seeds: tuple[str, ...] = DEFAULT_TAINT_SEEDS  # #98: effect categories (plus "network") a function-level call can be seeded with
 

@@ -604,6 +604,27 @@ repository that already has the target layout. With `package_pyproject` set, `pa
 the same derived values; it is `null` otherwise. `selftest` probes the rule by appending a workspace source for
 a non-dependency to a derived file; with no derived file on disk the probe is listed as skipped with the reason.
 
+### Package constraints: `[package.constraints]`
+
+A package can state what it promises *not* to do, as constraints rather than position (the host owns the rings; see
+`docs/superpowers/specs/2026-11-10-host-owned-rings-and-admission-design.md`). The table lives in the package's own policy
+file, `arborescent.toml` or `[tool.arborescent.package.constraints]` in `pyproject.toml`, and is **separate from**
+`__arbor__` annotations and from `packages.toml` (a `[[packages]]` entry carrying `constraints` is still an unknown key).
+
+```toml
+[package.constraints]
+must_be_pure = true              # bool, default false: no effect use of any category
+forbid_effects = ["network"]     # effect categories this package never uses, default []
+```
+
+`forbid_effects` takes the scanner's effect categories (`clock`, `env`, `identity`, `randomness`, `sleep`, `threads`,
+`process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`); duplicates collapse. They
+apply to paths with role `source`; test, docs and asset paths are exempt.
+
+This release **parses and validates only; nothing is enforced yet**. There is no blind spot in the schema: an unknown key
+under `package` or `package.constraints`, an unknown effect name (`netwrok`), a non-boolean `must_be_pure`, or a
+`forbid_effects` that is not a list of names is a policy error. With no `[package]` table nothing changes.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:
