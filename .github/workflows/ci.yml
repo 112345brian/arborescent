@@ -29,5 +29,7 @@ jobs:
         run: lint-imports --config arborescent-importlinter.toml
       - name: Architecture (arborescent dogfood)
         run: python -m arborescent check --require-profile --require-modularity
+      - name: Coupling ratchet (hub fan-in and entrypoint closure)
+        run: python -m arborescent coupling check
       - name: Mutation self-test
         run: python -m arborescent selftest

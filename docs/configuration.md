@@ -870,6 +870,42 @@ records two entries (`pkg` and `pkg.mod`). After `check` and `baseline`, one lin
 in modules: `baselined internal-import: 232 entries, 41 importing modules, 156 distinct targets`. A target is the dotted module
 as the entry records it, so the package and the submodule of one `from` import count separately.
 
+## Coupling metrics: `[tool.arborescent.coupling]`
+
+Import rules say what may import what; they do not say which modules everything depends on. `arborescent coupling` measures that
+from the same import facts the ring checks use (`from pkg import sub` is one edge to `pkg.sub`). Every import has one kind, and a
+pair imported in several ways takes the strongest: module-level, then function-level only, then `TYPE_CHECKING` only.
+
+```toml
+[tool.arborescent.coupling]
+entrypoints = ["app.__main__"]   # modules whose import closure is measured
+hub_fan_in = 8                   # importers from which a module is a hub (default 8)
+baseline = "arborescent-coupling.json"
+[tool.arborescent.coupling.fan_in_max]
+domain = 40                      # report-only cap on distinct importers per ring
+```
+
+- **Fan-in** per module: distinct importing modules (any kind), those that import it at module level, and the modules that reach
+  it through module-level imports (transitive). A module never counts as its own importer. A ring over its `fan_in_max` is flagged.
+- **Closure** per entrypoint: the project modules loaded by following module-level imports, the entrypoint included. The modules
+  only its function-level imports reach, and those only `TYPE_CHECKING` imports reach, are counted separately and not in the size.
+  Like the ring checks, this does not add the `__init__` of each parent package.
+- **Ambient hub candidates**: a module with at least `hub_fan_in` importers whose public definitions mostly (more than half) use an
+  effect directly (environment, file system, clock, process, ...). A definition owns the lines up to the next one; a parameter
+  default that names an effect is a seam and does not count. Pass such a module in through a port instead of importing it.
+
+`arborescent coupling report [--top N] [--json]` prints all three; `arborescent coupling cost IMPORTER [--imports MODULE...]
+[--modules N]` prints, per entrypoint that loads `IMPORTER`, how many modules its closure gains when `N` new modules (default 3:
+a port, a service and an adapter) are added behind it and import the given modules, so the price of a new module is visible
+before the commit.
+
+The optional ratchet is `arborescent coupling check`, with the counts in `arborescent-coupling.json`: `{"fan-in": {module: n},
+"closure": {entrypoint: n}, "growth": [...]}`. `fan-in` lists the modules at or above `hub_fan_in`; a module not listed must stay
+below it, and every declared entrypoint needs a `closure` entry. A count above its baseline, or an unlisted hub, fails.
+`arborescent coupling baseline` writes the file the first time and afterwards only lowers counts (a smaller or gone entry prints as
+`STALE` in `check`); a rise or a new entry needs `--allow-growth --reason TEXT` and is logged in `growth`. The file is separate
+from the check baseline and is not read by `arborescent check`.
+
 ## Commands and exit codes
 
 All seven commands are documented here. Run `arborescent COMMAND --help` for the concise option list.
@@ -926,6 +962,11 @@ projects, its dependency group and lockfile.
 Create the initial baseline or shrink it by removing findings that no longer occur. New findings are rejected by
 default. `--adopt FAMILY` adopts a previously unrecorded family once; `--allow-growth --reason TEXT --approved-by WHO` records other
 intentional baseline growth, its reason and its approver.
+
+### `arborescent coupling`
+
+`report`, `check`, `baseline` and `cost`, described under [Coupling metrics](#coupling-metrics-toolarborescentcoupling).
+`check` exits 1 on a regression; a policy or baseline error exits 2.
 
 ### `arborescent discover`
 

@@ -12,6 +12,11 @@
   records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
 - `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an
   added or raised value needs an attributed growth entry appended since the ref (#139).
+- `arborescent coupling` (#148): `report` lists fan-in per module (direct, module-level and transitive), the import closure
+  of each declared entrypoint (module-level imports only; function-level and `TYPE_CHECKING` imports counted separately) and
+  ambient-hub candidates; `cost` shows how many modules a new port, service and adapter add to each closure; `check` and
+  `baseline` ratchet hub fan-in and closure sizes in `arborescent-coupling.json`. Configured under
+  `[tool.arborescent.coupling]`.
 
 ### Changed
 - Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they

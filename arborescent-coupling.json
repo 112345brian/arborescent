@@ -1,0 +1,13 @@
+{
+  "fan-in": {
+    "arborescent.domain": 46,
+    "arborescent.facts": 13,
+    "arborescent.package_model": 20,
+    "arborescent.ports": 30,
+    "arborescent.rules": 10
+  },
+  "closure": {
+    "arborescent.__main__": 74
+  },
+  "growth": []
+}
