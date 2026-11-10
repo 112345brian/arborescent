@@ -33,6 +33,14 @@ path = "src/arborescent/baseline.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/baseline_report.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/baseline_history.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/bench.py"
 role = "source"
 
@@ -343,6 +351,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/cli_report.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_baseline_report.py"
 role = "source"
 
 [[packages.paths]]
