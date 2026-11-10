@@ -613,7 +613,7 @@ __arbor__ = {"ring": "domain"}
 ```
 
 The `ring` value must be a string naming one of the policy's configured `rings` (the owning scope's rings in
-multi-scope mode). The legal keys are `ring` and `role`; any other key reports `invalid-arbor-annotation`. `role` accepts only
+multi-scope mode). The legal keys are `ring`, `ring_reason` and `role`; any other key reports `invalid-arbor-annotation`. `role` accepts only
 `"dev_tool"` (`__arbor__ = {"role": "dev_tool"}`, no ring needed) and is valid only under a `dev_tools` path (`dev-tool-misplaced`).
 Arborescent reads the assignment statically, without importing or executing the module. Only direct module-level
 assignments count; assignments inside functions or classes are ignored (they are not module-level annotations at
@@ -642,6 +642,21 @@ so scopes may reuse ring names without sharing a hierarchy.
 Annotations apply to individual Python modules. An annotation in `__init__.py` assigns the package module's own
 ring; it does not assign rings to its descendants. Scope boundaries are configured separately through `sources`,
 `public` and `depends_on`; package extraction is separately invoked through `arborescent packages extract`.
+
+### `ring_reason`: why a looser ring than the tightest one
+
+```python
+__arbor__ = {"ring": "adapters", "ring_reason": "wraps the OS client; no I/O yet"}
+```
+
+`ring_reason` is a human justification, never a computed fact. It must be a non-blank string without NUL characters
+(otherwise `invalid-arbor-annotation`) and is only meaningful next to a `ring`. `arborescent admit` (below) reads it: it excuses
+a ring looser than the tightest one that fits, and it is the only way to admit a module with a dynamic import whose target is
+not a string literal. `check` itself does not judge it.
+
+**Minimum version.** A tool older than the release that added `ring_reason` (the first release after 0.6.0) reports
+`invalid-arbor-annotation` on a file that uses it, because unknown keys are errors. Upgrade every checkout and CI image
+before `admit --reason` writes the key.
 
 ### Requiring annotations
 
@@ -1103,6 +1118,26 @@ Record or lower the `[ratchet.<name>]` baselines (`--name NAME` for one). A rise
 List Python files that still lack a ring classification, grouped by scope and folder with that scope's outermost ring suggested.
 Add valid `__arbor__` ring annotations, matching `classify` patterns, or explicitly exclude files that should not be
 scanned. Git-tracked Python files under noise directories are reported separately by `check`.
+
+### `arborescent admit`
+
+`arborescent admit MODULE --ring RING [--reason TEXT] [--yes]` decides whether one module may enter a ring and writes its
+`__arbor__` annotation. Dry-run by default; `--yes` writes. It exits 1 when it refuses and never writes then.
+
+The scan is strict and function-level: every import counts, including function-local ones, imports under `TYPE_CHECKING`, and
+`importlib.import_module("pkg.x")` / `__import__("pkg.x")` with a literal target (treated as an edge). It refuses when:
+
+- the module's facts violate the ring (the same per-module rules as `check`, applied to all of those imports);
+- a dynamic import has a target that is not a plain absolute string literal and no `ring_reason` is recorded (a gate that cannot
+  see an edge must not certify its absence);
+- a tighter ring also fits and no `ring_reason` is recorded (`--reason TEXT`, or already in the file);
+- the ring is unknown or the module has no owning scope.
+
+It prints the evidence it used, reports importers whose ring cannot import the chosen ring as warnings (`check` fails on those
+later), and notes a `ring_reason` that excuses nothing (possibly stale). A module that is already annotated with another ring
+is left alone. "Admitted" means this module's own facts fit the ring, not that its contribution to the architecture is sound
+(re-export and forwarding laundering have their own rules). Existing modules are not forced through admission, and
+`discover --suggest` remains the read-only view.
 
 ### `arborescent selftest`
 

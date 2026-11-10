@@ -137,6 +137,8 @@ class SourceFacts:
     result_defs: tuple[str, ...] = ()  # module-level functions annotated `-> *Result` / `-> *Outcome` (#141)
     bare_calls: tuple[tuple[int, str], ...] = ()  # (line, dotted callee) of a call used as a whole statement; relative targets keep leading dots (#141)
     function_calls: tuple[FunctionCalls, ...] = ()  # module-level functions and class methods that call something imported (#104)
+    arbor_reason: str | None = None  # `__arbor__["ring_reason"]`: why the module sits in a ring a tighter one would also fit (#161)
+    dynamic_imports: tuple[tuple[int, str], ...] = ()  # (line, literal module name, or "" when the target is not a plain absolute string literal) (#161)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -603,7 +605,7 @@ def _weak_port_returns(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tup
     return tuple(sorted(found))
 
 
-_ARBOR_LEGAL_KEYS = frozenset({"ring", "role"})
+_ARBOR_LEGAL_KEYS = frozenset({"ring", "role", "ring_reason"})
 DEV_TOOL_ROLE = "dev_tool"
 _CONDITIONAL_CONTAINERS = (ast.If, ast.Try, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith)
 
@@ -659,26 +661,39 @@ def _arbor_dictionary(found: list[tuple[ast.expr | None, bool]]) -> dict[str, ob
     return {str(key): item for key, item in annotation.items()}
 
 
-def _arbor_fields(annotation: dict[str, object]) -> tuple[str | None, str | None, str | None]:
+def _arbor_reason(annotation: dict[str, object]) -> tuple[str | None, str | None]:
+    """``(reason, error)`` for ``ring_reason``: a non-blank string without NUL characters, kept as written apart from trimming."""
+    if "ring_reason" not in annotation:
+        return None, None
+    reason = annotation["ring_reason"]
+    if not isinstance(reason, str) or "\x00" in reason or not reason.strip():
+        return None, '__arbor__."ring_reason" must be a non-blank string'
+    return reason.strip(), None
+
+
+def _arbor_fields(annotation: dict[str, object]) -> tuple[str | None, str | None, str | None, str | None]:
+    reason, reason_error = _arbor_reason(annotation)
+    if reason_error is not None:
+        return None, reason_error, None, None
     if "role" in annotation and annotation.get("role") != DEV_TOOL_ROLE:
-        return None, f'__arbor__."role" must be "{DEV_TOOL_ROLE}"', None
+        return None, f'__arbor__."role" must be "{DEV_TOOL_ROLE}"', None, None
     role = DEV_TOOL_ROLE if "role" in annotation else None
     if "ring" not in annotation:
-        return None, (None if role is not None else '__arbor__ dictionary is missing "ring"'), role
+        return None, (None if role is not None else '__arbor__ dictionary is missing "ring"'), role, None
     ring = annotation["ring"]
     if not isinstance(ring, str):
-        return None, '__arbor__."ring" must be a string', None
-    return ring, None, role
+        return None, '__arbor__."ring" must be a string', None, None
+    return ring, None, role, reason
 
 
-def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None, str | None]:
-    """``(ring, error, role)`` from the module's ``__arbor__`` assignment."""
+def _arbor_ring(tree: ast.Module) -> tuple[str | None, str | None, str | None, str | None]:
+    """``(ring, error, role, ring_reason)`` from the module's ``__arbor__`` assignment."""
     found = _find_arbor_assignments(list(tree.body), False)
     if not found:
-        return None, None, None
+        return None, None, None, None
     annotation = _arbor_dictionary(found)
     if isinstance(annotation, str):
-        return None, annotation, None
+        return None, annotation, None, None
     return _arbor_fields(annotation)
 
 
@@ -702,7 +717,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     imports: list[RawImport] = []
     _walk(tree, False, False, imports)
-    arbor_ring, arbor_error, arbor_role = _arbor_ring(tree)
+    arbor_ring, arbor_error, arbor_role, arbor_reason = _arbor_ring(tree)
     suppressions, deferred = _comment_facts(source)
     nodes = list(ast.walk(tree))  # one walk, shared by every fact below
     aliases = _aliases(nodes)  # computed once: each fact below reads it
@@ -728,6 +743,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _result_defs(tree),
         _bare_calls(nodes, call_aliases),
         _function_calls(tree, aliases),
+        arbor_reason,
+        _dynamic_imports(nodes, aliases),
     )
 
 
@@ -795,6 +812,21 @@ def _call_aliases(nodes: Sequence[ast.AST], imported: dict[str, str]) -> dict[st
                 if item.name != "*":
                     aliases[item.asname or item.name] = f"{prefix}{'.' if node.module is not None else ''}{item.name}"
     return aliases
+
+
+_DYNAMIC_IMPORT_CALLS = frozenset({"importlib.import_module", "importlib.__import__", "__import__", "builtins.__import__"})
+
+
+def _dynamic_imports(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str], ...]:
+    """Every ``importlib.import_module(...)`` / ``__import__(...)`` call: its literal absolute target, or ``""`` when it cannot be read statically (#161)."""
+    out: set[tuple[int, str]] = set()
+    for node in nodes:
+        if not isinstance(node, ast.Call) or (name := _dotted(node.func, aliases)) not in _DYNAMIC_IMPORT_CALLS:
+            continue
+        target = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
+        literal = target.value if isinstance(target, ast.Constant) and isinstance(target.value, str) else ""
+        out.add((node.lineno, literal if literal and not literal.startswith(".") and "\x00" not in literal else ""))
+    return tuple(sorted(out))
 
 
 def _call_sites(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str], ...]:

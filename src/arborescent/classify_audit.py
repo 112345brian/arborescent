@@ -13,14 +13,14 @@ the scanner does not see builtins such as ``open()`` or ``print()``, calls throu
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .domain import ALL, Policy, Rule, Violation
-from .facts import ModuleInfo, resolve_targets
+from .facts import ModuleInfo, RawImport, resolve_targets
 from .rules import RuleContext, fits_ring
 from .taint import TaintResult
 
-__all__ = ["audit_classification", "suggest_ring"]
+__all__ = ["AdmissionOutcome", "admission_warnings", "admit_check", "audit_classification", "suggest_ring"]
 
 _SHOWN = 3
 
@@ -144,6 +144,79 @@ def suggest_ring(context: RuleContext, name: str, info: ModuleInfo, known: Colle
         if fits_ring(context, name, info, ring.name, known):
             return f"tightest ring: {ring.name} ({evidence})"
     return f"no ring passes every rule as written ({evidence})"
+
+
+@dataclass(frozen=True)
+class AdmissionOutcome:
+    """#161: whether a new module may enter ring ``ring``. A refusal carries every reason; a caller must read ``admitted``."""
+
+    module: str
+    ring: str
+    admitted: bool
+    refusals: tuple[str, ...]
+    notes: tuple[str, ...]
+    evidence: str
+
+
+def _strict_info(info: ModuleInfo) -> ModuleInfo:
+    """``info`` with each literal-target dynamic import added as an edge, so ``fits_ring`` judges it like any other import."""
+    extra = tuple(
+        RawImport(0, target, (), line, True, False) for line, target in info.facts.dynamic_imports if target
+    )
+    return replace(info, facts=replace(info.facts, imports=info.facts.imports + extra))
+
+
+def _usable_reason(reason: str | None) -> str | None:
+    return reason.strip() if reason is not None and reason.strip() and "\x00" not in reason else None
+
+
+def admit_check(
+    context: RuleContext, name: str, info: ModuleInfo, ring: str, known: Collection[str], reason: str | None = None,
+) -> AdmissionOutcome:
+    """#161: the strict, function-level admission test for ``name`` entering ``ring``.
+
+    Every import counts (function-local, ``TYPE_CHECKING``, and a dynamic import with a literal target). A dynamic import whose
+    target is not a literal cannot be seen, so it refuses unless a ``ring_reason`` (``reason``, else the file's own) is recorded.
+    A tighter ring that also fits refuses unless a reason is recorded; a reason with nothing tighter to excuse is noted as stale.
+    """
+    evidence = _evidence(info, known, name)
+    policy = context.policy_for(name)
+    if policy is None:
+        return AdmissionOutcome(name, ring, False, ("the module has no owning architecture scope",), (), evidence)
+    names = [r.name for r in policy.rings]
+    if ring not in names:
+        return AdmissionOutcome(name, ring, False, (f"unknown ring {ring!r}; this module's rings are {names}",), (), evidence)
+    given = _usable_reason(reason) or info.facts.arbor_reason  # a blank or NUL-bearing reason counts as none
+    strict = _strict_info(info)
+    refusals: list[str] = []
+    notes: list[str] = []
+    if not fits_ring(context, name, strict, ring, known):
+        refusals.append(f"its facts violate ring {ring!r}: an import, external package, effect or abstraction fails that ring's rules")
+    unreadable = sorted(line for line, target in info.facts.dynamic_imports if not target)
+    if unreadable and given is None:
+        lines = ", ".join(map(str, unreadable))
+        refusals.append(f"a dynamic import with a non-literal target (line {lines}) cannot be verified; record a ring_reason that names it")
+    tighter = next((c for c in names[: names.index(ring)] if fits_ring(context, name, strict, c, known)), None)
+    if tighter is not None and given is None:
+        refusals.append(f"ring {tighter!r} also fits; use it, or record why {ring!r} is needed as ring_reason")
+    if given is not None and tighter is None and not unreadable:
+        notes.append("ring_reason is recorded but no tighter ring fits and nothing is unverifiable: the reason may be stale")
+    return AdmissionOutcome(name, ring, not refusals, tuple(refusals), tuple(notes), evidence)
+
+
+def admission_warnings(
+    context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], name: str, ring: str,
+) -> tuple[str, ...]:
+    """#161: importers of ``name`` whose own ring may not import ``ring`` (``fits_ring`` judges outgoing edges only; ``check`` fails on these later)."""
+    policy = context.policy_for(name)
+    if policy is None:
+        return ()
+    found = sorted(
+        importer for importer, targets in _internal_targets(context, modules, known).items()
+        if name in targets and (importer_ring := context.resolve_ring(importer)) is not None
+        and ring not in policy.allowed_rings(importer_ring)
+    )
+    return tuple(f"{importer} [{context.resolve_ring(importer)}] imports it and may not import ring {ring!r}" for importer in found)
 
 
 def audit_classification(
