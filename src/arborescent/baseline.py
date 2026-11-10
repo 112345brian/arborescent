@@ -120,7 +120,7 @@ def _growth_entries(old: set[str], current: set[str], adopt: str | None, allow_g
     if adopt is not None:
         return _adoption_entries(old, added, adopt)
     if added and not allow_growth:
-        raise BaselineError(f"baseline growth refused; {len(added)} new violation(s); use `--allow-growth --reason TEXT`")
+        raise BaselineError(f"baseline growth refused; {len(added)} new violation(s); use `--allow-growth --reason TEXT --approved-by WHO`")
     if allow_growth and added:
         return [{"reason": reason.strip() if reason is not None else "", "added": sorted(added)}]
     return []

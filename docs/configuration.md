@@ -756,7 +756,7 @@ configures (falling back to the `secrets-guard` tests folder when `effect-patch`
 only `secrets-guard`; set `effect-patch` directly to enable this check without also enabling the environment-scrubbing
 check `secrets-guard` makes).
 `noqa` comments do not suppress native effect findings. Suppression and reasoned `discard()` counts are always reported;
-increases need `baseline --allow-growth --reason` (or one-time family adoption), while removals can shrink the baseline.
+increases need `baseline --allow-growth --reason --approved-by` (or one-time family adoption), while removals can shrink the baseline.
 
 `effect-via-import` propagates at module granularity: a module that mixes a forbidden effect with other code taints
 every importer, even one that only uses the clean part. It also stops at calls on an object of unknown type (it

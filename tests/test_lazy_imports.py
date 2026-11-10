@@ -132,7 +132,7 @@ def test_a_baselined_import_is_tolerated_and_a_new_one_fails(repo: Path, capsys:
     config = write_policy(repo)
     write_files(repo, {"app/adapters.py": "def f() -> None:\n    import os\n"})
     svc = _svc()
-    assert main(["--config", str(config), "baseline", "--allow-growth", "--reason", "existing"], svc) == 0
+    assert main(["--config", str(config), "baseline", "--allow-growth", "--reason", "existing", "--approved-by", "me"], svc) == 0
     _ = capsys.readouterr()
     assert main(["--config", str(config), "check", "--no-tools"], svc) == 0
     assert "function-level imports by module:\n  app.adapters: 1 (0 with `# deferred:`)" in capsys.readouterr().out
