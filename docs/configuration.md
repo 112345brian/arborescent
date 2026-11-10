@@ -162,6 +162,17 @@ it owns. The extraction itself is done by a migration library (git filter-repo, 
 Each path can carry string metadata that is recorded in the manifest, such as the import package name or the relative path to
 an independent `arborescent.toml`.
 
+### What "package" means
+
+In Arborescent a package is a Python distribution-sized ownership unit: a stable identity that owns a set of paths, and
+that can be extracted into its own repository. It is not a promise of cross-language enforcement.
+
+- Non-Python files inside a package (templates, SQL, data) are assets. They can carry metadata, but Arborescent does not
+  analyse them.
+- A repository that mixes languages is several units, each described by its main language. Only the Python unit gets
+  import analysis, rings and cycle checks.
+- Renaming the concept and polyglot support are deferred; see [#31](https://github.com/112345brian/arborescent/issues/31).
+
 ```toml
 [[packages]]
 id = "collection-core"
