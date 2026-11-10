@@ -279,6 +279,24 @@ reason = "the protocol between the process adapter and the config loader"
 identifier-like strings (letters, digits, `_`, `.`, `-`, at most 80 characters) are recorded, and docstrings are not spellings.
 A `modules` glob that matches no module is reported, and `selftest` spells each literal in a module that does not own it.
 
+`result_discard` is an opt-in check that a caller reads the outcome of a function it calls (a new "refused" or "skipped" outcome
+is otherwise silently ignored). It reports `result-discard` for a call written as a whole statement:
+
+```toml
+[tool.arborescent.result_discard]
+functions = ["app.usecases.place_order"]   # dotted names marked result-bearing, whatever they are annotated with
+rings = ["adapters", "composition"]        # only modules in these rings are checked (leave out for every ring)
+convention = true                          # default: a module-level function annotated `-> *Result` or `-> *Outcome` is marked
+```
+
+A function is result-bearing when it is listed in `functions`, or (with `convention`) when its module-level definition is
+annotated `-> FooResult` / `-> FooOutcome` (also `"FooResult"`, `mod.FooResult`, `FooResult | None`, `Optional[FooResult]`; not
+`list[FooResult]`, and not a bare `Result`). Binding, returning, passing on or testing the value is a use, and `_ = f()` is a
+deliberate discard; `await f()` as a statement is reported. Calls are resolved purely by syntax: `f()`, `module.f()`, an
+aliased or relative import, and a call inside the defining module. Dynamic calls are out of scope and never reported: methods
+(`obj.f()`), callbacks and variables, `getattr`, `functools.partial`, `*` imports, re-exports and shadowed names. Use a type
+checker's unused-result check for those. This is separate from the `discard(value, reason=...)` inventory above.
+
 Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
 and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
 and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (verified with Ruff 0.17.2,
@@ -700,6 +718,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-via-import` | a ring forbids an effect that a module it imports (directly or through that module's own imports, same scope, not an `if TYPE_CHECKING` import) uses directly; the message names the import chain |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
+| `result-discard` | a call used as a whole statement drops the value of a result-bearing function (`result_discard`); `_ = f()` is a deliberate discard and is not reported |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |

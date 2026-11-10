@@ -35,6 +35,7 @@ __all__ = [
     "Mutation",
     "Policy",
     "PolicyError",
+    "ResultDiscard",
     "RingRule",
     "Rule",
     "ToolResult",
@@ -63,6 +64,7 @@ class Rule(StrEnum):
     WILDCARD_RING = "wildcard-ring"
     SUPPRESSION = "suppression"
     DISCARD = "discard"
+    RESULT_DISCARD = "result-discard"
     EFFECT_CLOCK = "effect-clock"
     EFFECT_ENV = "effect-env"
     EFFECT_IDENTITY = "effect-identity"
@@ -243,6 +245,15 @@ class OwnedLiteral:
 
 
 @dataclass(frozen=True)
+class ResultDiscard:
+    """Opt-in ``result_discard`` (#141): a bare call statement that drops the value of a result-bearing function."""
+
+    functions: tuple[str, ...] = ()  # dotted names marked result-bearing in addition to the naming convention
+    rings: tuple[str, ...] = ()  # rings whose modules are checked; empty means every ring
+    convention: bool = True  # a module-level `-> *Result` / `-> *Outcome` function is result-bearing
+
+
+@dataclass(frozen=True)
 class ArchitectureScope:
     """One independently governed source tree and its import boundary."""
 
@@ -284,6 +295,7 @@ class Policy:
     child_policy_mode: str = "certify"  # "certify" keeps child-owned policy; "parent" overrides it
     module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
     owned_literals: tuple[OwnedLiteral, ...] = ()
+    result_discard: ResultDiscard | None = None
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution

@@ -192,6 +192,43 @@ def _owned_literal_findings(context: RuleContext, name: str, info: ModuleInfo) -
     ]
 
 
+def _absolute_callee(module: str, is_package: bool, target: str) -> str:
+    """A fact's callee as a dotted name: a relative target is resolved against the calling module; a bare name is local to it."""
+    dots = len(target) - len(target.lstrip("."))
+    if dots == 0:
+        return target if "." in target else f"{module}.{target}"
+    package = module.split(".") if is_package else module.split(".")[:-1]
+    base = package[: len(package) - (dots - 1)] if dots - 1 <= len(package) else None
+    if base is None:
+        return ""
+    return ".".join([*base, target[dots:]]).strip(".")
+
+
+def _result_discard_findings(context: RuleContext, name: str, info: ModuleInfo, modules: Mapping[str, ModuleInfo]) -> list[Violation]:
+    """A call statement that drops the value of a result-bearing function (#141); dynamic calls are not resolved."""
+    local_policy = context.policy_for(name)
+    setting = local_policy.result_discard if local_policy is not None else None
+    if setting is None or (setting.rings and context.resolve_ring(name) not in setting.rings):
+        return []
+    marked = set(setting.functions)
+    seen: dict[str, int] = {}
+    out: list[Violation] = []
+    for line, target in info.facts.bare_calls:
+        callee = _absolute_callee(name, info.is_package, target)
+        owner, _, function = callee.rpartition(".")
+        owner_info = modules.get(owner)
+        if callee not in marked and not (setting.convention and owner_info is not None and function in owner_info.facts.result_defs):
+            continue
+        seen[callee] = seen.get(callee, 0) + 1
+        out.append(Violation(
+            Rule.RESULT_DISCARD, name,
+            f"[{name}] calls {callee}() as a statement and drops its result (call #{seen[callee]}); bind it, return it, test it, "
+            f"or discard it on purpose with `_ = {callee.rpartition('.')[2]}(...)`",
+            line,
+        ))
+    return out
+
+
 def _owner_text(item: OwnedLiteral) -> str:
     parts = [f"modules {list(item.modules)}"] if item.modules else []
     return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
@@ -466,7 +503,7 @@ def check_modules(
         local_policy = context.policy_for(name)
         is_tool = name in context.tool_modules  # developer tooling: no ring, may import product code
         out += _module_preamble(context, name, info, known, tops)
-        out += _owned_literal_findings(context, name, info)
+        out += _owned_literal_findings(context, name, info) + _result_discard_findings(context, name, info, modules)
         if is_tool:
             out += _dev_tool_findings(context, name, info, _ImportEnv(modules, known, tops, import_graph))
             continue

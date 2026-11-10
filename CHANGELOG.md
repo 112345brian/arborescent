@@ -13,6 +13,9 @@
   every other stdlib and third-party import is still allow-listed (#128).
 - `package-never-depended-on` (information): flags a package that depends on nothing and that no other package declares
   or imports (#130).
+- `result_discard` and the `result-discard` rule: a call statement that drops the value of a result-bearing function (listed, or
+  annotated `-> *Result` / `-> *Outcome`) is reported; `_ = f()` is a deliberate discard; per-ring scoping; dynamic calls are out
+  of scope (#141).
 - A ring-mismatched `internal-import` now ends with the whole closure a move would drag along (the project modules to
   move too, and the externals to allow), instead of one edge per run. The baseline key is unchanged (#133).
 - `arborescent discover --suggest` prints, per module with no ring, the innermost ring its imports and effects already
