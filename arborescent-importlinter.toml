@@ -98,6 +98,7 @@ forbidden_modules = [
     "arborescent.cli_migrate",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 allow_indirect_imports = true
 
@@ -217,6 +218,7 @@ forbidden_modules = [
     "arborescent.cli_migrate",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 allow_indirect_imports = true
 
@@ -308,6 +310,7 @@ forbidden_modules = [
     "arborescent.cli_migrate",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 allow_indirect_imports = true
 
@@ -436,6 +439,7 @@ forbidden_modules = [
     "arborescent.cli_migrate",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 allow_indirect_imports = true
 
@@ -486,6 +490,7 @@ source_modules = [
     "arborescent.cli_migrate",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 forbidden_modules = [
     "asyncio",
@@ -595,6 +600,7 @@ source_modules = [
     "arborescent.ports",
     "arborescent.practices",
     "arborescent.presets",
+    "arborescent.pytest_io_block",
     "arborescent.ratchet_config",
     "arborescent.ratchet_measure",
     "arborescent.ratchets",
@@ -794,6 +800,7 @@ source_modules = [
     "arborescent.ports",
     "arborescent.practices",
     "arborescent.presets",
+    "arborescent.pytest_io_block",
     "arborescent.ratchet_config",
     "arborescent.ratchet_measure",
     "arborescent.ratchets",

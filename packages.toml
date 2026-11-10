@@ -57,6 +57,10 @@ path = "src/arborescent/ratchets.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/pytest_io_block.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/bench.py"
 role = "source"
 

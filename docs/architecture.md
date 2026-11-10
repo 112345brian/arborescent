@@ -95,6 +95,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.ratchet_config` | `single` | application |
 | `arborescent.ratchet_measure` | `single` | application |
 | `arborescent.ratchets` | `single` | application |
+| `arborescent.pytest_io_block` | `single` | composition |
 | `arborescent.bench` | `single` | application |
 | `arborescent.config` | `single` | application |
 | `arborescent.certification` | `single` | application |

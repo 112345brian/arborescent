@@ -38,6 +38,8 @@ pyrefly = ["pyrefly>=0.40"]
 filterrepo = ["git-filter-repo>=2.38"]
 # What `arborescent packages migrate` rewrites imports with, after the library ran.
 libcst = ["libcst>=1.0"]
+# The opt-in `arborescent.pytest_io_block` plugin (`-p arborescent.pytest_io_block`); no other module needs it.
+pytest = ["pytest>=8"]
 all = ["import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "ty>=0.0.50"]
 dev = ["pytest>=8", "jsonschema>=4", "import-linter>=2.0", "tach>=0.30", "pyright>=1.1.400", "ruff>=0.16.3", "basedpyright>=1.30", "ty>=0.0.50", "pyrefly>=0.40", "git-filter-repo>=2.38", "libcst>=1.0", "build"]
 
@@ -67,7 +69,7 @@ source_roots = ["src"]
 exclude = ["__pycache__", "tests", "tools"]
 forbid_circular_imports = true
 # Optional extras that are only imported by modules run as a subprocess (driver_libcst_scan): not required dependencies.
-tach_external_exclude = ["libcst"]
+tach_external_exclude = ["libcst", "pytest"]
 rings = ["domain", "ports", "application", "adapters", "composition"]
 type_checkers = ["ty", "pyright"]
 
@@ -97,7 +99,7 @@ forbid = ["clock", "dynamic-import", "env", "identity", "patch", "randomness", "
 
 [tool.arborescent.ring.composition]
 may_import = ["*"]
-external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
+external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random", "time", "types", "pytest", "arborescent"]
 
 [tool.arborescent.classify]
 "arborescent" = "domain"
@@ -131,6 +133,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.ratchet_config" = "application"
 "arborescent.ratchet_measure" = "application"
 "arborescent.ratchets" = "application"
+"arborescent.pytest_io_block" = "composition"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
 "arborescent.architecture_contracts" = "application"
