@@ -85,6 +85,7 @@ class Rule(StrEnum):
     RESTRICTED_IMPORT = "restricted-import"
     LITERAL_OUTSIDE_OWNER = "literal-outside-owner"
     NON_ABSTRACT_PORT = "non-abstract-port"
+    REEXPORT_RATIO = "reexport-ratio"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
     CIRCULAR_IMPORT = "circular-import"
@@ -227,6 +228,7 @@ class RingRule:
     os_branching: bool = False
     forbid: frozenset[str] | None = None  # None means the positional preset default; [] explicitly allows all effects
     require_abstract: bool = False  # every public class/function in this ring must be an abc.ABC/typing.Protocol shape
+    max_reexport_ratio: float | None = None  # share of a module's public surface that may be first-party imports; None = unchecked (#136)
 
 
 @dataclass(frozen=True)
