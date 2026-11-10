@@ -20,6 +20,7 @@ from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .classify_audit import suggest_ring
 from .cli_baseline_report import add_report_parser, run_report
+from .cli_coupling import add_coupling_parser, run_coupling
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
@@ -208,6 +209,7 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
         help="write the annotations instead of printing what would change",
     )
     sub.add_parser("selftest", help="mutation-test the rules")
+    add_coupling_parser(sub)
 
 
 def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
@@ -318,6 +320,8 @@ def _dispatch(
 ) -> int:
     if args.command == "packages":
         return _dispatch_packages(args, policy, root, svc, tools)
+    if args.command == "coupling":
+        return run_coupling(args, policy, root, svc)
     handlers: dict[str, Callable[[], int]] = {
         "generate": lambda: _generate(policy, root, svc),
         "install-tools": lambda: _install_tools(args, policy, root, svc),

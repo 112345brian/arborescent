@@ -176,6 +176,10 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.cli_report" = "composition"
 "arborescent.cli_baseline_report" = "composition"
 "arborescent.cli_migrate" = "composition"
+"arborescent.cli_coupling" = "composition"
+"arborescent.coupling" = "domain"
+"arborescent.coupling_policy" = "domain"
+"arborescent.coupling_ratchet" = "domain"
 "arborescent.__main__" = "composition"
 
 # The annotation layer never depends on the driver (#67): the driver sits on top of it and may import it, not the reverse.
@@ -187,6 +191,11 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.migration_json" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
 "arborescent.migration_export" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
 "arborescent.packages" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
+
+# Import closure of the one program entrypoint, and the importer count from which a module is a hub (#148); `arborescent coupling check` ratchets both.
+[tool.arborescent.coupling]
+entrypoints = ["arborescent.__main__"]
+hub_fan_in = 8
 
 [tool.arborescent.practices]
 crlf = ["*.sh", "*.bash"]
@@ -202,6 +211,7 @@ docs-sync = "docs/architecture.md"
 "src/arborescent/cli_install.py" = ["T20"]
 "src/arborescent/cli_report.py" = ["T20"]
 "src/arborescent/cli_migrate.py" = ["T20"]
+"src/arborescent/cli_coupling.py" = ["T20"]
 
 # Only the command line installs and reports the pre-push hook; `selftest` injects an outside import (importable_by_probes).
 [tool.arborescent.importable_by]

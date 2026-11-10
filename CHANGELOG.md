@@ -20,6 +20,11 @@
   importing a pass-through wrapper of C; the wrapper import is reported against the importer (#138).
 - `weakly-typed-port`: a ring with `require_typed_ports = true` flags `typing.Protocol` methods whose return type is
   missing, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set` or `Mapping[str, Any]` (#140).
+- `arborescent coupling` (#148): `report` lists fan-in per module (direct, module-level and transitive), the import closure
+  of each declared entrypoint (module-level imports only; function-level and `TYPE_CHECKING` imports counted separately) and
+  ambient-hub candidates; `cost` shows how many modules a new port, service and adapter add to each closure; `check` and
+  `baseline` ratchet hub fan-in and closure sizes in `arborescent-coupling.json`. Configured under
+  `[tool.arborescent.coupling]`.
 
 ## 0.6.0 — 2026-11-07
 

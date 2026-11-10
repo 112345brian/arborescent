@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
+from .coupling_policy import DEFAULT_BASELINE, DEFAULT_HUB_FAN_IN, CouplingPolicy
 from .domain import (
     ArchitectureScope,
     ChildArbor,
@@ -264,6 +265,29 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         preset=_preset_overrides(PRESETS[preset_name], raw),
         io_modules=frozenset(io_modules),
         taint_seeds=_taint_seeds(raw),
+        coupling=_coupling(raw),
+    )
+
+
+def _coupling(raw: Mapping[str, Any]) -> CouplingPolicy:
+    table = raw.get("coupling", {})
+    if not isinstance(table, Mapping):
+        raise PolicyError("`coupling` must be a table")
+    table = cast("Mapping[str, Any]", table)
+    unknown = set(table) - {"entrypoints", "fan_in_max", "hub_fan_in", "baseline"}
+    if unknown:
+        raise PolicyError(f"unknown key in `coupling`: {sorted(unknown)}")
+    caps = table.get("fan_in_max", {})
+    hub = table.get("hub_fan_in", DEFAULT_HUB_FAN_IN)
+    baseline = table.get("baseline", DEFAULT_BASELINE)
+    if not isinstance(caps, Mapping) or not all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in cast("Mapping[str, Any]", caps).values()):
+        raise PolicyError("`coupling.fan_in_max` must map ring names to positive integers")
+    if not isinstance(hub, int) or isinstance(hub, bool) or hub < 1:
+        raise PolicyError("`coupling.hub_fan_in` must be a positive integer")
+    if not isinstance(baseline, str) or not baseline:
+        raise PolicyError("`coupling.baseline` must be a file path")
+    return CouplingPolicy(
+        _string_list(table, "entrypoints"), tuple(sorted(cast("Mapping[str, int]", caps).items())), hub, baseline
     )
 
 
@@ -282,7 +306,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
-    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds",
+    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
@@ -329,6 +353,7 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
     first = scopes[0].policy
     return replace(
         first,
+        coupling=_coupling(raw),
         rings=(),
         classify=(),
         sources=tuple(path for scope in scopes for path in scope.policy.sources),

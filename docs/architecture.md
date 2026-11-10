@@ -132,6 +132,9 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.tach_visibility` | `single` | domain |
 | `arborescent.classify_audit` | `single` | domain |
 | `arborescent.taint` | `single` | domain |
+| `arborescent.coupling` | `single` | domain |
+| `arborescent.coupling_policy` | `single` | domain |
+| `arborescent.coupling_ratchet` | `single` | domain |
 | `arborescent.testing` | `single` | adapters |
 | `arborescent.typecheckers` | `single` | adapters |
 | `arborescent.__main__` | `single` | composition |
@@ -140,6 +143,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.cli_report` | `single` | composition |
 | `arborescent.cli_baseline_report` | `single` | composition |
 | `arborescent.cli_migrate` | `single` | composition |
+| `arborescent.cli_coupling` | `single` | composition |
 
 ## Data flow of `arborescent check`
 
