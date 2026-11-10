@@ -2,6 +2,11 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Fixed
+- The `STALE baseline entry` hint now points at `arborescent baseline --prune`, which works while other violations are unbaselined (#135).
+
 ## 0.6.0 — 2026-11-07
 
 ### Added
