@@ -28,6 +28,7 @@ from .presets import (
     TAINT_SEED_CATEGORIES,
     Preset,
 )
+from .ratchet_config import ratchet_specs
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")  # mirrors the scanner: only identifier-like strings are recorded
 
@@ -266,6 +267,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         io_modules=frozenset(io_modules),
         taint_seeds=_taint_seeds(raw),
         coupling=_coupling(raw),
+        ratchets=ratchet_specs(raw.get("ratchet", {})),
     )
 
 
@@ -307,6 +309,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
     "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling",
+    "ratchet",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",

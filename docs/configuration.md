@@ -945,6 +945,53 @@ below it, and every declared entrypoint needs a `closure` entry. A count above i
 `STALE` in `check`); a rise or a new entry needs `--allow-growth --reason TEXT` and is logged in `growth`. The file is separate
 from the check baseline and is not read by `arborescent check`.
 
+## Named ratchets: `[tool.arborescent.ratchet.<name>]`
+
+A named ratchet is a per-module counter that may only go down: function-level imports, bare prints, calls to a banned
+reader, findings of one rule, the size of an allow-list. Every ratchet uses one baseline format and one way to be lowered
+or raised, so a project does not need a baseline file and shrink-only script per scanner.
+
+```toml
+[tool.arborescent.ratchet.bare-prints]
+ast_call = "print"            # calls of this dotted name, per module
+scope = ["myapp.*"]           # optional module globs; default: every scanned module
+
+[tool.arborescent.ratchet.nested-imports]
+regex = '^[ ]+(import|from) '  # matches per module (Python regex, multi-line)
+
+[tool.arborescent.ratchet.suppressions]
+rule = "suppression"          # findings of one of Arborescent's own rule ids, per module
+
+[tool.arborescent.ratchet.legacy-scan]
+command = ["python", "tools/scan.py"]   # prints one `module count` line per module
+baseline = "ratchets/legacy.json"       # optional; default arborescent-ratchets.json
+```
+
+Each table sets exactly one measure (`rule`, `regex`, `ast_call` or `command`). `rule` takes an id from the rules above and
+counts findings by subject; the engines' findings (`ruff-*`) are not Arborescent's own rules, so measure those with a
+`command`. A `command` runs from the repository root, must exit 0 and print `module count` lines (blank lines are ignored; a
+repeated module, a line that is not `module count`, or a missing executable fails the ratchet). A file that cannot be read or
+parsed fails an `ast_call`/`regex` ratchet; it is never counted as zero.
+
+The baseline file holds every ratchet that names it:
+
+```json
+{"version": 1, "ratchets": {"bare-prints": {"myapp.cli": 4}}, "growth": []}
+```
+
+A module at zero is not listed, and a ratchet recorded at zero is `{}`. `arborescent check` compares each ratchet with its
+baseline and fails on a count above it (a regression) or below it (stale: run `arborescent ratchet` so the gain cannot be
+spent again), and on a ratchet that has no baseline yet. In `--changed` runs only regressions are reported.
+
+`arborescent ratchet [--name NAME]` records the baselines: the first recording of a ratchet is an adoption and logs itself,
+a later one only lowers counts. A count that would rise is refused unless
+`--allow-growth --reason "why" --approved-by "name or issue URL"` is given; that appends a growth entry
+`{"key": "NAME|MODULE", "reason": ..., "approved-by": ..., "from": 2, "to": 3}`. This is the same `key` / `reason` /
+`approved-by` record `ratchet_files` use. `arborescent check --growth-against REF` also reads each ratchet baseline at `REF`
+and fails when a module was added or raised since without an attributed entry appended since (a baseline file that is new since
+`REF` must log every count), or when existing log entries were rewritten. As with the main baseline, this checks consistency
+and not authorship: review baseline changes (for example through `CODEOWNERS`).
+
 ## Commands and exit codes
 
 All seven commands are documented here. Run `arborescent COMMAND --help` for the concise option list.
@@ -1006,6 +1053,11 @@ intentional baseline growth, its reason and its approver.
 
 `report`, `check`, `baseline` and `cost`, described under [Coupling metrics](#coupling-metrics-toolarborescentcoupling).
 `check` exits 1 on a regression; a policy or baseline error exits 2.
+
+### `arborescent ratchet`
+
+Record or lower the `[ratchet.<name>]` baselines (`--name NAME` for one). A rise needs
+`--allow-growth --reason TEXT --approved-by WHO`; see [Named ratchets](#named-ratchets-toolarborescentratchetname).
 
 ### `arborescent discover`
 

@@ -41,6 +41,22 @@ path = "src/arborescent/baseline_history.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/cli_ratchet.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/ratchet_config.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/ratchet_measure.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/ratchets.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/bench.py"
 role = "source"
 
