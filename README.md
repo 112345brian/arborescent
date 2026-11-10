@@ -135,6 +135,7 @@ arborescent check --require-modularity                # fail unless every module
 arborescent check --changed origin/main      # only files changed since a git ref
 arborescent discover     # list Python files that still need ring classification
 arborescent baseline     # record existing violations; future checks fail on new findings
+arborescent baseline report  # read-only: clusters, concentration and burn-down of the baseline
 arborescent selftest     # mutation-test native rules and fail if a rule stops firing
 arborescent bench DIR…   # cold/warm timings of every engine on prepared codebases
 arborescent packages validate
