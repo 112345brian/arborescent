@@ -111,6 +111,7 @@ class Rule(StrEnum):
     UNDECLARED_IMPORTS = "undeclared-imports"
     STALE_CONFIG_PATH = "stale-config-path"
     SOURCE_ROOT_DRIFT = "source-root-drift"
+    TEST_REFERENCE = "test-reference"
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
     UNANNOTATED_MODULE = "unannotated-module"
@@ -158,7 +159,7 @@ EFFECT_RULES: Mapping[str, Rule] = {
 # A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
-    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS,
+    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE,
 })
 
 

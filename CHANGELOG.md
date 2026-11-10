@@ -38,6 +38,9 @@
   for every added or raised count (#147).
 ### Fixed
 - The `STALE baseline entry` hint now points at `arborescent baseline --prune`, which works while other violations are unbaselined (#135).
+- `test-reference` practice (information): reports public functions of I/O-free rings that no function under the tests
+  folder imports and calls, resolved through aliases and package re-exports. `test-reference-exempt` skips names. The
+  per-function call facts it reads (`SourceFacts.function_calls`) are reusable by an adapter-equivalence check (#104).
 
 ## 0.6.0 — 2026-11-07
 

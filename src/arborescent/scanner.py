@@ -17,6 +17,7 @@ from .facts import (
     DEV_TOOL_ROLE,
     EffectUse,
     Forwarder,
+    FunctionCalls,
     ModuleInfo,
     RawImport,
     SourceFacts,
@@ -28,7 +29,7 @@ from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 19
+_CACHE_VERSION = 20
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
@@ -219,6 +220,7 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
         [[line, reason] for line, reason in f.deferred],
         [[line, name] for line, name in f.calls],
         list(f.result_defs), [[line, target] for line, target in f.bare_calls],
+        [[c.name, c.line, list(c.calls)] for c in f.function_calls],
     ]
 
 
@@ -237,6 +239,7 @@ def _facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple((item[0], item[1]) for item in raw[17]),
         tuple((item[0], item[1]) for item in raw[18]),
         tuple(raw[19]), tuple((item[0], item[1]) for item in raw[20]),
+        tuple(FunctionCalls(c[0], c[1], tuple(c[2])) for c in raw[21]),
     )
 
 
