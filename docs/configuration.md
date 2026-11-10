@@ -683,6 +683,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `wildcard-ring` | a non-outermost ring uses `*` in `external` or `may_import` (one finding per ring and axis) |
 | `suppression` | a `# noqa`, `# ruff: noqa` or `# type: ignore` directive is inventoried by module and kind; each occurrence is ratcheted |
 | `discard` | a `discard(value, reason=...)` call is inventoried by module; each call is ratcheted without claiming type-aware `Result` detection |
+| `lazy-import` | a function-level `import` with no `# deferred: <reason>` on its line or alone on the line above it; keyed by what it imports and its ordinal in the module, so moving it does not change the key. See "Function-level imports and import cycles" below |
 | `effect-clock` | a ring that forbids `clock` reads the ambient clock (`time.time`, `datetime.now` and related calls) |
 | `effect-env` | a ring that forbids `env` reads environment variables through `os.environ` or `os.getenv` |
 | `effect-identity` | a ring that forbids `identity` generates UUID identities |
@@ -746,6 +747,42 @@ cannot tell what `helper.do_it()` does when `helper`'s type is not known statica
 boundaries (that is `scope-effect-leak`, one hop, checked separately) or an `if TYPE_CHECKING` import (nothing runs
 there to inherit from). The function-level taint pass below (#98) is the sharper, same-granularity complement: it
 names which function actually calls the effectful code, instead of flagging every importer of the module that holds it.
+
+### Function-level imports and import cycles
+
+A function-level `import` is the usual workaround for an import cycle or a heavy dependency: it stops the
+`ImportError` and leaves the coupling in the graph. Each one is its own finding, `lazy-import`, so a baseline of them is
+a visible, shrink-only list per module. `check` prints `function-level imports by module:` with the total and how many
+carry a reason. An import under `if TYPE_CHECKING` never runs and is not counted. A decision is recorded on the line
+or alone on the line above (comment lines that continue it are fine, a blank line ends it):
+
+```python
+def load() -> None:
+    import heavy  # deferred: 300 ms of startup the CLI help path should not pay
+    # deferred: the registry imports this module at import time
+    import registry
+```
+
+The reason must not be empty. A justified import is counted but is not a finding. It still counts as an edge in the import
+graph, so `circular-import` and `arborescent cycles` see it. (Excluding these imports from a closure size is not done
+here; the closure used by `internal-import` move suggestions still follows them.)
+
+`arborescent cycles` reports the cycles themselves. For each strongly connected component of the first-party import
+graph it lists every edge with its kind (`import-time`, `function-level` or `type-checking`; an edge that several
+imports make takes the strongest kind) and the import lines, then:
+
+- **cut**: an approximate minimum feedback arc set, the edges whose removal leaves the component acyclic (an
+  Eades-Lin-Smyth ordering, thinned until no edge can be put back). Approximate, not guaranteed minimum.
+- **function-level imports that exist to break the cycle**: a function-level edge `a -> b` where `b` already reaches `a`
+  through import-time edges alone, so moving the import to module level would close an import-time cycle. A
+  function-level edge on a cycle without that property is only on cycles made of other deferred or type-only edges, and
+  one outside every cycle is deferred for another reason (startup cost, an optional dependency).
+- **Protocol owner**: the innermost-ring module of the component (then the one the others import most). Define the
+  `Protocol` there, make the importing side depend on it, and have the outer module register its implementation.
+
+The last line gives the function-level edge totals: how many are on a cycle, how many of those exist to break one, and
+how many are outside every cycle. A cycle fixed by a forwarder or a re-export is still a cycle; run `cycles` after
+those checks. The command only reports (exit 0); `circular-import` under `check` is what fails.
 
 ### Function-level taint: which functions actually reach I/O
 
@@ -897,6 +934,11 @@ scanned. Git-tracked Python files under noise directories are reported separatel
 Mutation-test Arborescent's native rules by adding forbidden constructs to a temporary copy and checking that each
 mutation produces a finding. A surviving mutation fails the command; rules that cannot be exercised for the current
 policy are reported as skipped.
+
+### `arborescent cycles`
+
+Print the first-party import cycles, the edges to cut and which function-level imports only break a cycle (see
+"Function-level imports and import cycles"). Read-only; exits 0 even when it finds cycles.
 
 ### `arborescent bench DIR...`
 

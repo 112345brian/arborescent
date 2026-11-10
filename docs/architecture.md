@@ -84,6 +84,8 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.driver_request` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.generated_config` | `single` | domain |
+| `arborescent.lazy_imports` | `single` | domain |
+| `arborescent.import_cycles` | `single` | domain |
 | `arborescent.driver_port` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
@@ -136,6 +138,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.cli_install` | `single` | composition |
 | `arborescent.cli_report` | `single` | composition |
 | `arborescent.cli_migrate` | `single` | composition |
+| `arborescent.cli_cycles` | `single` | composition |
 
 ## Data flow of `arborescent check`
 

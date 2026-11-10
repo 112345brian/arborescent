@@ -111,6 +111,12 @@ def _print_inventories(report: CheckReport) -> None:
             print(f"  {module}: {count}")
     else:
         print("  none")
+    print("function-level imports by module:")
+    if report.lazy_import_counts:
+        for module, lazy in sorted(report.lazy_import_counts.items()):
+            print(f"  {module}: {lazy.total} ({lazy.deferred} with `# deferred:`)")
+    else:
+        print("  none")
 
 
 def _print_setup_hint(report: CheckReport, setup_command: str | None = None) -> None:

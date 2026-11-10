@@ -8,7 +8,7 @@ and OS-branching rules applies is the policy's preset; layering and classificati
 from __future__ import annotations
 
 import fnmatch
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from typing import NamedTuple
 
@@ -26,6 +26,7 @@ from .domain import (
     in_unit,
 )
 from .facts import EffectUse, ModuleInfo, RawImport, resolve_targets
+from .import_cycles import cyclic_components
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
@@ -705,64 +706,9 @@ def _finalize_checks(
 def _circular_imports(graph: Mapping[str, Collection[str]]) -> list[Violation]:
     """Report each strongly connected import component, including direct self-imports.
 
-    Iterative Kosaraju traversal avoids recursion limits on large repositories. Import edges include
-    lazy and type-only imports because they still create architectural dependencies.
+    Import edges include lazy and type-only imports because they still create architectural dependencies.
     """
-    nodes = set(graph)
-    edges = {node: set(targets) & nodes for node, targets in graph.items()}
-    reverse: dict[str, set[str]] = {node: set() for node in nodes}
-    for source, targets in edges.items():
-        for target in targets:
-            reverse[target].add(source)
-
-    order = _finish_order(edges)
-    components = _strong_components(order, reverse)
     return [
         Violation(Rule.CIRCULAR_IMPORT, ", ".join(sorted(component)), "modules form a circular import dependency")
-        for component in components
-        if len(component) > 1 or next(iter(component)) in edges[next(iter(component))]
+        for component in cyclic_components(graph)
     ]
-
-
-def _finish_order(edges: Mapping[str, set[str]]) -> list[str]:
-    """Return DFS finish order without relying on Python's recursion limit."""
-    visited: set[str] = set()
-    order: list[str] = []
-    for start in sorted(edges):
-        if start in visited:
-            continue
-        visited.add(start)
-        pending: list[tuple[str, Iterator[str]]] = [(start, iter(sorted(edges[start])))]
-        while pending:
-            node, targets = pending[-1]
-            try:
-                target = next(targets)
-            except StopIteration:
-                pending.pop()
-                order.append(node)
-                continue
-            if target not in visited:
-                visited.add(target)
-                pending.append((target, iter(sorted(edges[target]))))
-    return order
-
-
-def _strong_components(order: list[str], reverse: Mapping[str, set[str]]) -> list[set[str]]:
-    """Collect the strongly connected components in reverse-graph finish order."""
-    assigned: set[str] = set()
-    components: list[set[str]] = []
-    for start in reversed(order):
-        if start in assigned:
-            continue
-        component: set[str] = set()
-        pending = [start]
-        assigned.add(start)
-        while pending:
-            node = pending.pop()
-            component.add(node)
-            for source in reverse[node]:
-                if source not in assigned:
-                    assigned.add(source)
-                    pending.append(source)
-        components.append(component)
-    return components

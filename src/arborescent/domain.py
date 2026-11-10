@@ -63,6 +63,7 @@ class Rule(StrEnum):
     WILDCARD_RING = "wildcard-ring"
     SUPPRESSION = "suppression"
     DISCARD = "discard"
+    LAZY_IMPORT = "lazy-import"
     EFFECT_CLOCK = "effect-clock"
     EFFECT_ENV = "effect-env"
     EFFECT_IDENTITY = "effect-identity"
@@ -198,6 +199,7 @@ class Violation:
 
 
 _RENDER_HINTS = {
+    Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on or above the line)",
     Rule.VENDOR_FOLDER: (
         " (folder excluded from the scan; to govern it list it under `vendor_roots` or set `scan_vendors = true`,"
         " otherwise first-party imports of it are reported as external)"
