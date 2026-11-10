@@ -279,6 +279,23 @@ reason = "the protocol between the process adapter and the config loader"
 identifier-like strings (letters, digits, `_`, `.`, `-`, at most 80 characters) are recorded, and docstrings are not spellings.
 A `modules` glob that matches no module is reported, and `selftest` spells each literal in a module that does not own it.
 
+`construct_only` lets only some modules and rings call a class or factory. `importable_by` cannot say "anyone may import the reader's
+module for its type, only the composition root may build the unfiltered one"; this can, and it is the checkable half of a wiring rule
+("the shell is wired to the unfiltered reader"): the unfiltered reader is its own class, and only the composition root constructs it.
+
+```toml
+[[tool.arborescent.construct_only]]
+target = "app.queries.UnfilteredQueries"   # dotted name of the class or factory, spelled as callers import it
+rings = ["composition"]                    # rings that may call it (and/or `modules`, module globs; not both empty)
+reason = "the unfiltered reader must not reach the MCP shell"
+```
+
+`construction-outside-site` names the module, its ring and the line of each other call, and repeats the `reason`. It goes into the
+baseline like any rule, so existing violations can only shrink. A `modules` glob, or a target whose module does not exist, is reported,
+and `selftest` calls each target from a module that may not. What it does not see: a name re-exported by another module (list the
+path callers import, or one entry per spelling), `partial(X)` or `make = X; make()`, `getattr`, a subclass, and an argument passed to a
+constructor (it checks who builds, not what is passed in). A parameter named like an imported class would be mistaken for it.
+
 Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
 and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
 and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (verified with Ruff 0.17.2,
@@ -701,6 +718,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
+| `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
 | `scope-effect-leak` | a module imports another scope's declared-`public` module, and that module uses an effect the importing ring forbids (one hop, not transitive) |

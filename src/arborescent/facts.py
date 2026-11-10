@@ -112,6 +112,7 @@ class SourceFacts:
     file_refs: tuple[int, ...] = ()  # lines that read `__file__`: a location-dependent path breaks when the module moves
     main_guard: int = 0  # line of a top-level `if __name__ == "__main__":`, 0 when there is none: the module is also a program
     string_literals: tuple[tuple[int, str], ...] = ()  # (line, value) of identifier-like string constants, docstrings excluded (#112)
+    calls: tuple[tuple[int, str], ...] = ()  # (line, dotted callee) of calls on an imported or module-level name; a relative import keeps its dots (#85)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -601,7 +602,36 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _file_ref_lines(tree),
         _main_guard_line(tree),
         _string_literals(tree),
+        _call_sites(tree),
     )
+
+
+def _call_aliases(tree: ast.AST) -> dict[str, str]:
+    """Like ``_aliases`` but a relative import keeps its leading dots (``from ..a import B`` -> ``B: "..a.B"``) for the rule to resolve."""
+    aliases = _aliases(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level:
+            prefix = "." * node.level + (node.module or "")
+            for item in node.names:
+                if item.name != "*":
+                    aliases[item.asname or item.name] = f"{prefix}{'.' if node.module is not None else ''}{item.name}"
+    return aliases
+
+
+def _call_sites(tree: ast.Module) -> tuple[tuple[int, str], ...]:
+    """Calls whose head name is imported or defined at module level: what a construction rule can resolve; a method on a value is not."""
+    aliases = _call_aliases(tree)
+    heads = set(aliases) | {stmt.name for stmt in tree.body if isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+    out: set[tuple[int, str]] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        head = node.func
+        while isinstance(head, ast.Attribute):
+            head = head.value
+        if isinstance(head, ast.Name) and head.id in heads and (name := _dotted(node.func, aliases)) is not None:
+            out.add((node.lineno, name))
+    return tuple(sorted(out))
 
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")

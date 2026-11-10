@@ -12,6 +12,7 @@ from typing import Any, cast
 from .domain import (
     ArchitectureScope,
     ChildArbor,
+    ConstructionSite,
     OwnedLiteral,
     Policy,
     PolicyError,
@@ -29,6 +30,8 @@ from .presets import (
 )
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")  # mirrors the scanner: only identifier-like strings are recorded
+
+_DOTTED_NAME = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)+")  # a module path and a name: `construct_only` targets
 
 __all__ = ["find_child_policy", "find_policy", "load_policy", "policy_from_mapping"]
 
@@ -234,6 +237,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         module_forbid_imports=tuple((pattern, tuple(targets)) for pattern, targets in raw_module_forbids.items()),
         importable_by=_importable_by(raw),
         owned_literals=_owned_literals(raw),
+        construct_only=_construct_only(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
@@ -285,7 +289,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "construct_only", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -510,6 +514,26 @@ def _owned_literal(entry: Mapping[str, Any]) -> OwnedLiteral:
     if not names["modules"] and not names["rings"]:
         raise PolicyError(f"`owned_literal` {literal!r} needs `modules` or `rings`, or it restricts nothing")
     return OwnedLiteral(literal, tuple(names["modules"]), tuple(names["rings"]), reason)
+
+
+def _construct_only(raw: Mapping[str, Any]) -> tuple[ConstructionSite, ...]:
+    entries = raw.get("construct_only", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in entries):
+        raise PolicyError("`construct_only` must be an array of tables: [[tool.arborescent.construct_only]]")
+    sites: list[ConstructionSite] = []
+    for entry in cast("list[Mapping[str, Any]]", entries):
+        target, reason = entry.get("target"), entry.get("reason", "")
+        names = {key: entry.get(key, []) for key in ("modules", "rings")}
+        if not isinstance(target, str) or not _DOTTED_NAME.fullmatch(target):
+            raise PolicyError("`construct_only` needs a `target` that is the dotted name of a class or factory, e.g. \"app.queries.UnfilteredQueries\"")
+        if not isinstance(reason, str) or any(
+            not isinstance(value, list) or not all(isinstance(item, str) and item for item in value) for value in names.values()
+        ):
+            raise PolicyError(f"`construct_only` {target!r}: `modules` and `rings` are lists of non-empty strings, `reason` a string")
+        if not names["modules"] and not names["rings"]:
+            raise PolicyError(f"`construct_only` {target!r} needs `modules` or `rings`, or it restricts nothing")
+        sites.append(ConstructionSite(target, tuple(names["modules"]), tuple(names["rings"]), reason))
+    return tuple(sites)
 
 
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:

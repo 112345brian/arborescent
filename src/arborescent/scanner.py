@@ -212,6 +212,7 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
         imports, effects, None if f.script_deps is None else list(f.script_deps),
         suppressions, list(f.discard_calls), top_level_defs, f.arbor_ring, f.arbor_error, list(f.file_refs), f.main_guard, f.arbor_role,
         [[line, value] for line, value in f.string_literals],
+        [[line, name] for line, name in f.calls],
     ]
 
 
@@ -224,6 +225,7 @@ def _facts_from_json(raw: list[Any]) -> SourceFacts:
         imports, effects, None if raw[2] is None else tuple(raw[2]),
         suppressions, tuple(raw[4]), top_level_defs, raw[6], raw[7], raw[10], tuple(raw[8]), raw[9],
         tuple((item[0], item[1]) for item in raw[11]),
+        tuple((item[0], item[1]) for item in raw[12]),
     )
 
 

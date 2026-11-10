@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
+from .construct_only_probes import construct_only_mutations
 from .domain import NOISE_DIRS, ArchitectureScope, Mutation, Policy, Rule
 from .engine import Services, package_checks, run_own
 from .facts import ModuleInfo
@@ -160,6 +161,7 @@ def _local_mutations(
     steps.append(module_forbid_mutations(local_policy, local_paths, local_known))
     steps.append(importable_by_mutations(local_policy, local_paths, local_known))
     steps.append(owned_literal_mutations(local_policy, local_paths, local_known, arbor_index))
+    steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
     for found, step_skipped in steps:
         out.extend(found)
         skipped.extend(step_skipped)

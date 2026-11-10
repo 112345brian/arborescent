@@ -60,6 +60,7 @@ def test_rule_id_strings_never_change() -> None:
             "internal-import",
             "restricted-import",
             "literal-outside-owner",
+            "construction-outside-site",
             "non-abstract-port",
             "circular-import",
             "external-import",
