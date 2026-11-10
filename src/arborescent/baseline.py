@@ -11,7 +11,7 @@ from .domain import PolicyError, Rule, Violation
 from .ports import FileSystem
 
 __all__ = [
-    "Ratchet", "apply", "growth_consistent", "internal_import_summary", "load", "prune", "record", "save", "stamp_approval",
+    "Ratchet", "apply", "growth_consistent", "internal_import_summary", "load", "prune", "record", "save", "stamp_approval", "growth_count",
     "values_growth_problems",
 ]
 
@@ -172,6 +172,11 @@ def growth_consistent(current: dict[str, object], at_ref: dict[str, object]) -> 
 def _attributed(entry: dict[str, object]) -> bool:
     """A growth entry needs a non-blank reason and a non-blank ``approved-by``."""
     return all(isinstance(entry.get(field), str) and str(entry[field]).strip() for field in ("reason", "approved-by"))
+
+
+def growth_count(fs: FileSystem, path: Path) -> int:
+    growth = document(fs, path)["growth"]
+    return len(growth) if isinstance(growth, list) else 0
 
 
 def stamp_approval(fs: FileSystem, path: Path, approved_by: str, since: int) -> None:

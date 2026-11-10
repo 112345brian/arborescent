@@ -419,7 +419,7 @@ def _baseline(
         return 0
     approved_by = _growth_approver(args)
     path = root / policy.baseline
-    logged = len(ratchet_mod.document(svc.fs, path)["growth"])  # pyright: ignore[reportArgumentType]
+    logged = ratchet_mod.growth_count(svc.fs, path)
     count = ratchet_mod.record(
         svc.fs,
         root / policy.baseline,
@@ -614,7 +614,7 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
 
 def _growth_approver(args: argparse.Namespace) -> str | None:
     """Who is on record as approving growth: required for ``--allow-growth``; an adoption is attributed to itself."""
-    approver = args.approved_by
+    approver: str | None = args.approved_by
     if approver is not None and not (approver.strip() and args.allow_growth):
         raise PolicyError("`--approved-by` needs a non-blank value and `--allow-growth`")
     if args.allow_growth and approver is None:
@@ -635,7 +635,7 @@ def _json_at_ref(ref: str, path: str, root: Path, svc: Services) -> dict[str, ob
         data = svc.fs.read_json(copy)
     if not isinstance(data, dict):
         raise ValueError(f"{path} at {ref} is not a JSON object")
-    return data
+    return {str(key): value for key, value in data.items()}
 
 
 def _growth_check(ref: str, policy: Policy, root: Path, svc: Services) -> EngineRun:
