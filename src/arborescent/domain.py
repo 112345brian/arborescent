@@ -31,6 +31,7 @@ __all__ = [
     "ArchitectureContracts",
     "ArchitectureScope",
     "ChildArbor",
+    "ConstructionSite",
     "Contract",
     "ModuleLayer",
     "Mutation",
@@ -88,6 +89,7 @@ class Rule(StrEnum):
     FORWARDED_IMPORT = "forwarded-import"
     RESTRICTED_IMPORT = "restricted-import"
     LITERAL_OUTSIDE_OWNER = "literal-outside-owner"
+    CONSTRUCTION_OUTSIDE_SITE = "construction-outside-site"
     NON_ABSTRACT_PORT = "non-abstract-port"
     WEAKLY_TYPED_PORT = "weakly-typed-port"
     REEXPORT_RATIO = "reexport-ratio"
@@ -263,6 +265,23 @@ class OwnedLiteral:
 
 
 @dataclass(frozen=True)
+class ConstructionSite:
+    """A class or factory only some modules and rings may call (the composition root builds it, nothing else does): #85."""
+
+    target: str  # dotted name of the callable, e.g. "app.queries.UnfilteredQueries"
+    modules: tuple[str, ...] = ()  # module globs; empty means any module
+    rings: tuple[str, ...] = ()  # ring names; empty means any ring
+    reason: str = ""
+
+    @property
+    def target_module(self) -> str:
+        return self.target.rpartition(".")[0]
+
+    def permits(self, module: str, ring: str | None) -> bool:
+        return OwnedLiteral(self.target, self.modules, self.rings).permits(module, ring)
+
+
+@dataclass(frozen=True)
 class ArchitectureScope:
     """One independently governed source tree and its import boundary."""
 
@@ -304,6 +323,7 @@ class Policy:
     child_policy_mode: str = "certify"  # "certify" keeps child-owned policy; "parent" overrides it
     module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
     owned_literals: tuple[OwnedLiteral, ...] = ()
+    construct_only: tuple[ConstructionSite, ...] = ()  # #85
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution

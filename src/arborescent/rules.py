@@ -16,6 +16,7 @@ from .domain import (
     ALL,
     EFFECT_RULES,
     ArchitectureScope,
+    ConstructionSite,
     OwnedLiteral,
     Policy,
     PolicyError,
@@ -241,6 +242,56 @@ def _stale_owned_literals(policy: Policy, modules: Collection[str]) -> list[Viol
         for item in policy.owned_literals for glob in item.modules
         if not any(in_unit(module, glob) for module in modules)
     ]
+
+
+def _construction_findings(context: RuleContext, name: str, info: ModuleInfo) -> list[Violation]:
+    """A module calling a class or factory that the policy lets only other modules or rings build (#85)."""
+    local_policy = context.policy_for(name)
+    if local_policy is None or not local_policy.construct_only:
+        return []
+    ring = context.resolve_ring(name)
+    sites = {item.target: item for item in local_policy.construct_only}
+    called = ((line, sites.get(_absolute_callee(name, info.is_package, callee) or "")) for line, callee in info.facts.calls)
+    return [
+        Violation(
+            Rule.CONSTRUCTION_OUTSIDE_SITE, name,
+            f"[{name}] (ring {ring or 'none'}) calls {site.target}, which only {_site_text(site)} may construct"
+            + (f": {site.reason}" if site.reason else ""),
+            line,
+        )
+        for line, site in called
+        if site is not None and not site.permits(name, ring)
+    ]
+
+
+def _absolute_callee(module: str, is_package: bool, callee: str) -> str | None:
+    """A call recorded by ``extract`` as a dotted name: relative imports keep their dots, a bare name is defined in this module."""
+    if not callee.startswith("."):
+        return callee if "." in callee else f"{module}.{callee}"
+    level = len(callee) - len(callee.lstrip("."))
+    parts = module.split(".")
+    package = parts if is_package else parts[:-1]
+    if level - 1 > len(package):
+        return None
+    return ".".join([*package[: len(package) - (level - 1)], callee[level:]])
+
+
+def _site_text(item: ConstructionSite) -> str:
+    parts = [f"modules {list(item.modules)}"] if item.modules else []
+    return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
+
+
+def _stale_construction_sites(policy: Policy, modules: Collection[str]) -> list[Violation]:
+    """A target module or owner glob that matches no module: after a rename the rule would restrict, or allow, nothing."""
+    out: list[Violation] = []
+    for item in policy.construct_only:
+        if item.target_module not in modules:
+            out.append(Violation(Rule.CONSTRUCTION_OUTSIDE_SITE, item.target, f"`construct_only` {item.target!r}: module {item.target_module!r} does not exist"))
+        out += [
+            Violation(Rule.CONSTRUCTION_OUTSIDE_SITE, item.target, f"`construct_only` {item.target!r}: modules glob {glob!r} matches no module")
+            for glob in item.modules if not any(in_unit(module, glob) for module in modules)
+        ]
+    return out
 
 
 def _stale_importable_by(policy: Policy, modules: Collection[str]) -> list[Violation]:
@@ -532,7 +583,7 @@ def check_modules(
         local_policy = context.policy_for(name)
         is_tool = name in context.tool_modules  # developer tooling: no ring, may import product code
         out += _module_preamble(context, name, info, known, tops)
-        out += _owned_literal_findings(context, name, info)
+        out += _owned_literal_findings(context, name, info) + _construction_findings(context, name, info)
         if is_tool:
             out += _dev_tool_findings(context, name, info, _ImportEnv(modules, known, tops, import_graph))
             continue
@@ -757,7 +808,7 @@ def _finalize_checks(
     policy = context.policy
     if not policy.scopes:
         circular = _circular_imports(import_graph) if policy.forbid_circular_imports else []
-        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {})) + _stale_importable_by(policy, known) + _stale_owned_literals(policy, known)
+        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {})) + _stale_importable_by(policy, known) + _stale_owned_literals(policy, known) + _stale_construction_sites(policy, known)
     out: list[Violation] = []
     for scope in policy.scopes:
         local_graph = {
@@ -770,6 +821,7 @@ def _finalize_checks(
         scope_modules = [name for name in known if context.scope_name(name) == scope.name]
         out.extend(_stale_importable_by(scope.policy, scope_modules))
         out.extend(_stale_owned_literals(scope.policy, scope_modules))
+        out.extend(_stale_construction_sites(scope.policy, scope_modules))
     return out
 
 

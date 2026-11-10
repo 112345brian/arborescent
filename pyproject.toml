@@ -163,6 +163,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.module_forbid_probes" = "application"
 "arborescent.importable_by_probes" = "application"
 "arborescent.owned_literal_probes" = "application"
+"arborescent.construct_only_probes" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
@@ -230,6 +231,12 @@ docs-sync = "docs/architecture.md"
 literal = "ARBORESCENT_LOCAL_CONFIG"
 modules = ["arborescent.local_targets"]
 reason = "the one reader of the local-config environment variable"
+
+# The process pool is chosen where the program is wired; `selftest` calls it from a module outside the composition ring.
+[[tool.arborescent.construct_only]]
+target = "arborescent.adapters.ProcessPoolParallel"
+rings = ["composition"]
+reason = "only the composition root picks how work is parallelised"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

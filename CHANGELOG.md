@@ -134,6 +134,10 @@
   installed it, and switching away from `strict` left a stale hook behind. Settable per scope, like `middle_forbid`.
   `ARBORESCENT_SKIP_HOOK=1 git push` skips the hook for one push only, leaving other hooks and the `git_hook` setting
   alone; `git push --no-verify` remains git's own way to skip every hook.
+- `construct_only`: `[[tool.arborescent.construct_only]] target = "app.queries.UnfilteredQueries", rings = [...], modules = [...], reason = "..."`
+  lets only those modules and rings call a class or factory (the construction-site half of a wiring rule); the new
+  `construction-outside-site` rule names the module, ring and line, reports an owner glob or target module that does not exist, and is
+  mutation-tested by `selftest`. Re-exported names, `partial(X)` and argument provenance are not followed. The scan cache is rebuilt once (#85).
 - `owned_literal`: `[[tool.arborescent.owned_literal]] literal = "APP_CONFIG", modules = [...], rings = [...], reason = "..."` lets only
   those modules (and rings) spell an identifier-like string, such as an environment variable name; the new `literal-outside-owner` rule
   names the module, ring and line, reports an owner glob that matches no module, and is mutation-tested by `selftest`. The scan cache is

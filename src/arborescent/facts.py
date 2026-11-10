@@ -120,6 +120,7 @@ class SourceFacts:
     surface_line: int = 0  # line of `__all__`, else of the first public binding
     reexports: tuple[tuple[str, int, str, str], ...] = ()  # surface names bound by an import: (name, level, module, imported name or "")
     deferred: tuple[tuple[int, str], ...] = ()  # (code line, reason): lines justified by a `# deferred: <reason>` comment (#149)
+    calls: tuple[tuple[int, str], ...] = ()  # (line, dotted callee) of calls on an imported or module-level name; a relative import keeps its dots (#85)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -705,6 +706,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _weak_port_returns(tree, _aliases(tree)),
         *_surface(tree),
         deferred,
+        _call_sites(tree),
     )
 
 
@@ -720,6 +722,8 @@ def _bound_names(stmt: ast.stmt) -> list[tuple[str, tuple[int, str, str] | None]
         return [(stmt.name, None)]
     targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target] if isinstance(stmt, ast.AnnAssign) else []
     return [(t.id, None) for t in targets if isinstance(t, ast.Name)]
+
+
 def _static_all(tree: ast.Module) -> tuple[int, list[str]] | None:
     """(line, names) of a `__all__` built only from string-literal lists/tuples; None when absent or dynamic."""
     line = 0
@@ -741,6 +745,8 @@ def _static_all(tree: ast.Module) -> tuple[int, list[str]] | None:
         line = line or stmt.lineno
         names += [str(e.value) for e in value.elts if isinstance(e, ast.Constant)]
     return (line, names) if line else None
+
+
 def _surface(tree: ast.AST) -> tuple[int, int, tuple[tuple[str, int, str, str], ...]]:
     """(size, line, re-exports) of a module's public surface (#136): a static `__all__`, else public top-level bindings."""
     if not isinstance(tree, ast.Module):
@@ -756,6 +762,36 @@ def _surface(tree: ast.AST) -> tuple[int, int, tuple[tuple[str, int, str, str], 
     names = list(dict.fromkeys(declared[1])) if declared is not None else [n for n in bound if not n.startswith("_")]
     line = declared[0] if declared is not None else first
     return len(names), line, tuple((n, *source) for n in names if (source := bound.get(n)) is not None)
+
+
+def _call_aliases(tree: ast.AST) -> dict[str, str]:
+    """Like ``_aliases`` but a relative import keeps its leading dots (``from ..a import B`` -> ``B: "..a.B"``) for the rule to resolve."""
+    aliases = _aliases(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level:
+            prefix = "." * node.level + (node.module or "")
+            for item in node.names:
+                if item.name != "*":
+                    aliases[item.asname or item.name] = f"{prefix}{'.' if node.module is not None else ''}{item.name}"
+    return aliases
+
+
+def _call_sites(tree: ast.Module) -> tuple[tuple[int, str], ...]:
+    """Calls whose head name is imported or defined at module level: what a construction rule can resolve; a method on a value is not."""
+    aliases = _call_aliases(tree)
+    heads = set(aliases) | {stmt.name for stmt in tree.body if isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+    out: set[tuple[int, str]] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        head = node.func
+        while isinstance(head, ast.Attribute):
+            head = head.value
+        if isinstance(head, ast.Name) and head.id in heads and (name := _dotted(node.func, aliases)) is not None:
+            out.add((node.lineno, name))
+    return tuple(sorted(out))
+
+
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")
 _DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 

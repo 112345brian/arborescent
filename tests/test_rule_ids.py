@@ -62,6 +62,7 @@ def test_rule_id_strings_never_change() -> None:
             "forwarded-import",
             "restricted-import",
             "literal-outside-owner",
+            "construction-outside-site",
             "non-abstract-port",
             "weakly-typed-port",
             "reexport-ratio",
