@@ -24,6 +24,7 @@ from arborescent.selftest import NO_MUTATION, plan, selftest
 from arborescent.testing import FakeToolRunner
 
 PACKAGE_RULES = {rule for rule in Rule if rule.startswith("package-")}
+DOCS_RULES = {Rule.MISSING_MODULE_DOCSTRING, Rule.DOCSTRING_RING_MISMATCH}
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY: dict[str, Any] = {"sources": ["app", "run.py"], "entry_scripts": ["run"], "classify": {**CLASSIFY, "run": "composition"}}
 
@@ -64,6 +65,8 @@ def test_rule_id_strings_never_change() -> None:
             "restricted-import",
             "literal-outside-owner",
             "construction-outside-site",
+            "missing-module-docstring",
+            "docstring-ring-mismatch",
             "non-abstract-port",
             "weakly-typed-port",
             "reexport-ratio",
@@ -124,7 +127,7 @@ def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     # is not fully annotated yet); those rules' mutations are covered by the next two tests instead. The package rules'
     # probes are only built with the catalog in view (`selftest`), so they are asserted by
     # `test_arborescent_probes_its_own_package_rules` below and, on synthetic catalogs, by tests/test_package_gaps.py.
-    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, *PACKAGE_RULES} >= set(Rule)
+    assert set(NO_MUTATION) | mutated | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, *DOCS_RULES, *PACKAGE_RULES} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
 
@@ -141,6 +144,12 @@ def test_unannotated_module_rule_has_a_mutation_when_required(repo: Path) -> Non
     policy = mini_policy(require_arbor_annotations=True)
     scan = FsScanner().scan(policy, repo)
     assert Rule.UNANNOTATED_MODULE in {m.rule for m in plan(policy, scan)[0]}
+
+
+def test_docs_rules_have_a_mutation_when_enabled(repo: Path) -> None:
+    policy = mini_policy(docs={"module_docstring": True, "module_names_ring": True})
+    scan = FsScanner().scan(policy, repo)
+    assert {m.rule for m in plan(policy, scan)[0]} >= DOCS_RULES
 
 
 def test_circular_import_rule_has_a_selftest_mutation(repo: Path) -> None:

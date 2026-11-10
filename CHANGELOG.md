@@ -41,6 +41,10 @@
 - `test-reference` practice (information): reports public functions of I/O-free rings that no function under the tests
   folder imports and calls, resolved through aliases and package re-exports. `test-reference-exempt` skips names. The
   per-function call facts it reads (`SourceFacts.function_calls`) are reusable by an adapter-equivalence check (#104).
+- `[tool.arborescent.docs]`: `module_docstring = true` reports a module with no docstring (`missing-module-docstring`) and
+  `module_names_ring = true` reports one whose docstring does not name the ring the policy enforces for it
+  (`docstring-ring-mismatch`); `exclude` takes module globs. Both join the baseline ratchet and are mutation-tested by `selftest`.
+  The scan cache is rebuilt once (#110). Not done: docstrings on public classes, functions and methods, which Ruff's `D1xx` rules cover.
 
 ## 0.6.0 — 2026-11-07
 
