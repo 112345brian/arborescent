@@ -134,6 +134,9 @@ def _print_summary(report: CheckReport) -> None:
         summary = ratchet_mod.internal_import_summary(v for v in report.violations if v.key not in new)
         if summary is not None:
             print(summary)
+        by_rule = ratchet_mod.rule_summary(report.violations, report.ratchet.new)
+        if by_rule is not None:
+            print(by_rule)
     print(
         f"arborescent check: {'OK' if report.ok else 'FAILED'} in {report.seconds:.2f}s "
         f"({len(report.violations)} violation(s), {tolerated} baselined, {report.parsed} file(s) parsed"

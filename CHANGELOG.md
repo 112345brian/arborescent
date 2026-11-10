@@ -2,6 +2,13 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- `arborescent check --rule FAMILY` (repeatable) runs and exits on one rule family, and `check` prints a
+  `by rule: … N (M new)` line splitting findings by rule with how many the baseline does not cover (#137). Selecting by
+  ring and a `type_checking` option for `internal-import` are not part of this change.
+
 ## 0.6.0 — 2026-11-07
 
 ### Added

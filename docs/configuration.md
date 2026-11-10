@@ -878,6 +878,13 @@ against the baseline. Options:
 - `--install-tools`: offer to install missing configured tools before checking. The prompt defaults to No.
 - `--yes`: install without prompting; valid with `--install-tools`.
 - `--no-baseline`: report every finding without applying the baseline.
+- `--rule FAMILY` (repeatable): run and exit on the named rule families only, so a migration can show one family going
+  to zero while others are still open. `FAMILY` means what it does for `baseline --adopt` (a rule id, a `ruff`-style
+  prefix, or `coverage`, `effects`, `suppressions`, `discard`); an unknown name is an error rather than an empty
+  selection. Findings, baseline entries (so none outside the selection are reported stale) and failing engines
+  outside the selection are ignored; an engine that fails without any finding still fails the run. Profile and
+  modularity gates you request explicitly stay in force. Every `check` also prints `by rule: <rule> N (M new)`, where
+  M counts the findings not covered by the baseline.
 - `--growth-against REF`: verify baseline growth entries against the baseline at a Git ref.
 - `--no-cache`: bypass the Arborescent AST fact cache for this run.
 

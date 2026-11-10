@@ -124,15 +124,15 @@ def _growth_entries(old: set[str], current: set[str], adopt: str | None, allow_g
 
 
 def _adoption_entries(old: set[str], added: set[str], adopt: str) -> list[dict[str, object]]:
-    if any(_in_family(key, adopt) for key in old):
+    if any(in_family(key, adopt) for key in old):
         raise BaselineError(f"baseline already contains {adopt!r} family entries; adoption is allowed once per family")
-    other_new = {key for key in added if not _in_family(key, adopt)}
+    other_new = {key for key in added if not in_family(key, adopt)}
     if other_new:
         raise BaselineError(f"`--adopt {adopt}` cannot record findings outside that family: {', '.join(sorted(other_new))}")
     return [{"reason": f"adopt {adopt} family", "added": sorted(added)}] if added else []
 
 
-def _in_family(key: str, family: str) -> bool:
+def in_family(key: str, family: str) -> bool:
     rule = key.split("|", 1)[0]
     if family == "coverage":
         return rule in {"unclassified", "noise-dir-code"}
@@ -164,6 +164,23 @@ def growth_consistent(current: dict[str, object], at_ref: dict[str, object]) -> 
             return False
         logged.update(keys)
     return current_keys - ref_keys == logged
+
+
+def in_any_family(key: str, families: Iterable[str]) -> bool:
+    return any(in_family(key, family) for family in families)
+
+
+def rule_summary(violations: Iterable[Violation], new: Iterable[Violation]) -> str | None:
+    """One line splitting findings by rule id, with how many of each are not covered by the baseline (#137)."""
+    totals: dict[str, int] = {}
+    for item in violations:
+        totals[item.rule] = totals.get(item.rule, 0) + 1
+    if not totals:
+        return None
+    fresh: dict[str, int] = {}
+    for item in new:
+        fresh[item.rule] = fresh.get(item.rule, 0) + 1
+    return "by rule: " + ", ".join(f"{rule} {count} ({fresh.get(rule, 0)} new)" for rule, count in sorted(totals.items()))
 
 
 def internal_import_summary(baselined: Iterable[Violation]) -> str | None:
