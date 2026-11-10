@@ -320,6 +320,15 @@ def _abstraction_violations(name: str, ring: str, rule: RingRule, info: ModuleIn
     return out
 
 
+def _typed_port_violations(name: str, ring: str, rule: RingRule, info: ModuleInfo) -> list[Violation]:
+    if not rule.require_typed_ports:
+        return []
+    return [
+        Violation(Rule.WEAKLY_TYPED_PORT, name, f"[{ring}] protocol method {member!r} {why}; name the result type", line)
+        for line, member, why in info.facts.weak_port_returns
+    ]
+
+
 def _entry_dependencies(
     policy: Policy, known: Collection[str], entry_deps: Mapping[str, tuple[str, ...] | None], third_party: ThirdParty
 ) -> list[Violation]:
@@ -496,7 +505,7 @@ def check_modules(
             out += _external_imports(local_policy, name, ring, imp.line, external, third_party, siblings)
         out += _os_branching(local_policy, name, ring, rule, info)
         out += _effect_uses(context, name, ring, info, known)
-        out += _abstraction_violations(name, ring, rule, info)
+        out += _abstraction_violations(name, ring, rule, info) + _typed_port_violations(name, ring, rule, info)
     out += _effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
     out = _with_move_closures(out, context, modules, known, tops)
     return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
@@ -675,6 +684,7 @@ def fits_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, know
     found += _os_branching(policy, name, ring, policy.ring(ring), info)
     found += _effect_uses(context, name, ring, info, known)
     found += _abstraction_violations(name, ring, policy.ring(ring), info)
+    found += _typed_port_violations(name, ring, policy.ring(ring), info)
     return not found
 
 

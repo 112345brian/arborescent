@@ -2,6 +2,12 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- `weakly-typed-port`: a ring with `require_typed_ports = true` flags `typing.Protocol` methods whose return type is
+  missing, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set` or `Mapping[str, Any]` (#140).
+
 ## 0.6.0 — 2026-11-07
 
 ### Added

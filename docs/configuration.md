@@ -633,6 +633,7 @@ Migrating an existing classify-only project:
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
 | `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `filesystem`, `dynamic-import`, `patch`, `console`, or `global`. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
+| `require_typed_ports` | `false` | Every method of a `typing.Protocol` class in this ring must name its return type. A missing return annotation, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set`/`frozenset` or `Mapping[str, Any]` (also inside `Optional`, `\|` unions and string annotations) fires `weakly-typed-port`; `None`, named classes and parameterised containers pass. `__init__` is skipped. Parameters are not checked. |
 
 A ring that is not given a table has no inner imports, no external imports and no OS branching. If `forbid` is omitted,
 the innermost ring forbids every effect, the outermost allows every effect, and middle rings use the preset default.
@@ -702,6 +703,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
+| `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
 | `scope-effect-leak` | a module imports another scope's declared-`public` module, and that module uses an effect the importing ring forbids (one hop, not transitive) |
 | `circular-import` | when `forbid_circular_imports` is enabled, first-party modules form a circular import dependency, including cycles made only of lazy or `TYPE_CHECKING` imports |
