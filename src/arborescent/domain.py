@@ -264,7 +264,7 @@ class OwnedLiteral:
     reason: str = ""
 
     def permits(self, module: str, ring: str | None) -> bool:
-        return (not self.modules or any(in_unit(module, glob) for glob in self.modules)) and (not self.rings or ring in self.rings)
+        return unit_permits(self.modules, self.rings, module, ring)
 
 
 @dataclass(frozen=True)
@@ -281,7 +281,7 @@ class ConstructionSite:
         return self.target.rpartition(".")[0]
 
     def permits(self, module: str, ring: str | None) -> bool:
-        return OwnedLiteral(self.target, self.modules, self.rings).permits(module, ring)
+        return unit_permits(self.modules, self.rings, module, ring)
 
 
 @dataclass(frozen=True)
@@ -319,6 +319,11 @@ def _validate_pattern_table(setting: str, table: Sequence[tuple[str, tuple[str, 
 def in_unit(module: str, pattern: str) -> bool:
     """Whether ``module`` is the module ``pattern`` names, one of its submodules, or matches it as a glob."""
     return module == pattern or module.startswith(pattern + ".") or fnmatch.fnmatchcase(module, pattern)
+
+
+def unit_permits(modules: Sequence[str], rings: Sequence[str], module: str, ring: str | None) -> bool:
+    """The one rule behind ``owned_literal`` and ``construct_only``: an empty list allows anyone, else ``module``/``ring`` must match."""
+    return (not modules or any(in_unit(module, glob) for glob in modules)) and (not rings or ring in rings)
 
 
 @dataclass(frozen=True)

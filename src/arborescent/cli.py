@@ -211,9 +211,9 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
         help="write the annotations instead of printing what would change",
     )
     sub.add_parser("selftest", help="mutation-test the rules")
-    add_coupling_parser(sub)
+    add_coupling_parser(sub.add_parser)
     sub.add_parser("cycles", help="report import cycles, the edges to cut and the function-level imports that only break a cycle")
-    add_ratchet_parser(sub)
+    add_ratchet_parser(sub.add_parser)
 
 
 def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]

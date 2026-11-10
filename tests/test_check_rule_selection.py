@@ -124,18 +124,14 @@ def test_summary_has_no_by_rule_line_when_clean(tmp_path: Path, capsys: pytest.C
     assert "by rule:" not in capsys.readouterr().out
 
 
-def _report(rules: tuple[str, ...], runs: list[EngineRun]) -> CheckReport:
-    return CheckReport(engines=runs, rules=rules)
-
-
 def test_a_failing_engine_with_only_unselected_findings_does_not_fail_the_selection() -> None:
     unrelated = EngineRun("tach", "fail", 0.0, violations=[Violation("tach-unused-dependency", "a", "x")])
-    assert _report(("internal-import",), [unrelated]).ok
-    assert not _report((), [unrelated]).ok
-    assert not _report(("tach",), [unrelated]).ok
+    assert CheckReport(engines=[unrelated], rules=("internal-import",)).ok
+    assert not CheckReport(engines=[unrelated], rules=()).ok
+    assert not CheckReport(engines=[unrelated], rules=("tach",)).ok
 
 
 def test_a_failing_engine_without_findings_still_fails_a_selection() -> None:
     crashed = EngineRun("tach", "fail", 0.0, lines=["boom"])
-    assert not _report(("internal-import",), [crashed]).ok
+    assert not CheckReport(engines=[crashed], rules=("internal-import",)).ok
 

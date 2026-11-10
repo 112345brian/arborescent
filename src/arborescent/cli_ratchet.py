@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from pathlib import Path
 
 from . import ratchets as ratchets_mod
@@ -13,8 +14,8 @@ from .ratchet_measure import Subject
 __all__ = ["add_ratchet_parser", "growth_run", "run_ratchet"]
 
 
-def add_ratchet_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
-    r = sub.add_parser("ratchet", help="record or lower the [ratchet.<name>] baselines; a rise must be explicit")
+def add_ratchet_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
+    r = add_parser("ratchet", help="record or lower the [ratchet.<name>] baselines; a rise must be explicit")
     r.add_argument("--name", help="only this ratchet (default: every configured one)")
     r.add_argument("--allow-growth", action="store_true", help="allow a count to rise, with a required reason and approver")
     r.add_argument("--reason", help="why the count is allowed to rise")

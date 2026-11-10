@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from . import coupling_ratchet as ratchet
@@ -37,8 +38,8 @@ _ACTIONS = {
 }
 
 
-def add_coupling_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
-    coupling = sub.add_parser("coupling", help="fan-in and entrypoint closure metrics, ratchet and cost of a new module")
+def add_coupling_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
+    coupling = add_parser("coupling", help="fan-in and entrypoint closure metrics, ratchet and cost of a new module")
     actions = coupling.add_subparsers(dest="coupling_action", required=True)
     for name, summary in _ACTIONS.items():
         actions.add_parser(name, help=summary)

@@ -20,6 +20,7 @@ from arborescent.cli import main
 from arborescent.domain import PolicyError, RatchetSpec, Rule, ToolResult, Violation
 from arborescent.engine import Services
 from arborescent.engines import default_engines
+from arborescent.ports import ToolRunner
 from arborescent.ratchet_config import ratchet_specs
 from arborescent.ratchet_measure import MeasureError, Subject, measure
 from arborescent.testing import FakeToolRunner
@@ -51,9 +52,9 @@ class GitRunner:
         return ToolResult(1, "", "unexpected command")
 
 
-def svc(runner: object | None = None) -> Services:
+def svc(runner: ToolRunner | None = None) -> Services:
     return Services(
-        FsScanner(), runner or FakeToolRunner(), list(all_checkers().values()), FS, SystemClock(), default_engines()  # pyright: ignore[reportArgumentType]
+        FsScanner(), runner or FakeToolRunner(), list(all_checkers().values()), FS, SystemClock(), default_engines()
     )
 
 
@@ -79,8 +80,8 @@ def doc(repo: Path) -> dict[str, Any]:
     return json.loads((repo / BASELINE).read_text(encoding="utf-8"))
 
 
-def subject(root: Path, paths: Mapping[str, str], found: Sequence[Violation] = (), runner: object | None = None) -> Subject:
-    return Subject(root, FS, runner or FakeToolRunner(), paths, found)  # pyright: ignore[reportArgumentType]
+def subject(root: Path, paths: Mapping[str, str], found: Sequence[Violation] = (), runner: ToolRunner | None = None) -> Subject:
+    return Subject(root, FS, runner or FakeToolRunner(), paths, found)
 
 
 # --- configuration ---------------------------------------------------------------------------------------------------
