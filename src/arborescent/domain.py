@@ -35,6 +35,7 @@ __all__ = [
     "Mutation",
     "Policy",
     "PolicyError",
+    "RatchetSpec",
     "RingRule",
     "Rule",
     "ToolResult",
@@ -230,6 +231,17 @@ class RingRule:
 
 
 @dataclass(frozen=True)
+class RatchetSpec:
+    """A named ratchet (#147): a per-module counter that may only go down. ``measure`` says how it is counted."""
+
+    name: str
+    measure: str  # "rule" (findings of one rule id) | "regex" (matches in the source) | "ast_call" (calls of a dotted name) | "command"
+    argument: tuple[str, ...]  # the rule id, the pattern or the dotted callee (one item); the command's argv
+    scope: tuple[str, ...] = ()  # module globs; empty means every scanned module
+    baseline: str = "arborescent-ratchets.json"
+
+
+@dataclass(frozen=True)
 class OwnedLiteral:
     """A string only some modules and rings may spell (an environment variable, a protocol key): #112."""
 
@@ -314,6 +326,7 @@ class Policy:
     package_parts: tuple[str, ...] = ()  # opt-in: extracted part trees (inside the repository) checked against the catalog
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
     modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
+    ratchets: tuple[RatchetSpec, ...] = ()  # #147: `[ratchet.<name>]` counters compared with their baseline by `check`
     taint_seeds: tuple[str, ...] = DEFAULT_TAINT_SEEDS  # #98: effect categories (plus "network") a function-level call can be seeded with
 
     def __post_init__(self) -> None:

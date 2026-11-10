@@ -2,6 +2,15 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- Named ratchets: `[tool.arborescent.ratchet.<name>]` counts per module by rule id, regex, call name (`ast_call`) or an
+  external `command` that prints `module count` lines, in one baseline format (`arborescent-ratchets.json`). `check`
+  fails a count above its baseline or below it (stale), `arborescent ratchet` records and lowers them and refuses a rise
+  without `--allow-growth --reason --approved-by`, and `check --growth-against REF` requires an attributed growth entry
+  for every added or raised count (#147).
+
 ## 0.6.0 — 2026-11-07
 
 ### Added

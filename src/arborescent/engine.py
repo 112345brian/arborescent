@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from . import baseline as ratchet_mod
+from . import ratchets as named_ratchets
 from .certification import PROFILE, certify, tach_multi_root_note, version_warnings
 from .classify_audit import audit_classification
 from .config import find_child_policy
@@ -40,6 +41,7 @@ from .ports import (
     ViolationEngine,
 )
 from .practices import run_practices
+from .ratchet_measure import Subject
 from .rules import RuleContext, check_modules
 from .suggestions import Suggestion, file_size_suggestions
 from .tach_visibility import invisible_import_violations
@@ -120,6 +122,16 @@ class CheckReport:
         """Whether the selected checks pass, regardless of Arborescent minimum-profile certification."""
         engines_ok = all(engine.status in {"ok", "disabled"} for engine in self.engines)
         return self.tool_checks_enabled and engines_ok and (self.ratchet is None or self.ratchet.ok)
+
+
+def _ratchet_runs(policy: Policy, root: Path, services: Services, scan: ScanResult, found: Sequence[Violation]) -> list[EngineRun]:
+    """One run per ``[ratchet.<name>]``: it fails on a count above its baseline, or (whole-repository runs) below it."""
+    started = services.clock.now()
+    subject = Subject(root, services.fs, services.runner, {m: scan.paths[m] for m in scan.modules if m in scan.paths}, found)
+    complete = scan.modules.keys() >= scan.paths.keys()  # every known module was parsed: not a `--changed` run
+    results = named_ratchets.check(policy, subject, complete)
+    seconds = (services.clock.now() - started) / max(1, len(results))
+    return [EngineRun(f"ratchet {r.name}", "fail" if r.failures else "ok", seconds, r.failures or [r.summary]) for r in results]
 
 
 def _tach_notes(policy: Policy, opts: Options) -> list[str]:
@@ -509,7 +521,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         )
         report.drift = _drift_report(policy, root, services, scan, opts)
         engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
-        report.engines += engine_runs
+        report.engines += [*engine_runs, *_ratchet_runs(policy, root, services, scan, found)]
         report.notes = [v for v in found if v.rule in INFORMATIONAL_RULES]
         report.violations = _apply_modularity(policy, report, found, opts, only is None) + [v for run in engine_runs for v in run.violations]
         base: set[str] = ratchet_mod.load(services.fs, root / policy.baseline) if opts.use_baseline else set()
