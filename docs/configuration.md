@@ -308,6 +308,24 @@ and `selftest` calls each target from a module that may not. What it does not se
 path callers import, or one entry per spelling), `partial(X)` or `make = X; make()`, `getattr`, a subclass, and an argument passed to a
 constructor (it checks who builds, not what is passed in). A parameter named like an imported class would be mistaken for it.
 
+`result_discard` is an opt-in check that a caller reads the outcome of a function it calls (a new "refused" or "skipped" outcome
+is otherwise silently ignored). It reports `result-discard` for a call written as a whole statement:
+
+```toml
+[tool.arborescent.result_discard]
+functions = ["app.usecases.place_order"]   # dotted names marked result-bearing, whatever they are annotated with
+rings = ["adapters", "composition"]        # only modules in these rings are checked (leave out for every ring)
+convention = true                          # default: a module-level function annotated `-> *Result` or `-> *Outcome` is marked
+```
+
+A function is result-bearing when it is listed in `functions`, or (with `convention`) when its module-level definition is
+annotated `-> FooResult` / `-> FooOutcome` (also `"FooResult"`, `mod.FooResult`, `FooResult | None`, `Optional[FooResult]`; not
+`list[FooResult]`, and not a bare `Result`). Binding, returning, passing on or testing the value is a use, and `_ = f()` is a
+deliberate discard; `await f()` as a statement is reported. Calls are resolved purely by syntax: `f()`, `module.f()`, an
+aliased or relative import, and a call inside the defining module. Dynamic calls are out of scope and never reported: methods
+(`obj.f()`), callbacks and variables, `getattr`, `functools.partial`, `*` imports, re-exports and shadowed names. Use a type
+checker's unused-result check for those. This is separate from the `discard(value, reason=...)` inventory above.
+
 Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
 and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
 and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (verified with Ruff 0.17.2,
@@ -733,6 +751,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `forwarded-import` | a module imports a pass-through function (`def f(a): return other.f(a)`: one call to an imported name, arguments exactly the parameters, no default, decorator or other statement) whose target `module_forbid_imports` forbids it: the dependency one hop away. Chains of forwarders are followed. Only `from B import f` is seen, not `B.f` attribute use; wrappers that add logic are real boundaries and are not flagged. Counts against the importing module and takes its own baseline key |
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
+| `result-discard` | a call used as a whole statement drops the value of a result-bearing function (`result_discard`); `_ = f()` is a deliberate discard and is not reported |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
 

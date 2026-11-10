@@ -10,7 +10,7 @@ import io
 import re
 import tokenize
 import tomllib
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Iterator
 from dataclasses import dataclass
 
 from .forwarder_facts import Forwarder, forwarders
@@ -121,6 +121,8 @@ class SourceFacts:
     reexports: tuple[tuple[str, int, str, str], ...] = ()  # surface names bound by an import: (name, level, module, imported name or "")
     deferred: tuple[tuple[int, str], ...] = ()  # (code line, reason): lines justified by a `# deferred: <reason>` comment (#149)
     calls: tuple[tuple[int, str], ...] = ()  # (line, dotted callee) of calls on an imported or module-level name; a relative import keeps its dots (#85)
+    result_defs: tuple[str, ...] = ()  # module-level functions annotated `-> *Result` / `-> *Outcome` (#141)
+    bare_calls: tuple[tuple[int, str], ...] = ()  # (line, dotted callee) of a call used as a whole statement; relative targets keep leading dots (#141)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -707,6 +709,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         *_surface(tree),
         deferred,
         _call_sites(tree),
+        _result_defs(tree),
+        _bare_calls(tree),
     )
 
 
@@ -790,6 +794,49 @@ def _call_sites(tree: ast.Module) -> tuple[tuple[int, str], ...]:
         if isinstance(head, ast.Name) and head.id in heads and (name := _dotted(node.func, aliases)) is not None:
             out.add((node.lineno, name))
     return tuple(sorted(out))
+
+
+_RESULT_SUFFIXES = ("Result", "Outcome")
+
+
+def _annotation_names(node: ast.expr | None) -> Iterator[str]:
+    """The names a return annotation may stand for: ``X``, ``m.X``, ``"X"``, ``X | None``, ``Optional[X]``; never ``list[X]``."""
+    if isinstance(node, ast.Name):
+        yield node.id
+    elif isinstance(node, ast.Attribute):
+        yield node.attr
+    elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            yield from _annotation_names(ast.parse(node.value.strip(), mode="eval").body)
+        except SyntaxError:
+            return
+    elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        yield from _annotation_names(node.left)
+        yield from _annotation_names(node.right)
+    elif isinstance(node, ast.Subscript) and next(_annotation_names(node.value), "") == "Optional":
+        yield from _annotation_names(node.slice)
+
+
+def _result_defs(tree: ast.AST) -> tuple[str, ...]:
+    body = tree.body if isinstance(tree, ast.Module) else []
+    return tuple(
+        stmt.name for stmt in body
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+        and any(name.endswith(_RESULT_SUFFIXES) and name not in _RESULT_SUFFIXES for name in _annotation_names(stmt.returns))
+    )
+
+
+def _bare_calls(tree: ast.AST) -> tuple[tuple[int, str], ...]:
+    aliases = _call_aliases(tree)
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Expr):
+            continue
+        value = node.value.value if isinstance(node.value, ast.Await) else node.value
+        target = _dotted(value.func, aliases) if isinstance(value, ast.Call) else None
+        if target is not None:
+            found.append((node.lineno, target))
+    return tuple(sorted(found))
 
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")

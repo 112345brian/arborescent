@@ -17,6 +17,7 @@ from .domain import (
     OwnedLiteral,
     Policy,
     PolicyError,
+    ResultDiscard,
     RingRule,
 )
 from .ports import FileSystem
@@ -240,6 +241,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         importable_by=_importable_by(raw),
         owned_literals=_owned_literals(raw),
         construct_only=_construct_only(raw),
+        result_discard=_result_discard(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
@@ -317,7 +319,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "construct_only", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "construct_only", "result_discard", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -563,6 +565,23 @@ def _construct_only(raw: Mapping[str, Any]) -> tuple[ConstructionSite, ...]:
             raise PolicyError(f"`construct_only` {target!r} needs `modules` or `rings`, or it restricts nothing")
         sites.append(ConstructionSite(target, tuple(names["modules"]), tuple(names["rings"]), reason))
     return tuple(sites)
+
+
+def _result_discard(raw: Mapping[str, Any]) -> ResultDiscard | None:
+    if "result_discard" not in raw:
+        return None
+    if not isinstance(raw["result_discard"], Mapping):
+        raise PolicyError("`result_discard` must be a table: [tool.arborescent.result_discard]")
+    entry = cast("Mapping[str, Any]", raw["result_discard"])
+    unknown = set(entry) - {"functions", "rings", "convention"}
+    convention = entry.get("convention", True)
+    lists = {key: entry.get(key, []) for key in ("functions", "rings")}
+    if unknown or not isinstance(convention, bool) or any(
+        not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[Any]", value))
+        for value in lists.values()
+    ):
+        raise PolicyError("`result_discard` takes `functions` and `rings` (lists of non-empty strings) and `convention` (a boolean)")
+    return ResultDiscard(tuple(cast("list[str]", lists["functions"])), tuple(cast("list[str]", lists["rings"])), convention)
 
 
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:

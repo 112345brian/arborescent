@@ -28,7 +28,7 @@ from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 18
+_CACHE_VERSION = 19
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
@@ -218,6 +218,7 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
         f.surface_size, f.surface_line, [list(item) for item in f.reexports],
         [[line, reason] for line, reason in f.deferred],
         [[line, name] for line, name in f.calls],
+        list(f.result_defs), [[line, target] for line, target in f.bare_calls],
     ]
 
 
@@ -235,6 +236,7 @@ def _facts_from_json(raw: list[Any]) -> SourceFacts:
         raw[14], raw[15], tuple((i[0], i[1], i[2], i[3]) for i in raw[16]),
         tuple((item[0], item[1]) for item in raw[17]),
         tuple((item[0], item[1]) for item in raw[18]),
+        tuple(raw[19]), tuple((item[0], item[1]) for item in raw[20]),
     )
 
 
