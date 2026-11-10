@@ -251,6 +251,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         disabled_tools=disabled_tools,
         output_dir=str(raw.get("output_dir", ".")),
         baseline=str(raw.get("baseline", "arborescent-baseline.json")),
+        ratchet_files=_string_list(raw, "ratchet_files"),
         suggestion_threshold=suggestion_threshold,
         ruff_overrides=ruff_overrides,
         customization_labels=customizations,
@@ -277,7 +278,7 @@ def _taint_seeds(raw: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 _SCOPED_ROOT_GLOBALS = frozenset({
-    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
+    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "ratchet_files", "suggestion_threshold", "children",
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
