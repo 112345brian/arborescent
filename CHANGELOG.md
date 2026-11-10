@@ -2,6 +2,15 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- `arborescent coupling` (#148): `report` lists fan-in per module (direct, module-level and transitive), the import closure
+  of each declared entrypoint (module-level imports only; function-level and `TYPE_CHECKING` imports counted separately) and
+  ambient-hub candidates; `cost` shows how many modules a new port, service and adapter add to each closure; `check` and
+  `baseline` ratchet hub fan-in and closure sizes in `arborescent-coupling.json`. Configured under
+  `[tool.arborescent.coupling]`.
+
 ## 0.6.0 — 2026-11-07
 
 ### Added

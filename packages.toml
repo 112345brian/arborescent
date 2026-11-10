@@ -149,6 +149,18 @@ path = "src/arborescent/taint.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/coupling.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/coupling_policy.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/coupling_ratchet.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/stdlib.py"
 role = "source"
 
@@ -339,6 +351,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/cli_report.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_coupling.py"
 role = "source"
 
 [[packages.paths]]

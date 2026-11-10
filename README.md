@@ -133,6 +133,7 @@ arborescent check --install-tools --yes # install without prompting, then check
 arborescent check --require-tools --require-profile  # require profile v1 and its verified tool versions/rules
 arborescent check --require-modularity                # fail unless every module and asset has exactly one owning package (modularity = "ready")
 arborescent check --changed origin/main      # only files changed since a git ref
+arborescent coupling report  # fan-in, entrypoint closure sizes and ambient-hub candidates (see docs/configuration.md)
 arborescent discover     # list Python files that still need ring classification
 arborescent baseline     # record existing violations; future checks fail on new findings
 arborescent selftest     # mutation-test native rules and fail if a rule stops firing
