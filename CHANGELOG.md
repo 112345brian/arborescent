@@ -23,6 +23,11 @@
 - `arborescent cycles` reports import cycles with edge kinds (import-time, function-level, type-checking), an
   approximate minimum set of edges to cut, the function-level imports that only break a cycle, and the lowest-ring
   module that could own a `Protocol` to invert the edge (#149).
+- Named ratchets: `[tool.arborescent.ratchet.<name>]` counts per module by rule id, regex, call name (`ast_call`) or an
+  external `command` that prints `module count` lines, in one baseline format (`arborescent-ratchets.json`). `check`
+  fails a count above its baseline or below it (stale), `arborescent ratchet` records and lowers them and refuses a rise
+  without `--allow-growth --reason --approved-by`, and `check --growth-against REF` requires an attributed growth entry
+  for every added or raised count (#147).
 
 ### Changed
 - Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they

@@ -70,6 +70,9 @@ forbidden_modules = [
     "arborescent.package_validation",
     "arborescent.packages",
     "arborescent.practices",
+    "arborescent.ratchet_config",
+    "arborescent.ratchet_measure",
+    "arborescent.ratchets",
     "arborescent.selftest",
     "arborescent.suggestions",
     "arborescent.adapters",
@@ -92,6 +95,7 @@ forbidden_modules = [
     "arborescent.cli_cycles",
     "arborescent.cli_install",
     "arborescent.cli_migrate",
+    "arborescent.cli_ratchet",
     "arborescent.cli_report",
 ]
 allow_indirect_imports = true
@@ -184,6 +188,9 @@ forbidden_modules = [
     "arborescent.package_validation",
     "arborescent.packages",
     "arborescent.practices",
+    "arborescent.ratchet_config",
+    "arborescent.ratchet_measure",
+    "arborescent.ratchets",
     "arborescent.selftest",
     "arborescent.suggestions",
     "arborescent.adapters",
@@ -206,6 +213,7 @@ forbidden_modules = [
     "arborescent.cli_cycles",
     "arborescent.cli_install",
     "arborescent.cli_migrate",
+    "arborescent.cli_ratchet",
     "arborescent.cli_report",
 ]
 allow_indirect_imports = true
@@ -268,6 +276,9 @@ source_modules = [
     "arborescent.package_validation",
     "arborescent.packages",
     "arborescent.practices",
+    "arborescent.ratchet_config",
+    "arborescent.ratchet_measure",
+    "arborescent.ratchets",
     "arborescent.selftest",
     "arborescent.suggestions",
 ]
@@ -292,6 +303,7 @@ forbidden_modules = [
     "arborescent.cli_cycles",
     "arborescent.cli_install",
     "arborescent.cli_migrate",
+    "arborescent.cli_ratchet",
     "arborescent.cli_report",
 ]
 allow_indirect_imports = true
@@ -330,6 +342,9 @@ source_modules = [
     "arborescent.package_validation",
     "arborescent.packages",
     "arborescent.practices",
+    "arborescent.ratchet_config",
+    "arborescent.ratchet_measure",
+    "arborescent.ratchets",
     "arborescent.selftest",
     "arborescent.suggestions",
 ]
@@ -402,6 +417,9 @@ forbidden_modules = [
     "arborescent.package_validation",
     "arborescent.packages",
     "arborescent.practices",
+    "arborescent.ratchet_config",
+    "arborescent.ratchet_measure",
+    "arborescent.ratchets",
     "arborescent.selftest",
     "arborescent.suggestions",
     "arborescent.__main__",
@@ -411,6 +429,7 @@ forbidden_modules = [
     "arborescent.cli_cycles",
     "arborescent.cli_install",
     "arborescent.cli_migrate",
+    "arborescent.cli_ratchet",
     "arborescent.cli_report",
 ]
 allow_indirect_imports = true
@@ -460,6 +479,7 @@ source_modules = [
     "arborescent.cli_cycles",
     "arborescent.cli_install",
     "arborescent.cli_migrate",
+    "arborescent.cli_ratchet",
     "arborescent.cli_report",
 ]
 forbidden_modules = [
@@ -542,6 +562,7 @@ source_modules = [
     "arborescent.bench",
     "arborescent.certification",
     "arborescent.classify_audit",
+    "arborescent.cli_ratchet",
     "arborescent.clock_adapter",
     "arborescent.config",
     "arborescent.coupling",
@@ -568,6 +589,9 @@ source_modules = [
     "arborescent.ports",
     "arborescent.practices",
     "arborescent.presets",
+    "arborescent.ratchet_config",
+    "arborescent.ratchet_measure",
+    "arborescent.ratchets",
     "arborescent.rules",
     "arborescent.scanner",
     "arborescent.selftest",
@@ -736,6 +760,7 @@ source_modules = [
     "arborescent.bench",
     "arborescent.certification",
     "arborescent.classify_audit",
+    "arborescent.cli_ratchet",
     "arborescent.clock_adapter",
     "arborescent.config",
     "arborescent.coupling",
@@ -762,6 +787,9 @@ source_modules = [
     "arborescent.ports",
     "arborescent.practices",
     "arborescent.presets",
+    "arborescent.ratchet_config",
+    "arborescent.ratchet_measure",
+    "arborescent.ratchets",
     "arborescent.rules",
     "arborescent.scanner",
     "arborescent.selftest",

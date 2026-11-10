@@ -24,6 +24,7 @@ from .cli_coupling import add_coupling_parser, run_coupling
 from .cli_cycles import run_cycles
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
+from .cli_ratchet import add_ratchet_parser, growth_run, run_ratchet
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
 from .domain import Policy, PolicyError, Rule, Violation, path_under
@@ -212,6 +213,7 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
     sub.add_parser("selftest", help="mutation-test the rules")
     add_coupling_parser(sub)
     sub.add_parser("cycles", help="report import cycles, the edges to cut and the function-level imports that only break a cycle")
+    add_ratchet_parser(sub)
 
 
 def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
@@ -332,6 +334,7 @@ def _dispatch(
         "annotate": lambda: _annotate(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),
         "cycles": lambda: run_cycles(policy, root, svc),
+        "ratchet": lambda: _ratchet(args, policy, root, svc),
     }
     return handlers.get(args.command, lambda: _check(args, policy, root, svc))()
 
@@ -524,6 +527,11 @@ def _discover_scoped(policy: Policy, scan: ScanResult, suggest: bool = False) ->
     return 0
 
 
+def _ratchet(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    print("\n".join(run_ratchet(args, policy, root, svc)))
+    return 0
+
+
 def _annotate(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
     _, scan = run_own(policy, root, svc, practices=False)
     plan = plan_annotations(policy, scan)
@@ -629,6 +637,8 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
     _print_excluded(report)
     if args.growth_against:
         report.engines.append(_growth_check(args.growth_against, policy, root, svc))
+        if policy.ratchets:
+            report.engines.append(growth_run(args.growth_against, policy, root, svc))
     setup_command = (
         None
         if args.no_tools

@@ -128,6 +128,9 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.generated_config" = "domain"
 "arborescent.lazy_imports" = "domain"
 "arborescent.import_cycles" = "domain"
+"arborescent.ratchet_config" = "application"
+"arborescent.ratchet_measure" = "application"
+"arborescent.ratchets" = "application"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
 "arborescent.architecture_contracts" = "application"
@@ -183,6 +186,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.coupling_policy" = "domain"
 "arborescent.coupling_ratchet" = "domain"
 "arborescent.cli_cycles" = "composition"
+"arborescent.cli_ratchet" = "composition"
 "arborescent.__main__" = "composition"
 
 # The annotation layer never depends on the driver (#67): the driver sits on top of it and may import it, not the reverse.
