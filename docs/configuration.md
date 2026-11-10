@@ -325,6 +325,7 @@ deliberate discard; `await f()` as a statement is reported. Calls are resolved p
 aliased or relative import, and a call inside the defining module. Dynamic calls are out of scope and never reported: methods
 (`obj.f()`), callbacks and variables, `getattr`, `functools.partial`, `*` imports, re-exports and shadowed names. Use a type
 checker's unused-result check for those. This is separate from the `discard(value, reason=...)` inventory above.
+
 `[tool.arborescent.docs]` makes a module say what it is, and says it in the ring the policy enforces:
 
 ```toml
