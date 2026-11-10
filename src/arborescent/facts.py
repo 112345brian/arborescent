@@ -644,7 +644,8 @@ def _call_aliases(tree: ast.AST) -> dict[str, str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for item in node.names:
-                aliases[item.asname or item.name.split(".")[0]] = item.name if item.asname else item.name.split(".")[0]
+                first = item.name.split(".")[0]
+                aliases[item.asname or first] = item.name if item.asname is not None else first
         elif isinstance(node, ast.ImportFrom):
             base = "." * node.level + (node.module or "")
             for item in node.names:
