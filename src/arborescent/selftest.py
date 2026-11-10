@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
+from .construct_only_probes import construct_only_mutations
 from .domain import NOISE_DIRS, ArchitectureScope, Mutation, Policy, Rule
 from .engine import Services, package_checks, run_own
 from .facts import ModuleInfo
@@ -51,14 +52,18 @@ _SKIP_COPY = (*sorted(NOISE_DIRS), "*.pyc")
 _PRACTICE = "repository practice: selftest mutates source files only and runs no practices"
 # Rules with no mutation, and why. A test fails when a rule is in neither this table nor ``plan``'s output.
 NO_MUTATION: dict[Rule, str] = {
+    Rule.REEXPORT_RATIO: "needs a module whose whole public surface is first-party imports, which one appended statement cannot make; covered by tests/test_reexport_ratio.py",
     Rule.FORBIDDEN_MODULE: "fires on a module name the policy forbids; selftest probes use fixed names no `forbidden_modules` pattern is written for",
     Rule.BAD_IMPORT: "a relative import above the source root is a syntax-level mistake, not a policy-dependent rule",
     Rule.GITIGNORE_SHADOW: _PRACTICE,
     Rule.SIBLING_VERSIONS: _PRACTICE,
     Rule.SECRETS_GUARD: _PRACTICE,
     Rule.DOCS_SYNC: _PRACTICE,
+    Rule.TEST_REFERENCE: _PRACTICE,
     Rule.NOISE_DIR_CODE: "requires a Git-tracked Python file under a noise directory; selftest works on a temporary non-Git copy",
+    Rule.WEAKLY_TYPED_PORT: "needs `require_typed_ports` on a ring and a Protocol with an untyped return; covered by focused rule tests",
     Rule.TACH_INVISIBLE_IMPORT: "informational and never baselined; focused tests cover it",
+    Rule.RESULT_DISCARD: "opt-in and resolved through imports; focused tests cover each call form, the convention and ring scoping",
     Rule.CLASSIFY_FACTS: "informational and never baselined; a mutation cannot make a ring wrong, focused tests cover each signal",
     Rule.VENDOR_FOLDER: "tracks whole-tree fingerprints; focused tests cover file additions, edits and removals",
     Rule.WILDCARD_RING: "a policy-level rule; selftest mutations only edit copied source files",
@@ -77,6 +82,7 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.EFFECT_DYNAMIC_IMPORT: "effect-dynamic-import is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_PATCH: "effect-patch requires a configured tests folder and project-package target; covered by focused rule tests",
     Rule.EFFECT_CONSOLE: "effect-console is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.FORWARDED_IMPORT: "needs a forwarding module and a `module_forbid_imports` entry; covered by focused rule tests",
     Rule.SCOPE_IMPORT: "cross-scope boundaries are mutation-tested when a project configures multiple scopes",
     Rule.SCOPE_EFFECT_LEAK: "cross-scope effect leaks are mutation-tested when a project configures multiple "
     "scopes with a declared public dependency",
@@ -160,6 +166,7 @@ def _local_mutations(
     steps.append(module_forbid_mutations(local_policy, local_paths, local_known))
     steps.append(importable_by_mutations(local_policy, local_paths, local_known))
     steps.append(owned_literal_mutations(local_policy, local_paths, local_known, arbor_index))
+    steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
     for found, step_skipped in steps:
         out.extend(found)
         skipped.extend(step_skipped)
@@ -442,6 +449,7 @@ def _anchor_mutations(anchor: str, host: str) -> list[Mutation]:
     out.extend((
         Mutation(Rule.SUPPRESSION, "a new noqa suppression directive", host, "# noqa"),
         Mutation(Rule.DISCARD, "a new reasoned discard call", host, 'discard(None, reason="selftest")'),
+        Mutation(Rule.LAZY_IMPORT, "a new function-level import without a reason", host, "def _arborescent_probe_lazy() -> None:\n    import json"),
     ))
     return out
 

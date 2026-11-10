@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import shlex
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,7 +24,7 @@ from .driver_request import (
 )
 from .driver_rewrite import check_source, rewrite_target
 from .engine import Services
-from .installer_adapter import _shell_join, manual_install_command  # pyright: ignore[reportPrivateUsage]
+from .installer_adapter import manual_install_command, shell_join
 from .local_targets import (
     DEFAULT_CONFIG,
     ChosenTarget,
@@ -59,14 +59,14 @@ class _View:
     dry_run: bool
 
 
-def add_migrate_parser(package_actions: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
+def add_migrate_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
     """``migrate`` and ``extract``: one pipeline (a migration library, then the import rewriter); ``extract`` also writes the
     manifest that records what was extracted, which the preservation checks and ``packages validate --extracted`` read."""
     for name, summary in (
         ("migrate", "supply a migration library with one package's migration arguments (dry run unless --yes)"),
         ("extract", "migrate one package into a new tree and record it in a .arborescent-package.toml (dry run unless --yes)"),
     ):
-        command = package_actions.add_parser(name, help=summary)
+        command = add_parser(name, help=summary)
         command.add_argument("package_id")
         command.add_argument(
             "--target", "--output", dest="target", type=Path,
@@ -169,7 +169,7 @@ def _resolve_target(
 
 def _setup_line(library: MigrationLibrary | ImportRewriter, root: Path, svc: Services) -> str:
     command = manual_install_command(root, svc.fs, [library.requirement])
-    return f"SETUP  missing migration tool: {library.executable}; install with `{_shell_join(command, shlex.join(command))}`"
+    return f"SETUP  missing migration tool: {library.executable}; install with `{shell_join(command, shlex.join(command))}`"
 
 
 def _print_findings(findings: tuple[RewriteFinding, ...]) -> None:

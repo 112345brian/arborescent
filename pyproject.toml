@@ -103,6 +103,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent" = "domain"
 "arborescent.domain" = "domain"
 "arborescent.facts" = "domain"
+"arborescent.forwarder_facts" = "domain"
 "arborescent.rules" = "domain"
 "arborescent.presets" = "domain"
 "arborescent.stdlib" = "domain"
@@ -125,10 +126,17 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.driver_port" = "ports"
 "arborescent.ports" = "ports"
 "arborescent.generated_config" = "domain"
+"arborescent.lazy_imports" = "domain"
+"arborescent.import_cycles" = "domain"
+"arborescent.ratchet_config" = "application"
+"arborescent.ratchet_measure" = "application"
+"arborescent.ratchets" = "application"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
 "arborescent.architecture_contracts" = "application"
 "arborescent.baseline" = "application"
+"arborescent.baseline_report" = "application"
+"arborescent.baseline_history" = "application"
 "arborescent.config" = "application"
 "arborescent.engine" = "application"
 "arborescent.certification" = "application"
@@ -155,6 +163,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.module_forbid_probes" = "application"
 "arborescent.importable_by_probes" = "application"
 "arborescent.owned_literal_probes" = "application"
+"arborescent.construct_only_probes" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
@@ -171,7 +180,14 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.cli" = "composition"
 "arborescent.cli_install" = "composition"
 "arborescent.cli_report" = "composition"
+"arborescent.cli_baseline_report" = "composition"
 "arborescent.cli_migrate" = "composition"
+"arborescent.cli_coupling" = "composition"
+"arborescent.coupling" = "domain"
+"arborescent.coupling_policy" = "domain"
+"arborescent.coupling_ratchet" = "domain"
+"arborescent.cli_cycles" = "composition"
+"arborescent.cli_ratchet" = "composition"
 "arborescent.__main__" = "composition"
 
 # The annotation layer never depends on the driver (#67): the driver sits on top of it and may import it, not the reverse.
@@ -183,6 +199,11 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.migration_json" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
 "arborescent.migration_export" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
 "arborescent.packages" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
+
+# Import closure of the one program entrypoint, and the importer count from which a module is a hub (#148); `arborescent coupling check` ratchets both.
+[tool.arborescent.coupling]
+entrypoints = ["arborescent.__main__"]
+hub_fan_in = 8
 
 [tool.arborescent.practices]
 crlf = ["*.sh", "*.bash"]
@@ -198,6 +219,8 @@ docs-sync = "docs/architecture.md"
 "src/arborescent/cli_install.py" = ["T20"]
 "src/arborescent/cli_report.py" = ["T20"]
 "src/arborescent/cli_migrate.py" = ["T20"]
+"src/arborescent/cli_coupling.py" = ["T20"]
+"src/arborescent/cli_cycles.py" = ["T20"]
 
 # Only the command line installs and reports the pre-push hook; `selftest` injects an outside import (importable_by_probes).
 [tool.arborescent.importable_by]
@@ -208,6 +231,12 @@ docs-sync = "docs/architecture.md"
 literal = "ARBORESCENT_LOCAL_CONFIG"
 modules = ["arborescent.local_targets"]
 reason = "the one reader of the local-config environment variable"
+
+# The process pool is chosen where the program is wired; `selftest` calls it from a module outside the composition ring.
+[[tool.arborescent.construct_only]]
+target = "arborescent.adapters.ProcessPoolParallel"
+rings = ["composition"]
+reason = "only the composition root picks how work is parallelised"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -8,7 +8,7 @@ and OS-branching rules applies is the policy's preset; layering and classificati
 from __future__ import annotations
 
 import fnmatch
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from typing import NamedTuple
 
@@ -16,6 +16,7 @@ from .domain import (
     ALL,
     EFFECT_RULES,
     ArchitectureScope,
+    ConstructionSite,
     OwnedLiteral,
     Policy,
     PolicyError,
@@ -25,7 +26,8 @@ from .domain import (
     dist_name,
     in_unit,
 )
-from .facts import EffectUse, ModuleInfo, RawImport, resolve_targets
+from .facts import EffectUse, Forwarder, ModuleInfo, RawImport, resolve_targets
+from .import_cycles import cyclic_components
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
@@ -166,6 +168,42 @@ def _internal_imports(
     return out
 
 
+def _forwarded_imports(context: RuleContext, name: str, imp: RawImport, env: _ImportEnv) -> list[Violation]:
+    """`from B import f` where `f` only forwards to a module `name` may not import (`module_forbid_imports`): the same dependency, one hop away (#138)."""
+    policy = context.policy_for(name)
+    if policy is None:
+        return []
+    out: list[Violation] = []
+    hosts, _, _ = resolve_targets(name, env.modules[name].is_package, imp, env.known, env.tops)
+    for host in hosts:
+        info = env.modules.get(host)
+        for fwd in () if info is None else info.facts.forwarders:
+            if fwd.name not in imp.names:
+                continue
+            for target in _forwarded_targets(env, host, fwd, {host}):
+                banned = policy.forbids_module_import(name, target)
+                if banned is not None and context.scope_name(target) == context.scope_name(name):
+                    detail = f"[{name}] imports {host}.{fwd.name}, which only forwards to {target}; {banned!r} is forbidden by module policy"
+                    out.append(Violation(Rule.FORWARDED_IMPORT, name, detail, imp.line, target))
+    return out
+
+
+def _forwarded_targets(env: _ImportEnv, host: str, fwd: Forwarder, seen: set[str]) -> list[str]:
+    """The modules a forwarder reaches, following forwarders that themselves only forward (a chain, not a cycle)."""
+    raw = RawImport(fwd.level, fwd.module, (fwd.imported,) if fwd.imported else (), fwd.line, False, False)
+    targets, _, _ = resolve_targets(host, env.modules[host].is_package, raw, env.known, env.tops)
+    out = list(targets)
+    callee = (fwd.member or fwd.imported).split(".")[0]
+    for target in targets:
+        info = env.modules.get(target)
+        if info is None or target in seen:
+            continue
+        for nxt in info.facts.forwarders:
+            if nxt.name == callee:
+                out += _forwarded_targets(env, target, nxt, seen | {target})
+    return out
+
+
 def _restricted_import(policy: Policy, name: str, target: str, line: int) -> Violation | None:
     allowed = policy.restricted_importers(name, target)
     if allowed is None:
@@ -192,6 +230,33 @@ def _owned_literal_findings(context: RuleContext, name: str, info: ModuleInfo) -
     ]
 
 
+def _result_discard_findings(context: RuleContext, name: str, info: ModuleInfo, modules: Mapping[str, ModuleInfo]) -> list[Violation]:
+    """A call statement that drops the value of a result-bearing function (#141); dynamic calls are not resolved."""
+    local_policy = context.policy_for(name)
+    setting = local_policy.result_discard if local_policy is not None else None
+    if setting is None or (setting.rings and context.resolve_ring(name) not in setting.rings):
+        return []
+    marked = set(setting.functions)
+    seen: dict[str, int] = {}
+    out: list[Violation] = []
+    for line, target in info.facts.bare_calls:
+        callee = _absolute_callee(name, info.is_package, target)
+        if callee is None:
+            continue
+        owner, _, function = callee.rpartition(".")
+        owner_info = modules.get(owner)
+        if callee not in marked and not (setting.convention and owner_info is not None and function in owner_info.facts.result_defs):
+            continue
+        seen[callee] = seen.get(callee, 0) + 1
+        out.append(Violation(
+            Rule.RESULT_DISCARD, name,
+            f"[{name}] calls {callee}() as a statement and drops its result (call #{seen[callee]}); bind it, return it, test it, "
+            f"or discard it on purpose with `_ = {callee.rpartition('.')[2]}(...)`",
+            line,
+        ))
+    return out
+
+
 def _owner_text(item: OwnedLiteral) -> str:
     parts = [f"modules {list(item.modules)}"] if item.modules else []
     return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
@@ -204,6 +269,56 @@ def _stale_owned_literals(policy: Policy, modules: Collection[str]) -> list[Viol
         for item in policy.owned_literals for glob in item.modules
         if not any(in_unit(module, glob) for module in modules)
     ]
+
+
+def _construction_findings(context: RuleContext, name: str, info: ModuleInfo) -> list[Violation]:
+    """A module calling a class or factory that the policy lets only other modules or rings build (#85)."""
+    local_policy = context.policy_for(name)
+    if local_policy is None or not local_policy.construct_only:
+        return []
+    ring = context.resolve_ring(name)
+    sites = {item.target: item for item in local_policy.construct_only}
+    called = ((line, sites.get(_absolute_callee(name, info.is_package, callee) or "")) for line, callee in info.facts.calls)
+    return [
+        Violation(
+            Rule.CONSTRUCTION_OUTSIDE_SITE, name,
+            f"[{name}] (ring {ring or 'none'}) calls {site.target}, which only {_site_text(site)} may construct"
+            + (f": {site.reason}" if site.reason else ""),
+            line,
+        )
+        for line, site in called
+        if site is not None and not site.permits(name, ring)
+    ]
+
+
+def _absolute_callee(module: str, is_package: bool, callee: str) -> str | None:
+    """A call recorded by ``extract`` as a dotted name: relative imports keep their dots, a bare name is defined in this module."""
+    if not callee.startswith("."):
+        return callee if "." in callee else f"{module}.{callee}"
+    level = len(callee) - len(callee.lstrip("."))
+    parts = module.split(".")
+    package = parts if is_package else parts[:-1]
+    if level - 1 > len(package):
+        return None
+    return ".".join([*package[: len(package) - (level - 1)], callee[level:]])
+
+
+def _site_text(item: ConstructionSite) -> str:
+    parts = [f"modules {list(item.modules)}"] if item.modules else []
+    return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
+
+
+def _stale_construction_sites(policy: Policy, modules: Collection[str]) -> list[Violation]:
+    """A target module or owner glob that matches no module: after a rename the rule would restrict, or allow, nothing."""
+    out: list[Violation] = []
+    for item in policy.construct_only:
+        if item.target_module not in modules:
+            out.append(Violation(Rule.CONSTRUCTION_OUTSIDE_SITE, item.target, f"`construct_only` {item.target!r}: module {item.target_module!r} does not exist"))
+        out += [
+            Violation(Rule.CONSTRUCTION_OUTSIDE_SITE, item.target, f"`construct_only` {item.target!r}: modules glob {glob!r} matches no module")
+            for glob in item.modules if not any(in_unit(module, glob) for module in modules)
+        ]
+    return out
 
 
 def _stale_importable_by(policy: Policy, modules: Collection[str]) -> list[Violation]:
@@ -318,6 +433,35 @@ def _abstraction_violations(name: str, ring: str, rule: RingRule, info: ModuleIn
         detail = f"[{ring}] {kind} {member.name!r} is concrete; this ring requires {shape}"
         out.append(Violation(Rule.NON_ABSTRACT_PORT, name, detail, member.line))
     return out
+
+
+def _typed_port_violations(name: str, ring: str, rule: RingRule, info: ModuleInfo) -> list[Violation]:
+    if not rule.require_typed_ports:
+        return []
+    return [
+        Violation(Rule.WEAKLY_TYPED_PORT, name, f"[{ring}] protocol method {member!r} {why}; name the result type", line)
+        for line, member, why in info.facts.weak_port_returns
+    ]
+
+
+REEXPORT_MIN_SURFACE = 5  # a smaller public surface gives a ratio too coarse to mean anything
+
+
+def _reexport_findings(name: str, ring: str, rule: RingRule, info: ModuleInfo, project: tuple[Collection[str], Collection[str]]) -> list[Violation]:
+    """A module whose public surface is mostly first-party imports moves edges without changing the dependency (#136)."""
+    facts = info.facts
+    known, tops = project
+    if rule.max_reexport_ratio is None or facts.surface_size < REEXPORT_MIN_SURFACE:
+        return []
+    count = sum(
+        1 for _, level, module, imported in facts.reexports
+        if resolve_targets(name, info.is_package, RawImport(level, module, (imported,) if imported else (), 0, False, False), known, tops)[0]
+    )
+    if count / facts.surface_size <= rule.max_reexport_ratio:
+        return []
+    detail = f"[{ring}] public surface is mostly re-exported first-party imports (limit {rule.max_reexport_ratio:.0%})"
+    hint = f" ({count} of {facts.surface_size} public names are imports; importers of this module keep the same dependency)"
+    return [Violation(Rule.REEXPORT_RATIO, name, detail, facts.surface_line, hint=hint)]
 
 
 def _entry_dependencies(
@@ -466,7 +610,11 @@ def check_modules(
         local_policy = context.policy_for(name)
         is_tool = name in context.tool_modules  # developer tooling: no ring, may import product code
         out += _module_preamble(context, name, info, known, tops)
-        out += _owned_literal_findings(context, name, info)
+        out += (
+            _owned_literal_findings(context, name, info)
+            + _construction_findings(context, name, info)
+            + _result_discard_findings(context, name, info, modules)
+        )
         if is_tool:
             out += _dev_tool_findings(context, name, info, _ImportEnv(modules, known, tops, import_graph))
             continue
@@ -492,11 +640,15 @@ def check_modules(
                 out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
             out += _scope_imports(context, name, imp.line, internal)
             out += _scope_effect_leaks(context, modules, name, imp.line, internal)
-            out += _internal_imports(context, name, ring, imp.line, internal)
+            out += _internal_imports(context, name, ring, imp.line, internal) + _forwarded_imports(context, name, imp, _ImportEnv(modules, known, tops, import_graph))
             out += _external_imports(local_policy, name, ring, imp.line, external, third_party, siblings)
         out += _os_branching(local_policy, name, ring, rule, info)
         out += _effect_uses(context, name, ring, info, known)
-        out += _abstraction_violations(name, ring, rule, info)
+        out += (
+            _abstraction_violations(name, ring, rule, info)
+            + _typed_port_violations(name, ring, rule, info)
+            + _reexport_findings(name, ring, rule, info, (known, tops))
+        )
     out += _effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
     out = _with_move_closures(out, context, modules, known, tops)
     return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
@@ -675,6 +827,7 @@ def fits_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, know
     found += _os_branching(policy, name, ring, policy.ring(ring), info)
     found += _effect_uses(context, name, ring, info, known)
     found += _abstraction_violations(name, ring, policy.ring(ring), info)
+    found += _typed_port_violations(name, ring, policy.ring(ring), info)
     return not found
 
 
@@ -686,7 +839,7 @@ def _finalize_checks(
     policy = context.policy
     if not policy.scopes:
         circular = _circular_imports(import_graph) if policy.forbid_circular_imports else []
-        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {})) + _stale_importable_by(policy, known) + _stale_owned_literals(policy, known)
+        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {})) + _stale_importable_by(policy, known) + _stale_owned_literals(policy, known) + _stale_construction_sites(policy, known)
     out: list[Violation] = []
     for scope in policy.scopes:
         local_graph = {
@@ -699,70 +852,16 @@ def _finalize_checks(
         scope_modules = [name for name in known if context.scope_name(name) == scope.name]
         out.extend(_stale_importable_by(scope.policy, scope_modules))
         out.extend(_stale_owned_literals(scope.policy, scope_modules))
+        out.extend(_stale_construction_sites(scope.policy, scope_modules))
     return out
 
 
 def _circular_imports(graph: Mapping[str, Collection[str]]) -> list[Violation]:
     """Report each strongly connected import component, including direct self-imports.
 
-    Iterative Kosaraju traversal avoids recursion limits on large repositories. Import edges include
-    lazy and type-only imports because they still create architectural dependencies.
+    Import edges include lazy and type-only imports because they still create architectural dependencies.
     """
-    nodes = set(graph)
-    edges = {node: set(targets) & nodes for node, targets in graph.items()}
-    reverse: dict[str, set[str]] = {node: set() for node in nodes}
-    for source, targets in edges.items():
-        for target in targets:
-            reverse[target].add(source)
-
-    order = _finish_order(edges)
-    components = _strong_components(order, reverse)
     return [
         Violation(Rule.CIRCULAR_IMPORT, ", ".join(sorted(component)), "modules form a circular import dependency")
-        for component in components
-        if len(component) > 1 or next(iter(component)) in edges[next(iter(component))]
+        for component in cyclic_components(graph)
     ]
-
-
-def _finish_order(edges: Mapping[str, set[str]]) -> list[str]:
-    """Return DFS finish order without relying on Python's recursion limit."""
-    visited: set[str] = set()
-    order: list[str] = []
-    for start in sorted(edges):
-        if start in visited:
-            continue
-        visited.add(start)
-        pending: list[tuple[str, Iterator[str]]] = [(start, iter(sorted(edges[start])))]
-        while pending:
-            node, targets = pending[-1]
-            try:
-                target = next(targets)
-            except StopIteration:
-                pending.pop()
-                order.append(node)
-                continue
-            if target not in visited:
-                visited.add(target)
-                pending.append((target, iter(sorted(edges[target]))))
-    return order
-
-
-def _strong_components(order: list[str], reverse: Mapping[str, set[str]]) -> list[set[str]]:
-    """Collect the strongly connected components in reverse-graph finish order."""
-    assigned: set[str] = set()
-    components: list[set[str]] = []
-    for start in reversed(order):
-        if start in assigned:
-            continue
-        component: set[str] = set()
-        pending = [start]
-        assigned.add(start)
-        while pending:
-            node = pending.pop()
-            component.add(node)
-            for source in reverse[node]:
-                if source not in assigned:
-                    assigned.add(source)
-                    pending.append(source)
-        components.append(component)
-    return components

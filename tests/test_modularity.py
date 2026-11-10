@@ -10,7 +10,7 @@ from test_package_gaps import repo
 
 from arborescent.cli import main
 from arborescent.domain import PolicyError, Rule
-from arborescent.engine import Options, _child_arbor_command, run_check, run_own  # pyright: ignore[reportPrivateUsage]
+from arborescent.engine import Options, child_arbor_command, run_check, run_own
 
 OPTS = Options(tools=False, use_baseline=False)
 REQUIRE = Options(tools=False, use_baseline=False, require_modularity=True)
@@ -100,8 +100,8 @@ def test_require_modularity_fails_on_an_open_gap(tmp_path: Path) -> None:
 
 
 def test_require_modularity_is_passed_to_child_arbors(tmp_path: Path) -> None:
-    assert "--require-modularity" in _child_arbor_command(tmp_path / "arborescent.toml", REQUIRE)
-    assert "--require-modularity" not in _child_arbor_command(tmp_path / "arborescent.toml", OPTS)
+    assert "--require-modularity" in child_arbor_command(tmp_path / "arborescent.toml", REQUIRE)
+    assert "--require-modularity" not in child_arbor_command(tmp_path / "arborescent.toml", OPTS)
 
 
 def test_a_declared_package_cycle_fails_require_modularity(tmp_path: Path) -> None:

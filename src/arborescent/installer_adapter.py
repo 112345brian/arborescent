@@ -21,7 +21,7 @@ class InstallerCommands:
     name: str
 
 
-def _shell_join(command: Sequence[str], posix: str, *, windows: bool | None = None) -> str:
+def shell_join(command: Sequence[str], posix: str, *, windows: bool | None = None) -> str:
     """Return a copyable command, using PowerShell invocation syntax on Windows."""
     is_windows = os.name == "nt" if windows is None else windows
     if not is_windows:

@@ -141,7 +141,7 @@ def test_growth_log_must_account_for_every_new_key_since_ref() -> None:
     valid = {
         "version": 2,
         "violations": ["rule|new|detail", "rule|old|detail"],
-        "growth": [{"reason": "approved", "added": ["rule|new|detail"]}],
+        "growth": [{"reason": "approved", "approved-by": "me", "added": ["rule|new|detail"]}],
     }
     unlogged = {**valid, "growth": []}
     incorrectly_logged = {**valid, "growth": [{"reason": "approved", "added": ["rule|other|detail"]}]}
@@ -154,7 +154,7 @@ def test_check_growth_against_reads_the_baseline_from_git(repo: Path) -> None:
     config = write_policy(repo)
     fs = LocalFileSystem()
     key = "rule|new|detail"
-    fs.write_json(repo / "arborescent-baseline.json", {"version": 2, "violations": [key], "growth": [{"reason": "approved", "added": [key]}]})
+    fs.write_json(repo / "arborescent-baseline.json", {"version": 2, "violations": [key], "growth": [{"reason": "approved", "approved-by": "me", "added": [key]}]})
     runner = FakeToolRunner({"git"}, {"git": ToolResult(0, '{"version":1,"violations":[]}', "")})
     svc = Services(FsScanner(), runner, list(all_checkers().values()), fs, SystemClock(), default_engines())
     assert main(["--config", str(config), "generate"], svc) == 0
@@ -177,8 +177,9 @@ def test_baseline_command_refuses_growth_then_accepts_a_reason(repo: Path) -> No
     write_files(repo, {"app/domain.py": "from . import adapters\n"})
     assert main(args, svc) == 2
     assert fs.read_text(baseline_path) == before
-    assert main([*args, "--allow-growth", "--reason", "new architecture debt"], svc) == 0
+    assert main([*args, "--allow-growth", "--reason", "new architecture debt", "--approved-by", "#12"], svc) == 0
     assert fs.read_json(baseline_path)["growth"][0]["reason"] == "new architecture debt"
+    assert fs.read_json(baseline_path)["growth"][0]["approved-by"] == "#12"
 
 
 def test_baseline_adopt_runs_requested_findings_engine(repo: Path) -> None:
@@ -245,3 +246,77 @@ def test_prune_without_a_baseline_is_a_noop() -> None:
     fs, path = filesystem()
     assert baseline.prune(fs, path, [v("internal-import", "a")]) == 0
     assert not fs.is_file(path)
+
+
+@pytest.mark.parametrize("approver", [None, "", "  ", 3])
+def test_growth_entry_without_a_real_approved_by_is_inconsistent(approver: object) -> None:
+    old = {"version": 2, "violations": [], "growth": []}
+    entry: dict[str, object] = {"reason": "why", "added": ["k"]}
+    if approver is not None:
+        entry["approved-by"] = approver
+    assert not baseline.growth_consistent({"version": 2, "violations": ["k"], "growth": [entry]}, old)
+
+
+def test_baseline_growth_needs_approved_by(repo: Path) -> None:
+    config = write_policy(repo)
+    fs = LocalFileSystem()
+    svc = Services(FsScanner(), FakeToolRunner(), list(all_checkers().values()), fs, SystemClock(), default_engines())
+    args = ["--config", str(config), "baseline"]
+    assert main(args, svc) == 0
+    write_files(repo, {"app/domain.py": "from . import adapters\n"})
+    before = (repo / "arborescent-baseline.json").read_text()
+    assert main([*args, "--allow-growth", "--reason", "debt"], svc) == 2
+    assert main([*args, "--allow-growth", "--reason", "debt", "--approved-by", " "], svc) == 2
+    assert main([*args, "--approved-by", "me"], svc) == 2
+    assert (repo / "arborescent-baseline.json").read_text() == before
+
+
+def test_values_growth_requires_an_attributed_entry_for_each_raised_or_added_name() -> None:
+    old = {"values": {"a": 3, "b": 5}, "growth": [{"key": "b", "reason": "r", "approved-by": "x"}]}
+    entry = {"key": "a", "reason": "r", "approved-by": "me"}
+    same = {"values": {"a": 3, "b": 5}, "growth": old["growth"]}
+    assert baseline.values_growth_problems(same, old) == []
+    assert baseline.values_growth_problems({**same, "values": {"a": 2, "b": 5}}, old) == []  # shrink needs nothing
+    assert baseline.values_growth_problems({"values": {"a": 4, "b": 5}, "growth": old["growth"]}, old)  # silent raise
+    assert baseline.values_growth_problems({"values": {"a": 4, "b": 5}, "growth": [*old["growth"], entry]}, old) == []
+    assert baseline.values_growth_problems({"values": {"a": 3, "b": 5, "c": 0}, "growth": old["growth"]}, old)  # new name
+    for bad in ({**entry, "approved-by": ""}, {**entry, "reason": " "}, {**entry, "key": "other"}):
+        assert baseline.values_growth_problems({"values": {"a": 4, "b": 5}, "growth": [*old["growth"], bad]}, old)
+
+
+def test_values_growth_edge_inputs() -> None:
+    old = {"values": {"a": 1}, "growth": [{"key": "a", "reason": "r", "approved-by": "x"}]}
+    assert baseline.values_growth_problems({"values": {"a": 1}, "growth": []}, old)  # log rewritten
+    assert baseline.values_growth_problems({"values": {"a": "1"}, "growth": old["growth"]}, old)  # not a number
+    assert baseline.values_growth_problems({"values": {"a": True}, "growth": old["growth"]}, old)
+    assert baseline.values_growth_problems({"values": [], "growth": []}, old)
+    assert baseline.values_growth_problems({"values": {"a": 1}}, {"values": {"a": 1}}) == []  # unchanged, no logs
+
+
+def test_check_growth_against_covers_configured_ratchet_files(repo: Path) -> None:
+    config = write_policy(repo)
+    config.write_text('ratchet_files = ["budget.json"]\n' + config.read_text())
+    fs = LocalFileSystem()
+    fs.write_json(repo / "arborescent-baseline.json", {"version": 2, "violations": [], "growth": []})
+    fs.write_json(repo / "budget.json", {"values": {"mods": 4}, "growth": []})
+    git = ToolResult(0, '{"values":{"mods":3},"growth":[]}', "")
+    svc = Services(FsScanner(), FakeToolRunner({"git"}, {"git": git}), list(all_checkers().values()), fs, SystemClock(), default_engines())
+    args = ["--config", str(config), "check", "--no-tools", "--no-baseline", "--growth-against", "base"]
+    assert main(args, svc) == 1
+    fs.write_json(repo / "budget.json", {"values": {"mods": 4}, "growth": [{"key": "mods", "reason": "r", "approved-by": "me"}]})
+    assert main(args, svc) == 0
+    (repo / "budget.json").unlink()
+    assert main(args, svc) == 1  # a missing file is a failure, not a pass
+
+
+def test_stale_hint_points_at_prune_which_works_while_new_violations_exist(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = write_policy(repo)
+    write_files(repo, {"app/domain.py": ""})
+    fs = LocalFileSystem()
+    svc = Services(FsScanner(), FakeToolRunner(), list(all_checkers().values()), fs, SystemClock(), default_engines())
+    policy = mini_policy()
+    fs.write_json(repo / policy.baseline, {"version": 2, "violations": [v("internal-import", "gone").key], "growth": []})
+
+    main(["--config", str(config), "check", "--no-tools"], svc)
+    stale_lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("STALE")]
+    assert stale_lines and all("arborescent baseline --prune" in line for line in stale_lines)

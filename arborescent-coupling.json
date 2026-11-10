@@ -1,0 +1,26 @@
+{
+  "fan-in": {
+    "arborescent.domain": 54,
+    "arborescent.engine": 10,
+    "arborescent.facts": 15,
+    "arborescent.package_model": 20,
+    "arborescent.ports": 34,
+    "arborescent.rules": 11
+  },
+  "closure": {
+    "arborescent.__main__": 86
+  },
+  "growth": [
+    {
+      "reason": "Merging the #136-#160 wave (reexport-ratio, forwarded-import, weak ports, construct_only, result-discard, test-reference, named ratchets, cycles, coupling) adds modules and imports; fan-in and closure sizes rise with them. Merged on the user's instruction 2026-11-10; revert this entry to veto.",
+      "added": [
+        "fan-in: arborescent.domain grew from 46 to 54",
+        "fan-in: arborescent.engine is not in the baseline (10)",
+        "fan-in: arborescent.facts grew from 13 to 15",
+        "fan-in: arborescent.ports grew from 30 to 34",
+        "fan-in: arborescent.rules grew from 10 to 11",
+        "closure: arborescent.__main__ grew from 74 to 86"
+      ]
+    }
+  ]
+}

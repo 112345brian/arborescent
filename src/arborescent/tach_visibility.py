@@ -15,14 +15,14 @@ from .facts import ModuleInfo
 
 __all__ = ["invisible_import_violations"]
 
-_TACH_EXCLUDED_PARTS = frozenset(TACH_EXCLUDED_FOLDERS)
+TACH_EXCLUDED_PARTS = frozenset(TACH_EXCLUDED_FOLDERS)
 
 
 def invisible_import_violations(modules: Iterable[ModuleInfo]) -> list[Violation]:
     """One informational finding per scanned module that imports by a run-time name, outside folders tach itself skips."""
     found: list[Violation] = []
     for module in sorted(modules, key=lambda item: item.name):
-        if _TACH_EXCLUDED_PARTS & set(module.path.split("/")):
+        if TACH_EXCLUDED_PARTS & set(module.path.split("/")):
             continue
         lines = sorted({use.line for use in module.facts.effect_uses if use.category == "dynamic-import"})
         if lines:

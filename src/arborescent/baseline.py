@@ -10,7 +10,10 @@ from pathlib import Path
 from .domain import PolicyError, Rule, Violation
 from .ports import FileSystem
 
-__all__ = ["Ratchet", "apply", "growth_consistent", "internal_import_summary", "load", "prune", "record", "save"]
+__all__ = [
+    "Ratchet", "apply", "growth_consistent", "growth_count", "internal_import_summary", "load", "prune", "record", "save",
+    "stamp_approval", "values_growth_problems",
+]
 
 VERSION = 2
 
@@ -124,15 +127,15 @@ def _growth_entries(old: set[str], current: set[str], adopt: str | None, allow_g
 
 
 def _adoption_entries(old: set[str], added: set[str], adopt: str) -> list[dict[str, object]]:
-    if any(_in_family(key, adopt) for key in old):
+    if any(in_family(key, adopt) for key in old):
         raise BaselineError(f"baseline already contains {adopt!r} family entries; adoption is allowed once per family")
-    other_new = {key for key in added if not _in_family(key, adopt)}
+    other_new = {key for key in added if not in_family(key, adopt)}
     if other_new:
         raise BaselineError(f"`--adopt {adopt}` cannot record findings outside that family: {', '.join(sorted(other_new))}")
     return [{"reason": f"adopt {adopt} family", "added": sorted(added)}] if added else []
 
 
-def _in_family(key: str, family: str) -> bool:
+def in_family(key: str, family: str) -> bool:
     rule = key.split("|", 1)[0]
     if family == "coverage":
         return rule in {"unclassified", "noise-dir-code"}
@@ -157,13 +160,69 @@ def growth_consistent(current: dict[str, object], at_ref: dict[str, object]) -> 
         return False
     logged: set[str] = set()
     for entry in current_log[len(ref_log) :]:
-        if not isinstance(entry, dict) or not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
+        if not isinstance(entry, dict) or not _attributed(entry):
             return False
         keys = entry.get("added")
         if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
             return False
         logged.update(keys)
     return current_keys - ref_keys == logged
+
+
+def _attributed(entry: dict[str, object]) -> bool:
+    """A growth entry needs a non-blank reason and a non-blank ``approved-by``."""
+    return all(isinstance(entry.get(field), str) and str(entry[field]).strip() for field in ("reason", "approved-by"))
+
+
+def growth_count(fs: FileSystem, path: Path) -> int:
+    growth = document(fs, path)["growth"]
+    return len(growth) if isinstance(growth, list) else 0
+
+
+def stamp_approval(fs: FileSystem, path: Path, approved_by: str, since: int) -> None:
+    """Record who approved the growth entries appended after the first ``since`` entries."""
+    doc = document(fs, path)
+    growth = doc["growth"]
+    if not isinstance(growth, list):
+        raise ValueError("baseline growth must be an array")
+    stamped = [{**entry, "approved-by": approved_by.strip()} if i >= since and isinstance(entry, dict) else entry for i, entry in enumerate(growth)]
+    fs.write_json(path, {**doc, "growth": stamped})
+
+
+def values_growth_problems(current: dict[str, object], at_ref: dict[str, object]) -> list[str]:
+    """Names in a numeric ratchet file (``{"values": {name: number}, "growth": [...]}``) that were added or raised
+    since ``at_ref`` without an attributed growth entry for that name appended since."""
+    values, before = current.get("values", {}), at_ref.get("values", {})
+    log, ref_log = current.get("growth", []), at_ref.get("growth", [])
+    if not isinstance(values, dict) or not isinstance(before, dict) or not isinstance(log, list) or not isinstance(ref_log, list):
+        return ["file must hold a `values` object and a `growth` array"]
+    if log[: len(ref_log)] != ref_log:
+        return ["existing growth entries were rewritten or removed"]
+    logged = {str(e["key"]) for e in log[len(ref_log) :] if isinstance(e, dict) and isinstance(e.get("key"), str) and _attributed(e)}
+    problems: list[str] = []
+    for name, value in sorted(values.items()):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            problems.append(f"{name}: value is not a number")
+        elif name not in logged and (name not in before or not isinstance(before[name], (int, float)) or value > before[name]):
+            problems.append(f"{name}: added or raised without a growth entry with a reason and approved-by")
+    return problems
+
+
+def in_any_family(key: str, families: Iterable[str]) -> bool:
+    return any(in_family(key, family) for family in families)
+
+
+def rule_summary(violations: Iterable[Violation], new: Iterable[Violation]) -> str | None:
+    """One line splitting findings by rule id, with how many of each are not covered by the baseline (#137)."""
+    totals: dict[str, int] = {}
+    for item in violations:
+        totals[item.rule] = totals.get(item.rule, 0) + 1
+    if not totals:
+        return None
+    fresh: dict[str, int] = {}
+    for item in new:
+        fresh[item.rule] = fresh.get(item.rule, 0) + 1
+    return "by rule: " + ", ".join(f"{rule} {count} ({fresh.get(rule, 0)} new)" for rule, count in sorted(totals.items()))
 
 
 def internal_import_summary(baselined: Iterable[Violation]) -> str | None:

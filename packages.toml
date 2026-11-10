@@ -33,6 +33,30 @@ path = "src/arborescent/baseline.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/baseline_report.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/baseline_history.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_ratchet.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/ratchet_config.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/ratchet_measure.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/ratchets.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/bench.py"
 role = "source"
 
@@ -62,6 +86,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/forwarder_facts.py"
 role = "source"
 
 [[packages.paths]]
@@ -97,6 +125,10 @@ path = "src/arborescent/owned_literal_probes.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/construct_only_probes.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/module_forbid_probes.py"
 role = "source"
 
@@ -125,6 +157,14 @@ path = "src/arborescent/presets.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/lazy_imports.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/import_cycles.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/rules.py"
 role = "source"
 
@@ -146,6 +186,18 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/taint.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/coupling.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/coupling_policy.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/coupling_ratchet.py"
 role = "source"
 
 [[packages.paths]]
@@ -338,7 +390,19 @@ path = "src/arborescent/cli_install.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/cli_cycles.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/cli_report.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_baseline_report.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_coupling.py"
 role = "source"
 
 [[packages.paths]]

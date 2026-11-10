@@ -62,7 +62,7 @@ def _print_findings(args: argparse.Namespace, report: CheckReport) -> None:
         print(f"FAIL   {v.render()}")
     if report.ratchet:
         for key in report.ratchet.stale:
-            print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline`): {key}")
+            print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline --prune`): {key}")
 
 
 def _print_engines(report: CheckReport) -> None:
@@ -111,6 +111,12 @@ def _print_inventories(report: CheckReport) -> None:
             print(f"  {module}: {count}")
     else:
         print("  none")
+    print("function-level imports by module:")
+    if report.lazy_import_counts:
+        for module, lazy in sorted(report.lazy_import_counts.items()):
+            print(f"  {module}: {lazy.total} ({lazy.deferred} with `# deferred:`)")
+    else:
+        print("  none")
 
 
 def _print_setup_hint(report: CheckReport, setup_command: str | None = None) -> None:
@@ -134,6 +140,9 @@ def _print_summary(report: CheckReport) -> None:
         summary = ratchet_mod.internal_import_summary(v for v in report.violations if v.key not in new)
         if summary is not None:
             print(summary)
+        by_rule = ratchet_mod.rule_summary(report.violations, report.ratchet.new)
+        if by_rule is not None:
+            print(by_rule)
     print(
         f"arborescent check: {'OK' if report.ok else 'FAILED'} in {report.seconds:.2f}s "
         f"({len(report.violations)} violation(s), {tolerated} baselined, {report.parsed} file(s) parsed"

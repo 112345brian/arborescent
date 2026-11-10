@@ -48,6 +48,7 @@ settings. The two forms cannot be mixed.
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
+| `ratchet_files` | `[]` | Extra numeric ratchet JSON files (`{"values": {"name": 3}, "growth": []}`) checked by `check --growth-against`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
 | `modularity` | `"ready"` | Needs `package_catalog` for `"report"`. `"ready"`: every package gap fails `check`. `"report"`: gaps are shown as notes and never fail. Independent of `preset`; `--require-modularity` certifies it (see [Strict linting and strict modularity](#strict-linting-and-strict-modularity)). |
@@ -160,6 +161,17 @@ validation and the manifest that records an extraction; the repository declares 
 it owns. The extraction itself is done by a migration library (git filter-repo, with history) that `packages extract` drives.
 Each path can carry string metadata that is recorded in the manifest, such as the import package name or the relative path to
 an independent `arborescent.toml`.
+
+### What "package" means
+
+In Arborescent a package is a Python distribution-sized ownership unit: a stable identity that owns a set of paths, and
+that can be extracted into its own repository. It is not a promise of cross-language enforcement.
+
+- Non-Python files inside a package (templates, SQL, data) are assets. They can carry metadata, but Arborescent does not
+  analyse them.
+- A repository that mixes languages is several units, each described by its main language. Only the Python unit gets
+  import analysis, rings and cycle checks.
+- Renaming the concept and polyglot support are deferred; see [#31](https://github.com/112345brian/arborescent/issues/31).
 
 ```toml
 [[packages]]
@@ -278,6 +290,41 @@ reason = "the protocol between the process adapter and the config loader"
 `literal-outside-owner` names the module, its ring and the line of each other spelling, and repeats the `reason`. Only
 identifier-like strings (letters, digits, `_`, `.`, `-`, at most 80 characters) are recorded, and docstrings are not spellings.
 A `modules` glob that matches no module is reported, and `selftest` spells each literal in a module that does not own it.
+
+`construct_only` lets only some modules and rings call a class or factory. `importable_by` cannot say "anyone may import the reader's
+module for its type, only the composition root may build the unfiltered one"; this can, and it is the checkable half of a wiring rule
+("the shell is wired to the unfiltered reader"): the unfiltered reader is its own class, and only the composition root constructs it.
+
+```toml
+[[tool.arborescent.construct_only]]
+target = "app.queries.UnfilteredQueries"   # dotted name of the class or factory, spelled as callers import it
+rings = ["composition"]                    # rings that may call it (and/or `modules`, module globs; not both empty)
+reason = "the unfiltered reader must not reach the MCP shell"
+```
+
+`construction-outside-site` names the module, its ring and the line of each other call, and repeats the `reason`. It goes into the
+baseline like any rule, so existing violations can only shrink. A `modules` glob, or a target whose module does not exist, is reported,
+and `selftest` calls each target from a module that may not. What it does not see: a name re-exported by another module (list the
+path callers import, or one entry per spelling), `partial(X)` or `make = X; make()`, `getattr`, a subclass, and an argument passed to a
+constructor (it checks who builds, not what is passed in). A parameter named like an imported class would be mistaken for it.
+
+`result_discard` is an opt-in check that a caller reads the outcome of a function it calls (a new "refused" or "skipped" outcome
+is otherwise silently ignored). It reports `result-discard` for a call written as a whole statement:
+
+```toml
+[tool.arborescent.result_discard]
+functions = ["app.usecases.place_order"]   # dotted names marked result-bearing, whatever they are annotated with
+rings = ["adapters", "composition"]        # only modules in these rings are checked (leave out for every ring)
+convention = true                          # default: a module-level function annotated `-> *Result` or `-> *Outcome` is marked
+```
+
+A function is result-bearing when it is listed in `functions`, or (with `convention`) when its module-level definition is
+annotated `-> FooResult` / `-> FooOutcome` (also `"FooResult"`, `mod.FooResult`, `FooResult | None`, `Optional[FooResult]`; not
+`list[FooResult]`, and not a bare `Result`). Binding, returning, passing on or testing the value is a use, and `_ = f()` is a
+deliberate discard; `await f()` as a statement is reported. Calls are resolved purely by syntax: `f()`, `module.f()`, an
+aliased or relative import, and a call inside the defining module. Dynamic calls are out of scope and never reported: methods
+(`obj.f()`), callbacks and variables, `getattr`, `functools.partial`, `*` imports, re-exports and shadowed names. Use a type
+checker's unused-result check for those. This is separate from the `discard(value, reason=...)` inventory above.
 
 Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
 and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
@@ -632,7 +679,9 @@ Migrating an existing classify-only project:
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
 | `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `filesystem`, `dynamic-import`, `patch`, `console`, or `global`. |
+| `max_reexport_ratio` | unset | A number from 0 to 1: the share of a module's public surface (a static `__all__`, else public top-level bindings; modules with fewer than 5 names are not judged) that may be first-party imports before `reexport-ratio` fires. Leave it unset on rings that legitimately aggregate (a composition root); the exemption is then visible in config. A dynamic `__all__` is ignored in favour of the bindings. Wrapping each name in a forwarding function evades it; that is the forwarded-import rule's job. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
+| `require_typed_ports` | `false` | Every method of a `typing.Protocol` class in this ring must name its return type. A missing return annotation, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set`/`frozenset` or `Mapping[str, Any]` (also inside `Optional`, `\|` unions and string annotations) fires `weakly-typed-port`; `None`, named classes and parameterised containers pass. `__init__` is skipped. Parameters are not checked. |
 
 A ring that is not given a table has no inner imports, no external imports and no OS branching. If `forbid` is omitted,
 the innermost ring forbids every effect, the outermost allows every effect, and middle rings use the preset default.
@@ -683,6 +732,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `wildcard-ring` | a non-outermost ring uses `*` in `external` or `may_import` (one finding per ring and axis) |
 | `suppression` | a `# noqa`, `# ruff: noqa` or `# type: ignore` directive is inventoried by module and kind; each occurrence is ratcheted |
 | `discard` | a `discard(value, reason=...)` call is inventoried by module; each call is ratcheted without claiming type-aware `Result` detection |
+| `lazy-import` | a function-level `import` with no `# deferred: <reason>` on its line or alone on the line above it; keyed by what it imports and its ordinal in the module, so moving it does not change the key. See "Function-level imports and import cycles" below |
 | `effect-clock` | a ring that forbids `clock` reads the ambient clock (`time.time`, `datetime.now` and related calls) |
 | `effect-env` | a ring that forbids `env` reads environment variables through `os.environ` or `os.getenv` |
 | `effect-identity` | a ring that forbids `identity` generates UUID identities |
@@ -699,9 +749,15 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-global` | a ring that forbids `global` has a function that declares `global x` and then assigns `x` (a read-only `global` is not a use) |
 | `effect-via-import` | a ring forbids an effect that a module it imports (directly or through that module's own imports, same scope, not an `if TYPE_CHECKING` import) uses directly; the message names the import chain |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
+| `forwarded-import` | a module imports a pass-through function (`def f(a): return other.f(a)`: one call to an imported name, arguments exactly the parameters, no default, decorator or other statement) whose target `module_forbid_imports` forbids it: the dependency one hop away. Chains of forwarders are followed. Only `from B import f` is seen, not `B.f` attribute use; wrappers that add logic are real boundaries and are not flagged. Counts against the importing module and takes its own baseline key |
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
+| `result-discard` | a call used as a whole statement drops the value of a result-bearing function (`result_discard`); `_ = f()` is a deliberate discard and is not reported |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
+| `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
+
+| `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
+| `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
 | `scope-effect-leak` | a module imports another scope's declared-`public` module, and that module uses an effect the importing ring forbids (one hop, not transitive) |
 | `circular-import` | when `forbid_circular_imports` is enabled, first-party modules form a circular import dependency, including cycles made only of lazy or `TYPE_CHECKING` imports |
@@ -746,6 +802,42 @@ cannot tell what `helper.do_it()` does when `helper`'s type is not known statica
 boundaries (that is `scope-effect-leak`, one hop, checked separately) or an `if TYPE_CHECKING` import (nothing runs
 there to inherit from). The function-level taint pass below (#98) is the sharper, same-granularity complement: it
 names which function actually calls the effectful code, instead of flagging every importer of the module that holds it.
+
+### Function-level imports and import cycles
+
+A function-level `import` is the usual workaround for an import cycle or a heavy dependency: it stops the
+`ImportError` and leaves the coupling in the graph. Each one is its own finding, `lazy-import`, so a baseline of them is
+a visible, shrink-only list per module. `check` prints `function-level imports by module:` with the total and how many
+carry a reason. An import under `if TYPE_CHECKING` never runs and is not counted. A decision is recorded on the line
+or alone on the line above (comment lines that continue it are fine, a blank line ends it):
+
+```python
+def load() -> None:
+    import heavy  # deferred: 300 ms of startup the CLI help path should not pay
+    # deferred: the registry imports this module at import time
+    import registry
+```
+
+The reason must not be empty. A justified import is counted but is not a finding. It still counts as an edge in the import
+graph, so `circular-import` and `arborescent cycles` see it. (Excluding these imports from a closure size is not done
+here; the closure used by `internal-import` move suggestions still follows them.)
+
+`arborescent cycles` reports the cycles themselves. For each strongly connected component of the first-party import
+graph it lists every edge with its kind (`import-time`, `function-level` or `type-checking`; an edge that several
+imports make takes the strongest kind) and the import lines, then:
+
+- **cut**: an approximate minimum feedback arc set, the edges whose removal leaves the component acyclic (an
+  Eades-Lin-Smyth ordering, thinned until no edge can be put back). Approximate, not guaranteed minimum.
+- **function-level imports that exist to break the cycle**: a function-level edge `a -> b` where `b` already reaches `a`
+  through import-time edges alone, so moving the import to module level would close an import-time cycle. A
+  function-level edge on a cycle without that property is only on cycles made of other deferred or type-only edges, and
+  one outside every cycle is deferred for another reason (startup cost, an optional dependency).
+- **Protocol owner**: the innermost-ring module of the component (then the one the others import most). Define the
+  `Protocol` there, make the importing side depend on it, and have the outer module register its implementation.
+
+The last line gives the function-level edge totals: how many are on a cycle, how many of those exist to break one, and
+how many are outside every cycle. A cycle fixed by a forwarder or a re-export is still a cycle; run `cycles` after
+those checks. The command only reports (exit 0); `circular-import` under `check` is what fails.
 
 ### Function-level taint: which functions actually reach I/O
 
@@ -812,6 +904,7 @@ Each practice is off until it has a value.
 | `undeclared-imports` | `true`, or a manifest path (default `pyproject.toml`) | a third-party import is absent from the manifest's dependencies |
 | `stale-config-path` | list of config file globs, e.g. `["Makefile", ".github/workflows/*.yml"]`; `stale-config-path-allow` lists path globs to ignore | a glob or `.py` path in the file matches nothing (a suite silently runs zero tests after a move), or a pyproject's hatch `packages` entry does not exist |
 | `source-root-drift` | `true`, or a list of files (default `["tach.toml", "pyproject.toml"]`) | a `sources` entry is below no `source_roots` entry, or the root list copied into `tach.toml` `source_roots`, hatch `sources`/`packages` or pytest `pythonpath` has drifted from the policy |
+| `test-reference` | tests folder, e.g. `"tests"`; `test-reference-exempt` lists `module.function` names or module globs to skip | information only: a public module-level function in an I/O-free ring (one that forbids `filesystem`, `network`, `database` and `process`; the innermost ring by default) that no function under the tests folder imports and calls. Resolved through import aliases and package re-exports; not through an object of unknown type, a fixture or a parametrized argument, and a function only a tested caller reaches is reported. Private, abstract and class members are skipped. A name that is only imported or mentioned does not count (#104) |
 
 `stale-config-path` is a heuristic: it reads path-like tokens (containing `/`, and either a glob or ending in `.py`) and skips
 comments, URLs, variables, absolute and `..` paths, generated folders and `.pyc`/`.log`/`.tmp` globs. A path it should not
@@ -823,18 +916,120 @@ check goes in `stale-config-path-allow`. `source-root-drift` reports a missing e
 `arborescent baseline` creates a baseline the first time. On later runs it removes stale entries, but refuses to add new
 ones. To adopt one previously unrecorded rule family, use `arborescent baseline --adopt FAMILY`; adoption is allowed only
 when that family has no existing baseline entries. Other growth requires
-`arborescent baseline --allow-growth --reason "why this debt is accepted"`. The version-2 JSON baseline records each
+`arborescent baseline --allow-growth --reason "why this debt is accepted" --approved-by "name or issue URL"`. The version-2 JSON baseline records each
 growth reason and the exact keys it added; version-1 baselines still load and are upgraded when written.
 
 `arborescent check --growth-against REF` compares the baseline at `REF` with the working baseline and requires every new
 key to match the keys in growth-log entries appended since that ref. This checks consistency; it does not prove the
 command wrote the file. A person could edit both the baseline and its log by hand, so review of baseline changes
-remains part of the protection (for example, require review through `CODEOWNERS`).
+remains part of the protection (for example, require review through `CODEOWNERS`). Each new growth entry must carry a
+non-blank `reason` and `approved-by`; the tool cannot verify the claim, but a false one is now an explicit, attributable
+string. Files listed in `ratchet_files` get the same check per name: an added or raised value needs a `growth` entry
+`{"key": NAME, "reason": ..., "approved-by": ...}` appended since the ref. To catch two branches that each raise a
+ratchet, run `check --growth-against <target-branch>` on the merge result in CI, not only on each branch.
+
+### `baseline report`
+
+`arborescent baseline report [FILE ...] [--json]` is read-only: it changes no file and no gate. It reads each file (default: the
+policy's `baseline`, paths relative to the policy root) in any of three shapes, a list of `rule|subject|detail` keys (also under
+`violations`), a `{module: count}` counter, or a `{name: {rule, module, target, count}}` registry, and prints:
+
+- the top clusters (`--top`, default 10) by rule, by module family (`--depth` leading segments of a dotted name or `/` path,
+  default 2), by module, and by target (the first backticked name in a key's detail, or a record's `target`), each with its share;
+- the concentration: any family, module or target holding more than `--threshold` percent (default 25) of the total, and at
+  least 3 entries, is flagged as a likely missing abstraction (a rule is never flagged);
+- the burn-down: entries added, removed and net per `--period` (`day`, `month`, `year`; default month) from the git history of
+  the file, reading the newest `--history-limit` revisions (default 200), with a warning when the baseline has only ever grown.
+  A counter entry that rises counts as added by the difference. `--no-history` skips it; a file git does not track prints a note.
+
 
 A shrink-only cap on imports (`module_forbid_imports` with the baseline) is sized in baseline entries, and `from pkg import mod`
 records two entries (`pkg` and `pkg.mod`). After `check` and `baseline`, one line sizes the baselined `internal-import` entries
 in modules: `baselined internal-import: 232 entries, 41 importing modules, 156 distinct targets`. A target is the dotted module
 as the entry records it, so the package and the submodule of one `from` import count separately.
+
+## Coupling metrics: `[tool.arborescent.coupling]`
+
+Import rules say what may import what; they do not say which modules everything depends on. `arborescent coupling` measures that
+from the same import facts the ring checks use (`from pkg import sub` is one edge to `pkg.sub`). Every import has one kind, and a
+pair imported in several ways takes the strongest: module-level, then function-level only, then `TYPE_CHECKING` only.
+
+```toml
+[tool.arborescent.coupling]
+entrypoints = ["app.__main__"]   # modules whose import closure is measured
+hub_fan_in = 8                   # importers from which a module is a hub (default 8)
+baseline = "arborescent-coupling.json"
+[tool.arborescent.coupling.fan_in_max]
+domain = 40                      # report-only cap on distinct importers per ring
+```
+
+- **Fan-in** per module: distinct importing modules (any kind), those that import it at module level, and the modules that reach
+  it through module-level imports (transitive). A module never counts as its own importer. A ring over its `fan_in_max` is flagged.
+- **Closure** per entrypoint: the project modules loaded by following module-level imports, the entrypoint included. The modules
+  only its function-level imports reach, and those only `TYPE_CHECKING` imports reach, are counted separately and not in the size.
+  Like the ring checks, this does not add the `__init__` of each parent package.
+- **Ambient hub candidates**: a module with at least `hub_fan_in` importers whose public definitions mostly (more than half) use an
+  effect directly (environment, file system, clock, process, ...). A definition owns the lines up to the next one; a parameter
+  default that names an effect is a seam and does not count. Pass such a module in through a port instead of importing it.
+
+`arborescent coupling report [--top N] [--json]` prints all three; `arborescent coupling cost IMPORTER [--imports MODULE...]
+[--modules N]` prints, per entrypoint that loads `IMPORTER`, how many modules its closure gains when `N` new modules (default 3:
+a port, a service and an adapter) are added behind it and import the given modules, so the price of a new module is visible
+before the commit.
+
+The optional ratchet is `arborescent coupling check`, with the counts in `arborescent-coupling.json`: `{"fan-in": {module: n},
+"closure": {entrypoint: n}, "growth": [...]}`. `fan-in` lists the modules at or above `hub_fan_in`; a module not listed must stay
+below it, and every declared entrypoint needs a `closure` entry. A count above its baseline, or an unlisted hub, fails.
+`arborescent coupling baseline` writes the file the first time and afterwards only lowers counts (a smaller or gone entry prints as
+`STALE` in `check`); a rise or a new entry needs `--allow-growth --reason TEXT` and is logged in `growth`. The file is separate
+from the check baseline and is not read by `arborescent check`.
+
+## Named ratchets: `[tool.arborescent.ratchet.<name>]`
+
+A named ratchet is a per-module counter that may only go down: function-level imports, bare prints, calls to a banned
+reader, findings of one rule, the size of an allow-list. Every ratchet uses one baseline format and one way to be lowered
+or raised, so a project does not need a baseline file and shrink-only script per scanner.
+
+```toml
+[tool.arborescent.ratchet.bare-prints]
+ast_call = "print"            # calls of this dotted name, per module
+scope = ["myapp.*"]           # optional module globs; default: every scanned module
+
+[tool.arborescent.ratchet.nested-imports]
+regex = '^[ ]+(import|from) '  # matches per module (Python regex, multi-line)
+
+[tool.arborescent.ratchet.suppressions]
+rule = "suppression"          # findings of one of Arborescent's own rule ids, per module
+
+[tool.arborescent.ratchet.legacy-scan]
+command = ["python", "tools/scan.py"]   # prints one `module count` line per module
+baseline = "ratchets/legacy.json"       # optional; default arborescent-ratchets.json
+```
+
+Each table sets exactly one measure (`rule`, `regex`, `ast_call` or `command`). `rule` takes an id from the rules above and
+counts findings by subject; the engines' findings (`ruff-*`) are not Arborescent's own rules, so measure those with a
+`command`. A `command` runs from the repository root, must exit 0 and print `module count` lines (blank lines are ignored; a
+repeated module, a line that is not `module count`, or a missing executable fails the ratchet). A file that cannot be read or
+parsed fails an `ast_call`/`regex` ratchet; it is never counted as zero.
+
+The baseline file holds every ratchet that names it:
+
+```json
+{"version": 1, "ratchets": {"bare-prints": {"myapp.cli": 4}}, "growth": []}
+```
+
+A module at zero is not listed, and a ratchet recorded at zero is `{}`. `arborescent check` compares each ratchet with its
+baseline and fails on a count above it (a regression) or below it (stale: run `arborescent ratchet` so the gain cannot be
+spent again), and on a ratchet that has no baseline yet. In `--changed` runs only regressions are reported.
+
+`arborescent ratchet [--name NAME]` records the baselines: the first recording of a ratchet is an adoption and logs itself,
+a later one only lowers counts. A count that would rise is refused unless
+`--allow-growth --reason "why" --approved-by "name or issue URL"` is given; that appends a growth entry
+`{"key": "NAME|MODULE", "reason": ..., "approved-by": ..., "from": 2, "to": 3}`. This is the same `key` / `reason` /
+`approved-by` record `ratchet_files` use. `arborescent check --growth-against REF` also reads each ratchet baseline at `REF`
+and fails when a module was added or raised since without an attributed entry appended since (a baseline file that is new since
+`REF` must log every count), or when existing log entries were rewritten. As with the main baseline, this checks consistency
+and not authorship: review baseline changes (for example through `CODEOWNERS`).
 
 ## Commands and exit codes
 
@@ -867,6 +1062,13 @@ against the baseline. Options:
 - `--install-tools`: offer to install missing configured tools before checking. The prompt defaults to No.
 - `--yes`: install without prompting; valid with `--install-tools`.
 - `--no-baseline`: report every finding without applying the baseline.
+- `--rule FAMILY` (repeatable): run and exit on the named rule families only, so a migration can show one family going
+  to zero while others are still open. `FAMILY` means what it does for `baseline --adopt` (a rule id, a `ruff`-style
+  prefix, or `coverage`, `effects`, `suppressions`, `discard`); an unknown name is an error rather than an empty
+  selection. Findings, baseline entries (so none outside the selection are reported stale) and failing engines
+  outside the selection are ignored; an engine that fails without any finding still fails the run. Profile and
+  modularity gates you request explicitly stay in force. Every `check` also prints `by rule: <rule> N (M new)`, where
+  M counts the findings not covered by the baseline.
 - `--growth-against REF`: verify baseline growth entries against the baseline at a Git ref.
 - `--no-cache`: bypass the Arborescent AST fact cache for this run.
 
@@ -883,8 +1085,18 @@ projects, its dependency group and lockfile.
 ### `arborescent baseline`
 
 Create the initial baseline or shrink it by removing findings that no longer occur. New findings are rejected by
-default. `--adopt FAMILY` adopts a previously unrecorded family once; `--allow-growth --reason TEXT` records other
-intentional baseline growth and its reason.
+default. `--adopt FAMILY` adopts a previously unrecorded family once; `--allow-growth --reason TEXT --approved-by WHO` records other
+intentional baseline growth, its reason and its approver.
+
+### `arborescent coupling`
+
+`report`, `check`, `baseline` and `cost`, described under [Coupling metrics](#coupling-metrics-toolarborescentcoupling).
+`check` exits 1 on a regression; a policy or baseline error exits 2.
+
+### `arborescent ratchet`
+
+Record or lower the `[ratchet.<name>]` baselines (`--name NAME` for one). A rise needs
+`--allow-growth --reason TEXT --approved-by WHO`; see [Named ratchets](#named-ratchets-toolarborescentratchetname).
 
 ### `arborescent discover`
 
@@ -897,6 +1109,11 @@ scanned. Git-tracked Python files under noise directories are reported separatel
 Mutation-test Arborescent's native rules by adding forbidden constructs to a temporary copy and checking that each
 mutation produces a finding. A surviving mutation fails the command; rules that cannot be exercised for the current
 policy are reported as skipped.
+
+### `arborescent cycles`
+
+Print the first-party import cycles, the edges to cut and which function-level imports only break a cycle (see
+"Function-level imports and import cycles"). Read-only; exits 0 even when it finds cycles.
 
 ### `arborescent bench DIR...`
 

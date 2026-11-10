@@ -10,11 +10,13 @@ import io
 import re
 import tokenize
 import tomllib
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 
+from .forwarder_facts import Forwarder, forwarders
+
 __all__ = [
-    "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef",
+    "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "Forwarder", "FunctionCalls", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef",
     "effect_category_of", "extract", "resolve_runtime_targets", "resolve_targets",
 ]
 
@@ -99,6 +101,19 @@ class TopLevelDef:
 
 
 @dataclass(frozen=True)
+class FunctionCalls:
+    """The imported callables one function or method calls, as canonical dotted names (``alias.attr()`` resolved).
+
+    ``name`` is ``f`` or ``Class.method``. Only calls whose root name was imported are kept, so a local variable's
+    method call is not recorded; a function that calls nothing imported has no entry. Reused by the test-reference check (#104).
+    """
+
+    name: str
+    line: int
+    calls: tuple[str, ...]  # sorted, unique
+
+
+@dataclass(frozen=True)
 class SourceFacts:
     imports: tuple[RawImport, ...]
     effect_uses: tuple[EffectUse, ...]
@@ -112,6 +127,16 @@ class SourceFacts:
     file_refs: tuple[int, ...] = ()  # lines that read `__file__`: a location-dependent path breaks when the module moves
     main_guard: int = 0  # line of a top-level `if __name__ == "__main__":`, 0 when there is none: the module is also a program
     string_literals: tuple[tuple[int, str], ...] = ()  # (line, value) of identifier-like string constants, docstrings excluded (#112)
+    forwarders: tuple[Forwarder, ...] = ()  # module-level pass-through functions (#138)
+    weak_port_returns: tuple[tuple[int, str, str], ...] = ()  # (line, "Protocol.method", why): a Protocol method whose return type says nothing (#140)
+    surface_size: int = 0  # public names: a static `__all__`, else public top-level bindings (#136)
+    surface_line: int = 0  # line of `__all__`, else of the first public binding
+    reexports: tuple[tuple[str, int, str, str], ...] = ()  # surface names bound by an import: (name, level, module, imported name or "")
+    deferred: tuple[tuple[int, str], ...] = ()  # (code line, reason): lines justified by a `# deferred: <reason>` comment (#149)
+    calls: tuple[tuple[int, str], ...] = ()  # (line, dotted callee) of calls on an imported or module-level name; a relative import keeps its dots (#85)
+    result_defs: tuple[str, ...] = ()  # module-level functions annotated `-> *Result` / `-> *Outcome` (#141)
+    bare_calls: tuple[tuple[int, str], ...] = ()  # (line, dotted callee) of a call used as a whole statement; relative targets keep leading dots (#141)
+    function_calls: tuple[FunctionCalls, ...] = ()  # module-level functions and class methods that call something imported (#104)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -155,9 +180,9 @@ def _walk_stmt(stmt: ast.stmt, lazy: bool, type_only: bool, imports: list[RawImp
     _walk(holder, lazy, type_only, imports)
 
 
-def _aliases(tree: ast.AST) -> dict[str, str]:
+def _aliases(nodes: Sequence[ast.AST]) -> dict[str, str]:
     aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             for item in node.names:
                 aliases[item.asname if item.asname is not None else item.name.split(".")[0]] = item.name if item.asname is not None else item.name.split(".")[0]
@@ -273,10 +298,10 @@ def _is_seam_subscript(node: ast.Subscript) -> bool:
     return _is_seam_annotation(base)
 
 
-def _injection_defaults(tree: ast.AST) -> dict[int, int]:
+def _injection_defaults(nodes: Sequence[ast.AST]) -> dict[int, int]:
     """Node id -> seam kind for every node inside a bare Name/Attribute parameter default: a reference there is the injection seam."""
     seams: dict[int, int] = {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Lambda):
             pairs = [(None, d) for d in [*node.args.defaults, *node.args.kw_defaults]]
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -293,10 +318,10 @@ def _injection_defaults(tree: ast.AST) -> dict[int, int]:
     return seams
 
 
-def _rebound_names(tree: ast.AST) -> set[str]:
+def _rebound_names(nodes: Sequence[ast.AST]) -> set[str]:
     """Names the module assigns, defines or takes as parameters (imports are resolved by `_aliases`): a bare builtin name among them is not the builtin."""
     bound: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
             bound.add(node.id)
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
@@ -353,11 +378,11 @@ def _own_scope_nodes(func: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterable[a
             stack.extend(ast.iter_child_nodes(node))
 
 
-def _global_effect_uses(tree: ast.AST) -> list[EffectUse]:
+def _global_effect_uses(nodes: Sequence[ast.AST]) -> list[EffectUse]:
     """A function that both declares ``global x`` and assigns ``x`` (plain, augmented or in a ``for``/``with``
     target) mutates module state from inside a call; one that only reads a global is not a use."""
     uses: list[EffectUse] = []
-    for func in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
+    for func in (n for n in nodes if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
         declared: set[str] = set()
         assigned: dict[str, int] = {}
         for node in _own_scope_nodes(func):
@@ -369,13 +394,12 @@ def _global_effect_uses(tree: ast.AST) -> list[EffectUse]:
     return uses
 
 
-def _effect_uses(tree: ast.AST) -> tuple[EffectUse, ...]:
-    aliases = _aliases(tree)
-    seams = _injection_defaults(tree)
-    rebound = _rebound_names(tree)
-    uses: set[EffectUse] = set(_global_effect_uses(tree))
+def _effect_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[EffectUse, ...]:
+    seams = _injection_defaults(nodes)
+    rebound = _rebound_names(nodes)
+    uses: set[EffectUse] = set(_global_effect_uses(nodes))
     imported_os_names: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.ImportFrom):
             for use, bound_name in _os_branch_imports(node):
                 uses.add(use)
@@ -414,30 +438,56 @@ def _patch_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
     return EffectUse(node.lineno, "patch", target) if target is not None else None
 
 
-def _suppression_comments(source: str) -> tuple[tuple[int, str], ...]:
-    found: list[tuple[int, str]] = []
+_DEFERRED = re.compile(r"(?:^|#)\s*deferred\s*:\s*(\S.*)", re.IGNORECASE)
+_SKIPPED_TOKENS = frozenset({tokenize.COMMENT, tokenize.NL, tokenize.INDENT, tokenize.DEDENT})
+
+
+def _suppression_kind(comment: str) -> str | None:
+    ruff = re.match(r"ruff\s*:\s*noqa\b(?:\s*:\s*(.*))?", comment, re.IGNORECASE)
+    noqa = re.match(r"noqa\b(?:\s*:\s*(.*))?", comment, re.IGNORECASE)
+    ignored_type = re.match(r"type\s*:\s*ignore\b(?:\s*\[([^\]]*)\])?", comment, re.IGNORECASE)
+    if ruff is not None:
+        return "ruff-noqa-coded" if (ruff.group(1) or "").strip() else "ruff-noqa-blanket"
+    if noqa is not None:
+        return "noqa-coded" if (noqa.group(1) or "").strip() else "noqa-blanket"
+    if ignored_type is not None:
+        return "type-ignore-coded" if (ignored_type.group(1) or "").strip() else "type-ignore-blanket"
+    return None
+
+
+def _comment_facts(source: str) -> tuple[tuple[tuple[int, str], ...], tuple[tuple[int, str], ...]]:
+    """One tokenize pass: suppression directives ``(line, kind)`` and ``# deferred: <reason>`` justifications.
+
+    A deferred comment justifies the code line it trails, or the next code line when it stands alone (comment lines
+    that continue it are skipped; a blank line ends it). The reason must not be empty.
+    """
+    suppressions: list[tuple[int, str]] = []
+    deferred: list[tuple[int, str]] = []
+    pending: str | None = None
     for token in tokenize.generate_tokens(io.StringIO(source).readline):
-        if token.type != tokenize.COMMENT:
-            continue
-        comment = token.string[1:].strip()
-        ruff = re.match(r"ruff\s*:\s*noqa\b(?:\s*:\s*(.*))?", comment, re.IGNORECASE)
-        noqa = re.match(r"noqa\b(?:\s*:\s*(.*))?", comment, re.IGNORECASE)
-        ignored_type = re.match(r"type\s*:\s*ignore\b(?:\s*\[([^\]]*)\])?", comment, re.IGNORECASE)
-        if ruff is not None:
-            kind = "ruff-noqa-coded" if (ruff.group(1) or "").strip() else "ruff-noqa-blanket"
-        elif noqa is not None:
-            kind = "noqa-coded" if (noqa.group(1) or "").strip() else "noqa-blanket"
-        elif ignored_type is not None:
-            kind = "type-ignore-coded" if (ignored_type.group(1) or "").strip() else "type-ignore-blanket"
-        else:
-            continue
-        found.append((token.start[0], kind))
-    return tuple(found)
+        if token.type == tokenize.COMMENT:
+            comment = token.string[1:].strip()
+            kind = _suppression_kind(comment)
+            if kind is not None:
+                suppressions.append((token.start[0], kind))
+            reason = _DEFERRED.search(comment)
+            if reason is None:
+                continue
+            if token.line.lstrip().startswith("#"):
+                pending = str(reason.group(1)).strip()
+            else:
+                deferred.append((token.start[0], str(reason.group(1)).strip()))
+        elif token.type == tokenize.NL and not token.line.strip():
+            pending = None
+        elif pending is not None and token.type not in _SKIPPED_TOKENS:
+            deferred.append((token.start[0], pending))
+            pending = None
+    return tuple(suppressions), tuple(deferred)
 
 
-def _discard_call_lines(tree: ast.AST) -> tuple[int, ...]:
+def _discard_call_lines(nodes: Sequence[ast.AST]) -> tuple[int, ...]:
     lines: list[int] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         function = node.func
@@ -486,6 +536,71 @@ def _top_level_defs(tree: ast.AST, aliases: dict[str, str]) -> tuple[TopLevelDef
         elif isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
             out.append(TopLevelDef(stmt.name, stmt.lineno, False, _is_stub_body(stmt.body, aliases)))
     return tuple(out)
+
+
+_PROTOCOL_NAMES = frozenset({"Protocol", "typing.Protocol", "typing_extensions.Protocol"})
+_ANY_NAMES = frozenset({"Any", "typing.Any", "typing_extensions.Any", "object", "builtins.object"})
+_BARE_CONTAINERS = frozenset({"dict", "list", "tuple", "set", "frozenset"})
+_BARE_TYPING_CONTAINERS = frozenset({"Dict", "List", "Tuple", "Set", "FrozenSet"})
+_STRING_KEYED_MAPPINGS = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
+_ANNOTATION_WRAPPERS = frozenset({"Optional", "Union", "Annotated"})
+
+
+def _last_name(node: ast.expr) -> str:
+    return node.attr if isinstance(node, ast.Attribute) else node.id if isinstance(node, ast.Name) else ""
+
+
+def _weak_annotation(node: ast.expr, aliases: dict[str, str]) -> str | None:
+    """Why a return annotation says nothing, or None when it names a type. Looks through Optional/Union/`|`/Annotated and string forms."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return _weak_string_annotation(node.value, aliases)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _weak_annotation(node.left, aliases) or _weak_annotation(node.right, aliases)
+    if isinstance(node, ast.Subscript):
+        return _weak_subscript(node, aliases)
+    dotted = _dotted(node, aliases) or ""
+    name = _last_name(node)
+    if dotted in _ANY_NAMES or dotted.split(".")[-1] == "Any":
+        return f"returns {dotted.split('.')[-1]}"
+    if name in _BARE_CONTAINERS or (name in _BARE_TYPING_CONTAINERS and dotted.startswith("typing")):
+        return f"returns a bare {name.lower()}"
+    return None
+
+
+def _weak_string_annotation(text: str, aliases: dict[str, str]) -> str | None:
+    try:
+        return _weak_annotation(ast.parse(text, mode="eval").body, aliases)
+    except SyntaxError:
+        return None
+
+
+def _weak_subscript(node: ast.Subscript, aliases: dict[str, str]) -> str | None:
+    name = _last_name(node.value)
+    items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+    if name in _ANNOTATION_WRAPPERS:
+        # Annotated's first item is the type; the rest are metadata
+        return next(filter(None, (_weak_annotation(item, aliases) for item in (items[:1] if name == "Annotated" else items))), None)
+    if name in _STRING_KEYED_MAPPINGS and len(items) == 2 and _last_name(items[0]) == "str":
+        value = _dotted(items[1], aliases)
+        if value is not None and value.split(".")[-1] == "Any":
+            return f"returns {name}[str, Any]"
+    return None
+
+
+def _weak_port_returns(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str, str], ...]:
+    """Methods of ``typing.Protocol`` classes (module-level or nested) whose return annotation is missing, Any, object,
+    a bare dict/list/tuple/set or ``Mapping[str, Any]`` (#140). ``__init__`` is skipped: it returns None by definition."""
+    found: list[tuple[int, str, str]] = []
+    for cls in (n for n in nodes if isinstance(n, ast.ClassDef)):
+        if not any(_dotted(base.value if isinstance(base, ast.Subscript) else base, aliases) in _PROTOCOL_NAMES for base in cls.bases):
+            continue
+        for stmt in cls.body:
+            if not isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef) or stmt.name == "__init__":
+                continue
+            why = "has no return annotation" if stmt.returns is None else _weak_annotation(stmt.returns, aliases)
+            if why is not None:
+                found.append((stmt.lineno, f"{cls.name}.{stmt.name}", why))
+    return tuple(sorted(found))
 
 
 _ARBOR_LEGAL_KEYS = frozenset({"ring", "role"})
@@ -588,34 +703,200 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     imports: list[RawImport] = []
     _walk(tree, False, False, imports)
     arbor_ring, arbor_error, arbor_role = _arbor_ring(tree)
+    suppressions, deferred = _comment_facts(source)
+    nodes = list(ast.walk(tree))  # one walk, shared by every fact below
+    aliases = _aliases(nodes)  # computed once: each fact below reads it
+    call_aliases = _call_aliases(nodes, aliases)
     return SourceFacts(
         tuple(imports),
-        _effect_uses(tree),
+        _effect_uses(tree, nodes, aliases),
         _script_deps(source),
-        _suppression_comments(source),
-        _discard_call_lines(tree),
-        _top_level_defs(tree, _aliases(tree)),
+        suppressions,
+        _discard_call_lines(nodes),
+        _top_level_defs(tree, aliases),
         arbor_ring,
         arbor_error,
         arbor_role,
-        _file_ref_lines(tree),
+        _file_ref_lines(nodes),
         _main_guard_line(tree),
-        _string_literals(tree),
+        _string_literals(nodes),
+        forwarders(tree),
+        _weak_port_returns(nodes, aliases),
+        *_surface(tree),
+        deferred,
+        _call_sites(tree, nodes, call_aliases),
+        _result_defs(tree),
+        _bare_calls(nodes, call_aliases),
+        _function_calls(tree, aliases),
     )
+
+
+def _bound_names(stmt: ast.stmt) -> list[tuple[str, tuple[int, str, str] | None]]:
+    """Names a top-level statement binds; an import carries (level, module, imported name) so a re-export can be resolved."""
+    if isinstance(stmt, ast.Import):
+        return [(a.asname or a.name.split(".")[0], (0, a.name if a.asname is not None else a.name.split(".")[0], "")) for a in stmt.names]
+    if isinstance(stmt, ast.ImportFrom):
+        if stmt.module == "__future__":
+            return []
+        return [(a.asname or a.name, (stmt.level, stmt.module or "", a.name)) for a in stmt.names if a.name != "*"]
+    if isinstance(stmt, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+        return [(stmt.name, None)]
+    targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target] if isinstance(stmt, ast.AnnAssign) else []
+    return [(t.id, None) for t in targets if isinstance(t, ast.Name)]
+
+
+def _static_all(tree: ast.Module) -> tuple[int, list[str]] | None:
+    """(line, names) of a `__all__` built only from string-literal lists/tuples; None when absent or dynamic."""
+    line = 0
+    names: list[str] = []
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            hit = any(isinstance(t, ast.Name) and t.id == "__all__" for t in stmt.targets)
+        elif isinstance(stmt, ast.AnnAssign | ast.AugAssign):
+            hit = isinstance(stmt.target, ast.Name) and stmt.target.id == "__all__"
+        else:
+            continue
+        if not hit:
+            continue
+        value = stmt.value
+        if not isinstance(value, ast.List | ast.Tuple) or not all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts):
+            return None
+        if not isinstance(stmt, ast.AugAssign):
+            names = []
+        line = line or stmt.lineno
+        names += [str(e.value) for e in value.elts if isinstance(e, ast.Constant)]
+    return (line, names) if line else None
+
+
+def _surface(tree: ast.AST) -> tuple[int, int, tuple[tuple[str, int, str, str], ...]]:
+    """(size, line, re-exports) of a module's public surface (#136): a static `__all__`, else public top-level bindings."""
+    if not isinstance(tree, ast.Module):
+        return 0, 0, ()
+    bound: dict[str, tuple[int, str, str] | None] = {}
+    first = 0
+    for stmt in tree.body:
+        for name, source in _bound_names(stmt):
+            bound[name] = source
+            if not name.startswith("_") and not first:
+                first = stmt.lineno
+    declared = _static_all(tree)
+    names = list(dict.fromkeys(declared[1])) if declared is not None else [n for n in bound if not n.startswith("_")]
+    line = declared[0] if declared is not None else first
+    return len(names), line, tuple((n, *source) for n in names if (source := bound.get(n)) is not None)
+
+
+def _call_aliases(nodes: Sequence[ast.AST], imported: dict[str, str]) -> dict[str, str]:
+    """Like ``_aliases`` but a relative import keeps its leading dots (``from ..a import B`` -> ``B: "..a.B"``) for the rule to resolve."""
+    aliases = dict(imported)
+    for node in nodes:
+        if isinstance(node, ast.ImportFrom) and node.level:
+            prefix = "." * node.level + (node.module or "")
+            for item in node.names:
+                if item.name != "*":
+                    aliases[item.asname or item.name] = f"{prefix}{'.' if node.module is not None else ''}{item.name}"
+    return aliases
+
+
+def _call_sites(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str], ...]:
+    """Calls whose head name is imported or defined at module level: what a construction rule can resolve; a method on a value is not."""
+    heads = set(aliases) | {stmt.name for stmt in tree.body if isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+    out: set[tuple[int, str]] = set()
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        head = node.func
+        while isinstance(head, ast.Attribute):
+            head = head.value
+        if isinstance(head, ast.Name) and head.id in heads and (name := _dotted(node.func, aliases)) is not None:
+            out.add((node.lineno, name))
+    return tuple(sorted(out))
+
+
+_RESULT_SUFFIXES = ("Result", "Outcome")
+
+
+def _annotation_names(node: ast.expr | None) -> Iterator[str]:
+    """The names a return annotation may stand for: ``X``, ``m.X``, ``"X"``, ``X | None``, ``Optional[X]``; never ``list[X]``."""
+    if isinstance(node, ast.Name):
+        yield node.id
+    elif isinstance(node, ast.Attribute):
+        yield node.attr
+    elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            yield from _annotation_names(ast.parse(node.value.strip(), mode="eval").body)
+        except SyntaxError:
+            return
+    elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        yield from _annotation_names(node.left)
+        yield from _annotation_names(node.right)
+    elif isinstance(node, ast.Subscript) and next(_annotation_names(node.value), "") == "Optional":
+        yield from _annotation_names(node.slice)
+
+
+def _result_defs(tree: ast.AST) -> tuple[str, ...]:
+    body = tree.body if isinstance(tree, ast.Module) else []
+    return tuple(
+        stmt.name for stmt in body
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+        and any(name.endswith(_RESULT_SUFFIXES) and name not in _RESULT_SUFFIXES for name in _annotation_names(stmt.returns))
+    )
+
+
+def _bare_calls(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str], ...]:
+    found: list[tuple[int, str]] = []
+    for node in nodes:
+        if not isinstance(node, ast.Expr):
+            continue
+        value = node.value.value if isinstance(node.value, ast.Await) else node.value
+        target = _dotted(value.func, aliases) if isinstance(value, ast.Call) else None
+        if target is not None:
+            found.append((node.lineno, target))
+    return tuple(sorted(found))
+
+
+def _root_name(node: ast.expr) -> str | None:
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _imported_calls(func: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str]) -> tuple[str, ...]:
+    calls: set[str] = set()
+    for node in ast.walk(func):
+        if isinstance(node, ast.Call) and _root_name(node.func) in aliases and (target := _dotted(node.func, aliases)) is not None:
+            calls.add(target)
+    return tuple(sorted(calls))
+
+
+def _function_calls(tree: ast.Module, aliases: dict[str, str]) -> tuple[FunctionCalls, ...]:
+    out: list[FunctionCalls] = []
+
+    def visit(func: ast.FunctionDef | ast.AsyncFunctionDef, qualified: str) -> None:
+        if calls := _imported_calls(func, aliases):
+            out.append(FunctionCalls(qualified, func.lineno, calls))
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+            visit(stmt, stmt.name)
+        elif isinstance(stmt, ast.ClassDef):
+            for member in stmt.body:
+                if isinstance(member, ast.FunctionDef | ast.AsyncFunctionDef):
+                    visit(member, f"{stmt.name}.{member.name}")
+    return tuple(out)
 
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")
 _DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 
 
-def _string_literals(tree: ast.Module) -> tuple[tuple[int, str], ...]:
+def _string_literals(nodes: Sequence[ast.AST]) -> tuple[tuple[int, str], ...]:
     """Identifier-like string constants (an environment variable, a key, a protocol name); a docstring is prose, not a spelling."""
     docstrings = {
-        id(node.body[0].value) for node in ast.walk(tree)
+        id(node.body[0].value) for node in nodes
         if isinstance(node, _DOCSTRING_OWNERS) and node.body and isinstance(node.body[0], ast.Expr)
     }
     return tuple(sorted({
-        (node.lineno, node.value) for node in ast.walk(tree)
+        (node.lineno, node.value) for node in nodes
         if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
         and _LITERAL_NAME.fullmatch(node.value)
     }))
@@ -633,8 +914,8 @@ def _main_guard_line(tree: ast.Module) -> int:
     return next((stmt.lineno for stmt in tree.body if isinstance(stmt, ast.If) and _is_main_guard(stmt.test)), 0)
 
 
-def _file_ref_lines(tree: ast.AST) -> tuple[int, ...]:
-    return tuple(sorted(node.lineno for node in ast.walk(tree) if isinstance(node, ast.Name) and node.id == "__file__"))
+def _file_ref_lines(nodes: Sequence[ast.AST]) -> tuple[int, ...]:
+    return tuple(sorted(node.lineno for node in nodes if isinstance(node, ast.Name) and node.id == "__file__"))
 
 
 def resolve_targets(

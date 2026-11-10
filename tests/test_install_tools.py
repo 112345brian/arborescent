@@ -32,8 +32,8 @@ from arborescent.install_tools import (
     TOOL_REQUIREMENTS,
 )
 from arborescent.installer_adapter import (
-    _shell_join,
     include_poetry_arborescent_group_in_dev,
+    shell_join,
 )
 from arborescent.testing import FakeToolRunner
 from arborescent.typecheckers import all_checkers
@@ -355,7 +355,7 @@ def test_check_reports_install_tools_without_running_an_installer(repo: Path, ca
     output = capsys.readouterr().out
     assert "SETUP  missing checker(s):" in output
     prefix = [sys.executable, "-m", "pip", "install"]
-    assert _shell_join(prefix, shlex.join(prefix), windows=os.name == "nt") in output
+    assert shell_join(prefix, shlex.join(prefix), windows=os.name == "nt") in output
     assert "arborescent check --install-tools" in output
     assert not any(call[3:4] == ["install"] or call[:3] == ["uv", "pip", "install"] for call in runner.calls)
     if "--require-tools" in argv:
@@ -467,5 +467,5 @@ def test_check_setup_hint_contains_the_active_environment_install_command(tmp_pa
     command = _setup_install_command(mini_policy(), tmp_path, _services(runner), None)
 
     expected = [sys.executable, "-m", "pip", "install", "import-linter>=2.0", "ruff>=0.16.3", "tach>=0.30", "ty>=0.0.50"]
-    assert command == _shell_join(expected, shlex.join(expected), windows=os.name == "nt")
+    assert command == shell_join(expected, shlex.join(expected), windows=os.name == "nt")
     assert runner.calls == [[sys.executable, "-m", "pip", "--version"]]

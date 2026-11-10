@@ -16,6 +16,8 @@ from .domain import NOISE_DIRS, Policy, PolicyError
 from .facts import (
     DEV_TOOL_ROLE,
     EffectUse,
+    Forwarder,
+    FunctionCalls,
     ModuleInfo,
     RawImport,
     SourceFacts,
@@ -27,7 +29,7 @@ from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 14
+_CACHE_VERSION = 20
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
@@ -212,6 +214,13 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
         imports, effects, None if f.script_deps is None else list(f.script_deps),
         suppressions, list(f.discard_calls), top_level_defs, f.arbor_ring, f.arbor_error, list(f.file_refs), f.main_guard, f.arbor_role,
         [[line, value] for line, value in f.string_literals],
+        [[w.name, w.line, w.level, w.module, w.imported, w.member] for w in f.forwarders],
+        [list(item) for item in f.weak_port_returns],
+        f.surface_size, f.surface_line, [list(item) for item in f.reexports],
+        [[line, reason] for line, reason in f.deferred],
+        [[line, name] for line, name in f.calls],
+        list(f.result_defs), [[line, target] for line, target in f.bare_calls],
+        [[c.name, c.line, list(c.calls)] for c in f.function_calls],
     ]
 
 
@@ -224,6 +233,13 @@ def _facts_from_json(raw: list[Any]) -> SourceFacts:
         imports, effects, None if raw[2] is None else tuple(raw[2]),
         suppressions, tuple(raw[4]), top_level_defs, raw[6], raw[7], raw[10], tuple(raw[8]), raw[9],
         tuple((item[0], item[1]) for item in raw[11]),
+        tuple(Forwarder(*item) for item in raw[12]),
+        tuple((item[0], item[1], item[2]) for item in raw[13]),
+        raw[14], raw[15], tuple((i[0], i[1], i[2], i[3]) for i in raw[16]),
+        tuple((item[0], item[1]) for item in raw[17]),
+        tuple((item[0], item[1]) for item in raw[18]),
+        tuple(raw[19]), tuple((item[0], item[1]) for item in raw[20]),
+        tuple(FunctionCalls(c[0], c[1], tuple(c[2])) for c in raw[21]),
     )
 
 

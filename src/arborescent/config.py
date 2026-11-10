@@ -9,12 +9,15 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
+from .coupling_policy import DEFAULT_BASELINE, DEFAULT_HUB_FAN_IN, CouplingPolicy
 from .domain import (
     ArchitectureScope,
     ChildArbor,
+    ConstructionSite,
     OwnedLiteral,
     Policy,
     PolicyError,
+    ResultDiscard,
     RingRule,
 )
 from .ports import FileSystem
@@ -27,8 +30,11 @@ from .presets import (
     TAINT_SEED_CATEGORIES,
     Preset,
 )
+from .ratchet_config import ratchet_specs
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")  # mirrors the scanner: only identifier-like strings are recorded
+
+_DOTTED_NAME = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)+")  # a module path and a name: `construct_only` targets
 
 __all__ = ["find_child_policy", "find_policy", "load_policy", "policy_from_mapping"]
 
@@ -234,6 +240,8 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         module_forbid_imports=tuple((pattern, tuple(targets)) for pattern, targets in raw_module_forbids.items()),
         importable_by=_importable_by(raw),
         owned_literals=_owned_literals(raw),
+        construct_only=_construct_only(raw),
+        result_discard=_result_discard(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
@@ -251,6 +259,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         disabled_tools=disabled_tools,
         output_dir=str(raw.get("output_dir", ".")),
         baseline=str(raw.get("baseline", "arborescent-baseline.json")),
+        ratchet_files=_string_list(raw, "ratchet_files"),
         suggestion_threshold=suggestion_threshold,
         ruff_overrides=ruff_overrides,
         customization_labels=customizations,
@@ -263,6 +272,30 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         preset=_preset_overrides(PRESETS[preset_name], raw),
         io_modules=frozenset(io_modules),
         taint_seeds=_taint_seeds(raw),
+        coupling=_coupling(raw),
+        ratchets=ratchet_specs(raw.get("ratchet", {})),
+    )
+
+
+def _coupling(raw: Mapping[str, Any]) -> CouplingPolicy:
+    table = raw.get("coupling", {})
+    if not isinstance(table, Mapping):
+        raise PolicyError("`coupling` must be a table")
+    table = cast("Mapping[str, Any]", table)
+    unknown = set(table) - {"entrypoints", "fan_in_max", "hub_fan_in", "baseline"}
+    if unknown:
+        raise PolicyError(f"unknown key in `coupling`: {sorted(unknown)}")
+    caps = table.get("fan_in_max", {})
+    hub = table.get("hub_fan_in", DEFAULT_HUB_FAN_IN)
+    baseline = table.get("baseline", DEFAULT_BASELINE)
+    if not isinstance(caps, Mapping) or not all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in cast("Mapping[str, Any]", caps).values()):
+        raise PolicyError("`coupling.fan_in_max` must map ring names to positive integers")
+    if not isinstance(hub, int) or isinstance(hub, bool) or hub < 1:
+        raise PolicyError("`coupling.hub_fan_in` must be a positive integer")
+    if not isinstance(baseline, str) or not baseline:
+        raise PolicyError("`coupling.baseline` must be a file path")
+    return CouplingPolicy(
+        _string_list(table, "entrypoints"), tuple(sorted(cast("Mapping[str, int]", caps).items())), hub, baseline
     )
 
 
@@ -277,15 +310,16 @@ def _taint_seeds(raw: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 _SCOPED_ROOT_GLOBALS = frozenset({
-    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "suggestion_threshold", "children",
+    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "ratchet_files", "suggestion_threshold", "children",
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
-    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds",
+    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling",
+    "ratchet",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "construct_only", "result_discard", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -328,6 +362,7 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
     first = scopes[0].policy
     return replace(
         first,
+        coupling=_coupling(raw),
         rings=(),
         classify=(),
         sources=tuple(path for scope in scopes for path in scope.policy.sources),
@@ -512,6 +547,43 @@ def _owned_literal(entry: Mapping[str, Any]) -> OwnedLiteral:
     return OwnedLiteral(literal, tuple(names["modules"]), tuple(names["rings"]), reason)
 
 
+def _construct_only(raw: Mapping[str, Any]) -> tuple[ConstructionSite, ...]:
+    entries = raw.get("construct_only", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in entries):
+        raise PolicyError("`construct_only` must be an array of tables: [[tool.arborescent.construct_only]]")
+    sites: list[ConstructionSite] = []
+    for entry in cast("list[Mapping[str, Any]]", entries):
+        target, reason = entry.get("target"), entry.get("reason", "")
+        names = {key: entry.get(key, []) for key in ("modules", "rings")}
+        if not isinstance(target, str) or not _DOTTED_NAME.fullmatch(target):
+            raise PolicyError("`construct_only` needs a `target` that is the dotted name of a class or factory, e.g. \"app.queries.UnfilteredQueries\"")
+        if not isinstance(reason, str) or any(
+            not isinstance(value, list) or not all(isinstance(item, str) and item for item in value) for value in names.values()
+        ):
+            raise PolicyError(f"`construct_only` {target!r}: `modules` and `rings` are lists of non-empty strings, `reason` a string")
+        if not names["modules"] and not names["rings"]:
+            raise PolicyError(f"`construct_only` {target!r} needs `modules` or `rings`, or it restricts nothing")
+        sites.append(ConstructionSite(target, tuple(names["modules"]), tuple(names["rings"]), reason))
+    return tuple(sites)
+
+
+def _result_discard(raw: Mapping[str, Any]) -> ResultDiscard | None:
+    if "result_discard" not in raw:
+        return None
+    if not isinstance(raw["result_discard"], Mapping):
+        raise PolicyError("`result_discard` must be a table: [tool.arborescent.result_discard]")
+    entry = cast("Mapping[str, Any]", raw["result_discard"])
+    unknown = set(entry) - {"functions", "rings", "convention"}
+    convention = entry.get("convention", True)
+    lists = {key: entry.get(key, []) for key in ("functions", "rings")}
+    if unknown or not isinstance(convention, bool) or any(
+        not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[Any]", value))
+        for value in lists.values()
+    ):
+        raise PolicyError("`result_discard` takes `functions` and `rings` (lists of non-empty strings) and `convention` (a boolean)")
+    return ResultDiscard(tuple(cast("list[str]", lists["functions"])), tuple(cast("list[str]", lists["rings"])), convention)
+
+
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:
     raw_module_forbids = raw.get("module_forbid_imports", {})
     if not isinstance(raw_module_forbids, Mapping) or any(
@@ -613,7 +685,18 @@ def _ring_from_mapping(
         bool(table.get("os_branching", False)),
         forbid,
         bool(table.get("require_abstract", False)),
+        bool(table.get("require_typed_ports", False)),
+        _reexport_ratio(table, name),
     )
+
+
+def _reexport_ratio(table: Mapping[str, Any], ring: str) -> float | None:
+    value = table.get("max_reexport_ratio")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 1:
+        raise PolicyError(f"`max_reexport_ratio` in [ring.{ring}] must be a number from 0 to 1")
+    return float(value)
 
 
 def _suggestion_threshold(raw: Mapping[str, Any]) -> int:

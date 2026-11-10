@@ -2,9 +2,52 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- Baseline growth entries now carry `approved-by`: `baseline --allow-growth` requires `--approved-by WHO` (adoption
+  records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
+- `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an
+  added or raised value needs an attributed growth entry appended since the ref (#139).
+
+### Changed
+- Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they
+  are newer than the ref.
+- `arborescent check --rule FAMILY` (repeatable) runs and exits on one rule family, and `check` prints a
+  `by rule: … N (M new)` line splitting findings by rule with how many the baseline does not cover (#137). Selecting by
+  ring and a `type_checking` option for `internal-import` are not part of this change.
+- `forwarded-import`: a module forbidden by `module_forbid_imports` from importing C can no longer satisfy the rule by
+  importing a pass-through wrapper of C; the wrapper import is reported against the importer (#138).
+- `weakly-typed-port`: a ring with `require_typed_ports = true` flags `typing.Protocol` methods whose return type is
+  missing, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set` or `Mapping[str, Any]` (#140).
+- `arborescent coupling` (#148): `report` lists fan-in per module (direct, module-level and transitive), the import closure
+  of each declared entrypoint (module-level imports only; function-level and `TYPE_CHECKING` imports counted separately) and
+  ambient-hub candidates; `cost` shows how many modules a new port, service and adapter add to each closure; `check` and
+  `baseline` ratchet hub fan-in and closure sizes in `arborescent-coupling.json`. Configured under
+  `[tool.arborescent.coupling]`.
+- `lazy-import`: each function-level import without a `# deferred: <reason>` comment (on the line or alone above it) is
+  a ratcheted finding, and `check` prints function-level import counts by module. A repository with such imports must
+  record them with `baseline` or justify them (#149).
+- `arborescent cycles` reports import cycles with edge kinds (import-time, function-level, type-checking), an
+  approximate minimum set of edges to cut, the function-level imports that only break a cycle, and the lowest-ring
+  module that could own a `Protocol` to invert the edge (#149).
+- Named ratchets: `[tool.arborescent.ratchet.<name>]` counts per module by rule id, regex, call name (`ast_call`) or an
+  external `command` that prints `module count` lines, in one baseline format (`arborescent-ratchets.json`). `check`
+  fails a count above its baseline or below it (stale), `arborescent ratchet` records and lowers them and refuses a rise
+  without `--allow-growth --reason --approved-by`, and `check --growth-against REF` requires an attributed growth entry
+  for every added or raised count (#147).
+### Fixed
+- The `STALE baseline entry` hint now points at `arborescent baseline --prune`, which works while other violations are unbaselined (#135).
+- `test-reference` practice (information): reports public functions of I/O-free rings that no function under the tests
+  folder imports and calls, resolved through aliases and package re-exports. `test-reference-exempt` skips names. The
+  per-function call facts it reads (`SourceFacts.function_calls`) are reusable by an adapter-equivalence check (#104).
+
 ## 0.6.0 — 2026-11-07
 
 ### Added
+- `reexport-ratio` (opt-in per ring via `max_reexport_ratio`): flags a module whose public surface is mostly first-party
+  imports, so relocating an import into a pass-through module no longer clears `internal-import` edges for free (#136).
+  The transitive form (`A -> B -> C` through a pass-through) is left to #138.
 - `arborescent baseline --prune` removes stale baseline entries without recording anything new, so it works while the
   tree has unrelated new violations; the growth log is untouched (#131).
 - `network` effect category (`effect-network`): `forbid = ["network"]` now catches `urllib.request`, `http.client`,
@@ -13,6 +56,9 @@
   every other stdlib and third-party import is still allow-listed (#128).
 - `package-never-depended-on` (information): flags a package that depends on nothing and that no other package declares
   or imports (#130).
+- `result_discard` and the `result-discard` rule: a call statement that drops the value of a result-bearing function (listed, or
+  annotated `-> *Result` / `-> *Outcome`) is reported; `_ = f()` is a deliberate discard; per-ring scoping; dynamic calls are out
+  of scope (#141).
 - A ring-mismatched `internal-import` now ends with the whole closure a move would drag along (the project modules to
   move too, and the externals to allow), instead of one edge per run. The baseline key is unchanged (#133).
 - `arborescent discover --suggest` prints, per module with no ring, the innermost ring its imports and effects already
@@ -94,6 +140,10 @@
   installed it, and switching away from `strict` left a stale hook behind. Settable per scope, like `middle_forbid`.
   `ARBORESCENT_SKIP_HOOK=1 git push` skips the hook for one push only, leaving other hooks and the `git_hook` setting
   alone; `git push --no-verify` remains git's own way to skip every hook.
+- `construct_only`: `[[tool.arborescent.construct_only]] target = "app.queries.UnfilteredQueries", rings = [...], modules = [...], reason = "..."`
+  lets only those modules and rings call a class or factory (the construction-site half of a wiring rule); the new
+  `construction-outside-site` rule names the module, ring and line, reports an owner glob or target module that does not exist, and is
+  mutation-tested by `selftest`. Re-exported names, `partial(X)` and argument provenance are not followed. The scan cache is rebuilt once (#85).
 - `owned_literal`: `[[tool.arborescent.owned_literal]] literal = "APP_CONFIG", modules = [...], rings = [...], reason = "..."` lets only
   those modules (and rings) spell an identifier-like string, such as an environment variable name; the new `literal-outside-owner` rule
   names the module, ring and line, reports an owner glob that matches no module, and is mutation-tested by `selftest`. The scan cache is

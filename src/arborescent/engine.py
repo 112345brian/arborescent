@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from . import baseline as ratchet_mod
+from . import ratchets as named_ratchets
 from .certification import PROFILE, certify, tach_multi_root_note, version_warnings
 from .classify_audit import audit_classification
 from .config import find_child_policy
@@ -25,6 +26,7 @@ from .domain import (
 )
 from .generate import generate_for_scan
 from .generated_config import GENERATED_MARKER
+from .lazy_imports import LazyImportCount, lazy_import_counts, lazy_import_violations
 from .ports import (
     Clock,
     ContractRenderer,
@@ -40,6 +42,7 @@ from .ports import (
     ViolationEngine,
 )
 from .practices import run_practices
+from .ratchet_measure import Subject
 from .rules import RuleContext, check_modules
 from .suggestions import Suggestion, file_size_suggestions
 from .tach_visibility import invisible_import_violations
@@ -75,6 +78,7 @@ class Options:
     require_modularity: bool = False  # fail unless the policy keeps `modularity = "ready"` and no package gap is open
     growth_against: str | None = None
     no_cache: bool = False
+    rules: tuple[str, ...] = ()  # rule families to run and exit on; empty selects everything (#137)
 
 
 @dataclass
@@ -100,6 +104,7 @@ class CheckReport:
     suggestions: list[Suggestion] = field(default_factory=list)
     suppression_counts: dict[tuple[str, str], int] = field(default_factory=lambda: {})
     discard_counts: dict[str, int] = field(default_factory=lambda: {})
+    lazy_import_counts: dict[str, LazyImportCount] = field(default_factory=lambda: {})
     profile: str | None = None
     profile_failures: tuple[str, ...] = ()
     profile_warnings: tuple[str, ...] = ()
@@ -109,10 +114,17 @@ class CheckReport:
     partial: bool = False
     seconds: float = 0.0
     tool_checks_enabled: bool = True
+    rules: tuple[str, ...] = ()  # the `--rule` selection this report was filtered to
+
+    def _engine_fails(self, run: EngineRun) -> bool:
+        """With a selection, an engine failing only on findings outside it is not this run's failure; one with no findings (a crash) still is."""
+        if run.status != "fail":
+            return False
+        return not self.rules or not run.violations or any(ratchet_mod.in_any_family(v.key, self.rules) for v in run.violations)
 
     @property
     def ok(self) -> bool:
-        engines_ok = all(e.status != "fail" for e in self.engines)
+        engines_ok = not any(self._engine_fails(e) for e in self.engines)
         return engines_ok and not self.profile_failures and not self.modularity_failures and not self.visibility_failures and (self.ratchet is None or self.ratchet.ok)
 
     @property
@@ -120,6 +132,16 @@ class CheckReport:
         """Whether the selected checks pass, regardless of Arborescent minimum-profile certification."""
         engines_ok = all(engine.status in {"ok", "disabled"} for engine in self.engines)
         return self.tool_checks_enabled and engines_ok and (self.ratchet is None or self.ratchet.ok)
+
+
+def _ratchet_runs(policy: Policy, root: Path, services: Services, scan: ScanResult, found: Sequence[Violation]) -> list[EngineRun]:
+    """One run per ``[ratchet.<name>]``: it fails on a count above its baseline, or (whole-repository runs) below it."""
+    started = services.clock.now()
+    subject = Subject(root, services.fs, services.runner, {m: scan.paths[m] for m in scan.modules if m in scan.paths}, found)
+    complete = scan.modules.keys() >= scan.paths.keys()  # every known module was parsed: not a `--changed` run
+    results = named_ratchets.check(policy, subject, complete)
+    seconds = (services.clock.now() - started) / max(1, len(results))
+    return [EngineRun(f"ratchet {r.name}", "fail" if r.failures else "ok", seconds, r.failures or [r.summary]) for r in results]
 
 
 def _tach_notes(policy: Policy, opts: Options) -> list[str]:
@@ -249,6 +271,7 @@ def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:
             found.append(Violation(Rule.SUPPRESSION, module.name, f"{kind}#{suppressions[kind]}"))
         for index, _ in enumerate(module.facts.discard_calls, start=1):
             found.append(Violation(Rule.DISCARD, module.name, f"call#{index}"))
+        found.extend(lazy_import_violations(module))
     return found
 
 
@@ -262,6 +285,12 @@ def _inventory_counts(modules: Mapping[str, ModuleInfo]) -> tuple[dict[tuple[str
         if module.facts.discard_calls:
             discards[module.name] = len(module.facts.discard_calls)
     return suppressions, discards
+
+
+def _record_inventories(report: CheckReport, modules: Mapping[str, ModuleInfo]) -> None:
+    report.suppression_counts, report.discard_counts = _inventory_counts(modules)
+    counts = ((module.name, lazy_import_counts(module)) for module in modules.values())
+    report.lazy_import_counts = {name: count for name, count in counts if count.total}
 
 
 def write_generated(policy: Policy, root: Path, services: Services) -> list[str]:
@@ -372,7 +401,7 @@ def _tool(services: Services, engine: Engine, files: Sequence[str], root: Path, 
     return EngineRun(name, status, result.seconds, text[-15:] if status == "fail" else text[-1:], findings)
 
 
-def _child_arbor_command(config_path: Path, opts: Options) -> list[str]:
+def child_arbor_command(config_path: Path, opts: Options) -> list[str]:
     argv = [sys.executable, "-m", "arborescent", "--config", str(config_path.resolve()), "check"]
     flags = (
         (not opts.tools, "--no-tools"),
@@ -409,7 +438,7 @@ def _child_arbor_runs(policy: Policy, root: Path, services: Services, opts: Opti
             runs.append(EngineRun(name, "fail", 0.0, [f"{sys.executable} is not available to run the child policy"]))
             continue
 
-        argv = _child_arbor_command(config_path, opts)
+        argv = child_arbor_command(config_path, opts)
         result = services.runner.run(argv, child_root)
         output = (result.stdout + result.stderr).strip().splitlines()
         status = "ok" if result.returncode == 0 else "fail"
@@ -476,6 +505,15 @@ def _plan_engines(policy: Policy, services: Services, opts: Options, files: Sequ
     return futures
 
 
+def _apply_ratchet(report: CheckReport, base: set[str], rules: tuple[str, ...], complete: bool) -> ratchet_mod.Ratchet:
+    """Narrow findings and the baseline to the `--rule` families first, so nothing outside them is new or stale (#137)."""
+    if rules:
+        report.rules = rules
+        report.violations = [v for v in report.violations if ratchet_mod.in_any_family(v.key, rules)]
+        base = {key for key in base if ratchet_mod.in_any_family(key, rules)}
+    return ratchet_mod.apply(report.violations, base, complete=complete)
+
+
 def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
     opts = opts if opts is not None else Options()
     if opts.require_profile and not opts.require_tools:
@@ -497,7 +535,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         found, scan = run_own(policy, root, services, only)
         report.engines.append(EngineRun("arborescent", "ok", services.clock.now() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
         report.parsed = scan.parsed
-        report.suppression_counts, report.discard_counts = _inventory_counts(scan.modules)
+        _record_inventories(report, scan.modules)
         report.excluded = dict(scan.excluded)
         report.vendor_folders = tuple(scan.vendor_folders)
         report.dev_tools = _dev_tool_counts(policy, scan)
@@ -509,7 +547,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         )
         report.drift = _drift_report(policy, root, services, scan, opts)
         engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
-        report.engines += engine_runs
+        report.engines += [*engine_runs, *_ratchet_runs(policy, root, services, scan, found)]
         report.notes = [v for v in found if v.rule in INFORMATIONAL_RULES]
         report.violations = _apply_modularity(policy, report, found, opts, only is None) + [v for run in engine_runs for v in run.violations]
         base: set[str] = ratchet_mod.load(services.fs, root / policy.baseline) if opts.use_baseline else set()
@@ -517,7 +555,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         if not opts.tools or ruff_skipped:
             # Ruff is the only external engine whose findings enter the baseline; absent output cannot prove them stale.
             base = {key for key in base if not key.split("|", 1)[0].startswith("ruff-")}
-        report.ratchet = ratchet_mod.apply(report.violations, base, complete=only is None)
+        report.ratchet = _apply_ratchet(report, base, opts.rules, only is None)
         if opts.require_profile:
             report.profile = PROFILE
             report.profile_failures = certify(root, policy, scan, services.runner, services.fs)

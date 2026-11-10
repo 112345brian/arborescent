@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
+from .coupling_policy import CouplingPolicy
 from .presets import (
     DEFAULT_PRESET,
     DEFAULT_TAINT_SEEDS,
@@ -30,11 +31,14 @@ __all__ = [
     "ArchitectureContracts",
     "ArchitectureScope",
     "ChildArbor",
+    "ConstructionSite",
     "Contract",
     "ModuleLayer",
     "Mutation",
     "Policy",
     "PolicyError",
+    "RatchetSpec",
+    "ResultDiscard",
     "RingRule",
     "Rule",
     "ToolResult",
@@ -63,6 +67,8 @@ class Rule(StrEnum):
     WILDCARD_RING = "wildcard-ring"
     SUPPRESSION = "suppression"
     DISCARD = "discard"
+    LAZY_IMPORT = "lazy-import"
+    RESULT_DISCARD = "result-discard"
     EFFECT_CLOCK = "effect-clock"
     EFFECT_ENV = "effect-env"
     EFFECT_IDENTITY = "effect-identity"
@@ -82,9 +88,13 @@ class Rule(StrEnum):
     EFFECT_GLOBAL = "effect-global"
     EFFECT_VIA_IMPORT = "effect-via-import"
     INTERNAL_IMPORT = "internal-import"
+    FORWARDED_IMPORT = "forwarded-import"
     RESTRICTED_IMPORT = "restricted-import"
     LITERAL_OUTSIDE_OWNER = "literal-outside-owner"
+    CONSTRUCTION_OUTSIDE_SITE = "construction-outside-site"
     NON_ABSTRACT_PORT = "non-abstract-port"
+    WEAKLY_TYPED_PORT = "weakly-typed-port"
+    REEXPORT_RATIO = "reexport-ratio"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
     CIRCULAR_IMPORT = "circular-import"
@@ -101,6 +111,7 @@ class Rule(StrEnum):
     UNDECLARED_IMPORTS = "undeclared-imports"
     STALE_CONFIG_PATH = "stale-config-path"
     SOURCE_ROOT_DRIFT = "source-root-drift"
+    TEST_REFERENCE = "test-reference"
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
     UNANNOTATED_MODULE = "unannotated-module"
@@ -148,7 +159,7 @@ EFFECT_RULES: Mapping[str, Rule] = {
 # A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
-    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS,
+    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE,
 })
 
 
@@ -198,6 +209,7 @@ class Violation:
 
 
 _RENDER_HINTS = {
+    Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on or above the line)",
     Rule.VENDOR_FOLDER: (
         " (folder excluded from the scan; to govern it list it under `vendor_roots` or set `scan_vendors = true`,"
         " otherwise first-party imports of it are reported as external)"
@@ -227,6 +239,19 @@ class RingRule:
     os_branching: bool = False
     forbid: frozenset[str] | None = None  # None means the positional preset default; [] explicitly allows all effects
     require_abstract: bool = False  # every public class/function in this ring must be an abc.ABC/typing.Protocol shape
+    require_typed_ports: bool = False  # every typing.Protocol method in this ring must name its return type (no Any/object/bare container)
+    max_reexport_ratio: float | None = None  # share of a module's public surface that may be first-party imports; None = unchecked (#136)
+
+
+@dataclass(frozen=True)
+class RatchetSpec:
+    """A named ratchet (#147): a per-module counter that may only go down. ``measure`` says how it is counted."""
+
+    name: str
+    measure: str  # "rule" (findings of one rule id) | "regex" (matches in the source) | "ast_call" (calls of a dotted name) | "command"
+    argument: tuple[str, ...]  # the rule id, the pattern or the dotted callee (one item); the command's argv
+    scope: tuple[str, ...] = ()  # module globs; empty means every scanned module
+    baseline: str = "arborescent-ratchets.json"
 
 
 @dataclass(frozen=True)
@@ -239,7 +264,33 @@ class OwnedLiteral:
     reason: str = ""
 
     def permits(self, module: str, ring: str | None) -> bool:
-        return (not self.modules or any(in_unit(module, glob) for glob in self.modules)) and (not self.rings or ring in self.rings)
+        return unit_permits(self.modules, self.rings, module, ring)
+
+
+@dataclass(frozen=True)
+class ConstructionSite:
+    """A class or factory only some modules and rings may call (the composition root builds it, nothing else does): #85."""
+
+    target: str  # dotted name of the callable, e.g. "app.queries.UnfilteredQueries"
+    modules: tuple[str, ...] = ()  # module globs; empty means any module
+    rings: tuple[str, ...] = ()  # ring names; empty means any ring
+    reason: str = ""
+
+    @property
+    def target_module(self) -> str:
+        return self.target.rpartition(".")[0]
+
+    def permits(self, module: str, ring: str | None) -> bool:
+        return unit_permits(self.modules, self.rings, module, ring)
+
+
+@dataclass(frozen=True)
+class ResultDiscard:
+    """Opt-in ``result_discard`` (#141): a bare call statement that drops the value of a result-bearing function."""
+
+    functions: tuple[str, ...] = ()  # dotted names marked result-bearing in addition to the naming convention
+    rings: tuple[str, ...] = ()  # rings whose modules are checked; empty means every ring
+    convention: bool = True  # a module-level `-> *Result` / `-> *Outcome` function is result-bearing
 
 
 @dataclass(frozen=True)
@@ -270,6 +321,11 @@ def in_unit(module: str, pattern: str) -> bool:
     return module == pattern or module.startswith(pattern + ".") or fnmatch.fnmatchcase(module, pattern)
 
 
+def unit_permits(modules: Sequence[str], rings: Sequence[str], module: str, ring: str | None) -> bool:
+    """The one rule behind ``owned_literal`` and ``construct_only``: an empty list allows anyone, else ``module``/``ring`` must match."""
+    return (not modules or any(in_unit(module, glob) for glob in modules)) and (not rings or ring in rings)
+
+
 @dataclass(frozen=True)
 class Policy:
     """The single source of truth that the three tool configs and Arborescent's own checks derive from."""
@@ -284,6 +340,8 @@ class Policy:
     child_policy_mode: str = "certify"  # "certify" keeps child-owned policy; "parent" overrides it
     module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
     owned_literals: tuple[OwnedLiteral, ...] = ()
+    construct_only: tuple[ConstructionSite, ...] = ()  # #85
+    result_discard: ResultDiscard | None = None
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
@@ -299,6 +357,7 @@ class Policy:
     type_checkers: tuple[str, ...] = ("ty",)
     output_dir: str = "."
     baseline: str = "arborescent-baseline.json"
+    ratchet_files: tuple[str, ...] = ()  # numeric ratchets checked by `check --growth-against`
     suggestion_threshold: int = 300
     ruff_overrides: Mapping[str, Any] = field(default_factory=lambda: {})
     customization_labels: tuple[str, ...] = ()
@@ -314,6 +373,8 @@ class Policy:
     package_parts: tuple[str, ...] = ()  # opt-in: extracted part trees (inside the repository) checked against the catalog
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
     modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
+    coupling: CouplingPolicy = field(default_factory=CouplingPolicy)  # #148: entrypoints and hub threshold for `arborescent coupling`
+    ratchets: tuple[RatchetSpec, ...] = ()  # #147: `[ratchet.<name>]` counters compared with their baseline by `check`
     taint_seeds: tuple[str, ...] = DEFAULT_TAINT_SEEDS  # #98: effect categories (plus "network") a function-level call can be seeded with
 
     def __post_init__(self) -> None:

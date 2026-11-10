@@ -66,6 +66,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent` | `single` | domain |
 | `arborescent.domain` | `single` | domain |
 | `arborescent.facts` | `single` | domain |
+| `arborescent.forwarder_facts` | `single` | domain |
 | `arborescent.stdlib` | `single` | domain |
 | `arborescent.presets` | `single` | domain |
 | `arborescent.rules` | `single` | domain |
@@ -84,9 +85,16 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.driver_request` | `single` | domain |
 | `arborescent.ports` | `single` | ports |
 | `arborescent.generated_config` | `single` | domain |
+| `arborescent.lazy_imports` | `single` | domain |
+| `arborescent.import_cycles` | `single` | domain |
 | `arborescent.driver_port` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
+| `arborescent.baseline_report` | `single` | application |
+| `arborescent.baseline_history` | `single` | application |
+| `arborescent.ratchet_config` | `single` | application |
+| `arborescent.ratchet_measure` | `single` | application |
+| `arborescent.ratchets` | `single` | application |
 | `arborescent.bench` | `single` | application |
 | `arborescent.config` | `single` | application |
 | `arborescent.certification` | `single` | application |
@@ -115,6 +123,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.module_forbid_probes` | `single` | application |
 | `arborescent.importable_by_probes` | `single` | application |
 | `arborescent.owned_literal_probes` | `single` | application |
+| `arborescent.construct_only_probes` | `single` | application |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |
@@ -129,13 +138,20 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.tach_visibility` | `single` | domain |
 | `arborescent.classify_audit` | `single` | domain |
 | `arborescent.taint` | `single` | domain |
+| `arborescent.coupling` | `single` | domain |
+| `arborescent.coupling_policy` | `single` | domain |
+| `arborescent.coupling_ratchet` | `single` | domain |
 | `arborescent.testing` | `single` | adapters |
 | `arborescent.typecheckers` | `single` | adapters |
 | `arborescent.__main__` | `single` | composition |
 | `arborescent.cli` | `single` | composition |
+| `arborescent.cli_ratchet` | `single` | composition |
 | `arborescent.cli_install` | `single` | composition |
 | `arborescent.cli_report` | `single` | composition |
+| `arborescent.cli_baseline_report` | `single` | composition |
 | `arborescent.cli_migrate` | `single` | composition |
+| `arborescent.cli_coupling` | `single` | composition |
+| `arborescent.cli_cycles` | `single` | composition |
 
 ## Data flow of `arborescent check`
 
@@ -168,3 +184,26 @@ recursively requires each independently governed child to pass its requested che
   standard/customized certification label when the added constraint changes whether the policy is standard.
 - The policy defaults `forbid_circular_imports` to true. Arborescent's minimum profile requires it, and `selftest` injects
   a self-import to prove that the cycle rule remains active.
+
+## Scope: what Arborescent does not check
+
+Arborescent reasons about the import graph, the effects a ring may use, and the declared ownership of modules. It does
+not read types or behaviour.
+
+- **Protocol conformance is the type checker's job.** Whether a concrete class satisfies the `Protocol` it is meant to
+  implement is checked by `ty`, pyright, basedpyright or pyrefly, not here. Ports and adapters are deliberately
+  decoupled (nothing imports across them), so the ring rules never see that relationship. Arborescent can only help
+  upstream of the checker: keep the registry or composition-root parameter precisely typed so structural checking has
+  something to check. Do not expect a missing method on an adapter to fail `check`.
+- **Two adapters of one port can still disagree.** Matching signatures say nothing about matching defaults or
+  filtering. A contract test that runs both adapters is the project's to write.
+
+### Violations and observations
+
+A finding is a **violation** when a rule is broken: it fails `check` and can be baselined. It is an **observation**
+when it is a signal that may or may not be a problem (for example `package-spans-rings`, `package-owns-everything`):
+it is printed as a `NOTE`, never fails `check`, never enters the baseline, and does not affect `ok`.
+
+New design-smell signals (cohesion, stability, interface width) join as observations, never as failures. A threshold
+is a policy decision, so it lives in the policy file with no built-in default that fails anything. Size alone is not
+a defect: one cohesive package may legitimately own most of a codebase.
