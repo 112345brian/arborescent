@@ -82,6 +82,7 @@ class Rule(StrEnum):
     EFFECT_GLOBAL = "effect-global"
     EFFECT_VIA_IMPORT = "effect-via-import"
     INTERNAL_IMPORT = "internal-import"
+    FORWARDED_IMPORT = "forwarded-import"
     RESTRICTED_IMPORT = "restricted-import"
     LITERAL_OUTSIDE_OWNER = "literal-outside-owner"
     NON_ABSTRACT_PORT = "non-abstract-port"

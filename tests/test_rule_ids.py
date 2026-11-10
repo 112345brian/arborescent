@@ -58,6 +58,7 @@ def test_rule_id_strings_never_change() -> None:
             "effect-global",
             "effect-via-import",
             "internal-import",
+            "forwarded-import",
             "restricted-import",
             "literal-outside-owner",
             "non-abstract-port",

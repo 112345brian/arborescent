@@ -2,6 +2,12 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- `forwarded-import`: a module forbidden by `module_forbid_imports` from importing C can no longer satisfy the rule by
+  importing a pass-through wrapper of C; the wrapper import is reported against the importer (#138).
+
 ## 0.6.0 — 2026-11-07
 
 ### Added

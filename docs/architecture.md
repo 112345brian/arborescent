@@ -66,6 +66,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent` | `single` | domain |
 | `arborescent.domain` | `single` | domain |
 | `arborescent.facts` | `single` | domain |
+| `arborescent.forwarder_facts` | `single` | domain |
 | `arborescent.stdlib` | `single` | domain |
 | `arborescent.presets` | `single` | domain |
 | `arborescent.rules` | `single` | domain |
