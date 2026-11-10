@@ -137,6 +137,14 @@ path = "src/arborescent/presets.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/lazy_imports.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/import_cycles.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/rules.py"
 role = "source"
 
@@ -359,6 +367,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/cli_install.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_cycles.py"
 role = "source"
 
 [[packages.paths]]

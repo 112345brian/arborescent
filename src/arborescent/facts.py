@@ -119,6 +119,7 @@ class SourceFacts:
     surface_size: int = 0  # public names: a static `__all__`, else public top-level bindings (#136)
     surface_line: int = 0  # line of `__all__`, else of the first public binding
     reexports: tuple[tuple[str, int, str, str], ...] = ()  # surface names bound by an import: (name, level, module, imported name or "")
+    deferred: tuple[tuple[int, str], ...] = ()  # (code line, reason): lines justified by a `# deferred: <reason>` comment (#149)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -421,25 +422,51 @@ def _patch_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
     return EffectUse(node.lineno, "patch", target) if target is not None else None
 
 
-def _suppression_comments(source: str) -> tuple[tuple[int, str], ...]:
-    found: list[tuple[int, str]] = []
+_DEFERRED = re.compile(r"(?:^|#)\s*deferred\s*:\s*(\S.*)", re.IGNORECASE)
+_SKIPPED_TOKENS = frozenset({tokenize.COMMENT, tokenize.NL, tokenize.INDENT, tokenize.DEDENT})
+
+
+def _suppression_kind(comment: str) -> str | None:
+    ruff = re.match(r"ruff\s*:\s*noqa\b(?:\s*:\s*(.*))?", comment, re.IGNORECASE)
+    noqa = re.match(r"noqa\b(?:\s*:\s*(.*))?", comment, re.IGNORECASE)
+    ignored_type = re.match(r"type\s*:\s*ignore\b(?:\s*\[([^\]]*)\])?", comment, re.IGNORECASE)
+    if ruff is not None:
+        return "ruff-noqa-coded" if (ruff.group(1) or "").strip() else "ruff-noqa-blanket"
+    if noqa is not None:
+        return "noqa-coded" if (noqa.group(1) or "").strip() else "noqa-blanket"
+    if ignored_type is not None:
+        return "type-ignore-coded" if (ignored_type.group(1) or "").strip() else "type-ignore-blanket"
+    return None
+
+
+def _comment_facts(source: str) -> tuple[tuple[tuple[int, str], ...], tuple[tuple[int, str], ...]]:
+    """One tokenize pass: suppression directives ``(line, kind)`` and ``# deferred: <reason>`` justifications.
+
+    A deferred comment justifies the code line it trails, or the next code line when it stands alone (comment lines
+    that continue it are skipped; a blank line ends it). The reason must not be empty.
+    """
+    suppressions: list[tuple[int, str]] = []
+    deferred: list[tuple[int, str]] = []
+    pending: str | None = None
     for token in tokenize.generate_tokens(io.StringIO(source).readline):
-        if token.type != tokenize.COMMENT:
-            continue
-        comment = token.string[1:].strip()
-        ruff = re.match(r"ruff\s*:\s*noqa\b(?:\s*:\s*(.*))?", comment, re.IGNORECASE)
-        noqa = re.match(r"noqa\b(?:\s*:\s*(.*))?", comment, re.IGNORECASE)
-        ignored_type = re.match(r"type\s*:\s*ignore\b(?:\s*\[([^\]]*)\])?", comment, re.IGNORECASE)
-        if ruff is not None:
-            kind = "ruff-noqa-coded" if (ruff.group(1) or "").strip() else "ruff-noqa-blanket"
-        elif noqa is not None:
-            kind = "noqa-coded" if (noqa.group(1) or "").strip() else "noqa-blanket"
-        elif ignored_type is not None:
-            kind = "type-ignore-coded" if (ignored_type.group(1) or "").strip() else "type-ignore-blanket"
-        else:
-            continue
-        found.append((token.start[0], kind))
-    return tuple(found)
+        if token.type == tokenize.COMMENT:
+            comment = token.string[1:].strip()
+            kind = _suppression_kind(comment)
+            if kind is not None:
+                suppressions.append((token.start[0], kind))
+            reason = _DEFERRED.search(comment)
+            if reason is None:
+                continue
+            if token.line.lstrip().startswith("#"):
+                pending = str(reason.group(1)).strip()
+            else:
+                deferred.append((token.start[0], str(reason.group(1)).strip()))
+        elif token.type == tokenize.NL and not token.line.strip():
+            pending = None
+        elif pending is not None and token.type not in _SKIPPED_TOKENS:
+            deferred.append((token.start[0], pending))
+            pending = None
+    return tuple(suppressions), tuple(deferred)
 
 
 def _discard_call_lines(tree: ast.AST) -> tuple[int, ...]:
@@ -660,11 +687,12 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     imports: list[RawImport] = []
     _walk(tree, False, False, imports)
     arbor_ring, arbor_error, arbor_role = _arbor_ring(tree)
+    suppressions, deferred = _comment_facts(source)
     return SourceFacts(
         tuple(imports),
         _effect_uses(tree),
         _script_deps(source),
-        _suppression_comments(source),
+        suppressions,
         _discard_call_lines(tree),
         _top_level_defs(tree, _aliases(tree)),
         arbor_ring,
@@ -676,6 +704,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         forwarders(tree),
         _weak_port_returns(tree, _aliases(tree)),
         *_surface(tree),
+        deferred,
     )
 
 

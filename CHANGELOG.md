@@ -17,6 +17,12 @@
   ambient-hub candidates; `cost` shows how many modules a new port, service and adapter add to each closure; `check` and
   `baseline` ratchet hub fan-in and closure sizes in `arborescent-coupling.json`. Configured under
   `[tool.arborescent.coupling]`.
+- `lazy-import`: each function-level import without a `# deferred: <reason>` comment (on the line or alone above it) is
+  a ratcheted finding, and `check` prints function-level import counts by module. A repository with such imports must
+  record them with `baseline` or justify them (#149).
+- `arborescent cycles` reports import cycles with edge kinds (import-time, function-level, type-checking), an
+  approximate minimum set of edges to cut, the function-level imports that only break a cycle, and the lowest-ring
+  module that could own a `Protocol` to invert the edge (#149).
 
 ### Changed
 - Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they

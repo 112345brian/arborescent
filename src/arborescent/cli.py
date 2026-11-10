@@ -21,6 +21,7 @@ from .bench import run_bench
 from .classify_audit import suggest_ring
 from .cli_baseline_report import add_report_parser, run_report
 from .cli_coupling import add_coupling_parser, run_coupling
+from .cli_cycles import run_cycles
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
@@ -210,6 +211,7 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
     )
     sub.add_parser("selftest", help="mutation-test the rules")
     add_coupling_parser(sub)
+    sub.add_parser("cycles", help="report import cycles, the edges to cut and the function-level imports that only break a cycle")
 
 
 def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
@@ -329,6 +331,7 @@ def _dispatch(
         "discover": lambda: _discover(policy, root, svc, args.suggest),
         "annotate": lambda: _annotate(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),
+        "cycles": lambda: run_cycles(policy, root, svc),
     }
     return handlers.get(args.command, lambda: _check(args, policy, root, svc))()
 
