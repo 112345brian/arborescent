@@ -640,7 +640,17 @@ def _ring_from_mapping(
         forbid,
         bool(table.get("require_abstract", False)),
         bool(table.get("require_typed_ports", False)),
+        _reexport_ratio(table, name),
     )
+
+
+def _reexport_ratio(table: Mapping[str, Any], ring: str) -> float | None:
+    value = table.get("max_reexport_ratio")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 <= value <= 1:
+        raise PolicyError(f"`max_reexport_ratio` in [ring.{ring}] must be a number from 0 to 1")
+    return float(value)
 
 
 def _suggestion_threshold(raw: Mapping[str, Any]) -> int:

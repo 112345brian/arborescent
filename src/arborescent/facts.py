@@ -116,6 +116,9 @@ class SourceFacts:
     string_literals: tuple[tuple[int, str], ...] = ()  # (line, value) of identifier-like string constants, docstrings excluded (#112)
     forwarders: tuple[Forwarder, ...] = ()  # module-level pass-through functions (#138)
     weak_port_returns: tuple[tuple[int, str, str], ...] = ()  # (line, "Protocol.method", why): a Protocol method whose return type says nothing (#140)
+    surface_size: int = 0  # public names: a static `__all__`, else public top-level bindings (#136)
+    surface_line: int = 0  # line of `__all__`, else of the first public binding
+    reexports: tuple[tuple[str, int, str, str], ...] = ()  # surface names bound by an import: (name, level, module, imported name or "")
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -672,9 +675,58 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _string_literals(tree),
         forwarders(tree),
         _weak_port_returns(tree, _aliases(tree)),
+        *_surface(tree),
     )
 
 
+def _bound_names(stmt: ast.stmt) -> list[tuple[str, tuple[int, str, str] | None]]:
+    """Names a top-level statement binds; an import carries (level, module, imported name) so a re-export can be resolved."""
+    if isinstance(stmt, ast.Import):
+        return [(a.asname or a.name.split(".")[0], (0, a.name if a.asname is not None else a.name.split(".")[0], "")) for a in stmt.names]
+    if isinstance(stmt, ast.ImportFrom):
+        if stmt.module == "__future__":
+            return []
+        return [(a.asname or a.name, (stmt.level, stmt.module or "", a.name)) for a in stmt.names if a.name != "*"]
+    if isinstance(stmt, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+        return [(stmt.name, None)]
+    targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target] if isinstance(stmt, ast.AnnAssign) else []
+    return [(t.id, None) for t in targets if isinstance(t, ast.Name)]
+def _static_all(tree: ast.Module) -> tuple[int, list[str]] | None:
+    """(line, names) of a `__all__` built only from string-literal lists/tuples; None when absent or dynamic."""
+    line = 0
+    names: list[str] = []
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            hit = any(isinstance(t, ast.Name) and t.id == "__all__" for t in stmt.targets)
+        elif isinstance(stmt, ast.AnnAssign | ast.AugAssign):
+            hit = isinstance(stmt.target, ast.Name) and stmt.target.id == "__all__"
+        else:
+            continue
+        if not hit:
+            continue
+        value = stmt.value
+        if not isinstance(value, ast.List | ast.Tuple) or not all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts):
+            return None
+        if not isinstance(stmt, ast.AugAssign):
+            names = []
+        line = line or stmt.lineno
+        names += [str(e.value) for e in value.elts if isinstance(e, ast.Constant)]
+    return (line, names) if line else None
+def _surface(tree: ast.AST) -> tuple[int, int, tuple[tuple[str, int, str, str], ...]]:
+    """(size, line, re-exports) of a module's public surface (#136): a static `__all__`, else public top-level bindings."""
+    if not isinstance(tree, ast.Module):
+        return 0, 0, ()
+    bound: dict[str, tuple[int, str, str] | None] = {}
+    first = 0
+    for stmt in tree.body:
+        for name, source in _bound_names(stmt):
+            bound[name] = source
+            if not name.startswith("_") and not first:
+                first = stmt.lineno
+    declared = _static_all(tree)
+    names = list(dict.fromkeys(declared[1])) if declared is not None else [n for n in bound if not n.startswith("_")]
+    line = declared[0] if declared is not None else first
+    return len(names), line, tuple((n, *source) for n in names if (source := bound.get(n)) is not None)
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")
 _DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 

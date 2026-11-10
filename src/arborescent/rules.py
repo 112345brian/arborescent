@@ -365,6 +365,24 @@ def _typed_port_violations(name: str, ring: str, rule: RingRule, info: ModuleInf
     ]
 
 
+REEXPORT_MIN_SURFACE = 5  # a smaller public surface gives a ratio too coarse to mean anything
+
+
+def _reexport_findings(name: str, ring: str, rule: RingRule, info: ModuleInfo, project: tuple[Collection[str], Collection[str]]) -> list[Violation]:
+    """A module whose public surface is mostly first-party imports moves edges without changing the dependency (#136)."""
+    facts = info.facts
+    known, tops = project
+    if rule.max_reexport_ratio is None or facts.surface_size < REEXPORT_MIN_SURFACE:
+        return []
+    count = sum(
+        1 for _, level, module, imported in facts.reexports
+        if resolve_targets(name, info.is_package, RawImport(level, module, (imported,) if imported else (), 0, False, False), known, tops)[0]
+    )
+    if count / facts.surface_size <= rule.max_reexport_ratio:
+        return []
+    detail = f"[{ring}] public surface is mostly re-exported first-party imports (limit {rule.max_reexport_ratio:.0%})"
+    hint = f" ({count} of {facts.surface_size} public names are imports; importers of this module keep the same dependency)"
+    return [Violation(Rule.REEXPORT_RATIO, name, detail, facts.surface_line, hint=hint)]
 def _entry_dependencies(
     policy: Policy, known: Collection[str], entry_deps: Mapping[str, tuple[str, ...] | None], third_party: ThirdParty
 ) -> list[Violation]:
@@ -541,7 +559,7 @@ def check_modules(
             out += _external_imports(local_policy, name, ring, imp.line, external, third_party, siblings)
         out += _os_branching(local_policy, name, ring, rule, info)
         out += _effect_uses(context, name, ring, info, known)
-        out += _abstraction_violations(name, ring, rule, info) + _typed_port_violations(name, ring, rule, info)
+        out += _abstraction_violations(name, ring, rule, info) + _typed_port_violations(name, ring, rule, info) + _reexport_findings(name, ring, rule, info, (known, tops))
     out += _effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
     out = _with_move_closures(out, context, modules, known, tops)
     return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
