@@ -39,6 +39,7 @@ def test_rule_id_strings_never_change() -> None:
             "wildcard-ring",
             "suppression",
             "discard",
+            "lazy-import",
             "effect-clock",
             "effect-env",
             "effect-identity",

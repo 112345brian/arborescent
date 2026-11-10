@@ -126,6 +126,8 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.driver_port" = "ports"
 "arborescent.ports" = "ports"
 "arborescent.generated_config" = "domain"
+"arborescent.lazy_imports" = "domain"
+"arborescent.import_cycles" = "domain"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
 "arborescent.architecture_contracts" = "application"
@@ -180,6 +182,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.coupling" = "domain"
 "arborescent.coupling_policy" = "domain"
 "arborescent.coupling_ratchet" = "domain"
+"arborescent.cli_cycles" = "composition"
 "arborescent.__main__" = "composition"
 
 # The annotation layer never depends on the driver (#67): the driver sits on top of it and may import it, not the reverse.
@@ -212,6 +215,7 @@ docs-sync = "docs/architecture.md"
 "src/arborescent/cli_report.py" = ["T20"]
 "src/arborescent/cli_migrate.py" = ["T20"]
 "src/arborescent/cli_coupling.py" = ["T20"]
+"src/arborescent/cli_cycles.py" = ["T20"]
 
 # Only the command line installs and reports the pre-push hook; `selftest` injects an outside import (importable_by_probes).
 [tool.arborescent.importable_by]

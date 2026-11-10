@@ -445,6 +445,7 @@ def _anchor_mutations(anchor: str, host: str) -> list[Mutation]:
     out.extend((
         Mutation(Rule.SUPPRESSION, "a new noqa suppression directive", host, "# noqa"),
         Mutation(Rule.DISCARD, "a new reasoned discard call", host, 'discard(None, reason="selftest")'),
+        Mutation(Rule.LAZY_IMPORT, "a new function-level import without a reason", host, "def _arborescent_probe_lazy() -> None:\n    import json"),
     ))
     return out
 
