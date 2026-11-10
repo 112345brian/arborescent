@@ -614,6 +614,7 @@ def _ring_from_mapping(
         bool(table.get("os_branching", False)),
         forbid,
         bool(table.get("require_abstract", False)),
+        bool(table.get("require_typed_ports", False)),
     )
 
 

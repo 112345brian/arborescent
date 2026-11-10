@@ -18,6 +18,8 @@
   ring and a `type_checking` option for `internal-import` are not part of this change.
 - `forwarded-import`: a module forbidden by `module_forbid_imports` from importing C can no longer satisfy the rule by
   importing a pass-through wrapper of C; the wrapper import is reported against the importer (#138).
+- `weakly-typed-port`: a ring with `require_typed_ports = true` flags `typing.Protocol` methods whose return type is
+  missing, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set` or `Mapping[str, Any]` (#140).
 
 ## 0.6.0 — 2026-11-07
 

@@ -214,6 +214,9 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
         suppressions, list(f.discard_calls), top_level_defs, f.arbor_ring, f.arbor_error, list(f.file_refs), f.main_guard, f.arbor_role,
         [[line, value] for line, value in f.string_literals],
         [[w.name, w.line, w.level, w.module, w.imported, w.member] for w in f.forwarders],
+
+
+        [list(item) for item in f.weak_port_returns],
     ]
 
 
@@ -227,6 +230,9 @@ def _facts_from_json(raw: list[Any]) -> SourceFacts:
         suppressions, tuple(raw[4]), top_level_defs, raw[6], raw[7], raw[10], tuple(raw[8]), raw[9],
         tuple((item[0], item[1]) for item in raw[11]),
         tuple(Forwarder(*item) for item in raw[12]),
+
+
+        tuple((item[0], item[1], item[2]) for item in raw[12]),
     )
 
 

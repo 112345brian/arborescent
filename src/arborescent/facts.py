@@ -116,6 +116,9 @@ class SourceFacts:
     string_literals: tuple[tuple[int, str], ...] = ()  # (line, value) of identifier-like string constants, docstrings excluded (#112)
     forwarders: tuple[Forwarder, ...] = ()  # module-level pass-through functions (#138)
 
+
+    weak_port_returns: tuple[tuple[int, str, str], ...] = ()  # (line, "Protocol.method", why): a Protocol method whose return type says nothing (#140)
+
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
         """Compatibility view for the original OS-branching rule."""
@@ -491,6 +494,71 @@ def _top_level_defs(tree: ast.AST, aliases: dict[str, str]) -> tuple[TopLevelDef
     return tuple(out)
 
 
+_PROTOCOL_NAMES = frozenset({"Protocol", "typing.Protocol", "typing_extensions.Protocol"})
+_ANY_NAMES = frozenset({"Any", "typing.Any", "typing_extensions.Any", "object", "builtins.object"})
+_BARE_CONTAINERS = frozenset({"dict", "list", "tuple", "set", "frozenset"})
+_BARE_TYPING_CONTAINERS = frozenset({"Dict", "List", "Tuple", "Set", "FrozenSet"})
+_STRING_KEYED_MAPPINGS = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
+_ANNOTATION_WRAPPERS = frozenset({"Optional", "Union", "Annotated"})
+
+
+def _last_name(node: ast.expr) -> str:
+    return node.attr if isinstance(node, ast.Attribute) else node.id if isinstance(node, ast.Name) else ""
+
+
+def _weak_annotation(node: ast.expr, aliases: dict[str, str]) -> str | None:
+    """Why a return annotation says nothing, or None when it names a type. Looks through Optional/Union/`|`/Annotated and string forms."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return _weak_string_annotation(node.value, aliases)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _weak_annotation(node.left, aliases) or _weak_annotation(node.right, aliases)
+    if isinstance(node, ast.Subscript):
+        return _weak_subscript(node, aliases)
+    dotted = _dotted(node, aliases) or ""
+    name = _last_name(node)
+    if dotted in _ANY_NAMES or dotted.split(".")[-1] == "Any":
+        return f"returns {dotted.split('.')[-1]}"
+    if name in _BARE_CONTAINERS or (name in _BARE_TYPING_CONTAINERS and dotted.startswith("typing")):
+        return f"returns a bare {name.lower()}"
+    return None
+
+
+def _weak_string_annotation(text: str, aliases: dict[str, str]) -> str | None:
+    try:
+        return _weak_annotation(ast.parse(text, mode="eval").body, aliases)
+    except SyntaxError:
+        return None
+
+
+def _weak_subscript(node: ast.Subscript, aliases: dict[str, str]) -> str | None:
+    name = _last_name(node.value)
+    items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+    if name in _ANNOTATION_WRAPPERS:
+        # Annotated's first item is the type; the rest are metadata
+        return next(filter(None, (_weak_annotation(item, aliases) for item in (items[:1] if name == "Annotated" else items))), None)
+    if name in _STRING_KEYED_MAPPINGS and len(items) == 2 and _last_name(items[0]) == "str":
+        value = _dotted(items[1], aliases)
+        if value is not None and value.split(".")[-1] == "Any":
+            return f"returns {name}[str, Any]"
+    return None
+
+
+def _weak_port_returns(tree: ast.AST, aliases: dict[str, str]) -> tuple[tuple[int, str, str], ...]:
+    """Methods of ``typing.Protocol`` classes (module-level or nested) whose return annotation is missing, Any, object,
+    a bare dict/list/tuple/set or ``Mapping[str, Any]`` (#140). ``__init__`` is skipped: it returns None by definition."""
+    found: list[tuple[int, str, str]] = []
+    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+        if not any(_dotted(base.value if isinstance(base, ast.Subscript) else base, aliases) in _PROTOCOL_NAMES for base in cls.bases):
+            continue
+        for stmt in cls.body:
+            if not isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef) or stmt.name == "__init__":
+                continue
+            why = "has no return annotation" if stmt.returns is None else _weak_annotation(stmt.returns, aliases)
+            if why is not None:
+                found.append((stmt.lineno, f"{cls.name}.{stmt.name}", why))
+    return tuple(sorted(found))
+
+
 _ARBOR_LEGAL_KEYS = frozenset({"ring", "role"})
 DEV_TOOL_ROLE = "dev_tool"
 _CONDITIONAL_CONTAINERS = (ast.If, ast.Try, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith)
@@ -605,6 +673,9 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _main_guard_line(tree),
         _string_literals(tree),
         forwarders(tree),
+
+
+        _weak_port_returns(tree, _aliases(tree)),
     )
 
 
