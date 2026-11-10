@@ -16,6 +16,8 @@
 ### Changed
 - Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they
   are newer than the ref.
+- `forwarded-import`: a module forbidden by `module_forbid_imports` from importing C can no longer satisfy the rule by
+  importing a pass-through wrapper of C; the wrapper import is reported against the importer (#138).
 
 ## 0.6.0 — 2026-11-07
 

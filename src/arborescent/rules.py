@@ -25,7 +25,7 @@ from .domain import (
     dist_name,
     in_unit,
 )
-from .facts import EffectUse, ModuleInfo, RawImport, resolve_targets
+from .facts import EffectUse, Forwarder, ModuleInfo, RawImport, resolve_targets
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
@@ -163,6 +163,42 @@ def _internal_imports(
         if target_ring is not None and target_ring not in allowed:
             detail = f"[{ring}] imports {target} [{target_ring}]; {ring} may import only {sorted(allowed)}"
             out.append(Violation(Rule.INTERNAL_IMPORT, name, detail, line, target))
+    return out
+
+
+def _forwarded_imports(context: RuleContext, name: str, imp: RawImport, env: _ImportEnv) -> list[Violation]:
+    """`from B import f` where `f` only forwards to a module `name` may not import (`module_forbid_imports`): the same dependency, one hop away (#138)."""
+    policy = context.policy_for(name)
+    if policy is None:
+        return []
+    out: list[Violation] = []
+    hosts, _, _ = resolve_targets(name, env.modules[name].is_package, imp, env.known, env.tops)
+    for host in hosts:
+        info = env.modules.get(host)
+        for fwd in () if info is None else info.facts.forwarders:
+            if fwd.name not in imp.names:
+                continue
+            for target in _forwarded_targets(env, host, fwd, {host}):
+                banned = policy.forbids_module_import(name, target)
+                if banned is not None and context.scope_name(target) == context.scope_name(name):
+                    detail = f"[{name}] imports {host}.{fwd.name}, which only forwards to {target}; {banned!r} is forbidden by module policy"
+                    out.append(Violation(Rule.FORWARDED_IMPORT, name, detail, imp.line, target))
+    return out
+
+
+def _forwarded_targets(env: _ImportEnv, host: str, fwd: Forwarder, seen: set[str]) -> list[str]:
+    """The modules a forwarder reaches, following forwarders that themselves only forward (a chain, not a cycle)."""
+    raw = RawImport(fwd.level, fwd.module, (fwd.imported,) if fwd.imported else (), fwd.line, False, False)
+    targets, _, _ = resolve_targets(host, env.modules[host].is_package, raw, env.known, env.tops)
+    out = list(targets)
+    callee = (fwd.member or fwd.imported).split(".")[0]
+    for target in targets:
+        info = env.modules.get(target)
+        if info is None or target in seen:
+            continue
+        for nxt in info.facts.forwarders:
+            if nxt.name == callee:
+                out += _forwarded_targets(env, target, nxt, seen | {target})
     return out
 
 
@@ -492,7 +528,7 @@ def check_modules(
                 out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
             out += _scope_imports(context, name, imp.line, internal)
             out += _scope_effect_leaks(context, modules, name, imp.line, internal)
-            out += _internal_imports(context, name, ring, imp.line, internal)
+            out += _internal_imports(context, name, ring, imp.line, internal) + _forwarded_imports(context, name, imp, _ImportEnv(modules, known, tops, import_graph))
             out += _external_imports(local_policy, name, ring, imp.line, external, third_party, siblings)
         out += _os_branching(local_policy, name, ring, rule, info)
         out += _effect_uses(context, name, ring, info, known)

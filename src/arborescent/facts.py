@@ -13,8 +13,10 @@ import tomllib
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
+from .forwarder_facts import Forwarder, forwarders
+
 __all__ = [
-    "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef",
+    "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "Forwarder", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef",
     "effect_category_of", "extract", "resolve_runtime_targets", "resolve_targets",
 ]
 
@@ -112,6 +114,7 @@ class SourceFacts:
     file_refs: tuple[int, ...] = ()  # lines that read `__file__`: a location-dependent path breaks when the module moves
     main_guard: int = 0  # line of a top-level `if __name__ == "__main__":`, 0 when there is none: the module is also a program
     string_literals: tuple[tuple[int, str], ...] = ()  # (line, value) of identifier-like string constants, docstrings excluded (#112)
+    forwarders: tuple[Forwarder, ...] = ()  # module-level pass-through functions (#138)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -601,6 +604,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _file_ref_lines(tree),
         _main_guard_line(tree),
         _string_literals(tree),
+        forwarders(tree),
     )
 
 
