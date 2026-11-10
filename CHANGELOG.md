@@ -36,6 +36,8 @@
   fails a count above its baseline or below it (stale), `arborescent ratchet` records and lowers them and refuses a rise
   without `--allow-growth --reason --approved-by`, and `check --growth-against REF` requires an attributed growth entry
   for every added or raised count (#147).
+### Fixed
+- The `STALE baseline entry` hint now points at `arborescent baseline --prune`, which works while other violations are unbaselined (#135).
 
 ## 0.6.0 — 2026-11-07
 

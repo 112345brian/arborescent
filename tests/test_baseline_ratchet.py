@@ -307,3 +307,16 @@ def test_check_growth_against_covers_configured_ratchet_files(repo: Path) -> Non
     assert main(args, svc) == 0
     (repo / "budget.json").unlink()
     assert main(args, svc) == 1  # a missing file is a failure, not a pass
+
+
+def test_stale_hint_points_at_prune_which_works_while_new_violations_exist(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = write_policy(repo)
+    write_files(repo, {"app/domain.py": ""})
+    fs = LocalFileSystem()
+    svc = Services(FsScanner(), FakeToolRunner(), list(all_checkers().values()), fs, SystemClock(), default_engines())
+    policy = mini_policy()
+    fs.write_json(repo / policy.baseline, {"version": 2, "violations": [v("internal-import", "gone").key], "growth": []})
+
+    main(["--config", str(config), "check", "--no-tools"], svc)
+    stale_lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("STALE")]
+    assert stale_lines and all("arborescent baseline --prune" in line for line in stale_lines)

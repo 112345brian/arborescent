@@ -62,7 +62,7 @@ def _print_findings(args: argparse.Namespace, report: CheckReport) -> None:
         print(f"FAIL   {v.render()}")
     if report.ratchet:
         for key in report.ratchet.stale:
-            print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline`): {key}")
+            print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline --prune`): {key}")
 
 
 def _print_engines(report: CheckReport) -> None:
