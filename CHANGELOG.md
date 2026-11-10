@@ -2,6 +2,13 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- `test-reference` practice (information): reports public functions of I/O-free rings that no function under the tests
+  folder imports and calls, resolved through aliases and package re-exports. `test-reference-exempt` skips names. The
+  per-function call facts it reads (`SourceFacts.function_calls`) are reusable by an adapter-equivalence check (#104).
+
 ## 0.6.0 — 2026-11-07
 
 ### Added

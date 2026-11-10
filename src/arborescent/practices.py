@@ -11,6 +11,7 @@ directory. Enable them under ``[tool.arborescent.practices]``.
 ``undeclared-imports``  code imports a third-party package that no manifest declares
 ``stale-config-path``   a Makefile glob or script path matched nothing after a move, so a suite silently ran zero tests
 ``source-root-drift``   the source-root list is copied into tach and pyproject, and one copy was not updated
+``test-reference``      a function in an I/O-free ring that no function under the tests folder imports and calls (information, #104)
 """
 
 from __future__ import annotations
@@ -19,15 +20,16 @@ import fnmatch
 import re
 import tomllib
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
-from .domain import NOISE_DIRS, Policy, Rule, Violation, dist_name
-from .facts import ModuleInfo, resolve_targets
+from .domain import NOISE_DIRS, Policy, Rule, Violation, dist_name, in_unit
+from .facts import ModuleInfo, extract, resolve_targets
 from .ports import FileSystem, ScanResult, ToolRunner
 from .rules import RuleContext
 
-__all__ = ["PRACTICES", "run_practices"]
+__all__ = ["PRACTICES", "FunctionReferences", "TestReferenceConfig", "function_references", "missing_test_references", "run_practices"]
 
 _NOISE = NOISE_DIRS | {"build", "dist"}  # build output is noise for gitignore-shadow, but a package called `build` is source
 
@@ -327,7 +329,7 @@ def _config_copies(
 
 PRACTICES = (
     Rule.GITIGNORE_SHADOW, Rule.SIBLING_VERSIONS, Rule.SECRETS_GUARD, Rule.DOCS_SYNC, Rule.CRLF, Rule.UNDECLARED_IMPORTS,
-    Rule.STALE_CONFIG_PATH, Rule.SOURCE_ROOT_DRIFT,
+    Rule.STALE_CONFIG_PATH, Rule.SOURCE_ROOT_DRIFT, Rule.TEST_REFERENCE,
 )  # fmt: skip
 
 
@@ -344,6 +346,116 @@ def _source_root_findings(fs: FileSystem, root: Path, policy: Policy, value: obj
     files = _string_items(value) if isinstance(value, list) else ["tach.toml", "pyproject.toml"]
     return source_root_drift(fs, root, policy, files)
 
+# An I/O-free ring forbids every one of these effect categories (the innermost ring does by default).
+_IO_EFFECTS = frozenset({"filesystem", "network", "database", "process"})
+
+
+@dataclass(frozen=True)
+class FunctionReferences:
+    """One function under the tests folder and the project functions it calls, as ``(module, function)`` pairs."""
+
+    path: str  # posix, relative to the root
+    name: str  # ``test_x``, ``TestClass.test_x`` or a helper's name
+    line: int
+    is_test: bool  # pytest collects it: a module-level ``test*`` function or a ``test*`` method of a ``Test*`` class
+    references: frozenset[tuple[str, str]]
+
+
+@dataclass(frozen=True)
+class _Index:
+    modules: Mapping[str, ModuleInfo]
+    known: Collection[str]
+    tops: Collection[str]
+
+
+def _resolve_reference(target: str, index: _Index) -> tuple[str, str] | None:
+    """The ``(module, function)`` a dotted call target names, following ``from .impl import f`` re-exports."""
+    parts = target.split(".")
+    if len(parts) < 2:
+        return None
+    module = ".".join(parts[:-1])
+    return _defining_module(module, parts[-1], index, frozenset()) if module in index.modules else None
+
+
+def _defining_module(module: str, name: str, index: _Index, seen: frozenset[tuple[str, str]]) -> tuple[str, str] | None:
+    info = index.modules[module]
+    if (module, name) in seen:
+        return None
+    if any(not d.is_class and d.name == name for d in info.facts.top_level_defs):
+        return module, name
+    for imp in info.facts.imports:
+        if name not in imp.names or imp.lazy or imp.type_only:
+            continue
+        for edge in resolve_targets(module, info.is_package, imp, index.known, index.tops)[0]:
+            if edge in index.modules and edge != module and (found := _defining_module(edge, name, index, seen | {(module, name)})):
+                return found
+    return None
+
+
+def function_references(fs: FileSystem, root: Path, tests_dir: str, scan: ScanResult) -> list[FunctionReferences]:
+    """Every function under ``tests_dir`` with the project functions it imports and calls.
+
+    The shared machinery of the test-reference check: #104 asks whether any function in the folder calls each project
+    function (a helper a test delegates to counts); a check that needs one test to cover several functions (two adapters
+    of one port, #113) keeps only the ``is_test`` entries. A call is resolved through import aliases and package
+    re-exports, but not through an object of unknown type, a fixture or a parametrized argument.
+    """
+    folder = root / tests_dir
+    if not fs.is_dir(folder):
+        return []
+    index = _Index(scan.modules, scan.known, {module.split(".", 1)[0] for module in scan.known})
+    out: list[FunctionReferences] = []
+    for path in fs.rglob(folder, "*.py"):
+        rel = path.relative_to(root).as_posix()
+        if _NOISE & set(rel.split("/")):
+            continue
+        try:
+            facts = extract(fs.read_text(path), rel)
+        except (SyntaxError, ValueError, UnicodeDecodeError):
+            continue
+        for function in facts.function_calls:
+            owner, _, method = function.name.rpartition(".")
+            is_test = method.startswith("test") and (not owner or owner.startswith("Test"))
+            resolved = (_resolve_reference(call, index) for call in function.calls)
+            out.append(FunctionReferences(rel, function.name, function.line, is_test, frozenset(r for r in resolved if r is not None)))
+    return out
+
+
+@dataclass(frozen=True)
+class TestReferenceConfig:
+    __test__ = False  # not a pytest class
+
+    folder: str  # the tests folder, posix, relative to the root
+    exempt: Sequence[str] = ()  # ``module.function`` names or module globs the check skips
+
+
+def missing_test_references(
+    fs: FileSystem, root: Path, policy: Policy, scan: ScanResult, config: TestReferenceConfig,
+) -> list[Violation]:
+    """Public module-level functions of I/O-free rings that no test function imports and calls (#104)."""
+    referenced = {pair for test in function_references(fs, root, config.folder, scan) for pair in test.references}
+    context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
+    out: list[Violation] = []
+    for module, info in sorted(scan.modules.items()):
+        owner = context.policy_for(module)
+        ring = context.resolve_ring(module)
+        if owner is None or ring is None or not owner.forbidden_effects(ring) >= _IO_EFFECTS:
+            continue
+        for member in info.facts.top_level_defs:
+            qualified = f"{module}.{member.name}"
+            if member.is_class or member.is_abstract or member.name.startswith("_") or (module, member.name) in referenced:
+                continue
+            if any(in_unit(qualified, pattern) for pattern in config.exempt):
+                continue
+            out.append(Violation(Rule.TEST_REFERENCE, module, f"[{ring}] function {member.name!r} has no test that imports and calls it", member.line))
+    return out
+
+
+def _test_reference_findings(fs: FileSystem, root: Path, policy: Policy, scan: ScanResult, cfg: Mapping[str, object]) -> list[Violation]:
+    folder = str(cfg[Rule.TEST_REFERENCE]).replace("\\", "/").strip("/")
+    exempt = _string_items(cfg.get("test-reference-exempt", []))
+    return missing_test_references(fs, root, policy, scan, TestReferenceConfig(folder, exempt))
+
 
 def run_practices(
     policy: Policy, root: Path, runner: ToolRunner, fs: FileSystem, scan: ScanResult,
@@ -359,6 +471,7 @@ def run_practices(
         (Rule.UNDECLARED_IMPORTS, lambda: undeclared_imports(fs, root, policy, scan.modules, scan.known, manifest if isinstance(manifest, str) else "pyproject.toml")),
         (Rule.STALE_CONFIG_PATH, lambda: _stale_config_findings(fs, root, cfg)),
         (Rule.SOURCE_ROOT_DRIFT, lambda: _source_root_findings(fs, root, policy, cfg[Rule.SOURCE_ROOT_DRIFT])),
+        (Rule.TEST_REFERENCE, lambda: _test_reference_findings(fs, root, policy, scan, cfg)),
     ]
     out: list[Violation] = []
     for rule, check in checks:

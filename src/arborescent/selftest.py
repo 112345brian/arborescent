@@ -57,6 +57,7 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.SIBLING_VERSIONS: _PRACTICE,
     Rule.SECRETS_GUARD: _PRACTICE,
     Rule.DOCS_SYNC: _PRACTICE,
+    Rule.TEST_REFERENCE: _PRACTICE,
     Rule.NOISE_DIR_CODE: "requires a Git-tracked Python file under a noise directory; selftest works on a temporary non-Git copy",
     Rule.TACH_INVISIBLE_IMPORT: "informational and never baselined; focused tests cover it",
     Rule.CLASSIFY_FACTS: "informational and never baselined; a mutation cannot make a ring wrong, focused tests cover each signal",

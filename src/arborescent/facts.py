@@ -14,7 +14,7 @@ from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
 __all__ = [
-    "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef",
+    "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "FunctionCalls", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef",
     "effect_category_of", "extract", "resolve_runtime_targets", "resolve_targets",
 ]
 
@@ -99,6 +99,19 @@ class TopLevelDef:
 
 
 @dataclass(frozen=True)
+class FunctionCalls:
+    """The imported callables one function or method calls, as canonical dotted names (``alias.attr()`` resolved).
+
+    ``name`` is ``f`` or ``Class.method``. Only calls whose root name was imported are kept, so a local variable's
+    method call is not recorded; a function that calls nothing imported has no entry. Reused by the test-reference check (#104).
+    """
+
+    name: str
+    line: int
+    calls: tuple[str, ...]  # sorted, unique
+
+
+@dataclass(frozen=True)
 class SourceFacts:
     imports: tuple[RawImport, ...]
     effect_uses: tuple[EffectUse, ...]
@@ -112,6 +125,7 @@ class SourceFacts:
     file_refs: tuple[int, ...] = ()  # lines that read `__file__`: a location-dependent path breaks when the module moves
     main_guard: int = 0  # line of a top-level `if __name__ == "__main__":`, 0 when there is none: the module is also a program
     string_literals: tuple[tuple[int, str], ...] = ()  # (line, value) of identifier-like string constants, docstrings excluded (#112)
+    function_calls: tuple[FunctionCalls, ...] = ()  # module-level functions and class methods that call something imported (#104)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -601,7 +615,40 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _file_ref_lines(tree),
         _main_guard_line(tree),
         _string_literals(tree),
+        _function_calls(tree),
     )
+
+
+def _root_name(node: ast.expr) -> str | None:
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _imported_calls(func: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str]) -> tuple[str, ...]:
+    calls: set[str] = set()
+    for node in ast.walk(func):
+        if isinstance(node, ast.Call) and _root_name(node.func) in aliases and (target := _dotted(node.func, aliases)) is not None:
+            calls.add(target)
+    return tuple(sorted(calls))
+
+
+def _function_calls(tree: ast.Module) -> tuple[FunctionCalls, ...]:
+    aliases = _aliases(tree)
+    out: list[FunctionCalls] = []
+
+    def visit(func: ast.FunctionDef | ast.AsyncFunctionDef, qualified: str) -> None:
+        if calls := _imported_calls(func, aliases):
+            out.append(FunctionCalls(qualified, func.lineno, calls))
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+            visit(stmt, stmt.name)
+        elif isinstance(stmt, ast.ClassDef):
+            for member in stmt.body:
+                if isinstance(member, ast.FunctionDef | ast.AsyncFunctionDef):
+                    visit(member, f"{stmt.name}.{member.name}")
+    return tuple(out)
 
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")

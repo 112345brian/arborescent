@@ -74,6 +74,7 @@ def test_rule_id_strings_never_change() -> None:
             "undeclared-imports",
             "stale-config-path",
             "source-root-drift",
+            "test-reference",
             "invalid-arbor-annotation",
             "arbor-ring-mismatch",
             "unannotated-module",
