@@ -650,7 +650,7 @@ def _call_aliases(tree: ast.AST) -> dict[str, str]:
             base = "." * node.level + (node.module or "")
             for item in node.names:
                 if item.name != "*":
-                    aliases[item.asname or item.name] = f"{base}.{item.name}" if node.module else f"{base}{item.name}"
+                    aliases[item.asname or item.name] = f"{base}.{item.name}" if node.module is not None else f"{base}{item.name}"
     return aliases
 
 
