@@ -129,6 +129,8 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.generate" = "application"
 "arborescent.architecture_contracts" = "application"
 "arborescent.baseline" = "application"
+"arborescent.baseline_report" = "application"
+"arborescent.baseline_history" = "application"
 "arborescent.config" = "application"
 "arborescent.engine" = "application"
 "arborescent.certification" = "application"
@@ -171,6 +173,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "arborescent"]
 "arborescent.cli" = "composition"
 "arborescent.cli_install" = "composition"
 "arborescent.cli_report" = "composition"
+"arborescent.cli_baseline_report" = "composition"
 "arborescent.cli_migrate" = "composition"
 "arborescent.__main__" = "composition"
 

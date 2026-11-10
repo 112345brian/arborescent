@@ -19,6 +19,7 @@ from .adapters import (
 from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .classify_audit import suggest_ring
+from .cli_baseline_report import add_report_parser, run_report
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
 from .cli_report import _print_excluded, _print_report, _print_rule_label
@@ -183,6 +184,7 @@ def _add_maintenance_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPa
     )
     b.add_argument("--reason", help="explain why new baseline keys are being recorded")
     b.add_argument("--prune", action="store_true", help="only remove stale entries; never adds, works while the tree has new violations")
+    add_report_parser(b)
     discover = sub.add_parser(
         "discover",
         help="list in-scope Python files that still need a ring classification",
@@ -311,7 +313,7 @@ def _dispatch(
     handlers: dict[str, Callable[[], int]] = {
         "generate": lambda: _generate(policy, root, svc),
         "install-tools": lambda: _install_tools(args, policy, root, svc),
-        "baseline": lambda: _baseline(args, policy, root, svc),
+        "baseline": lambda: run_report(args, policy, root, svc) if args.baseline_action == "report" else _baseline(args, policy, root, svc),
         "discover": lambda: _discover(policy, root, svc, args.suggest),
         "annotate": lambda: _annotate(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),

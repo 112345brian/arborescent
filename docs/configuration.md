@@ -831,6 +831,21 @@ key to match the keys in growth-log entries appended since that ref. This checks
 command wrote the file. A person could edit both the baseline and its log by hand, so review of baseline changes
 remains part of the protection (for example, require review through `CODEOWNERS`).
 
+### `baseline report`
+
+`arborescent baseline report [FILE ...] [--json]` is read-only: it changes no file and no gate. It reads each file (default: the
+policy's `baseline`, paths relative to the policy root) in any of three shapes, a list of `rule|subject|detail` keys (also under
+`violations`), a `{module: count}` counter, or a `{name: {rule, module, target, count}}` registry, and prints:
+
+- the top clusters (`--top`, default 10) by rule, by module family (`--depth` leading segments of a dotted name or `/` path,
+  default 2), by module, and by target (the first backticked name in a key's detail, or a record's `target`), each with its share;
+- the concentration: any family, module or target holding more than `--threshold` percent (default 25) of the total, and at
+  least 3 entries, is flagged as a likely missing abstraction (a rule is never flagged);
+- the burn-down: entries added, removed and net per `--period` (`day`, `month`, `year`; default month) from the git history of
+  the file, reading the newest `--history-limit` revisions (default 200), with a warning when the baseline has only ever grown.
+  A counter entry that rises counts as added by the difference. `--no-history` skips it; a file git does not track prints a note.
+
+
 A shrink-only cap on imports (`module_forbid_imports` with the baseline) is sized in baseline entries, and `from pkg import mod`
 records two entries (`pkg` and `pkg.mod`). After `check` and `baseline`, one line sizes the baselined `internal-import` entries
 in modules: `baselined internal-import: 232 entries, 41 importing modules, 156 distinct targets`. A target is the dotted module
