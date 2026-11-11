@@ -1124,6 +1124,7 @@ against the baseline. Options:
   modularity gates you request explicitly stay in force. Every `check` also prints `by rule: <rule> N (M new)`, where
   M counts the findings not covered by the baseline.
 - `--growth-against REF`: verify baseline growth entries against the baseline at a Git ref.
+- `--admitted-against REF`: fail a module that is new since `REF` and was not validly admitted (see "Checking admission of new modules" below).
 - `--no-cache`: bypass the Arborescent AST fact cache for this run.
 
 By default, `check` is read-only with respect to the environment and prints install instructions for missing tools.
@@ -1177,6 +1178,31 @@ later), and notes a `ring_reason` that excuses nothing (possibly stale). A modul
 is left alone. "Admitted" means this module's own facts fit the ring, not that its contribution to the architecture is sound
 (re-export and forwarding laundering have their own rules). Existing modules are not forced through admission, and
 `discover --suggest` remains the read-only view.
+
+#### Checking admission of new modules: `check --admitted-against REF`
+
+A CI diff check, stateless apart from the human `ring_reason`. New modules are the `.py` files that
+`git diff --name-status -M --diff-filter=A <merge-base of REF and HEAD> HEAD` reports added, mapped to module names with the
+current source roots (git is called through the `runner` port). For each one the check **recomputes admission at HEAD** with the
+same strict test as `arborescent admit`, so a hand-written `__arbor__` is accepted only if it passes. A new module fails when:
+
+- it has no explicit `__arbor__` ring: a ring that comes only from a `classify` glob does not count as admitted
+  (`admission-refused`);
+- admission refuses it: its facts violate the ring, a dynamic import cannot be read and no `ring_reason` names it, or the
+  annotation is invalid (`admission-refused`);
+- a tighter ring also fits and no `ring_reason` is recorded (`admission-looser-than-needed`).
+
+Existing modules are never judged, so adopting the flag creates no backlog; the shrink-only baseline still carries the legacy
+debt. A rename (content similarity above git's `-M` threshold) is not new; a move that falls below the threshold is new and is
+admitted afresh. A deleted module is not new. An empty diff passes. If the diff cannot be read (unknown ref, shallow clone with no
+shared history, a ref that looks like an option) the check **fails** with `could not verify admission: ...`; it never passes. In CI
+use `fetch-depth: 0` or deepen the clone. The check runs on the full module set (never `--changed`), and nothing is cached
+between runs, so the ref is part of every run. `classify-facts` "could sit in an inner ring" stays an information-tier note for
+existing modules; it skips modules with no top-level definitions, a `__main__` guard, an abstract class or an entry-script
+entry. Admission shares the underlying test (`classify_audit.tighter_ring`) but applies none of those exemptions, because a
+bare-import shim that passes every inner ring is exactly what a new module must not be admitted as. The check is not a native
+mutation-tested rule (its findings are not `Violation`s and never enter the baseline); `selftest` probes the admission gate
+itself (`admission_probes`).
 
 ### `arborescent selftest`
 

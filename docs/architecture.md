@@ -107,6 +107,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.practices` | `single` | application |
 | `arborescent.selftest` | `single` | application |
 | `arborescent.admission_probes` | `single` | application |
+| `arborescent.admitted_against` | `single` | application |
 | `arborescent.suggestions` | `single` | application |
 | `arborescent.packages` | `single` | application |
 | `arborescent.package_tree` | `single` | application |

@@ -14,6 +14,11 @@
   ring (function-local, `TYPE_CHECKING` and literal dynamic imports all count; a non-literal dynamic import is refused
   unless a reason is recorded; a tighter ring that fits is refused unless a reason is recorded). New `__arbor__` key
   `ring_reason` (a tool older than the release containing it reports `invalid-arbor-annotation` on a file that uses it).
+- `arborescent check --admitted-against REF` (#163): a module new since the merge base with `REF` (`git diff -M
+  --diff-filter=A`, renames are not new) fails unless it has an explicit `__arbor__` ring and `admit`'s strict test still
+  passes at HEAD (`admission-refused`), or a tighter ring fits and no `ring_reason` is recorded
+  (`admission-looser-than-needed`). An unreadable ref or a shallow clone fails; existing modules are untouched. The same flag
+  is forwarded to child arbors.
 - Baseline growth entries now carry `approved-by`: `baseline --allow-growth` requires `--approved-by WHO` (adoption
   records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
 - `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an

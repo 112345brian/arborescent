@@ -185,6 +185,10 @@ path = "src/arborescent/admission_probes.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/admitted_against.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/tach_visibility.py"
 role = "source"
 

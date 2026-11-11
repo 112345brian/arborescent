@@ -77,6 +77,7 @@ class Options:
     require_visible: bool = False  # fail on every dependency tach cannot see (run-time imports) instead of only noting it
     require_modularity: bool = False  # fail unless the policy keeps `modularity = "ready"` and no package gap is open
     growth_against: str | None = None
+    admitted_against: str | None = None  # git ref: fail a module new since it that was not validly admitted (#163)
     no_cache: bool = False
     rules: tuple[str, ...] = ()  # rule families to run and exit on; empty selects everything (#137)
 
@@ -417,6 +418,8 @@ def child_arbor_command(config_path: Path, opts: Options) -> list[str]:
         argv.extend(("--type-checker", opts.type_checker))
     if opts.growth_against is not None:
         argv.extend(("--growth-against", opts.growth_against))
+    if opts.admitted_against is not None:
+        argv.extend(("--admitted-against", opts.admitted_against))
     return argv
 
 
