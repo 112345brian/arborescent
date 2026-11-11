@@ -326,6 +326,22 @@ aliased or relative import, and a call inside the defining module. Dynamic calls
 (`obj.f()`), callbacks and variables, `getattr`, `functools.partial`, `*` imports, re-exports and shadowed names. Use a type
 checker's unused-result check for those. This is separate from the `discard(value, reason=...)` inventory above.
 
+`[tool.arborescent.docs]` makes a module say what it is, and says it in the ring the policy enforces:
+
+```toml
+[tool.arborescent.docs]
+module_docstring = true    # missing-module-docstring: every module has a non-blank docstring
+module_names_ring = true   # docstring-ring-mismatch: the docstring names the module's effective ring
+exclude = ["app.generated*"]   # module globs both rules skip
+```
+
+The ring is the one `classify` or `__arbor__` gives the module, matched as a whole word, case-insensitively (`Ring: domain`,
+`the domain ring`; `subdomain` does not count), so a docstring cannot claim a different ring than the one enforced. A docstring that
+names only other rings says which. Both rules are off by default, and both join the baseline ratchet: record today's gaps, and new
+ones fail while fixed ones must leave the file. A module without a docstring gets `missing-module-docstring` only, and a module
+with no ring (unclassified, or developer tooling) is never asked to name one. `selftest` adds a module with no docstring and one
+whose docstring names another ring. Not covered: docstrings on public classes, functions and methods; use Ruff's `D1xx` rules for those.
+
 Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
 and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
 and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (verified with Ruff 0.17.2,
@@ -752,6 +768,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `forwarded-import` | a module imports a pass-through function (`def f(a): return other.f(a)`: one call to an imported name, arguments exactly the parameters, no default, decorator or other statement) whose target `module_forbid_imports` forbids it: the dependency one hop away. Chains of forwarders are followed. Only `from B import f` is seen, not `B.f` attribute use; wrappers that add logic are real boundaries and are not flagged. Counts against the importing module and takes its own baseline key |
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
 | `result-discard` | a call used as a whole statement drops the value of a result-bearing function (`result_discard`); `_ = f()` is a deliberate discard and is not reported |
+| `missing-module-docstring` | `docs.module_docstring` is on and a module has no, or a blank, docstring |
+| `docstring-ring-mismatch` | `docs.module_names_ring` is on and a module's docstring does not name the ring that `classify` or `__arbor__` gives it (it says which other rings it names) |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
 

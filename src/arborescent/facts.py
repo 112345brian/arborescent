@@ -137,6 +137,7 @@ class SourceFacts:
     result_defs: tuple[str, ...] = ()  # module-level functions annotated `-> *Result` / `-> *Outcome` (#141)
     bare_calls: tuple[tuple[int, str], ...] = ()  # (line, dotted callee) of a call used as a whole statement; relative targets keep leading dots (#141)
     function_calls: tuple[FunctionCalls, ...] = ()  # module-level functions and class methods that call something imported (#104)
+    module_doc: str | None = None  # the module docstring, cleaned; None when there is none (#110)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -728,6 +729,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         _result_defs(tree),
         _bare_calls(nodes, call_aliases),
         _function_calls(tree, aliases),
+        ast.get_docstring(tree),
     )
 
 

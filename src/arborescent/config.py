@@ -14,6 +14,7 @@ from .domain import (
     ArchitectureScope,
     ChildArbor,
     ConstructionSite,
+    DocsPolicy,
     OwnedLiteral,
     Policy,
     PolicyError,
@@ -242,6 +243,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         owned_literals=_owned_literals(raw),
         construct_only=_construct_only(raw),
         result_discard=_result_discard(raw),
+        docs=_docs(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
@@ -319,7 +321,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "construct_only", "result_discard", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "result_discard", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -524,6 +526,21 @@ def _importable_by(raw: Mapping[str, Any]) -> tuple[tuple[str, tuple[str, ...]],
         raise PolicyError("`importable_by` must map module globs to non-empty lists of importer module globs")
     checked = cast("Mapping[str, list[str]]", table)
     return tuple((pattern, tuple(importers)) for pattern, importers in checked.items())
+
+
+def _docs(raw: Mapping[str, Any]) -> DocsPolicy:
+    table = raw.get("docs", {})
+    if not isinstance(table, Mapping):
+        raise PolicyError("`docs` must be a table: [tool.arborescent.docs]")
+    unknown = set(table) - {"module_docstring", "module_names_ring", "exclude"}
+    if unknown:
+        raise PolicyError(f"unknown `[tool.arborescent.docs]` setting(s): {sorted(unknown)}")
+    try:
+        return DocsPolicy(
+            _boolean_option(table, "module_docstring", False), _boolean_option(table, "module_names_ring", False), _string_list(table, "exclude"),
+        )
+    except PolicyError as exc:
+        raise PolicyError(f"[tool.arborescent.docs]: {exc}") from exc
 
 
 def _owned_literals(raw: Mapping[str, Any]) -> tuple[OwnedLiteral, ...]:
