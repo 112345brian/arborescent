@@ -57,6 +57,10 @@ path = "src/arborescent/ratchets.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/pytest_io_block.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/bench.py"
 role = "source"
 
@@ -177,6 +181,10 @@ path = "src/arborescent/selftest.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/admission_probes.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/tach_visibility.py"
 role = "source"
 
@@ -198,6 +206,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/coupling_ratchet.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_constraints.py"
 role = "source"
 
 [[packages.paths]]
@@ -391,6 +403,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/cli_cycles.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_admit.py"
 role = "source"
 
 [[packages.paths]]

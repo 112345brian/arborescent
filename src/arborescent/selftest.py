@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
+from .admission_probes import admission_probes
 from .construct_only_probes import construct_only_mutations
 from .domain import NOISE_DIRS, ArchitectureScope, Mutation, Policy, Rule
 from .engine import Services, package_checks, run_own
@@ -167,10 +168,43 @@ def _local_mutations(
     steps.append(importable_by_mutations(local_policy, local_paths, local_known))
     steps.append(owned_literal_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
+    steps.append(_docs_mutations(local_policy, local_paths, local_known, arbor_index))
     for found, step_skipped in steps:
         out.extend(found)
         skipped.extend(step_skipped)
     out.extend(_entry_dependency_mutations(local_policy, local_paths, local_known, arbor_index))
+    return out, skipped
+
+
+def _docs_mutations(
+    policy: Policy, paths: dict[str, str], known: Collection[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[list[Mutation], list[str]]:
+    """Probe the documentation rules (#110) with an added module: one with no docstring, one whose docstring names another ring."""
+    docs = policy.docs
+    out: list[Mutation] = []
+    skipped: list[str] = []
+    if not (docs.module_docstring or docs.module_names_ring):
+        return out, skipped
+    hosts = sorted(
+        module for module in known
+        if module in paths and not paths[module].endswith("__init__.py") and policy.resolve_ring(arbor_index, module) is not None
+    )
+    host = next((module for module in hosts if docs.applies_to(module.rpartition(".")[0] + ".arborescent_probe_docs")), None)
+    if host is None:
+        reason = "no classified module outside `docs.exclude` to place a probe beside"
+        return out, [f"{rule}: {reason}" for rule in (Rule.MISSING_MODULE_DOCSTRING, Rule.DOCSTRING_RING_MISMATCH)]
+    directory = paths[host].rpartition("/")[0]
+    new = (directory + "/" if directory else "") + "arborescent_probe_docs.py"
+    ring = policy.resolve_ring(arbor_index, host)
+    if docs.module_docstring:
+        out.append(Mutation(Rule.MISSING_MODULE_DOCSTRING, "a new module with no docstring", new, "", new_file=True))
+    if not docs.module_names_ring:
+        return out, skipped
+    other = next((rule.name for rule in policy.rings if rule.name != ring), None)
+    if other is None:
+        return out, [*skipped, f"{Rule.DOCSTRING_RING_MISMATCH}: policy has only one ring, nothing else to name"]
+    content = f'"""A probe module that says it lives in the {other} ring."""\n__arbor__ = {{"ring": {ring!r}}}\n'
+    out.append(Mutation(Rule.DOCSTRING_RING_MISMATCH, f"a new {ring} module whose docstring names the {other} ring", new, "", new_file=True, content=content))
     return out, skipped
 
 
@@ -504,7 +538,8 @@ def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
         else:
             jobs = [(policy, root, services, baseline, m) for m in mutations]
             killed, survived = _collect(mutations, services.parallel.map(_mutate_and_check, jobs))
-    return SelfTestReport(killed, survived, skipped)
+    admitted, admission_survived, admission_skipped = admission_probes(policy, scan.arbor_index, scan.scope_by_module, scan.known)
+    return SelfTestReport(killed + admitted, survived + admission_survived, skipped + admission_skipped)
 
 
 def _collect(mutations: list[Mutation], killed_flags: list[bool]) -> tuple[list[str], list[str]]:
@@ -526,7 +561,7 @@ def _run_mutations_sequential(
         target = work / m.file
         original = fs.read_bytes(target) if fs.exists(target) and not m.new_file else None
         if m.new_file:
-            fs.write_text(target, "X = 1\n")
+            fs.write_text(target, m.content)
         else:
             fs.write_bytes(target, (original or b"") + b"\n" + m.append.encode() + b"\n")
         try:
@@ -548,7 +583,7 @@ def _mutate_and_check(policy: Policy, root: Path, services: Services, baseline: 
         fs.copy_tree(root, work, ignore=_SKIP_COPY)
         target = work / mutation.file
         if mutation.new_file:
-            fs.write_text(target, "X = 1\n")
+            fs.write_text(target, mutation.content)
         else:
             original = fs.read_bytes(target) if fs.exists(target) else b""
             fs.write_bytes(target, original + b"\n" + mutation.append.encode() + b"\n")

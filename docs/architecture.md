@@ -95,6 +95,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.ratchet_config` | `single` | application |
 | `arborescent.ratchet_measure` | `single` | application |
 | `arborescent.ratchets` | `single` | application |
+| `arborescent.pytest_io_block` | `single` | composition |
 | `arborescent.bench` | `single` | application |
 | `arborescent.config` | `single` | application |
 | `arborescent.certification` | `single` | application |
@@ -105,6 +106,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.architecture_contracts` | `single` | application |
 | `arborescent.practices` | `single` | application |
 | `arborescent.selftest` | `single` | application |
+| `arborescent.admission_probes` | `single` | application |
 | `arborescent.suggestions` | `single` | application |
 | `arborescent.packages` | `single` | application |
 | `arborescent.package_tree` | `single` | application |
@@ -141,6 +143,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.coupling` | `single` | domain |
 | `arborescent.coupling_policy` | `single` | domain |
 | `arborescent.coupling_ratchet` | `single` | domain |
+| `arborescent.package_constraints` | `single` | domain |
 | `arborescent.testing` | `single` | adapters |
 | `arborescent.typecheckers` | `single` | adapters |
 | `arborescent.__main__` | `single` | composition |
@@ -152,6 +155,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.cli_migrate` | `single` | composition |
 | `arborescent.cli_coupling` | `single` | composition |
 | `arborescent.cli_cycles` | `single` | composition |
+| `arborescent.cli_admit` | `single` | composition |
 
 ## Data flow of `arborescent check`
 

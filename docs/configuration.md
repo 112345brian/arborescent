@@ -326,6 +326,22 @@ aliased or relative import, and a call inside the defining module. Dynamic calls
 (`obj.f()`), callbacks and variables, `getattr`, `functools.partial`, `*` imports, re-exports and shadowed names. Use a type
 checker's unused-result check for those. This is separate from the `discard(value, reason=...)` inventory above.
 
+`[tool.arborescent.docs]` makes a module say what it is, and says it in the ring the policy enforces:
+
+```toml
+[tool.arborescent.docs]
+module_docstring = true    # missing-module-docstring: every module has a non-blank docstring
+module_names_ring = true   # docstring-ring-mismatch: the docstring names the module's effective ring
+exclude = ["app.generated*"]   # module globs both rules skip
+```
+
+The ring is the one `classify` or `__arbor__` gives the module, matched as a whole word, case-insensitively (`Ring: domain`,
+`the domain ring`; `subdomain` does not count), so a docstring cannot claim a different ring than the one enforced. A docstring that
+names only other rings says which. Both rules are off by default, and both join the baseline ratchet: record today's gaps, and new
+ones fail while fixed ones must leave the file. A module without a docstring gets `missing-module-docstring` only, and a module
+with no ring (unclassified, or developer tooling) is never asked to name one. `selftest` adds a module with no docstring and one
+whose docstring names another ring. Not covered: docstrings on public classes, functions and methods; use Ruff's `D1xx` rules for those.
+
 Tool configs remain project-owned and are discovered natively by their tools. `arborescent generate` creates missing optional presets
 and skips every existing file. Drift is shown only for files still marked as Arborescent-generated,
 and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (verified with Ruff 0.17.2,
@@ -604,6 +620,27 @@ repository that already has the target layout. With `package_pyproject` set, `pa
 the same derived values; it is `null` otherwise. `selftest` probes the rule by appending a workspace source for
 a non-dependency to a derived file; with no derived file on disk the probe is listed as skipped with the reason.
 
+### Package constraints: `[package.constraints]`
+
+A package can state what it promises *not* to do, as constraints rather than position (the host owns the rings; see
+`docs/superpowers/specs/2026-11-10-host-owned-rings-and-admission-design.md`). The table lives in the package's own policy
+file, `arborescent.toml` or `[tool.arborescent.package.constraints]` in `pyproject.toml`, and is **separate from**
+`__arbor__` annotations and from `packages.toml` (a `[[packages]]` entry carrying `constraints` is still an unknown key).
+
+```toml
+[package.constraints]
+must_be_pure = true              # bool, default false: no effect use of any category
+forbid_effects = ["network"]     # effect categories this package never uses, default []
+```
+
+`forbid_effects` takes the scanner's effect categories (`clock`, `env`, `identity`, `randomness`, `sleep`, `threads`,
+`process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`); duplicates collapse. They
+apply to paths with role `source`; test, docs and asset paths are exempt.
+
+This release **parses and validates only; nothing is enforced yet**. There is no blind spot in the schema: an unknown key
+under `package` or `package.constraints`, an unknown effect name (`netwrok`), a non-boolean `must_be_pure`, or a
+`forbid_effects` that is not a list of names is a policy error. With no `[package]` table nothing changes.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:
@@ -613,7 +650,7 @@ __arbor__ = {"ring": "domain"}
 ```
 
 The `ring` value must be a string naming one of the policy's configured `rings` (the owning scope's rings in
-multi-scope mode). The legal keys are `ring` and `role`; any other key reports `invalid-arbor-annotation`. `role` accepts only
+multi-scope mode). The legal keys are `ring`, `ring_reason` and `role`; any other key reports `invalid-arbor-annotation`. `role` accepts only
 `"dev_tool"` (`__arbor__ = {"role": "dev_tool"}`, no ring needed) and is valid only under a `dev_tools` path (`dev-tool-misplaced`).
 Arborescent reads the assignment statically, without importing or executing the module. Only direct module-level
 assignments count; assignments inside functions or classes are ignored (they are not module-level annotations at
@@ -642,6 +679,21 @@ so scopes may reuse ring names without sharing a hierarchy.
 Annotations apply to individual Python modules. An annotation in `__init__.py` assigns the package module's own
 ring; it does not assign rings to its descendants. Scope boundaries are configured separately through `sources`,
 `public` and `depends_on`; package extraction is separately invoked through `arborescent packages extract`.
+
+### `ring_reason`: why a looser ring than the tightest one
+
+```python
+__arbor__ = {"ring": "adapters", "ring_reason": "wraps the OS client; no I/O yet"}
+```
+
+`ring_reason` is a human justification, never a computed fact. It must be a non-blank string without NUL characters
+(otherwise `invalid-arbor-annotation`) and is only meaningful next to a `ring`. `arborescent admit` (below) reads it: it excuses
+a ring looser than the tightest one that fits, and it is the only way to admit a module with a dynamic import whose target is
+not a string literal. `check` itself does not judge it.
+
+**Minimum version.** A tool older than the release that added `ring_reason` (the first release after 0.6.0) reports
+`invalid-arbor-annotation` on a file that uses it, because unknown keys are errors. Upgrade every checkout and CI image
+before `admit --reason` writes the key.
 
 ### Requiring annotations
 
@@ -752,6 +804,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `forwarded-import` | a module imports a pass-through function (`def f(a): return other.f(a)`: one call to an imported name, arguments exactly the parameters, no default, decorator or other statement) whose target `module_forbid_imports` forbids it: the dependency one hop away. Chains of forwarders are followed. Only `from B import f` is seen, not `B.f` attribute use; wrappers that add logic are real boundaries and are not flagged. Counts against the importing module and takes its own baseline key |
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
 | `result-discard` | a call used as a whole statement drops the value of a result-bearing function (`result_discard`); `_ = f()` is a deliberate discard and is not reported |
+| `missing-module-docstring` | `docs.module_docstring` is on and a module has no, or a blank, docstring |
+| `docstring-ring-mismatch` | `docs.module_names_ring` is on and a module's docstring does not name the ring that `classify` or `__arbor__` gives it (it says which other rings it names) |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
 
@@ -1104,6 +1158,26 @@ List Python files that still lack a ring classification, grouped by scope and fo
 Add valid `__arbor__` ring annotations, matching `classify` patterns, or explicitly exclude files that should not be
 scanned. Git-tracked Python files under noise directories are reported separately by `check`.
 
+### `arborescent admit`
+
+`arborescent admit MODULE --ring RING [--reason TEXT] [--yes]` decides whether one module may enter a ring and writes its
+`__arbor__` annotation. Dry-run by default; `--yes` writes. It exits 1 when it refuses and never writes then.
+
+The scan is strict and function-level: every import counts, including function-local ones, imports under `TYPE_CHECKING`, and
+`importlib.import_module("pkg.x")` / `__import__("pkg.x")` with a literal target (treated as an edge). It refuses when:
+
+- the module's facts violate the ring (the same per-module rules as `check`, applied to all of those imports);
+- a dynamic import has a target that is not a plain absolute string literal and no `ring_reason` is recorded (a gate that cannot
+  see an edge must not certify its absence);
+- a tighter ring also fits and no `ring_reason` is recorded (`--reason TEXT`, or already in the file);
+- the ring is unknown or the module has no owning scope.
+
+It prints the evidence it used, reports importers whose ring cannot import the chosen ring as warnings (`check` fails on those
+later), and notes a `ring_reason` that excuses nothing (possibly stale). A module that is already annotated with another ring
+is left alone. "Admitted" means this module's own facts fit the ring, not that its contribution to the architecture is sound
+(re-export and forwarding laundering have their own rules). Existing modules are not forced through admission, and
+`discover --suggest` remains the read-only view.
+
 ### `arborescent selftest`
 
 Mutation-test Arborescent's native rules by adding forbidden constructs to a temporary copy and checking that each
@@ -1134,3 +1208,30 @@ distribution, then publishes through PyPI Trusted Publishing; no long-lived PyPI
 GitHub Release for the matching version tag (for example, `v0.1.0`) only after the release commit is on `main`.
 
 When `type_checkers` is omitted, Arborescent uses Ty. Set `type_checkers = ["pyright"]` to select Pyright explicitly. During `--changed`, graph-wide import-linter and Tach checks are skipped; Ruff and the selected type checker receive only changed files.
+
+## Running a ring's tests with real I/O blocked (`arborescent.pytest_io_block`)
+
+An opt-in pytest plugin (#105). It never auto-loads: there is no `pytest11` entry point and arborescent still has no
+runtime dependency. Install `arborescent[pytest]` (or have pytest 8+) and load it with `-p arborescent.pytest_io_block`
+or `addopts`. Select the tests of modules in rings you declared I/O-free:
+
+```ini
+[pytest]
+addopts = -p arborescent.pytest_io_block
+arbor_io_free =
+    tests/domain/*
+    tests/test_rules.py
+```
+
+Globs are matched against the test file's path relative to the rootdir, with `/` separators on every platform;
+`--arbor-io-block` selects every test, and `@pytest.mark.arbor_allow_io` opts one test out. During the call phase of a
+selected test (fixtures are not blocked) these raise `IOBlockedError`, an `AssertionError`: `open` of a non-source file,
+`socket.connect`, `subprocess.Popen`, `os.system`, `sqlite3.connect`, `os.remove`/`rmdir`/`rename`, `shutil.rmtree`,
+`time.time`/`monotonic`/`perf_counter`/`sleep`, `datetime.datetime.now`/`today`, the `random` module functions and
+`os.environ`. Only calls whose first non-standard-library frame is neither pytest nor the plugin raise.
+
+A passing blocked test shows the code ran on plain values or in-memory fakes **for the inputs that test chose**; it does
+not prove a branch the test did not take. Known gaps: names bound before the patch (`from time import time` at import),
+a test that patches `builtins.open`, `ctypes` and C extensions that do I/O without an audit event. The static
+`effect-*` rules and `effect-patch` remain the guards for those. For network blocking with allow-lists, `pytest-socket`
+is the maintained tool; this plugin only raises. Deriving the glob list from the policy is not done yet.

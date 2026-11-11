@@ -11,6 +11,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from .coupling_policy import CouplingPolicy
+from .package_constraints import PackageConstraints
 from .presets import (
     DEFAULT_PRESET,
     DEFAULT_TAINT_SEEDS,
@@ -92,6 +93,8 @@ class Rule(StrEnum):
     RESTRICTED_IMPORT = "restricted-import"
     LITERAL_OUTSIDE_OWNER = "literal-outside-owner"
     CONSTRUCTION_OUTSIDE_SITE = "construction-outside-site"
+    MISSING_MODULE_DOCSTRING = "missing-module-docstring"
+    DOCSTRING_RING_MISMATCH = "docstring-ring-mismatch"
     NON_ABSTRACT_PORT = "non-abstract-port"
     WEAKLY_TYPED_PORT = "weakly-typed-port"
     REEXPORT_RATIO = "reexport-ratio"
@@ -294,6 +297,18 @@ class ResultDiscard:
 
 
 @dataclass(frozen=True)
+class DocsPolicy:
+    """``[tool.arborescent.docs]``: which module documentation rules are on (#110)."""
+
+    module_docstring: bool = False  # every module has a non-blank docstring
+    module_names_ring: bool = False  # the docstring says the module's effective ring, as a whole word
+    exclude: tuple[str, ...] = ()  # module globs the rules skip
+
+    def applies_to(self, module: str) -> bool:
+        return not any(in_unit(module, glob) for glob in self.exclude)
+
+
+@dataclass(frozen=True)
 class ArchitectureScope:
     """One independently governed source tree and its import boundary."""
 
@@ -342,6 +357,7 @@ class Policy:
     owned_literals: tuple[OwnedLiteral, ...] = ()
     construct_only: tuple[ConstructionSite, ...] = ()  # #85
     result_discard: ResultDiscard | None = None
+    docs: DocsPolicy = DocsPolicy()
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
     dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
@@ -374,6 +390,7 @@ class Policy:
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
     modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
     coupling: CouplingPolicy = field(default_factory=CouplingPolicy)  # #148: entrypoints and hub threshold for `arborescent coupling`
+    package_constraints: PackageConstraints = field(default_factory=PackageConstraints)  # #164: `[package.constraints]`, parsed only, not enforced
     ratchets: tuple[RatchetSpec, ...] = ()  # #147: `[ratchet.<name>]` counters compared with their baseline by `check`
     taint_seeds: tuple[str, ...] = DEFAULT_TAINT_SEEDS  # #98: effect categories (plus "network") a function-level call can be seeded with
 
@@ -782,3 +799,4 @@ class Mutation:
     file: str  # posix path relative to the root
     append: str  # text appended to the file ("" for an added file: see ``new_file``)
     new_file: bool = False
+    content: str = "X = 1\n"  # what an added file holds

@@ -1,14 +1,14 @@
 {
   "fan-in": {
-    "arborescent.domain": 54,
-    "arborescent.engine": 10,
-    "arborescent.facts": 15,
+    "arborescent.domain": 56,
+    "arborescent.engine": 11,
+    "arborescent.facts": 17,
     "arborescent.package_model": 20,
     "arborescent.ports": 34,
-    "arborescent.rules": 11
+    "arborescent.rules": 13
   },
   "closure": {
-    "arborescent.__main__": 86
+    "arborescent.__main__": 89
   },
   "growth": [
     {
@@ -20,6 +20,18 @@
         "fan-in: arborescent.ports grew from 30 to 34",
         "fan-in: arborescent.rules grew from 10 to 11",
         "closure: arborescent.__main__ grew from 74 to 86"
+      ]
+    },
+    {
+      "reason": "package_constraints (#164) is a new domain module imported by domain, so the __main__ import closure grows by exactly one",
+      "added": [
+        "closure: arborescent.__main__ grew from 86 to 87"
+      ]
+    },
+    {
+      "reason": "Integration of #169-#172: package_constraints (#164) and the admit modules (#161) each add a module on the __main__ import path, so the closure grows 87 -> 89",
+      "added": [
+        "closure: arborescent.__main__ grew from 87 to 89"
       ]
     }
   ]
