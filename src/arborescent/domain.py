@@ -112,6 +112,8 @@ class Rule(StrEnum):
     STALE_CONFIG_PATH = "stale-config-path"
     SOURCE_ROOT_DRIFT = "source-root-drift"
     TEST_REFERENCE = "test-reference"
+    ADAPTER_EQUIVALENCE = "adapter-equivalence"
+    ADAPTER_EQUIVALENCE_REPORT = "adapter-equivalence-report"
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
     UNANNOTATED_MODULE = "unannotated-module"
@@ -160,6 +162,7 @@ EFFECT_RULES: Mapping[str, Rule] = {
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
     Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE,
+    Rule.ADAPTER_EQUIVALENCE_REPORT,
 })
 
 

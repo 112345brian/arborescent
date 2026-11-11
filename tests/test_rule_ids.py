@@ -81,6 +81,8 @@ def test_rule_id_strings_never_change() -> None:
             "stale-config-path",
             "source-root-drift",
             "test-reference",
+            "adapter-equivalence",
+            "adapter-equivalence-report",
             "invalid-arbor-annotation",
             "arbor-ring-mismatch",
             "unannotated-module",

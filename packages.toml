@@ -77,6 +77,10 @@ path = "src/arborescent/domain.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/equivalence.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/engine.py"
 role = "source"
 

@@ -1,6 +1,6 @@
 {
   "fan-in": {
-    "arborescent.domain": 54,
+    "arborescent.domain": 55,
     "arborescent.engine": 10,
     "arborescent.facts": 15,
     "arborescent.package_model": 20,
@@ -8,7 +8,7 @@
     "arborescent.rules": 11
   },
   "closure": {
-    "arborescent.__main__": 86
+    "arborescent.__main__": 87
   },
   "growth": [
     {
@@ -20,6 +20,13 @@
         "fan-in: arborescent.ports grew from 30 to 34",
         "fan-in: arborescent.rules grew from 10 to 11",
         "closure: arborescent.__main__ grew from 74 to 86"
+      ]
+    },
+    {
+      "reason": "new module arborescent.equivalence (adapter-equivalence practice, #113) imports domain and joins the closure; legitimate +1 each",
+      "added": [
+        "fan-in: arborescent.domain grew from 54 to 55",
+        "closure: arborescent.__main__ grew from 86 to 87"
       ]
     }
   ]
