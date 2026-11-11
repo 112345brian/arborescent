@@ -20,6 +20,7 @@ from .facts import ModuleInfo
 from .importable_by_probes import importable_by_mutations
 from .module_forbid_probes import module_forbid_mutations
 from .owned_literal_probes import owned_literal_mutations
+from .package_constraint_probes import constraint_mutations
 from .ports import PackageProbes
 
 
@@ -143,6 +144,9 @@ def plan(
     import_found, import_skipped = _import_propagation_mutations(policy, scan)
     out.extend(import_found)
     skipped.extend(import_skipped)
+    constraint_found, constraint_skipped = constraint_mutations(policy, paths, [(local, known) for _, local, known in local_policies], arbor_index)
+    out.extend(constraint_found)
+    skipped.extend(constraint_skipped)
     if policy.scopes:
         out.extend(_scope_boundary_mutations(policy, paths, known, owners))
         out.extend(_scope_effect_mutations(policy, scan))

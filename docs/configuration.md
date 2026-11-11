@@ -637,9 +637,31 @@ forbid_effects = ["network"]     # effect categories this package never uses, de
 `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`); duplicates collapse. They
 apply to paths with role `source`; test, docs and asset paths are exempt.
 
-This release **parses and validates only; nothing is enforced yet**. There is no blind spot in the schema: an unknown key
-under `package` or `package.constraints`, an unknown effect name (`netwrok`), a non-boolean `must_be_pure`, or a
-`forbid_effects` that is not a list of names is a policy error. With no `[package]` table nothing changes.
+There is no blind spot in the schema: an unknown key under `package` or `package.constraints`, an unknown effect name
+(`netwrok`), a non-boolean `must_be_pure`, or a `forbid_effects` that is not a list of names is a policy error. With no
+`[package]` table nothing changes.
+
+Two independent rules enforce the table, each module judged against **its own scope's** ladder (the table sits at the policy
+root, so in multi-scope mode one promise covers every scope and each module is checked against the ring it is placed in):
+
+- `package-constraint-facts`: the module **uses** a forbidden effect, in whatever ring it sits, so a host cannot loosen the
+  promise by placement. `forbid_effects` covers the module's own effect uses (the scanner's per-function analysis and
+  category taxonomy; no second detector). `must_be_pure` forbids every category and also: any non-type-only import of
+  something that is neither first-party nor on the pure allow-list (the structural stdlib `__future__`, `typing`,
+  `dataclasses`, `collections`, `enum`, `abc`, plus `math`, `re`, `functools`, `itertools`, `operator`, `json` and similar
+  computation-only modules; `arborescent.package_constraint_rules.PURE_STDLIB` is the list), and any import of a first-party
+  module from which a forbidden effect is reachable (the existing `effect-via-import` graph: first-party, same scope,
+  type-only imports carry nothing).
+- `package-constraint-placement`: the ring the host put the module in **permits** an effect the package forbids (a ring's
+  `forbid` list, or the preset default, leaves it open). Failing here, before any module misbehaves, is the point: tighten the
+  ring or drop the constraint. For `must_be_pure` every effect category counts bar the test-only `patch`.
+
+Limits: reachability is the file-level import graph, not a call graph, and it does not look inside third-party packages (the
+import itself is refused instead); `must_be_pure` placement compares effects and does not read a ring's `external` list;
+`forbid_effects` alone does not follow imports or restrict them; a module without a ring is left to `unclassified`. Paths
+below a `tests`, `test` or `docs` folder, `conftest.py` and `dev_tools` modules are exempt. Both rules are blocking whatever
+`modularity` says. `selftest` probes each with a new module (a clock call; an `__arbor__` annotation into a ring that permits
+the effect) and lists a probe it cannot build, with the reason, as skipped.
 
 ## Module ring annotations: `__arbor__`
 
@@ -839,6 +861,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `package-public-symbol-dropped` | a module on a package's declared public surface lost a public class or function in its part |
 | `package-private-import` | a module imports another package's module outside the `public` surface that package declares (checked in the origin and in each part) |
 
+| `package-constraint-facts` | a module uses an effect `[package.constraints]` forbids (`forbid_effects`, or any effect under `must_be_pure`), or under `must_be_pure` imports a non-pure external package or a first-party module that reaches one, whatever its ring |
+| `package-constraint-placement` | the ring a module is placed in permits an effect `[package.constraints]` forbids; tighten the ring or drop the constraint |
 | `package-pyproject-drift` | information only (never fails, never baselined): `package_pyproject` is set and a derived field of an existing package `pyproject.toml` disagrees with the annotations |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
