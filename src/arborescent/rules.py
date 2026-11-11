@@ -605,10 +605,24 @@ def _constraint_findings(context: RuleContext, name: str, info: ModuleInfo, impo
     return found if ring is None else found + placement_violations(constraints, local_policy, info, ring)
 
 
+def _untokenizable_findings(name: str, info: ModuleInfo) -> list[Violation]:
+    """A file Python parses but cannot tokenize (a doubled carriage return, #181): its comment facts are unknown, so say so.
+
+    The detail is fixed, so the baseline key survives edits; the tokenizer's line and message ride in the hint."""
+    if not info.facts.untokenizable:
+        return []
+    line, _, message = info.facts.untokenizable.partition(": ")
+    detail = (
+        "the source parses but does not tokenize, so its `# noqa`, `# type: ignore` and `# deferred:` comments were not read; "
+        "fix the stray carriage return or similar byte"
+    )
+    return [Violation(Rule.UNTOKENIZABLE_SOURCE, name, detail, int(line) if line.isdigit() else 0, hint=f" (tokenizer: {message})")]
+
+
 def _module_preamble(context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], tops: Collection[str]) -> list[Violation]:
     """Documentation, annotation, tooling-import and forbidden-name findings, which apply whether or not the module has a ring."""
     is_tool = name in context.tool_modules
-    out: list[Violation] = _docs_findings(context, name, info)
+    out: list[Violation] = _docs_findings(context, name, info) + _untokenizable_findings(name, info)
     detail = context.annotation_violation(name)
     if detail is not None:
         out.append(Violation(Rule.INVALID_ARBOR_ANNOTATION, name, detail))

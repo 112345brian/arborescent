@@ -54,12 +54,20 @@ def logical_code_lines(source: str) -> int:
                 end = getattr(value, "end_lineno", None)
                 ignored.append((value.lineno, end if isinstance(end, int) else value.lineno))
 
-    code_lines = {
-        token.start[0]
-        for token in tokenize.generate_tokens(io.StringIO(source).readline)
-        if token.type not in _IGNORED_TOKEN_TYPES
-        and not _in_spans(token.start[0], ignored)
-    }
+    try:
+        code_lines = {
+            token.start[0]
+            for token in tokenize.generate_tokens(io.StringIO(source).readline)
+            if token.type not in _IGNORED_TOKEN_TYPES
+            and not _in_spans(token.start[0], ignored)
+        }
+    except (tokenize.TokenError, SyntaxError):
+        # ast accepted the source but tokenize did not (#181; reported as `untokenizable-source`): count statement start lines.
+        code_lines = {
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.stmt) and not _in_spans(node.lineno, ignored)
+        }
     return len(code_lines)
 
 

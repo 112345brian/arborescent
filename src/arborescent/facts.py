@@ -142,6 +142,7 @@ class SourceFacts:
     arbor_reason: str | None = None  # `__arbor__["ring_reason"]`: why the module sits in a ring a tighter one would also fit (#161)
     dynamic_imports: tuple[tuple[int, str], ...] = ()  # (line, literal module name, or "" when the target is not a plain absolute string literal) (#161)
     purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
+    untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -460,16 +461,39 @@ def _suppression_kind(comment: str) -> str | None:
     return None
 
 
-def _comment_facts(source: str) -> tuple[tuple[tuple[int, str], ...], tuple[tuple[int, str], ...]]:
-    """One tokenize pass: suppression directives ``(line, kind)`` and ``# deferred: <reason>`` justifications.
+def _token_error_text(error: tokenize.TokenError | SyntaxError) -> str:
+    """``"<line>: <message>"`` for a tokenizer failure; the line is 0 when the error carries none."""
+    message = str(error.args[0]) if error.args else type(error).__name__
+    where = error.args[1] if len(error.args) > 1 and isinstance(error.args[1], tuple) else ()
+    line = where[0] if where and isinstance(where[0], int) else 0
+    if isinstance(error, SyntaxError) and line == 0 and error.lineno is not None:
+        line = error.lineno
+    return f"{line}: {message}"
+
+
+def _comment_facts(source: str) -> tuple[tuple[tuple[int, str], ...], tuple[tuple[int, str], ...], str]:
+    """One tokenize pass: suppression directives ``(line, kind)`` and ``# deferred: <reason>`` justifications, then the error.
+
+    ``ast`` accepts sources ``tokenize`` rejects (a doubled carriage return, #181), so the comment facts of such a file
+    are unknowable: both tuples are empty and the third item is ``"<line>: <message>"``, ``""`` when the pass succeeded.
+    Newlines are deliberately not normalised first: facts are keyed by ``ast`` line numbers, which a rewrite could shift.
 
     A deferred comment justifies the code line it trails, or the next code line when it stands alone (comment lines
     that continue it are skipped; a blank line ends it). The reason must not be empty.
     """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, SyntaxError) as error:
+        return (), (), _token_error_text(error)
+    suppressions, deferred = _comments_in(tokens)
+    return suppressions, deferred, ""
+
+
+def _comments_in(tokens: Sequence[tokenize.TokenInfo]) -> tuple[tuple[tuple[int, str], ...], tuple[tuple[int, str], ...]]:
     suppressions: list[tuple[int, str]] = []
     deferred: list[tuple[int, str]] = []
     pending: str | None = None
-    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+    for token in tokens:
         if token.type == tokenize.COMMENT:
             comment = token.string[1:].strip()
             kind = _suppression_kind(comment)
@@ -731,7 +755,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     imports: list[RawImport] = []
     _walk(tree, False, False, imports)
     arbor_ring, arbor_error, arbor_role, arbor_reason = _arbor_ring(tree)
-    suppressions, deferred = _comment_facts(source)
+    suppressions, deferred, untokenizable = _comment_facts(source)
     nodes = list(ast.walk(tree))  # one walk, shared by every fact below
     aliases = _aliases(nodes)  # computed once: each fact below reads it
     call_aliases = _call_aliases(nodes, aliases)
@@ -760,6 +784,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         arbor_reason,
         _dynamic_imports(nodes, aliases),
         purity_facts(tree, nodes, aliases, _purity_helpers(aliases)),
+        untokenizable,
     )
 
 
