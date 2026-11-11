@@ -550,7 +550,7 @@ class Policy:
         ring = self.ring_of(name)
         if ring is None:
             return None  # unclassified's job, not this rule's
-        return f"module has no __arbor__ annotation; `classify` assigns {ring!r} only as a legacy fallback"
+        return f"module has no __arbor__ annotation; `classify` assigns {ring!r} only as a legacy fallback; place a new module with `arborescent admit {name} --ring R`, or migrate a legacy one with `arborescent annotate --legacy --against REF`"
 
     def forbidden_imports(self, module: str) -> frozenset[str]:
         """Module-specific internal import restrictions, additive across matching globs."""
