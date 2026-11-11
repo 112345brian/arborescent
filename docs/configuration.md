@@ -1137,8 +1137,12 @@ only modules that are not mixed (any more), is itself a `mixed-purity` finding, 
 With `--changed` only a missing module is judged, since the other modules were not parsed.
 
 **Adopting it.** Run `arborescent baseline` to record today's findings and let the ratchet shrink them; a fixed module leaves a
-stale entry you delete. `arborescent purity` (`--json` for machines) lists every mixed module, including allowed ones, ranked by
-how many modules import it, which is the order to split them in.
+stale entry you delete. `arborescent purity` lists every mixed module, including allowed ones, ranked by
+how many modules import it (ties: more pure units first, then module name), which is the order to split them in. The
+listing is grouped by ring with per-ring counts, and each line carries the effect kinds, the effectful and pure definitions
+and the importer count. `--top N` (N >= 1; 0 or a negative number is an error) keeps only the N highest-ranked modules;
+`--json` prints the same rows for tooling. Ranking is presentation only: `check`, the baseline keys and the exit code are
+unaffected, and the importer counts are the ones `check` reports.
 
 **Excluded paths.** With the rule on, files under `exclude` are parsed (through the same content-hash cache) and the mixed ones
 are reported as `mixed-purity-excluded` notes. Tooling, tests and fixtures stay excluded; they just stop being invisible. Turn

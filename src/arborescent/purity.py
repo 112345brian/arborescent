@@ -17,7 +17,7 @@ from .domain import Policy, Rule, Violation, in_unit
 from .facts import ModuleInfo, absolute_callee
 from .purity_policy import AMBIENT, PurityPolicy
 
-__all__ = ["ModulePurity", "assess", "excluded_findings", "importer_counts", "is_allowed", "summarize"]
+__all__ = ["ModulePurity", "assess", "by_ring", "excluded_findings", "importer_counts", "is_allowed", "summarize"]
 
 _NON_PROPAGATING = frozenset({"os-branching", "patch"})  # a portability fact and a test-only use: neither is an effect of the module
 IMPORT_TIME = "<import time>"
@@ -119,6 +119,14 @@ def assess(info: ModuleInfo, policy: Policy) -> ModulePurity | None:
     kinds = tally.import_time.union(*(tally.kinds[u.name] for u in effectful))
     line = min((tally.first[name] for name in names if name in tally.first), default=0)
     return ModulePurity(info.name, tuple(sorted(kinds)), tuple(names), tuple(u.name for u in pure), line)
+
+
+def by_ring(rows: Collection[tuple[ModulePurity, str, bool]]) -> list[tuple[str, list[tuple[ModulePurity, str, bool]]]]:
+    """Ranked (report, ring, allowed) rows grouped by ring: rings in the order of their best-ranked row, rows keeping their rank."""
+    groups: dict[str, list[tuple[ModulePurity, str, bool]]] = {}
+    for row in rows:
+        groups.setdefault(row[1], []).append(row)
+    return list(groups.items())
 
 
 def importer_counts(graph: Mapping[str, Collection[str]]) -> dict[str, int]:
