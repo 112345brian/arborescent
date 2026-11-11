@@ -28,6 +28,7 @@ from .domain import (
 from .generate import generate_for_scan
 from .generated_config import GENERATED_MARKER
 from .lazy_imports import LazyImportCount, lazy_import_counts, lazy_import_violations
+from .path_exclusion import nested_bare_pattern
 from .ports import (
     Clock,
     ContractRenderer,
@@ -102,6 +103,7 @@ class CheckReport:
     ratchet: ratchet_mod.Ratchet | None = None
     parsed: int = 0
     excluded: dict[str, int] = field(default_factory=lambda: {})
+    excluded_nested: dict[str, str] = field(default_factory=lambda: {})  # excluded folder -> the bare `exclude` name that reached it below the root
     vendor_folders: tuple[tuple[str, str], ...] = ()
     dev_tools: dict[str, int] = field(default_factory=lambda: {})  # `dev_tools` path -> modules below it
     suggestions: list[Suggestion] = field(default_factory=list)
@@ -197,6 +199,29 @@ def run_own(
     return found, scan
 
 
+def _nested_exclusions(excluded: Mapping[str, int], patterns: Sequence[str]) -> dict[str, str]:
+    """Excluded folder -> the bare ``exclude`` name that hid it below the repository root (the entry that may have been meant as ``/name``)."""
+    return {folder: pattern for folder in excluded if (pattern := nested_bare_pattern(folder, patterns)) is not None}
+
+
+class _TaintCacheFile:
+    """The taint pass's fact cache as one file: a missing or unreadable file is an empty cache."""
+
+    def __init__(self, fs: FileSystem, path: Path) -> None:
+        self._fs = fs
+        self._path = path
+
+    def read(self) -> str | None:
+        try:
+            return self._fs.read_text(self._path) if self._fs.is_file(self._path) else None
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    def write(self, text: str) -> None:
+        self._fs.mkdir(self._path.parent)
+        self._fs.write_text(self._path, text)
+
+
 def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult) -> TaintResult:
     """#98: re-reads each scanned module's source and runs the whole-repository call-graph pass, reusing the
     scanner's cache directory (a sibling ``taint.json``) so an unchanged file skips re-parsing. A module whose
@@ -210,8 +235,8 @@ def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult)
         except OSError:
             continue
     cache_dir = services.scanner.cache_dir
-    cache_file = cache_dir / "taint.json" if cache_dir else None
-    return compute_taint(scan.modules, sources, scan.known, policy.taint_seeds, cache_file)
+    store = _TaintCacheFile(services.fs, cache_dir / "taint.json") if cache_dir else None
+    return compute_taint(scan.modules, sources, scan.known, policy.taint_seeds, store)
 
 
 def _dev_tool_counts(policy: Policy, scan: ScanResult) -> dict[str, int]:
@@ -542,7 +567,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         report.engines.append(EngineRun("arborescent", "ok", services.clock.now() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
         report.parsed = scan.parsed
         _record_inventories(report, scan.modules)
-        report.excluded = dict(scan.excluded)
+        report.excluded, report.excluded_nested = dict(scan.excluded), _nested_exclusions(scan.excluded, policy.exclude)
         report.vendor_folders = tuple(scan.vendor_folders)
         report.dev_tools = _dev_tool_counts(policy, scan)
         report.suggestions = file_size_suggestions(

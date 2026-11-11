@@ -91,6 +91,11 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.EFFECT_DYNAMIC_IMPORT: "effect-dynamic-import is exercised by focused rule tests; the selftest probes the clock effect family",
     Rule.EFFECT_PATCH: "effect-patch requires a configured tests folder and project-package target; covered by focused rule tests",
     Rule.EFFECT_CONSOLE: "effect-console is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_STATE: "effect-state is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_MONOTONIC: "effect-monotonic is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_HOST: "effect-host is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_FS_QUERY: "effect-fs-query is exercised by focused rule tests; the selftest probes the clock effect family",
+    Rule.EFFECT_UNSANCTIONED_IMPORT: "needs `effects.sanctioned` in the policy; covered by focused rule tests",
     Rule.FORWARDED_IMPORT: "needs a forwarding module and a `module_forbid_imports` entry; covered by focused rule tests",
     Rule.SCOPE_IMPORT: "cross-scope boundaries are mutation-tested when a project configures multiple scopes",
     Rule.SCOPE_EFFECT_LEAK: "cross-scope effect leaks are mutation-tested when a project configures multiple "

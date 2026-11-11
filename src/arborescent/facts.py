@@ -61,6 +61,34 @@ _PROCESS_OS_APIS = frozenset({
     "os.spawnlp", "os.spawnlpe", "os.spawnv", "os.spawnve", "os.spawnvp", "os.spawnvpe",
     "os.posix_spawn", "os.posix_spawnp", "os.startfile",
 })
+# Path methods that touch file contents or the directory tree, and ones that only ask the filesystem a question.
+_PATH_QUERY_METHODS = frozenset({"exists", "is_file", "is_dir", "is_symlink", "is_mount", "resolve", "absolute", "expanduser", "samefile"})
+_PATH_CONSTRUCTORS = frozenset({"pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "pathlib.WindowsPath"})
+# Methods that return another path when called on a path, so the result is still path-valued.
+_PATH_RETURNING = frozenset({"resolve", "absolute", "expanduser", "with_name", "with_suffix", "with_stem", "joinpath", "relative_to", "readlink"})
+_PATH_ATTRIBUTES = frozenset({"parent", "parents"})
+_FS_QUERY_APIS = frozenset({
+    "os.path.exists", "os.path.lexists", "os.path.isfile", "os.path.isdir", "os.path.islink", "os.path.ismount", "os.path.getsize",
+    "os.path.getmtime", "os.path.getatime", "os.path.getctime", "os.path.samefile", "os.path.realpath", "os.path.abspath",
+    "os.path.expanduser", "os.getcwd", "os.getcwdb", "os.access", "shutil.which", "shutil.disk_usage", "tempfile.gettempdir",
+    "pathlib.Path.cwd", "pathlib.Path.home",
+})
+_MONOTONIC_APIS = frozenset({
+    "time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns", "time.process_time", "time.process_time_ns",
+    "time.thread_time", "time.thread_time_ns",
+})
+_HOST_APIS = frozenset({
+    "sys.argv", "sys.stdin", "os.getpid", "os.getppid", "os.cpu_count", "os.getlogin", "os.uname", "socket.gethostname", "socket.getfqdn",
+    "getpass.getuser",
+})
+_HOST_PREFIXES = ("locale.", "platform.")
+# Synchronisation primitives guard shared state; they neither start threads nor touch the outside world.
+_STATE_PRIMITIVES = frozenset({"Lock", "RLock", "Semaphore", "BoundedSemaphore", "Event", "Condition", "Barrier", "local"})
+# What loads a module at run time, which is what tach cannot see. `importlib.resources`, `importlib.metadata` and `find_spec` do not.
+_DYNAMIC_IMPORT_APIS = frozenset({
+    "importlib.import_module", "importlib.__import__", "importlib.reload", "importlib.util.module_from_spec",
+    "importlib.util.spec_from_file_location", "importlib.util.spec_from_loader", "builtins.__import__", "__import__",
+})
 _PEP723 = re.compile(r"^# /// script\n((?:#.*\n)+?)# ///$", re.MULTILINE)
 
 
@@ -223,7 +251,7 @@ _EXACT_EFFECTS: dict[str, str] = {
     for category, targets in (
         ("env", ("os.environ", "os.getenv")),
         ("clock", (
-            "time.time", "time.gmtime", "time.localtime", "time.strftime",
+            "time.time", "time.time_ns", "time.gmtime", "time.localtime", "time.strftime",
             "datetime.datetime.now", "datetime.datetime.utcnow", "datetime.datetime.today", "datetime.date.today",
         )),
         ("identity", ("uuid.uuid1", "uuid.uuid4")),
@@ -237,13 +265,27 @@ _EXACT_EFFECTS: dict[str, str] = {
 def _basic_category(target: str) -> str | None:
     if target in OS_BRANCH_ATTRS:
         return "os-branching"
-    if target.startswith(("random.", "secrets.")):
+    if target.startswith(("random.", "secrets.")) or target == "os.urandom":
         return "randomness"
     return _EXACT_EFFECTS.get(target)
 
 
+def _query_category(target: str) -> str | None:
+    """Questions asked of the machine: the filesystem, the monotonic clock, the process and the host."""
+    if target in _FS_QUERY_APIS:
+        return "fs-query"
+    if target in _MONOTONIC_APIS:
+        return "monotonic"
+    if target in _HOST_APIS or target.startswith(_HOST_PREFIXES):
+        return "host"
+    return None
+
+
 def _effect_category(target: str) -> str | None:
-    return _basic_category(target) or _storage_category(target) or _concurrency_category(target) or _import_category(target)
+    return (
+        _basic_category(target) or _query_category(target) or _storage_category(target)
+        or _concurrency_category(target) or _import_category(target)
+    )
 
 
 def effect_category_of(target: str) -> str | None:
@@ -256,7 +298,9 @@ def effect_category_of(target: str) -> str | None:
 
 
 def _concurrency_category(target: str) -> str | None:
-    if target.startswith("threading.") or target in _THREAD_POOL_APIS:
+    if target.startswith("threading."):
+        return "state" if target.removeprefix("threading.") in _STATE_PRIMITIVES else "threads"
+    if target in _THREAD_POOL_APIS:
         return "threads"
     if target.startswith(("multiprocessing.", "subprocess.", "asyncio.create_subprocess_")) or target in _PROCESS_OS_APIS | _PROCESS_POOL_APIS:
         return "process"
@@ -264,12 +308,12 @@ def _concurrency_category(target: str) -> str | None:
 
 
 def _import_category(target: str) -> str | None:
-    if target.startswith("importlib.") or target in {"builtins.__import__", "__import__"}:
+    if target in _DYNAMIC_IMPORT_APIS or target.endswith(".exec_module"):
         return "dynamic-import"
     return None
 
 
-_INJECTABLE_EFFECTS = frozenset({"clock", "env", "identity", "randomness", "sleep", "threads", "process"})
+_INJECTABLE_EFFECTS = frozenset({"clock", "env", "identity", "randomness", "sleep", "threads", "process", "monotonic", "host"})
 
 
 _SEAM_ANNOTATIONS = frozenset({"Callable", "Mapping", "MutableMapping"})
@@ -318,10 +362,23 @@ def _injection_defaults(nodes: Sequence[ast.AST]) -> dict[int, int]:
         else:
             continue
         for annotation, default in pairs:
-            if isinstance(default, ast.Name | ast.Attribute):
+            held = _seam_expression(default)
+            if held is not None:
                 kind = 1 if _is_seam_annotation(annotation) else 2
-                seams.update((id(inner), kind) for inner in ast.walk(default))  # `os.environ.get` also holds `os.environ`
+                seams.update((id(inner), kind) for inner in ast.walk(held))  # `os.environ.get` also holds `os.environ`
     return seams
+
+
+def _seam_expression(default: ast.expr | None) -> ast.expr | None:
+    """The part of a parameter default that is the seam: a bare Name/Attribute, or the callee of ``lambda: clock()``.
+
+    A lambda default whose body is a call defers that call until the parameter is used, exactly as a bare reference
+    does; the call's own arguments are not part of the seam, so an effect passed to it still counts."""
+    if isinstance(default, ast.Name | ast.Attribute):
+        return default
+    if isinstance(default, ast.Lambda) and isinstance(default.body, ast.Call):
+        return default.body.func
+    return None
 
 
 def _rebound_names(nodes: Sequence[ast.AST]) -> set[str]:
@@ -337,14 +394,108 @@ def _rebound_names(nodes: Sequence[ast.AST]) -> set[str]:
     return bound
 
 
+def _annotation_is_path(node: ast.expr | None, aliases: dict[str, str]) -> bool:
+    """Whether an annotation names a ``pathlib`` path, looking through ``Optional``/``Union``/``|`` and string forms."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            return _annotation_is_path(ast.parse(node.value, mode="eval").body, aliases)
+        except SyntaxError:
+            return False
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _annotation_is_path(node.left, aliases) or _annotation_is_path(node.right, aliases)
+    if isinstance(node, ast.Subscript):
+        base = _dotted(node.value, aliases) or ""
+        if base.rsplit(".", 1)[-1] in {"Optional", "Union", "Annotated"}:
+            inner = node.slice
+            return any(_annotation_is_path(item, aliases) for item in (inner.elts if isinstance(inner, ast.Tuple) else [inner]))
+        return False
+    return isinstance(node, ast.Name | ast.Attribute) and _dotted(node, aliases) in _PATH_CONSTRUCTORS
+
+
+def _is_pathish(node: ast.expr, bound: set[str], aliases: dict[str, str]) -> bool:
+    """Whether an expression is a path: a ``Path(...)`` call, a name bound from one, ``a / b`` with a path side, ``p.parent`` or ``p.resolve()``."""
+    if isinstance(node, ast.Name):
+        return node.id in bound
+    if isinstance(node, ast.Call):
+        callee = _dotted(node.func, aliases)
+        if callee in _PATH_CONSTRUCTORS or callee in {"pathlib.Path.cwd", "pathlib.Path.home"}:
+            return True
+        return isinstance(node.func, ast.Attribute) and node.func.attr in _PATH_RETURNING and _is_pathish(node.func.value, bound, aliases)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _is_pathish(node.left, bound, aliases) or _is_pathish(node.right, bound, aliases)
+    return isinstance(node, ast.Attribute) and node.attr in _PATH_ATTRIBUTES and _is_pathish(node.value, bound, aliases)
+
+
+def _path_binding(node: ast.AST, aliases: dict[str, str]) -> tuple[list[str], ast.expr | None]:
+    """(names, value) for a node that may bind a path: a ``Path``-annotated name comes with no value to inspect (``None``)."""
+    if isinstance(node, ast.arg):
+        return ([node.arg], None) if _annotation_is_path(node.annotation, aliases) else ([], None)
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        if _annotation_is_path(node.annotation, aliases):
+            return [node.target.id], None
+        return ([node.target.id], node.value) if node.value is not None else ([], None)
+    if isinstance(node, ast.Assign):
+        return [t.id for t in node.targets if isinstance(t, ast.Name)], node.value
+    return [], None
+
+
+def _scope_path_names(scope: ast.AST, aliases: dict[str, str]) -> set[str]:
+    """Names one scope binds to a path: a parameter or variable annotated ``Path``, or assigned a path expression."""
+    bound: set[str] = set()
+    assigns: list[tuple[list[str], ast.expr]] = []
+    for node in _own_scope_nodes(scope):
+        names, value = _path_binding(node, aliases)
+        if value is None:
+            bound.update(names)
+        else:
+            assigns.append((names, value))
+    for _ in range(3):  # `a = Path(x); b = a / "y"; c = b.parent` settles in a few passes
+        before = len(bound)
+        for names, value in assigns:
+            if names and _is_pathish(value, bound, aliases):
+                bound.update(names)
+        if len(bound) == before:
+            break
+    return bound
+
+
+def _path_receiver_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> list[EffectUse]:
+    """``p.read_text()``, ``p.exists()`` on a name this scope bound to a path (a ``Path(...)`` value or a ``Path`` annotation).
+
+    Scope by scope, so a ``str`` named ``path`` in another function is not mistaken for one. A module that never
+    imports ``pathlib`` has no path to find and is skipped without a second walk."""
+    if not any(target == "pathlib" or target.startswith("pathlib.") for target in aliases.values()):
+        return []
+    uses: list[EffectUse] = []
+    scopes = [tree, *(n for n in nodes if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef))]
+    for scope in scopes:
+        bound = _scope_path_names(scope, aliases)
+        if not bound:
+            continue
+        for node in _own_scope_nodes(scope):
+            if isinstance(node, ast.Attribute) and (node.attr in _PATH_IO_METHODS or node.attr in _PATH_QUERY_METHODS) and _is_pathish(node.value, bound, aliases):
+                use = _path_method_use(node, f"pathlib.Path.{node.attr}")
+                if use is not None:
+                    uses.append(use)
+    return uses
+
+
+def _path_method_use(node: ast.Attribute, target: str) -> EffectUse | None:
+    if node.attr in _PATH_IO_METHODS:
+        return EffectUse(node.lineno, "filesystem", target)
+    if node.attr in _PATH_QUERY_METHODS:
+        return EffectUse(node.lineno, "fs-query", target)
+    return None
+
+
 def _path_io_use(node: ast.AST, aliases: dict[str, str]) -> EffectUse | None:
     """``Path(...).read_text()`` and friends: the receiver is a call, which `_dotted` cannot name."""
-    if not (isinstance(node, ast.Attribute) and node.attr in _PATH_IO_METHODS and isinstance(node.value, ast.Call)):
+    if not (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Call)):
         return None
     constructor = _dotted(node.value.func, aliases)
-    if constructor not in {"pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "pathlib.WindowsPath"}:
+    if constructor not in _PATH_CONSTRUCTORS:
         return None
-    return EffectUse(node.lineno, "filesystem", f"{constructor}.{node.attr}")
+    return _path_method_use(node, f"{constructor}.{node.attr}")
 
 
 def _os_branch_imports(node: ast.ImportFrom) -> list[tuple[EffectUse, str]]:
@@ -373,7 +524,7 @@ _SCOPE_BOUNDARIES = (
 )
 
 
-def _own_scope_nodes(func: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterable[ast.AST]:
+def _own_scope_nodes(func: ast.AST) -> Iterable[ast.AST]:
     """Every node directly in ``func``'s own scope: its body, but not a nested function/lambda/class/comprehension's
     (each of those is its own scope, so a ``global`` declared in ``func`` cannot reach an assignment inside one)."""
     stack = list(ast.iter_child_nodes(func))
@@ -400,10 +551,41 @@ def _global_effect_uses(nodes: Sequence[ast.AST]) -> list[EffectUse]:
     return uses
 
 
+def _annotation_node_ids(nodes: Sequence[ast.AST]) -> set[int]:
+    """Ids of every node inside a type annotation (parameter, return, variable): a hint names a type, it does not use it."""
+    ids: set[int] = set()
+    for node in nodes:
+        annotation: ast.expr | None = None
+        if isinstance(node, ast.arg | ast.AnnAssign):
+            annotation = node.annotation
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            annotation = node.returns
+        if annotation is not None:
+            ids.update(id(inner) for inner in ast.walk(annotation))
+    return ids
+
+
+def _seeded_random_ids(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> set[int]:
+    """Ids of the callee in ``random.Random(<seed>)``: a generator built from a seed is deterministic, so it is no randomness use."""
+    seeded: set[int] = set()
+    for node in nodes:
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name | ast.Attribute)):
+            continue
+        if _dotted(node.func, aliases) != "random.Random":
+            continue
+        args = [*node.args, *(keyword.value for keyword in node.keywords)]
+        if any(not (isinstance(arg, ast.Constant) and arg.value is None) for arg in args):
+            seeded.add(id(node.func))
+    return seeded
+
+
 def _effect_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[EffectUse, ...]:
     seams = _injection_defaults(nodes)
     rebound = _rebound_names(nodes)
+    hints = _annotation_node_ids(nodes)
+    seeded = _seeded_random_ids(nodes, aliases)
     uses: set[EffectUse] = set(_global_effect_uses(nodes))
+    uses.update(_path_receiver_uses(tree, nodes, aliases))
     imported_os_names: set[str] = set()
     for node in nodes:
         if isinstance(node, ast.ImportFrom):
@@ -411,8 +593,8 @@ def _effect_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str
                 uses.add(use)
                 imported_os_names.add(bound_name)
         found = [_path_io_use(node, aliases), _patch_use(node, aliases)]
-        if isinstance(node, ast.Attribute | ast.Name) and not _is_shadowed(node, imported_os_names, rebound):
-            found.append(_reference_use(node, aliases, seams))
+        if isinstance(node, ast.Attribute | ast.Name) and id(node) not in hints and not _is_shadowed(node, imported_os_names, rebound):
+            found.append(None if id(node) in seeded else _reference_use(node, aliases, seams))
         uses.update(use for use in found if use is not None)
     return tuple(sorted(uses))
 

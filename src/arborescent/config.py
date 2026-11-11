@@ -21,6 +21,7 @@ from .domain import (
     ResultDiscard,
     RingRule,
 )
+from .effects_policy import DEFAULT_PROVIDER_RINGS, EffectsPolicy
 from .package_constraints import (
     ConstraintError,
     PackageConstraints,
@@ -289,6 +290,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         taint_seeds=_taint_seeds(raw),
         coupling=_coupling(raw),
         mixed_purity=_mixed_purity(raw),
+        effects=_effects(raw),
         package_constraints=_package_constraints(raw),
         ratchets=ratchet_specs(raw.get("ratchet", {})),
     )
@@ -360,7 +362,7 @@ def _mixed_purity(raw: Mapping[str, Any]) -> PurityPolicy:
     if not isinstance(table, Mapping):
         raise PolicyError("`mixed_purity` must be a table")
     table = cast("Mapping[str, Any]", table)
-    unknown = set(table) - {"enabled", "report_excluded", "min_pure_units", "min_body_lines", "kinds", "ambient", "allow"}
+    unknown = set(table) - {"enabled", "report_excluded", "min_pure_units", "min_body_lines", "kinds", "ambient", "allow", "exclude_rings"}
     if unknown:
         raise PolicyError(f"unknown key in `mixed_purity`: {sorted(unknown)}")
     return PurityPolicy(
@@ -371,7 +373,22 @@ def _mixed_purity(raw: Mapping[str, Any]) -> PurityPolicy:
         _purity_kinds(table),
         _string_list(table, "ambient"),
         _purity_allow(table),
+        _string_list(table, "exclude_rings"),
     )
+
+
+def _effects(raw: Mapping[str, Any]) -> EffectsPolicy:
+    table = raw.get("effects", {})
+    if not isinstance(table, Mapping):
+        raise PolicyError("`effects` must be a table")
+    table = cast("Mapping[str, Any]", table)
+    unknown = set(table) - {"sanctioned", "rings"}
+    if unknown:
+        raise PolicyError(f"unknown key in `effects`: {sorted(unknown)}")
+    rings = _string_list(table, "rings") if "rings" in table else DEFAULT_PROVIDER_RINGS
+    if not rings:
+        raise PolicyError("`effects.rings` must name at least one ring")
+    return EffectsPolicy(_string_list(table, "sanctioned"), rings, "sanctioned" in table)
 
 
 def _taint_seeds(raw: Mapping[str, Any]) -> tuple[str, ...]:
@@ -389,7 +406,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
-    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling", "mixed_purity", "package",
+    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling", "mixed_purity", "package", "effects",
     "ratchet",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({

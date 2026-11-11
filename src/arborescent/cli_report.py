@@ -30,7 +30,9 @@ def _print_excluded(report: CheckReport) -> None:
         print("  none")
     else:
         for folder, count in sorted(excluded.items()):
-            print(f"  {folder}/ ({count} file(s))")
+            nested = report.excluded_nested.get(folder)
+            note = f"; nested match of the bare pattern {nested!r}, write '/{nested}' to exclude only the top-level folder" if nested is not None else ""
+            print(f"  {folder}/ ({count} file(s){note})")
     if report.dev_tools:
         print("dev tools (no ring, may import product code, never imported by it):")
         for entry, count in sorted(report.dev_tools.items()):

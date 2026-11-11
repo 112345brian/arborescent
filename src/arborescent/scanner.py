@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import os
@@ -26,7 +25,7 @@ from .facts import (
     TopLevelDef,
     extract,
 )
-from .path_exclusion import excluded_by_policy
+from .path_exclusion import excluded_by_policy, matches_exclusion
 from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
@@ -114,7 +113,7 @@ def _excluded_folder(rel: str, patterns: Sequence[str]) -> str:
     parts = rel.split("/")[:-1]
     for index in range(len(parts), 0, -1):
         candidate = "/".join(parts[:index])
-        if any(fnmatch.fnmatch(candidate, pattern) or fnmatch.fnmatch(parts[index - 1], pattern) for pattern in patterns):
+        if any(matches_exclusion(candidate, pattern) for pattern in patterns):
             return candidate
     return Path(rel).parent.as_posix()
 

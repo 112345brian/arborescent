@@ -11,8 +11,10 @@ EXISTING_KINDS = (
     "clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "network", "filesystem", "dynamic-import", "console", "global",
 )
 NEW_KINDS = ("logging", "memo", "state")  # what #173 adds; they never reach the ``effect-*`` rules
+# Detected since 0.8.0 and counted by ``mixed-purity`` only when ``kinds`` names them: the default set is unchanged.
+OPTIONAL_KINDS = ("monotonic", "host", "fs-query")
 AMBIENT = "ambient"  # a call matching a configured pattern (``ambient``); on only when patterns are configured
-KNOWN_KINDS = frozenset((*EXISTING_KINDS, *NEW_KINDS, AMBIENT))
+KNOWN_KINDS = frozenset((*EXISTING_KINDS, *NEW_KINDS, *OPTIONAL_KINDS, AMBIENT))
 DEFAULT_KINDS = (*EXISTING_KINDS, *NEW_KINDS)
 
 
@@ -36,3 +38,4 @@ class PurityPolicy:
     kinds: tuple[str, ...] = DEFAULT_KINDS
     ambient: tuple[str, ...] = ()  # globs on the dotted name of an imported callable, e.g. ``myapp.state.state_root``
     allow: tuple[PurityAllow, ...] = ()
+    exclude_rings: tuple[str, ...] = ()  # rings whose modules the rule skips: a ring that is meant to be effectful has nothing to split
