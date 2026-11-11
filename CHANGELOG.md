@@ -2,6 +2,28 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## 0.7.1 — 2026-11-11
+
+0.7.0 was tagged and released on GitHub but never uploaded to PyPI: its publish run failed the Windows 3.13 warm-scan speed test
+(490 ms against a 478 ms budget), so the build and upload were skipped. 0.7.1 is 0.7.0 plus the fix below; upgrade straight from
+0.6 and read *Upgrading from 0.6* under 0.7.0.
+
+### Fixed
+- Package assignment finds the owners of a path in an index of the catalog's paths instead of testing every catalog entry for every
+  file. That scan was files times entries, grew with every module added in 0.7.0 and was about three quarters of a warm run: the warm
+  scan of this repository drops from about 190 ms to about 80 ms. Results are unchanged.
+
+## 0.7.1 — 2026-11-11
+
+0.7.0 was tagged and released on GitHub but not published to PyPI: a test job (Windows, Python 3.13) exceeded the warm-scan time
+budget by about 3%, and a failing test job stops the publish workflow before it builds. 0.7.1 is the same code plus the fix below, so
+installing it gives everything listed under 0.7.0.
+
+### Fixed
+- Assigning files to packages no longer compares every file with every path in `packages.toml`. `owners_of` answers from an index of the
+  owned paths, so the cost grows with how deep a path is, not with the size of the catalog. On this repository the warm scan went from
+  about 190 ms to about 78 ms; package assignment had been about three quarters of it.
+
 ## 0.7.0 — 2026-11-11
 
 ### Upgrading from 0.6
