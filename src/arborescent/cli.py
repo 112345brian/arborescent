@@ -19,6 +19,7 @@ from .adapters import (
 from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .classify_audit import suggest_ring
+from .cli_admit import add_admit_parser, run_admit
 from .cli_baseline_report import add_report_parser, run_report
 from .cli_coupling import add_coupling_parser, run_coupling
 from .cli_cycles import run_cycles
@@ -210,6 +211,7 @@ def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser])
         action="store_true",
         help="write the annotations instead of printing what would change",
     )
+    add_admit_parser(add_parser)
     add_parser("selftest", help="mutation-test the rules")
     add_coupling_parser(add_parser)
     add_parser("cycles", help="report import cycles, the edges to cut and the function-level imports that only break a cycle")
@@ -332,6 +334,7 @@ def _dispatch(
         "baseline": lambda: run_report(args, policy, root, svc) if args.baseline_action == "report" else _baseline(args, policy, root, svc),
         "discover": lambda: _discover(policy, root, svc, args.suggest),
         "annotate": lambda: _annotate(args, policy, root, svc),
+        "admit": lambda: run_admit(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),
         "cycles": lambda: run_cycles(policy, root, svc),
         "ratchet": lambda: _ratchet(args, policy, root, svc),

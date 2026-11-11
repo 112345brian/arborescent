@@ -147,6 +147,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.git_hook" = "application"
 "arborescent.practices" = "application"
 "arborescent.selftest" = "application"
+"arborescent.admission_probes" = "application"
 "arborescent.suggestions" = "application"
 "arborescent.bench" = "application"
 "arborescent.packages" = "application"
@@ -191,6 +192,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.coupling_ratchet" = "domain"
 "arborescent.package_constraints" = "domain"
 "arborescent.cli_cycles" = "composition"
+"arborescent.cli_admit" = "composition"
 "arborescent.cli_ratchet" = "composition"
 "arborescent.__main__" = "composition"
 
@@ -225,6 +227,7 @@ docs-sync = "docs/architecture.md"
 "src/arborescent/cli_migrate.py" = ["T20"]
 "src/arborescent/cli_coupling.py" = ["T20"]
 "src/arborescent/cli_cycles.py" = ["T20"]
+"src/arborescent/cli_admit.py" = ["T20"]
 
 # Only the command line installs and reports the pre-push hook; `selftest` injects an outside import (importable_by_probes).
 [tool.arborescent.importable_by]

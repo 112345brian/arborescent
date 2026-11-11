@@ -10,6 +10,10 @@
   environment access raising `IOBlockedError`. No new runtime dependency (#105).
 - `[package.constraints]` (`must_be_pure`, `forbid_effects`) in a package's own policy file: schema and validation only, nothing
   enforced yet. Unknown keys, unknown effect names and non-boolean `must_be_pure` are policy errors; absent means no change (#164).
+- `arborescent admit MODULE --ring R [--reason TEXT] [--yes]` (#161): strict function-level admission of a module into a
+  ring (function-local, `TYPE_CHECKING` and literal dynamic imports all count; a non-literal dynamic import is refused
+  unless a reason is recorded; a tighter ring that fits is refused unless a reason is recorded). New `__arbor__` key
+  `ring_reason` (a tool older than the release containing it reports `invalid-arbor-annotation` on a file that uses it).
 - Baseline growth entries now carry `approved-by`: `baseline --allow-growth` requires `--approved-by WHO` (adoption
   records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
 - `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an

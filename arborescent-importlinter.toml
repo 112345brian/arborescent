@@ -41,6 +41,7 @@ source_modules = [
 forbidden_modules = [
     "arborescent.driver_port",
     "arborescent.ports",
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -92,6 +93,7 @@ forbidden_modules = [
     "arborescent.typecheckers",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -162,6 +164,7 @@ name = "ports ring imports only ['domain', 'ports']"
 type = "forbidden"
 source_modules = ["arborescent.driver_port", "arborescent.ports"]
 forbidden_modules = [
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -213,6 +216,7 @@ forbidden_modules = [
     "arborescent.typecheckers",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -252,6 +256,7 @@ allow_indirect_imports = true
 name = "application ring imports only ['application', 'domain', 'ports']"
 type = "forbidden"
 source_modules = [
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -305,6 +310,7 @@ forbidden_modules = [
     "arborescent.typecheckers",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -320,6 +326,7 @@ allow_indirect_imports = true
 name = "application ring imports no I/O or third-party package it does not list"
 type = "forbidden"
 source_modules = [
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -396,6 +403,7 @@ source_modules = [
     "arborescent.typecheckers",
 ]
 forbidden_modules = [
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -434,6 +442,7 @@ forbidden_modules = [
     "arborescent.suggestions",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -485,6 +494,7 @@ type = "forbidden"
 source_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -543,6 +553,7 @@ source_modules = [
 forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -566,6 +577,7 @@ name = "package core imports only declared packages' public modules"
 type = "forbidden"
 source_modules = [
     "arborescent.adapters",
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -620,6 +632,7 @@ source_modules = [
 forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -677,6 +690,7 @@ source_modules = [
 forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -739,6 +753,7 @@ type = "forbidden"
 source_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -767,6 +782,7 @@ name = "package core imports no I/O or third-party package its rings do not list
 type = "forbidden"
 source_modules = [
     "arborescent.adapters",
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",

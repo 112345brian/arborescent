@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
+from .admission_probes import admission_probes
 from .construct_only_probes import construct_only_mutations
 from .domain import NOISE_DIRS, ArchitectureScope, Mutation, Policy, Rule
 from .engine import Services, package_checks, run_own
@@ -537,7 +538,8 @@ def selftest(policy: Policy, root: Path, services: Services) -> SelfTestReport:
         else:
             jobs = [(policy, root, services, baseline, m) for m in mutations]
             killed, survived = _collect(mutations, services.parallel.map(_mutate_and_check, jobs))
-    return SelfTestReport(killed, survived, skipped)
+    admitted, admission_survived, admission_skipped = admission_probes(policy, scan.arbor_index, scan.scope_by_module, scan.known)
+    return SelfTestReport(killed + admitted, survived + admission_survived, skipped + admission_skipped)
 
 
 def _collect(mutations: list[Mutation], killed_flags: list[bool]) -> tuple[list[str], list[str]]:
