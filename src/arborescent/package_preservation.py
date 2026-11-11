@@ -14,7 +14,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields
 
 from .domain import Rule, Violation
-from .package_assignment import RepositoryFacts, owners_of
+from .package_assignment import OwnershipIndex, RepositoryFacts, owners_of
 from .package_model import (
     CatalogDocument,
     ExtractedPath,
@@ -43,10 +43,11 @@ class PartFacts:
 
 def sole_owners(catalog: CatalogDocument, facts: RepositoryFacts) -> dict[str, str]:
     """Module -> its only owning package (modules owned by none or by several are #52's findings, not ours)."""
+    index = OwnershipIndex(catalog)
     return {
         module: owners[0]
         for module, path in sorted(facts.modules.items())
-        if len(owners := owners_of(catalog, path)) == 1
+        if len(owners := owners_of(catalog, path, index=index)) == 1
     }
 
 

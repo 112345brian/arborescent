@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from .domain import Rule, Violation
-from .package_fields import glob_match, within
+from .package_fields import glob_match
 from .package_model import CatalogDocument
 
-__all__ = ["RepositoryFacts", "assignment_violations", "dependency_cycle", "owners_of"]
+__all__ = ["OwnershipIndex", "RepositoryFacts", "assignment_violations", "dependency_cycle", "owners_of"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,14 +29,36 @@ class RepositoryFacts:
     file_refs: Mapping[str, int] = field(default_factory=dict)  # module -> how many times it reads `__file__`
 
 
-def owners_of(catalog: CatalogDocument, path: str, *, asset: bool = False) -> tuple[str, ...]:
-    """Ids of the packages that claim ``path``, sorted: by an owned path and, for an asset, by the first matching glob."""
-    target = PurePosixPath(path)
-    found = {
-        package.id
-        for package in catalog.packages
-        if any(within(target, PurePosixPath(item.path)) for item in package.paths)
-    }
+class OwnershipIndex:
+    """``parts of an owned path -> ids of the packages that list it``, built once per catalog.
+
+    A run asks who owns every file of one catalog, so a loop builds this once and passes it to ``owners_of``: the lookup is then
+    the path's depth, not the number of catalog entries. There is no shared cache, so nothing can answer from another catalog."""
+
+    __slots__ = ("_by_parts",)
+
+    def __init__(self, catalog: CatalogDocument) -> None:
+        grouped: dict[tuple[str, ...], set[str]] = {}
+        for package in catalog.packages:
+            for item in package.paths:
+                grouped.setdefault(PurePosixPath(item.path).parts, set()).add(package.id)
+        self._by_parts = {parts: frozenset(ids) for parts, ids in grouped.items()}
+
+    def claimants(self, path: str) -> set[str]:
+        """Packages that list the path or a folder above it (the empty prefix is the workspace root; only a relative path sits below it)."""
+        target = PurePosixPath(path)
+        parts = target.parts
+        found: set[str] = set()
+        for end in range(1 if target.is_absolute() else 0, len(parts) + 1):
+            found |= self._by_parts.get(parts[:end], frozenset())
+        return found
+
+
+def owners_of(catalog: CatalogDocument, path: str, *, asset: bool = False, index: OwnershipIndex | None = None) -> tuple[str, ...]:
+    """Ids of the packages that claim ``path``, sorted: by an owned path and, for an asset, by the first matching glob.
+
+    Pass ``index`` (an ``OwnershipIndex`` of this same catalog) when asking about many paths."""
+    found = (index if index is not None else OwnershipIndex(catalog)).claimants(path)
     if asset:
         rule = next((rule for rule in catalog.assets if glob_match(rule.pattern, path)), None)
         if rule is not None:
@@ -46,10 +68,11 @@ def owners_of(catalog: CatalogDocument, path: str, *, asset: bool = False) -> tu
 
 def assignment_violations(catalog: CatalogDocument, facts: RepositoryFacts) -> list[Violation]:
     out: list[Violation] = []
+    index = OwnershipIndex(catalog)
     sole: dict[str, str] = {}  # module -> its only owning package
     claimed: dict[str, tuple[str, ...]] = {}  # module -> every package that claims it
     for module, path in sorted(facts.modules.items()):
-        owners = claimed[module] = owners_of(catalog, path)
+        owners = claimed[module] = owners_of(catalog, path, index=index)
         if not owners:
             out.append(Violation(Rule.PACKAGE_UNASSIGNED_MODULE, module, f"module ({path}) is claimed by no package"))
         elif len(owners) > 1:
@@ -60,7 +83,7 @@ def assignment_violations(catalog: CatalogDocument, facts: RepositoryFacts) -> l
         else:
             sole[module] = owners[0]
     for path in sorted(facts.assets):
-        owners = owners_of(catalog, path, asset=True)
+        owners = owners_of(catalog, path, asset=True, index=index)
         if not owners:
             out.append(Violation(Rule.PACKAGE_UNOWNED_ASSET, path, "asset is claimed by no package path and no [[assets]] glob"))
         elif len(owners) > 1:

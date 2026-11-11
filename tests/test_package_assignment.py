@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Any
 
 import pytest
@@ -12,7 +13,7 @@ from arborescent.package_assignment import (
     assignment_violations,
     owners_of,
 )
-from arborescent.package_fields import glob_match
+from arborescent.package_fields import glob_match, within
 from arborescent.package_model import (
     ROOT_OWNER,
     AssetRule,
@@ -306,3 +307,40 @@ def test_a_consumer_a_declared_or_imported_package_and_a_single_package_are_not_
     imported = facts({"app.a": "src/app/a.py", "lib.b": "src/lib/b.py"}, imports={"app.a": ("lib.b",)})
     assert found(two_packages(), imported, Rule.PACKAGE_NEVER_DEPENDED_ON) == []
     assert found(CatalogDocument((package("all", "src"),)), facts({}), Rule.PACKAGE_NEVER_DEPENDED_ON) == []
+
+
+def _reference_owners(catalog: CatalogDocument, path: str) -> tuple[str, ...]:
+    """The definition `owners_of` replaced: scan every package path with `within`. Kept here so the index cannot drift from it."""
+    target = PurePosixPath(path)
+    return tuple(sorted({p.id for p in catalog.packages if any(within(target, PurePosixPath(i.path)) for i in p.paths)}))
+
+
+def test_the_indexed_owners_of_agrees_with_scanning_every_path() -> None:
+    """`owners_of` answers from a prefix index (the scan was files x catalog entries and dominated every warm run). The answers must
+    not change for any shape of claim: the workspace root, a folder, a single file, overlapping packages, a trailing slash."""
+    catalog = CatalogDocument(
+        (
+            package("root", "."),
+            package("core", "src/core", "src/shared/util.py"),
+            package("app", "src/app/", "src/core/extra.py"),
+            package("deep", "src/app/plugins/a/b"),
+            package("sibling", "src/core_extras"),
+        )
+    )
+    paths = [
+        "README.md", "src", "src/core", "src/core/x.py", "src/core/sub/y.py", "src/core_extras/z.py", "src/core_extra",
+        "src/shared/util.py", "src/shared/util.pyc", "src/app/m.py", "src/app/plugins/a/b/c.py", "src/app/plugins/a/c.py",
+        "src/core/extra.py", "other/src/core/x.py", "", ".",
+    ]
+    for path in paths:
+        assert owners_of(catalog, path) == _reference_owners(catalog, path), path
+
+
+def test_owners_of_follows_a_catalog_that_changes_between_calls() -> None:
+    """The index is built per catalog object; a different catalog must never be answered from another's index."""
+    first = CatalogDocument((package("one", "src/a"),))
+    second = CatalogDocument((package("two", "src/a"), package("three", "src/b")))
+    assert owners_of(first, "src/a/m.py") == ("one",)
+    assert owners_of(second, "src/a/m.py") == ("two",)
+    assert owners_of(first, "src/a/m.py") == ("one",)
+    assert owners_of(second, "src/b/m.py") == ("three",)
