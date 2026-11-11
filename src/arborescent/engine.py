@@ -208,18 +208,18 @@ class _TaintCacheFile:
     """The taint pass's fact cache as one file: a missing or unreadable file is an empty cache."""
 
     def __init__(self, fs: FileSystem, path: Path) -> None:
-        self._fs = fs
+        self.fs = fs
         self._path = path
 
     def read(self) -> str | None:
         try:
-            return self._fs.read_text(self._path) if self._fs.is_file(self._path) else None
+            return self.fs.read_text(self._path) if self.fs.is_file(self._path) else None
         except (OSError, UnicodeDecodeError):
             return None
 
     def write(self, text: str) -> None:
-        self._fs.mkdir(self._path.parent)
-        self._fs.write_text(self._path, text)
+        self.fs.mkdir(self._path.parent)
+        self.fs.write_text(self._path, text)
 
 
 def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult) -> TaintResult:
