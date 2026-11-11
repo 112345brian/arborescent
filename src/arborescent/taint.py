@@ -45,13 +45,12 @@ import hashlib
 import json
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .facts import ModuleInfo, effect_category_of
 from .presets import DEFAULT_TAINT_SEEDS
 
-__all__ = ["DEFAULT_TAINT_SEEDS", "TaintResult", "TaintedFunction", "compute_taint"]
+__all__ = ["DEFAULT_TAINT_SEEDS", "TaintCacheStore", "TaintResult", "TaintedFunction", "compute_taint"]
 
 _CACHE_VERSION = 2
 
@@ -332,23 +331,34 @@ def _file_facts_from_json(raw: list[Any]) -> _FileFacts:
     return _FileFacts(raw[0], funcs, classes, symbol_aliases, dict(raw[4]))
 
 
-def _load_file_cache(cache_file: Path | None, seeds_key: str) -> dict[str, list[Any]]:
+class TaintCacheStore(Protocol):
+    """Where the per-file fact cache lives. The caller binds it (a file under the scan cache directory); this module only
+    turns text into facts and back, so the pass itself touches no file."""
+
+    def read(self) -> str | None:
+        """The stored text, or ``None`` when there is none or it cannot be read."""
+        ...
+
+    def write(self, text: str) -> None: ...
+
+
+def _load_file_cache(store: TaintCacheStore | None, seeds_key: str) -> dict[str, list[Any]]:
     """Content-hash cache of per-file facts, keyed by module; wholesale-invalidated if the seed list changed."""
-    if not (cache_file and cache_file.is_file()):
+    text = store.read() if store else None
+    if text is None:
         return {}
     try:
-        loaded = json.loads(cache_file.read_text(encoding="utf-8"))
+        loaded = json.loads(text)
         if loaded.get("v") != _CACHE_VERSION or loaded.get("seeds") != seeds_key:
             return {}
         return loaded["files"]
-    except (OSError, ValueError, KeyError):
+    except (ValueError, KeyError, AttributeError):
         return {}
 
 
-def _store_file_cache(cache_file: Path | None, seeds_key: str, fresh: dict[str, list[Any]]) -> None:
-    if cache_file:
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(json.dumps({"v": _CACHE_VERSION, "seeds": seeds_key, "files": fresh}), encoding="utf-8")
+def _store_file_cache(store: TaintCacheStore | None, seeds_key: str, fresh: dict[str, list[Any]]) -> None:
+    if store:
+        store.write(json.dumps({"v": _CACHE_VERSION, "seeds": seeds_key, "files": fresh}))
 
 
 def _extract_files_cached(
@@ -494,19 +504,19 @@ def _line_of(files: Mapping[str, _FileFacts], module: str, qualname: str) -> int
 
 def compute_taint(
     modules: Mapping[str, ModuleInfo], sources: Mapping[str, str], known: Collection[str], seeds: Collection[str] = DEFAULT_TAINT_SEEDS,
-    cache_file: Path | None = None,
+    cache: TaintCacheStore | None = None,
 ) -> TaintResult:
     """Whole-repository pass: which functions call an I/O primitive directly, or call (through a resolvable
     expression) a function that does, iterated to a fixed point. ``sources`` is the file text for every module
     in ``modules`` this pass can read; a module missing from it, or one that fails to parse, contributes no
-    facts and no edges (it is simply not in the call graph), never an error. ``cache_file``, when given, skips
+    facts and no edges (it is simply not in the call graph), never an error. ``cache``, when given, skips
     re-parsing and re-walking a module's AST when its text has not changed since the last run.
     """
     seed_set = frozenset(seeds)
     seeds_key = ",".join(sorted(seed_set))
-    cache = _load_file_cache(cache_file, seeds_key)
-    files, fresh = _extract_files_cached(modules, sources, known, seed_set, cache)
-    _store_file_cache(cache_file, seeds_key, fresh)
+    stored = _load_file_cache(cache, seeds_key)
+    files, fresh = _extract_files_cached(modules, sources, known, seed_set, stored)
+    _store_file_cache(cache, seeds_key, fresh)
     index = _build_index(files)
     graph, direct = _build_graph(files, index)
     tainted = _propagate(graph, direct)

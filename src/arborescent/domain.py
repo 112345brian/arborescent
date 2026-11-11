@@ -11,8 +11,10 @@ from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from .coupling_policy import CouplingPolicy
+from .effects_policy import EffectsPolicy
 from .package_constraints import PackageConstraints
 from .presets import (
+    DEFAULT_FORBID_CATEGORIES,
     DEFAULT_PRESET,
     DEFAULT_TAINT_SEEDS,
     EFFECT_CATEGORIES,
@@ -89,6 +91,11 @@ class Rule(StrEnum):
     EFFECT_PATCH = "effect-patch"
     EFFECT_CONSOLE = "effect-console"
     EFFECT_GLOBAL = "effect-global"
+    EFFECT_STATE = "effect-state"
+    EFFECT_MONOTONIC = "effect-monotonic"
+    EFFECT_HOST = "effect-host"
+    EFFECT_FS_QUERY = "effect-fs-query"
+    EFFECT_UNSANCTIONED_IMPORT = "effect-unsanctioned-import"
     EFFECT_VIA_IMPORT = "effect-via-import"
     INTERNAL_IMPORT = "internal-import"
     FORWARDED_IMPORT = "forwarded-import"
@@ -166,6 +173,10 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "patch": Rule.EFFECT_PATCH,
     "console": Rule.EFFECT_CONSOLE,
     "global": Rule.EFFECT_GLOBAL,
+    "state": Rule.EFFECT_STATE,
+    "monotonic": Rule.EFFECT_MONOTONIC,
+    "host": Rule.EFFECT_HOST,
+    "fs-query": Rule.EFFECT_FS_QUERY,
 }
 
 # Not catalog gaps despite the prefix: a constraint is a promise, so `modularity = "report"` never demotes these.
@@ -407,6 +418,7 @@ class Policy:
     coupling: CouplingPolicy = field(default_factory=CouplingPolicy)  # #148: entrypoints and hub threshold for `arborescent coupling`
     package_constraints: PackageConstraints = field(default_factory=PackageConstraints)  # #164: `[package.constraints]`, parsed only, not enforced
     ratchets: tuple[RatchetSpec, ...] = ()  # #147: `[ratchet.<name>]` counters compared with their baseline by `check`
+    effects: EffectsPolicy = field(default_factory=EffectsPolicy)  # 0.8.0: sanctioned seam modules and the guard that goes with them
     taint_seeds: tuple[str, ...] = DEFAULT_TAINT_SEEDS  # #98: effect categories (plus "network") a function-level call can be seeded with
 
     def __post_init__(self) -> None:
@@ -601,7 +613,7 @@ class Policy:
         elif position == len(self.rings) - 1:
             forbidden = frozenset[str]()
         elif position == 0:
-            forbidden = EFFECT_CATEGORIES
+            forbidden = DEFAULT_FORBID_CATEGORIES
         else:
             forbidden = self.preset.middle_forbid
         if forbidden and "dynamic-import" not in forbidden:

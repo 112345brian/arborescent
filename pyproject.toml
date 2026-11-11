@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "arborescent"
-version = "0.7.1"
+version = "0.8.0"
 description = "One architecture policy that generates import-linter, tach and type-checker configs, then enforces more."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -134,6 +134,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.purity" = "domain"
 "arborescent.purity_facts" = "domain"
 "arborescent.purity_policy" = "domain"
+"arborescent.effects_policy" = "domain"
 "arborescent.ratchet_config" = "application"
 "arborescent.ratchet_measure" = "application"
 "arborescent.ratchets" = "application"

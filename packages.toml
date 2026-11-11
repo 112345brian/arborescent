@@ -193,6 +193,10 @@ path = "src/arborescent/purity_policy.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/effects_policy.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/rules.py"
 role = "source"
 

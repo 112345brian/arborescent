@@ -10,7 +10,7 @@ from pathlib import Path
 from .domain import Policy
 from .engine import Services
 from .import_cycles import import_edges
-from .purity import ModulePurity, assess, by_ring, is_allowed, summarize
+from .purity import ModulePurity, assess_in_ring, by_ring, is_allowed, summarize
 from .rules import RuleContext
 
 _HEADER = "mixed modules, most imported first (a module's importers are the ones that inherit its effects):"
@@ -28,7 +28,7 @@ def ranked(policy: Policy, root: Path, svc: Services) -> list[tuple[ModulePurity
     rows: list[tuple[ModulePurity, str, bool]] = []
     for name, ring in rings.items():
         local = context.policy_for(name)
-        report = assess(scan.modules[name], local) if local is not None else None
+        report = assess_in_ring(scan.modules[name], local, ring) if local is not None else None
         if local is not None and report is not None:
             rows.append((replace(report, importers=len(importers.get(name, ()))), ring, is_allowed(local.mixed_purity, name)))
     return sorted(rows, key=lambda row: (-row[0].importers, -len(row[0].pure), row[0].module))

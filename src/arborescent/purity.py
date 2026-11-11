@@ -17,7 +17,7 @@ from .domain import Policy, Rule, Violation, in_unit
 from .facts import ModuleInfo, absolute_callee
 from .purity_policy import AMBIENT, PurityPolicy
 
-__all__ = ["ModulePurity", "assess", "by_ring", "excluded_findings", "importer_counts", "is_allowed", "summarize"]
+__all__ = ["ModulePurity", "assess", "assess_in_ring", "by_ring", "excluded_findings", "importer_counts", "is_allowed", "summarize"]
 
 _NON_PROPAGATING = frozenset({"os-branching", "patch"})  # a portability fact and a test-only use: neither is an effect of the module
 IMPORT_TIME = "<import time>"
@@ -33,6 +33,11 @@ class ModulePurity:
     pure: tuple[str, ...]  # substantial pure definitions (the ones that count towards the threshold)
     line: int  # the first effectful line, where the finding is anchored
     importers: int = 0  # blast radius: modules in the scanned tree that import this one
+
+
+def assess_in_ring(info: ModuleInfo, policy: Policy, ring: str) -> ModulePurity | None:
+    """``assess``, except that a module in a ring listed under ``mixed_purity.exclude_rings`` is never mixed."""
+    return None if ring in policy.mixed_purity.exclude_rings else assess(info, policy)
 
 
 def is_allowed(policy: PurityPolicy, module: str) -> bool:

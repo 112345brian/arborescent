@@ -2,6 +2,56 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## 0.8.0 — 2026-11-11
+
+Effect detection is more precise and more complete, and a project can now say which modules are its sanctioned seams. Found by an
+adversarial review of the effect heuristics against a ~1500-module project, in which 98% of the 1536 `effect-via-import` findings
+were not actionable (a read-only port every importer inherited, `importlib.util.find_spec`, a module-level `threading.Lock()`, a
+seeded `random.Random(seed)`, type annotations). Closes #189, #190, #191, #192, #193 and #196; addresses #194 and #195 in part.
+
+### Upgrading from 0.7
+
+- **Fewer findings** from the narrower definitions below, **more** from the extended `Path` detection. A repository with a baseline
+  sees stale entries (delete them with `arborescent baseline`) and possibly new `effect-filesystem` findings for `p.read_text()` where
+  `p` is a path variable; a `forbid` list is otherwise unchanged. `must_be_pure` still means every pre-0.8.0 category.
+- `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local` moved from `threads` to the new `state` category. A ring that
+  forbids `threads` no longer fails on a lock; add `state` to its `forbid` to keep failing on it. `mixed-purity` still counts a lock
+  (as `state`, which is in its default kinds).
+- Nothing else is on by default. The new categories are in no default `forbid`, and the `[effects]` and `mixed_purity.exclude_rings`
+  keys are off until set.
+
+### Changed
+- `dynamic-import` is only run-time module loading: `importlib.import_module`, `__import__`, `importlib.reload`,
+  `importlib.util.spec_from_file_location`/`spec_from_loader`/`module_from_spec` and `*.exec_module`. `importlib.resources`,
+  `importlib.metadata` and `importlib.util.find_spec` import nothing and no longer count (#189).
+- `random.Random(<seed>)` is deterministic and no longer `randomness`; `Random()`, `Random(None)`, `SystemRandom`, the module-level
+  functions and `secrets.*` still are, and `os.urandom` now is (#191).
+- A reference inside a type annotation (parameter, return, variable) is never an effect use (#190, #191).
+- A `lambda` parameter default whose body is a call (`clock=lambda: datetime.now(UTC)`) is an injection seam like a bare
+  `now=datetime.now`; arguments passed into that call still count (#196).
+- `time.time_ns` is `clock`.
+
+### Added
+- Categories `state` (synchronisation primitives, #190), `monotonic` (`time.monotonic`, `perf_counter`, `process_time`, ...),
+  `host` (`sys.argv`/`stdin`, `locale`, `platform`, `os.getpid`/`cpu_count`, `socket.gethostname`, ...) and `fs-query`
+  (`exists`/`is_file`/`is_dir`/`resolve` on a path, `os.path.*` queries, `os.getcwd`, `Path.cwd`/`home`, `shutil.which`) with rules
+  `effect-state`, `effect-monotonic`, `effect-host` and `effect-fs-query` (#193, #194). They are valid in every `forbid` list, `forbid_effects`,
+  `dev_tools_forbid` and `mixed_purity.kinds`, and in no default.
+- `Path` method calls on a name bound to a path (a `Path` annotation, `Path(...)`, `a / b`, `p.parent`, `p.resolve()`) are
+  `filesystem` / `fs-query`, resolved per function so a `str` named `path` elsewhere is not mistaken for one (#193).
+- `[effects] sanctioned = [...]` (#192): a sanctioned seam module's own direct uses stop propagating through `effect-via-import`.
+  It ships with its guard, `effect-unsanctioned-import`: once the table is present, a ring that forbids effects may import a
+  module of an `effects.rings` ring (default `["effects"]`) only if it is listed. See *Effect categories and the `[effects]` table*.
+- `[mixed_purity] exclude_rings = [...]` skips rings meant to be effectful (also in `arborescent purity`); `kinds` already
+  restricted what counts and now accepts the new kinds (#195).
+- `exclude` entries starting with `/` are anchored to the repository root (`/client` hides the top-level `client/`, not
+  `src/pkg/client/`). Bare entries keep matching at any depth, as before, and the `excluded folders` listing now flags a folder hidden
+  only by a bare name below the root (#196).
+
+### Fixed
+- The taint pass no longer reads and writes its cache file itself; the caller passes a `TaintCacheStore` (a `Protocol`), which the
+  new `Path` detection showed was a filesystem use inside the domain ring.
+
 ## 0.7.1 — 2026-11-11
 
 0.7.0 was tagged and released on GitHub but never uploaded to PyPI: its publish run failed the Windows 3.13 warm-scan speed test

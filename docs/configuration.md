@@ -17,7 +17,7 @@ settings. The two forms cannot be mixed.
 | `classify` | `{}` | Table of glob -> ring, used when a module has no valid `__arbor__` annotation. Globs match the dotted module name and `*` crosses dots. The first match wins. Every module needs a ring from an annotation or a matching glob (`unclassified`). |
 | `sources` | `["."]` | Folders or single files to scan. A single `.py` file is an entry script, not a package. |
 | `source_roots` | `["."]` | Folders that module names are relative to (`src` for a `src/app` layout). Also handed to tach. |
-| `exclude` | `[]` | Globs matched against a path or a file/folder name to skip while scanning. Excluded Python files are counted by folder on every `check`. |
+| `exclude` | `[]` | Globs to skip while scanning. A bare entry (`client`, `*.gen`, `dir/sub`) is unanchored, like a `.gitignore` line: it matches the path, a file or folder name, or any ancestor folder at **any depth**, so `client` also hides `src/pkg/client/`. A leading `/` anchors the entry to the repository root and matches by full relative path only: `/client` hides the top-level `client/` and nothing deeper, `/src/*/generated` hides one level of generated folders. Excluded Python files are counted by folder on every `check`; a folder hidden only by a bare name below the root is flagged there with the anchored spelling. |
 | `children` | `[]` | Explicit nested package roots to inspect for a direct Arborescent policy. In `certify` mode, roots with their own policy are checked recursively; roots without one remain in the parent scan. |
 | `child_policy_mode` | `"certify"` | `"certify"` respects direct child policies and includes their results in parent certification. `"parent"` overrides child policies: listed roots stay in the parent scan and are not checked separately. |
 | `scan_vendors` | `false` | Include convention-named `vendor`, `vendored`, `third_party` and `site-packages` folders in the parent scan. This lets parent rules govern vendored code; declared child roots with their own policy are still separated in `certify` mode. |
@@ -43,7 +43,7 @@ settings. The two forms cannot be mixed.
 | `dev_tools_forbid` | `["process"]` | Effect categories (`clock`, `env`, `process`, `filesystem`, …) that `dev_tools` modules may not use. The default reports raw `subprocess` use in tooling; `[]` allows everything. Reported as the matching `effect-*` rule. |
 | `dev_tools_may_import` | `[]` | Dotted-module globs of product modules that `dev_tools` modules may import. Empty means any; otherwise an import of another product module is `dev-tool-product-import`. |
 | `effect_defaults` | `"injection"` | How a bare parameter default that names an effect (`now=datetime.now`) counts. `"injection"`: never a use. `"typed"`: not a use only when the parameter is annotated `Callable` or `Mapping` (alone, in `Optional`/`Union`/`\|`, or as a string), so `x: int = datetime.now` still counts. `"count"`: always a use. Calls, aliases and lambda-wrapped defaults always count; applies to `clock`, `env`, `identity`, `randomness`, `sleep`, `threads` and `process`. Settable per scope. |
-| `taint_seeds` | every `effect-*` category except `patch` and `global`, plus `network` | Which I/O primitives the function-level taint pass (#98, below `classify-facts`) seeds a function as reaching. `[]` turns the pass into a no-op. Root-level (shared by all scopes). |
+| `taint_seeds` | every `effect-*` category that existed before 0.8.0 except `patch` and `global`, plus `network` (`monotonic`, `host` and `fs-query` are valid but not seeded unless listed) | Which I/O primitives the function-level taint pass (#98, below `classify-facts`) seeds a function as reaching. `[]` turns the pass into a no-op. Root-level (shared by all scopes). |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
@@ -758,7 +758,7 @@ Migrating an existing classify-only project:
 | `may_import` | `[]` | Inner rings this ring may import; `["*"]` means every inner ring. A ring may always import itself. An outer ring in this list is a policy error (the onion rule). |
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
-| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `filesystem`, `dynamic-import`, `patch`, `console`, or `global`. |
+| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`, and, since 0.8.0, `state`, `monotonic`, `host` and `fs-query` (see *Effect categories*). The positional and preset defaults never include the four new ones: name them to opt in. |
 | `max_reexport_ratio` | unset | A number from 0 to 1: the share of a module's public surface (a static `__all__`, else public top-level bindings; modules with fewer than 5 names are not judged) that may be first-party imports before `reexport-ratio` fires. Leave it unset on rings that legitimately aggregate (a composition root); the exemption is then visible in config. A dynamic `__all__` is ignored in favour of the bindings. Wrapping each name in a forwarding function evades it; that is the forwarded-import rule's job. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 | `require_typed_ports` | `false` | Every method of a `typing.Protocol` class in this ring must name its return type. A missing return annotation, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set`/`frozenset` or `Mapping[str, Any]` (also inside `Optional`, `\|` unions and string annotations) fires `weakly-typed-port`; `None`, named classes and parameterised containers pass. `__init__` is skipped. Parameters are not checked. |
@@ -818,15 +818,20 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-identity` | a ring that forbids `identity` generates UUID identities |
 | `effect-randomness` | a ring that forbids `randomness` uses `random` or `secrets` |
 | `effect-sleep` | a ring that forbids `sleep` calls `time.sleep` or `asyncio.sleep` |
-| `effect-threads` | a ring that forbids `threads` uses `threading` or constructs a `ThreadPoolExecutor` |
+| `effect-threads` | a ring that forbids `threads` starts a `threading.Thread`/`Timer` or constructs a `ThreadPoolExecutor` (locks and events are `state`) |
 | `effect-process` | a ring that forbids `process` starts a process or shell command through `subprocess`, `multiprocessing`, `ProcessPoolExecutor`, or direct `os` spawn/exec APIs |
 | `effect-network` | a ring that forbids `network` calls `urllib.request`, `http.client`, `http.server`, `socket`, `requests`, `httpx`, `aiohttp` or `urllib3` (a call probe, not an import ban) |
 | `effect-database` | a ring that forbids `database` uses `sqlite3`, `psycopg`, `psycopg2`, `asyncpg`, `pymysql`, `mysql.connector`, `sqlalchemy`, `pymongo`, `redis` or `aiosqlite` |
-| `effect-filesystem` | a ring that forbids `filesystem` calls `open`, `os` file operations (`os.remove`, `os.listdir`, `os.walk`, ...), `shutil`, `tempfile`, `glob`, or reads/writes through `Path(...)` (`read_text`, `write_text`, `mkdir`, `glob`, ...). Direct references only: a `Path` held in a variable or a call routed through a wrapper is not seen |
-| `effect-dynamic-import` | a ring that forbids any effect uses `importlib` or `__import__` |
+| `effect-filesystem` | a ring that forbids `filesystem` calls `open`, `os` file operations (`os.remove`, `os.listdir`, `os.walk`, ...), `shutil`, `tempfile`, `glob`, or reads/writes through `Path(...)` or through a name bound to a path (`read_text`, `write_text`, `mkdir`, `glob`, ...). A call routed through a wrapper, or a path stored on `self`, is not seen |
+| `effect-dynamic-import` | a ring that forbids any effect loads a module at run time (`importlib.import_module`, `__import__`, `spec_from_file_location`/`module_from_spec`, `exec_module`); `find_spec`, `importlib.resources` and `importlib.metadata` do not |
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `effect-console` | a ring that forbids `console` calls `print`, `input`, `sys.stdout.write` or `sys.stderr.write` |
 | `effect-global` | a ring that forbids `global` has a function that declares `global x` and then assigns `x` (a read-only `global` is not a use) |
+| `effect-state` | a ring that forbids `state` creates a `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local` (0.8.0) |
+| `effect-monotonic` | a ring that forbids `monotonic` calls `time.monotonic`, `perf_counter` or `process_time` (0.8.0) |
+| `effect-host` | a ring that forbids `host` reads `sys.argv`, `sys.stdin`, `locale`, `platform`, the process id, the CPU count or the host name (0.8.0) |
+| `effect-fs-query` | a ring that forbids `fs-query` asks the filesystem a question: `os.path.exists`, `os.getcwd`, `Path.cwd`, `p.exists()`, `shutil.which`... (0.8.0) |
+| `effect-unsanctioned-import` | with `[effects] sanctioned` set, a ring that forbids effects imports a module of an `effects.rings` ring that is not listed as a sanctioned seam (0.8.0) |
 | `effect-via-import` | a ring forbids an effect that a module it imports (directly or through that module's own imports, same scope, not an `if TYPE_CHECKING` import) uses directly; the message names the import chain |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `forwarded-import` | a module imports a pass-through function (`def f(a): return other.f(a)`: one call to an imported name, arguments exactly the parameters, no default, decorator or other statement) whose target `module_forbid_imports` forbids it: the dependency one hop away. Chains of forwarders are followed. Only `from B import f` is seen, not `B.f` attribute use; wrappers that add logic are real boundaries and are not flagged. Counts against the importing module and takes its own baseline key |
@@ -1087,6 +1092,63 @@ below it, and every declared entrypoint needs a `closure` entry. A count above i
 `STALE` in `check`); a rise or a new entry needs `--allow-growth --reason TEXT` and is logged in `growth`. The file is separate
 from the check baseline and is not read by `arborescent check`.
 
+## Effect categories and the `[effects]` table
+
+Every direct use of an effectful API is classified into a category; a ring's `forbid` list decides which categories fail there
+(`effect-<category>`), and `effect-via-import` carries the same categories across imports. What each category matches:
+
+| category | matches |
+|---|---|
+| `clock` | `time.time`, `time.time_ns`, `time.gmtime`, `time.localtime`, `time.strftime`, `datetime.now`/`utcnow`/`today`, `date.today` |
+| `monotonic` | `time.monotonic`, `perf_counter`, `process_time`, `thread_time` and their `_ns` forms (0.8.0; deadline arithmetic is not a wall-clock read, so it is its own kind) |
+| `env` | `os.environ`, `os.getenv` |
+| `host` | `sys.argv`, `sys.stdin`, `locale.*`, `platform.*` (bar the OS-branching `platform.system`), `os.getpid`/`getppid`/`cpu_count`/`getlogin`/`uname`, `socket.gethostname`/`getfqdn`, `getpass.getuser` (0.8.0) |
+| `identity` | `uuid.uuid1`, `uuid.uuid4` |
+| `randomness` | `random.*`, `secrets.*`, `os.urandom`. **`random.Random(<seed>)` is deterministic and does not count**; `random.Random()`, `Random(None)`, `SystemRandom` and the module-level functions do |
+| `sleep` | `time.sleep`, `asyncio.sleep` |
+| `threads` | `threading.Thread`/`Timer`, `ThreadPoolExecutor`, `multiprocessing.pool.ThreadPool` and the rest of `threading` that starts or inspects threads |
+| `state` | `threading.Lock`/`RLock`/`Semaphore`/`BoundedSemaphore`/`Event`/`Condition`/`Barrier`/`local` (0.8.0; they guard shared state, they create no thread, so "inject a port" is the wrong remedy and the category is not in any default `forbid`) |
+| `process` | `subprocess`, `multiprocessing`, `ProcessPoolExecutor`, `os.system`/`spawn*`/`exec*` |
+| `filesystem` | `open`, `os` file operations, `shutil`, `tempfile`, `glob`, and read/write/`mkdir`/`glob`/`stat`... methods on `Path(...)` **or on a name bound to a path** (0.8.0: a parameter or variable annotated `Path`, or assigned `Path(...)`, `a / b`, `p.parent`, `p.resolve()`; resolved per function, so a `str` of the same name elsewhere is not a path; needs `import pathlib`) |
+| `fs-query` | questions asked of the filesystem: `exists`/`is_file`/`is_dir`/`resolve`/`expanduser`/`samefile` on a path, `Path.cwd`/`home`, `os.path.exists`/`isfile`/`getsize`/`getmtime`/`abspath`/`realpath`/`expanduser`, `os.getcwd`, `os.access`, `shutil.which`, `tempfile.gettempdir` (0.8.0) |
+| `network` | `urllib.request`, `http.client`, `http.server`, `socket` (bar `gethostname`/`getfqdn`), and `requests`/`httpx`/`aiohttp`/`urllib3` calls |
+| `database` | `sqlite3`, `psycopg`, `sqlalchemy`, ... |
+| `dynamic-import` | **only** run-time module loading: `importlib.import_module`, `importlib.__import__`, `importlib.reload`, `importlib.util.spec_from_file_location`/`spec_from_loader`/`module_from_spec`, `*.exec_module`, `__import__`. `importlib.resources`, `importlib.metadata` and `importlib.util.find_spec` import nothing and do not count (0.8.0) |
+| `console` | `print`, `input`, `sys.stdout.write`, `sys.stderr.write` |
+| `global` | a function that declares `global x` and assigns it |
+| `patch` | a test patching a project target |
+
+A reference inside a type annotation (a parameter, return or variable annotation) is never a use: a hint names a type, it does not
+call it. A bare parameter default naming an effect, and since 0.8.0 a `lambda` default whose body is a call
+(`clock=lambda: datetime.now(UTC)`), is an injection seam under the default `effect_defaults`; arguments passed *into* that
+call are still uses.
+
+Four categories were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`). They are valid in every `forbid`, `forbid_effects`,
+`dev_tools_forbid` and `mixed_purity.kinds` list but are in **no default**: a policy that does not name them keeps its findings,
+except that the extended `Path` detection (a path held in a variable) and the narrower `dynamic-import`, `threads`
+and `randomness` definitions change which modules the pre-existing categories report. `must_be_pure` keeps meaning "every
+pre-0.8.0 category"; list the new ones under `forbid_effects` to add them.
+
+### `[tool.arborescent.effects]`: sanctioned seams
+
+A *seam* is a module that owns an effect on purpose (a file-read port, a process-environment reader, the logging setup) so that
+everything else can take it as a port. Without help, `effect-via-import` reports every importer of such a module, which is the
+sanctioned path itself. The `effects` table names the seams:
+
+```toml
+[tool.arborescent.effects]
+sanctioned = ["runtime_seams.*", "app_logging.logging_setup"]   # dotted names, package prefixes or globs
+rings = ["effects"]                                              # default: the rings that hold such modules
+```
+
+- A sanctioned module's **own direct uses** do not propagate to its importers. What it imports still does: a seam that reaches a
+  raw-effect module is not a seam.
+- The guard that makes this safe, `effect-unsanctioned-import`: once the table is present (even `sanctioned = []`), a module in a
+  ring that forbids effects may import a module of a `rings` ring only if that module is `sanctioned`. Otherwise it is a
+  finding, so a domain module importing a raw environment reader cannot hide behind the stopped propagation. `TYPE_CHECKING`
+  imports and rings that forbid nothing are not checked; modules in another scope are not checked.
+- Without the table nothing changes. Never stop propagation for a whole ring: list the seams.
+
 ## Mixed purity: `[tool.arborescent.mixed_purity]`
 
 A ring label says where a module sits; it does not say the module is one thing. A module in a permissive ring can hold a
@@ -1115,6 +1177,7 @@ min_pure_units = 2        # default: pure definitions needed before a module cou
 min_body_lines = 4        # default: lines a definition needs to be substantial
 kinds = ["clock", "env", "filesystem", "logging", "memo", "state"]   # default: every kind below except ambient
 ambient = ["myapp.state.state_root", "myapp.env.*"]                    # globs on the absolute dotted name of an ambient lookup
+exclude_rings = ["entrypoints", "effects"]                             # default []: rings whose modules are never reported (they are meant to be effectful)
 
 [[tool.arborescent.mixed_purity.allow]]
 module = "myapp.bundle_schema.hydration"   # a dotted name, a package prefix or a glob
@@ -1122,15 +1185,18 @@ reason = "split tracked in #212; until then the cache slot and the validation sh
 ```
 
 `kinds` takes the existing categories (`clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`,
-`network`, `filesystem`, `dynamic-import`, `console` for `print`/`input`, `global` for a function that rebinds a module global)
+`network`, `filesystem`, `dynamic-import`, `console` for `print`/`input`, `global` for a function that rebinds a module global),
+the 0.8.0 categories `monotonic`, `host` and `fs-query` (valid, but not in the default list), and
 and the kinds this rule adds, which never feed the `effect-*` rules:
 
 | kind | what it is |
 |---|---|
 | `logging` | `logging.info(...)` and friends, a call on a module-level `logging.getLogger(...)` / `structlog.get_logger(...)` result, `loguru.logger`. `getLogger` itself is not an effect |
 | `memo` | `functools.lru_cache` / `cache` / `cached_property` decorators, or a write to a module-level dict, list or set whose name contains `cache` or `memo` |
-| `state` | a write (item assignment, `del`, `append`/`update`/`setdefault`/... ) to any other module-level dict, list or set from inside a function, unless that function binds the name locally. Reads are not effects |
+| `state` | a write (item assignment, `del`, `append`/`update`/`setdefault`/... ) to any other module-level dict, list or set from inside a function, unless that function binds the name locally; and, since 0.8.0, a `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local`. Reads are not effects |
 | `ambient` | a call to something matching `ambient`, resolved through absolute and relative imports (`state_root()`, `os.getcwd`). Off until `ambient` lists a pattern |
+
+**Choosing what counts.** The default `kinds` count everything above, so a CLI `main` that prints, a module that only logs, and an `lru_cache` on a regex compiler all make a module "mixed". To report only the splits that separate real effects, restrict `kinds` (for example drop `console`, `logging`, `memo`, `state`, `global`) and list the rings that are meant to be effectful under `exclude_rings`. `exclude_rings` also applies to `arborescent purity`. Both default to today's behaviour.
 
 **Allowlist.** An entry needs a non-blank `reason`; without one the policy fails to load. An entry that matches no module, or
 only modules that are not mixed (any more), is itself a `mixed-purity` finding, so an exemption cannot outlive the code it excused.

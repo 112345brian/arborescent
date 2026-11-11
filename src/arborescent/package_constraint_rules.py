@@ -20,7 +20,7 @@ from collections.abc import Collection, Mapping
 from .domain import Policy, Rule, Violation
 from .facts import ModuleInfo, resolve_targets
 from .package_constraints import PackageConstraints
-from .presets import EFFECT_CATEGORIES, STRUCTURAL_STDLIB
+from .presets import DEFAULT_FORBID_CATEGORIES, STRUCTURAL_STDLIB
 
 __all__ = ["PURE_STDLIB", "forbidden_by", "is_exempt_path", "placement_violations", "reach_violations", "use_violations"]
 
@@ -38,7 +38,7 @@ _EXEMPT_DIRECTORIES = frozenset({"tests", "test", "docs"})
 def forbidden_by(constraints: PackageConstraints) -> frozenset[str]:
     """The effect categories the constraints rule out (every one, bar the test-only ``patch``, for ``must_be_pure``)."""
     named = frozenset(constraints.forbid_effects)
-    return named | (EFFECT_CATEGORIES - _PURE_EXCLUDES) if constraints.must_be_pure else named
+    return named | (DEFAULT_FORBID_CATEGORIES - _PURE_EXCLUDES) if constraints.must_be_pure else named
 
 
 def is_exempt_path(path: str) -> bool:

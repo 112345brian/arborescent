@@ -43,7 +43,7 @@ from .package_constraint_rules import (
     use_violations,
 )
 from .package_constraints import PackageConstraints
-from .purity import ModulePurity, assess, importer_counts, is_allowed, summarize
+from .purity import ModulePurity, assess_in_ring, importer_counts, is_allowed, summarize
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
@@ -690,8 +690,10 @@ def check_modules(
             _record_effect_edge(context, effect_graph, pending_effect_edges, _EffectImport(local_policy, name, ring, imp, internal))
             if error is not None:
                 out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
-            out += _scope_imports(context, name, imp.line, internal)
-            out += _scope_effect_leaks(context, modules, name, imp.line, internal)
+            out += (
+                _scope_imports(context, name, imp.line, internal) + _scope_effect_leaks(context, modules, name, imp.line, internal)
+                + _unsanctioned_effect_imports(context, _EffectImport(local_policy, name, ring, imp, internal))
+            )
             out += _internal_imports(context, name, ring, imp.line, internal) + _forwarded_imports(context, name, imp, _ImportEnv(modules, known, tops, import_graph))
             out += _external_imports(local_policy, name, ring, imp.line, external, third_party, siblings)
         out += _os_branching(local_policy, name, ring, rule, info)
@@ -718,7 +720,7 @@ def _mixed_purity_findings(
     mixed: set[str] = set()
     for name, info in sorted(modules.items()):
         local_policy, ring = context.policy_for(name), context.resolve_ring(name)
-        report = assess(info, local_policy) if local_policy is not None and ring is not None and name not in context.tool_modules else None
+        report = assess_in_ring(info, local_policy, ring) if local_policy is not None and ring is not None and name not in context.tool_modules else None
         if local_policy is None or ring is None or report is None:
             continue
         mixed.add(name)
@@ -841,7 +843,34 @@ def _record_effect_edge(
     pending.append(_EffectEdge(edge.policy, edge.name, edge.ring, edge.imp.line, targets))
 
 
+def is_sanctioned(policy: Policy, module: str) -> bool:
+    """Whether ``effects.sanctioned`` names this module as a capability seam: its own direct uses stop at it."""
+    return any(in_unit(module, pattern) for pattern in policy.effects.sanctioned)
+
+
+def _unsanctioned_effect_imports(context: RuleContext, edge: _EffectImport) -> list[Violation]:
+    """The guard that makes ``effects.sanctioned`` safe: a ring that forbids effects imports a provider-ring module only if it is a listed seam.
+
+    Off unless the policy sets ``effects.sanctioned``. Type-only imports never run and are not checked."""
+    policy = edge.policy
+    if not policy.effects.configured or edge.imp.type_only or not policy.forbidden_effects(edge.ring):
+        return []
+    out: list[Violation] = []
+    for target in sorted(set(edge.internal)):
+        target_ring = context.resolve_ring(target)
+        if target_ring not in policy.effects.rings or context.scope_name(target) != context.scope_name(edge.name) or is_sanctioned(policy, target):
+            continue
+        detail = (
+            f"[{edge.ring}] imports {target!r}, a module of the {target_ring!r} ring that is not listed in `effects.sanctioned`; "
+            "reach the effect through a sanctioned seam, or list the module if it is one"
+        )
+        out.append(Violation(Rule.EFFECT_UNSANCTIONED_IMPORT, edge.name, detail, edge.imp.line))
+    return out
+
+
 def _direct_propagating_effects(policy: Policy, info: ModuleInfo) -> frozenset[str]:
+    if is_sanctioned(policy, info.name):
+        return frozenset[str]()
     return frozenset(
         use.category for use in info.facts.effect_uses
         if use.category not in _NON_PROPAGATING_EFFECTS and policy.counts_effect_seam(use.seam)

@@ -8,19 +8,25 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
-__all__ = ["DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "PRESETS", "TAINT_SEED_CATEGORIES", "Preset", "Scope"]
+__all__ = ["DEFAULT_FORBID_CATEGORIES", "DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "PRESETS", "TAINT_SEED_CATEGORIES", "Preset", "Scope"]
 
+# The categories a policy may name in `forbid`. Four were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`); they are valid
+# in every `forbid` list but in no default one (`DEFAULT_FORBID_CATEGORIES`), so a policy that forbids nothing new keeps its findings.
 EFFECT_CATEGORIES: frozenset[str] = frozenset(
     {
         "clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "network", "filesystem", "dynamic-import", "patch",
-        "console", "global",
+        "console", "global", "state", "monotonic", "host", "fs-query",
     }
 )
 
+# What a ring forbids when the policy does not say (the strict preset's middle rings, and the innermost ring): the categories that
+# existed before 0.8.0. Opt in to the rest by listing them in a ring's `forbid`.
+DEFAULT_FORBID_CATEGORIES: frozenset[str] = EFFECT_CATEGORIES - {"state", "monotonic", "host", "fs-query"}
+
 # #98 (function-level taint): which effect categories count as an I/O primitive a function can be seeded with.
 # ``patch`` (test-only) and ``global`` (module-state mutation, not I/O) are excluded.
-TAINT_SEED_CATEGORIES: frozenset[str] = EFFECT_CATEGORIES - {"patch", "global"}
-DEFAULT_TAINT_SEEDS: tuple[str, ...] = tuple(sorted(TAINT_SEED_CATEGORIES))
+TAINT_SEED_CATEGORIES: frozenset[str] = EFFECT_CATEGORIES - {"patch", "global", "state"}
+DEFAULT_TAINT_SEEDS: tuple[str, ...] = tuple(sorted(DEFAULT_FORBID_CATEGORIES - {"patch", "global"}))
 
 # Which imports outside the project need an entry in the importing ring's ``external`` allow-list.
 #   "all"          every one, stdlib included
@@ -77,7 +83,7 @@ PRESETS: dict[str, Preset] = {
     p.name: p
     for p in (
         Preset(
-            "strict", "every external import, stdlib included, must be allow-listed per ring; OS branching limited", "all", True, EFFECT_CATEGORIES,
+            "strict", "every external import, stdlib included, must be allow-listed per ring; OS branching limited", "all", True, DEFAULT_FORBID_CATEGORIES,
             git_hook=True, ruff_select=("PLR0911",), ruff_limits=STRICT_RUFF_LIMITS,
         ),
         Preset("standard", "third-party and I/O stdlib must be allow-listed; other stdlib is free; OS branching limited", "io", True, frozenset({"env", "sleep", "threads", "process"})),
