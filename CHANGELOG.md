@@ -2,22 +2,19 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
-## Unreleased
+## 0.7.0 — 2026-11-11
 
-### Fixed
-- The opt-in `arborescent.pytest_io_block` plugin removes its patches when the blocked test ends. Before, `datetime.datetime`,
-  `os.environ`, `time` and `random` stayed replaced for the rest of the session, which broke pickling a real `datetime` in later tests.
-- A fact-cache record that does not fit the current layout reads as a cache miss instead of aborting the run with an `IndexError`
-  (the version number is bumped by hand, so two branches can write different layouts under the same one).
-- `mixed-purity` sees functions defined inside a module-level `if`/`try`/`with` (an `except ImportError` fallback) as definitions of
-  the module; logging inside one used to be reported as logging at import time. A name defined twice counts once.
-- `check --growth-against` reads the baseline and `ratchet_files` at the ref relative to the policy root, so it works when that
-  root is below the repository root.
-- A source file that `ast` accepts but `tokenize` rejects (for example a doubled carriage return, `\r\r\n`) no longer aborts
-  the run with `tokenize.TokenError` (#181). The file keeps every `ast` fact and gets no comment facts (suppressions and
-  `# deferred:` reasons are unknowable), and a new `untokenizable-source` violation names it, so it is visible and can be
-  baselined. Newlines are not normalised first, so line numbers still match `ast`. The fact cache layout grew (`scan.json`
-  v24), so the first run after upgrading re-parses every file.
+### Upgrading from 0.6
+
+- New rules are on by default and fail `check` on a repository that has not adopted them: `mixed-purity`, `lazy-import` (or justify an
+  import with `# deferred: <reason>`) and `untokenizable-source`. Adopt them by recording the current findings with
+  `arborescent baseline` (a repository that already has a baseline needs `--allow-growth --reason TEXT --approved-by WHO`), or switch
+  `mixed-purity` off with `[tool.arborescent.mixed_purity] enabled = false`. `arborescent purity --top 20` ranks the mixed modules by how
+  many modules import them. Everything else new is opt-in.
+- `baseline --allow-growth` now needs `--approved-by WHO` as well as `--reason`, and `check --growth-against` rejects growth entries
+  without an approver.
+- `arborescent annotate` no longer writes a ring on its own; new modules go through `arborescent admit`.
+- The first run after upgrading re-parses every file (the scan cache layout changed), and `purity`'s text output changed.
 
 ### Added
 - `arborescent purity --top N` (#183): list only the N mixed modules with the largest blast radius. The listing is now
@@ -55,13 +52,6 @@
   records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
 - `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an
   added or raised value needs an attributed growth entry appended since the ref (#139).
-
-### Changed
-- `arborescent annotate` no longer writes a ring by itself (#162): migrating `classify` matches needs `--legacy --against REF`,
-  modules added since `REF` are refused and routed to `arborescent admit`, an unreadable `REF` fails with exit 1, and the
-  output says the annotation records policy, not a validated placement. The `unannotated-module` message names both routes.
-- Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they
-  are newer than the ref.
 - `arborescent check --rule FAMILY` (repeatable) runs and exits on one rule family, and `check` prints a
   `by rule: … N (M new)` line splitting findings by rule with how many the baseline does not cover (#137). Selecting by
   ring and a `type_checking` option for `internal-import` are not part of this change.
@@ -85,8 +75,6 @@
   fails a count above its baseline or below it (stale), `arborescent ratchet` records and lowers them and refuses a rise
   without `--allow-growth --reason --approved-by`, and `check --growth-against REF` requires an attributed growth entry
   for every added or raised count (#147).
-### Fixed
-- The `STALE baseline entry` hint now points at `arborescent baseline --prune`, which works while other violations are unbaselined (#135).
 - `adapter-equivalence` practice: declare groups of modules that implement one port; fails when no single test function
   calls into every member. `adapter-equivalence-report` makes the missing-test finding information; invalid groups always
   fail. Built on `function_references`; default-argument parity (direction 2) is not implemented (#113).
@@ -97,6 +85,39 @@
   `module_names_ring = true` reports one whose docstring does not name the ring the policy enforces for it
   (`docstring-ring-mismatch`); `exclude` takes module globs. Both join the baseline ratchet and are mutation-tested by `selftest`.
   The scan cache is rebuilt once (#110). Not done: docstrings on public classes, functions and methods, which Ruff's `D1xx` rules cover.
+- `reexport-ratio` (#136): a ring option `max_reexport_ratio` (0 to 1, unset means off) reports a module whose public surface (a static
+  `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Such a pass-through module clears an
+  `internal-import` edge without changing the dependency.
+- `result-discard` (#141), opt-in under `[tool.arborescent.result_discard]`: a call used as a whole statement that drops the value of a
+  result-bearing function (a listed function, or by convention one returning a `*Result`/`*Outcome`) is reported; `_ = f()` is a deliberate
+  discard and is not.
+- `construct_only` (#85), opt-in `[[tool.arborescent.construct_only]]`: only the listed modules and rings may call a class or factory; any
+  other caller is reported as `construction-outside-site`, and an owner glob or target module that no longer exists is reported too.
+- `arborescent baseline report [FILE ...] [--json]` (#146): a read-only view of baseline files that clusters entries by rule, family and
+  target, flags concentration and shows the burn-down; it changes no file and no gate.
+
+### Changed
+- `arborescent annotate` no longer writes a ring by itself (#162): migrating `classify` matches needs `--legacy --against REF`,
+  modules added since `REF` are refused and routed to `arborescent admit`, an unreadable `REF` fails with exit 1, and the
+  output says the annotation records policy, not a validated placement. The `unannotated-module` message names both routes.
+- Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they
+  are newer than the ref.
+
+### Fixed
+- The opt-in `arborescent.pytest_io_block` plugin removes its patches when the blocked test ends. Before, `datetime.datetime`,
+  `os.environ`, `time` and `random` stayed replaced for the rest of the session, which broke pickling a real `datetime` in later tests.
+- A fact-cache record that does not fit the current layout reads as a cache miss instead of aborting the run with an `IndexError`
+  (the version number is bumped by hand, so two branches can write different layouts under the same one).
+- `mixed-purity` sees functions defined inside a module-level `if`/`try`/`with` (an `except ImportError` fallback) as definitions of
+  the module; logging inside one used to be reported as logging at import time. A name defined twice counts once.
+- `check --growth-against` reads the baseline and `ratchet_files` at the ref relative to the policy root, so it works when that
+  root is below the repository root.
+- A source file that `ast` accepts but `tokenize` rejects (for example a doubled carriage return, `\r\r\n`) no longer aborts
+  the run with `tokenize.TokenError` (#181). The file keeps every `ast` fact and gets no comment facts (suppressions and
+  `# deferred:` reasons are unknowable), and a new `untokenizable-source` violation names it, so it is visible and can be
+  baselined. Newlines are not normalised first, so line numbers still match `ast`. The fact cache layout grew (`scan.json`
+  v24), so the first run after upgrading re-parses every file.
+- The `STALE baseline entry` hint now points at `arborescent baseline --prune`, which works while other violations are unbaselined (#135).
 
 ## 0.6.0 — 2026-11-07
 
