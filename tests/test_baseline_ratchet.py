@@ -320,3 +320,18 @@ def test_stale_hint_points_at_prune_which_works_while_new_violations_exist(repo:
     main(["--config", str(config), "check", "--no-tools"], svc)
     stale_lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("STALE")]
     assert stale_lines and all("arborescent baseline --prune" in line for line in stale_lines)
+
+
+
+def test_growth_against_reads_the_baseline_relative_to_the_policy_root(repo: Path) -> None:
+    """Review finding: `git show REF:path` is relative to the repository root, so a policy in a subfolder could not read its
+    own baseline at the ref. `REF:./path` is relative to the policy root (as `ratchets` already did)."""
+    config = write_policy(repo)
+    fs = LocalFileSystem()
+    fs.write_json(repo / "arborescent-baseline.json", {"version": 2, "violations": [], "growth": []})
+    runner = FakeToolRunner({"git"}, {"git": ToolResult(0, '{"version":2,"violations":[],"growth":[]}', "")})
+    svc = Services(FsScanner(), runner, list(all_checkers().values()), fs, SystemClock(), default_engines())
+    assert main(["--config", str(config), "generate"], svc) == 0
+    assert main(["--config", str(config), "check", "--no-tools", "--no-baseline", "--growth-against", "base"], svc) == 0
+    shown = [call[2] for call in runner.calls if call[:2] == ["git", "show"]]
+    assert shown and all(arg.startswith("base:./") for arg in shown), shown

@@ -4,7 +4,7 @@ Load it with ``-p arborescent.pytest_io_block``. It never auto-loads (no ``pytes
 path matches a glob in the ``arbor_io_free`` ini setting (``--arbor-io-block`` selects every test) runs its call
 phase with these raising ``IOBlockedError``: ``open`` of a non-source file, ``socket.connect``, ``subprocess.Popen``,
 ``os.system``, ``sqlite3.connect``, file removal and rename, and ``time``, ``datetime``, ``random`` and
-``os.environ`` reads. Fixtures (setup and teardown) are not blocked. ``@pytest.mark.arbor_allow_io`` opts one test out.
+``os.environ`` reads. Fixtures (setup and teardown) are not blocked, and the patches are removed again when the test ends. ``@pytest.mark.arbor_allow_io`` opts one test out.
 
 Only calls whose first non-standard-library frame is neither pytest nor this module raise, so pytest's own bookkeeping
 keeps working. A passing test shows the code did no I/O on the inputs the test chose. Not covered: names bound before
@@ -43,7 +43,8 @@ _AUDIT_EVENTS = frozenset(
     }
 )
 _active = False
-_installed = False
+_hook_installed = False
+_saved: list[tuple[object, str, object]] = []  # (owner, attribute, original value) of every patch in force, restored in reverse
 
 
 class IOBlockedError(AssertionError):
@@ -164,18 +165,30 @@ class _BlockedDatetime(metaclass=_DatetimeMeta):
         return _REAL_DATETIME.today()
 
 
+def _patch(owner: object, name: str, value: object) -> None:
+    _saved.append((owner, name, getattr(owner, name)))
+    setattr(owner, name, value)
+
+
 def _install() -> None:
-    global _installed
-    if _installed:
-        return
-    _installed = True
-    sys.addaudithook(_audit)
+    """Patch for the duration of one selected test. The audit hook cannot be removed, so it stays and is gated by ``_active``."""
+    global _hook_installed
+    if not _hook_installed:
+        _hook_installed = True
+        sys.addaudithook(_audit)
     for name in _TIME:
-        setattr(time, name, _blocked(f"time.{name}", getattr(time, name)))
+        _patch(time, name, _blocked(f"time.{name}", getattr(time, name)))
     for name in _RANDOM:
-        setattr(random, name, _blocked(f"random.{name}", getattr(random, name)))
-    vars(datetime).update(datetime=_BlockedDatetime)
-    vars(os).update(environ=_BlockedEnviron(os.environ))
+        _patch(random, name, _blocked(f"random.{name}", getattr(random, name)))
+    _patch(datetime, "datetime", _BlockedDatetime)
+    _patch(os, "environ", _BlockedEnviron(os.environ))
+
+
+def _uninstall() -> None:
+    """Undo every patch so a later test, blocked or not, sees the real ``datetime``, ``time``, ``random`` and ``os.environ``."""
+    while _saved:
+        owner, name, original = _saved.pop()
+        setattr(owner, name, original)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -210,3 +223,4 @@ def pytest_runtest_call(item: pytest.Item) -> Iterator[None]:
         return (yield)
     finally:
         _active = False
+        _uninstall()

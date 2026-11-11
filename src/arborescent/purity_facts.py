@@ -66,6 +66,20 @@ class PurityFacts:
     import_time: tuple[tuple[int, str], ...] = ()  # (line, logging) outside every unit: logging at import time
 
 
+def _module_level_defs(body: Sequence[ast.stmt]) -> list[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
+    """Functions and classes defined at module level, including inside ``if``/``try``/``with`` blocks (an
+    ``except ImportError`` fallback is still a module-level function), but never inside another function or class."""
+    found: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef] = []
+    for stmt in body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            found.append(stmt)
+        elif isinstance(stmt, ast.If | ast.With | ast.AsyncWith):
+            found += _module_level_defs([*stmt.body, *getattr(stmt, "orelse", [])])
+        elif isinstance(stmt, ast.Try | ast.TryStar):
+            found += _module_level_defs([*stmt.body, *stmt.orelse, *stmt.finalbody, *(s for h in stmt.handlers for s in h.body)])
+    return found
+
+
 def _body_lines(body: list[ast.stmt]) -> int:
     first = 1 if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str) else 0
     rest = body[first:]
@@ -167,7 +181,7 @@ class _Collector:
     def __init__(self, tree: ast.Module, aliases: dict[str, str], helpers: Helpers) -> None:
         self.aliases = aliases
         self.helpers = helpers
-        self.defs = [s for s in tree.body if isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)]
+        self.defs = _module_level_defs(tree.body)
         self.loggers, self.containers = _module_names(tree, aliases, helpers.dotted)
         self.first_line = [min([s.lineno, *(d.lineno for d in s.decorator_list)]) for s in self.defs]
         self.spans = sorted((self.first_line[index], s.end_lineno or s.lineno, index) for index, s in enumerate(self.defs))

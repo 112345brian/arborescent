@@ -702,7 +702,7 @@ def _growth_approver(args: argparse.Namespace) -> str | None:
 
 def _json_at_ref(ref: str, path: str, root: Path, svc: Services) -> dict[str, object]:
     """The JSON object stored at ``path`` in git ``ref``; ValueError when it cannot be read."""
-    git = svc.runner.run(["git", "show", f"{ref}:{path}"], root)
+    git = svc.runner.run(["git", "show", f"{ref}:./{path}"], root)  # `./`: relative to `root`, which may be below the repository root
     if git.returncode != 0:
         raise ValueError(f"could not read {path} at {ref}: {git.stderr.strip() or git.stdout.strip()}")
     with svc.fs.temporary_directory("arborescent-growth-") as temp:

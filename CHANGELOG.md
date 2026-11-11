@@ -5,6 +5,14 @@
 ## Unreleased
 
 ### Fixed
+- The opt-in `arborescent.pytest_io_block` plugin removes its patches when the blocked test ends. Before, `datetime.datetime`,
+  `os.environ`, `time` and `random` stayed replaced for the rest of the session, which broke pickling a real `datetime` in later tests.
+- A fact-cache record that does not fit the current layout reads as a cache miss instead of aborting the run with an `IndexError`
+  (the version number is bumped by hand, so two branches can write different layouts under the same one).
+- `mixed-purity` sees functions defined inside a module-level `if`/`try`/`with` (an `except ImportError` fallback) as definitions of
+  the module; logging inside one used to be reported as logging at import time. A name defined twice counts once.
+- `check --growth-against` reads the baseline and `ratchet_files` at the ref relative to the policy root, so it works when that
+  root is below the repository root.
 - A source file that `ast` accepts but `tokenize` rejects (for example a doubled carriage return, `\r\r\n`) no longer aborts
   the run with `tokenize.TokenError` (#181). The file keeps every `ast` fact and gets no comment facts (suppressions and
   `# deferred:` reasons are unknowable), and a new `untokenizable-source` violation names it, so it is visible and can be
