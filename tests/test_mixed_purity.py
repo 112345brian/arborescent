@@ -376,8 +376,9 @@ def test_the_purity_command_ranks_by_blast_radius_and_marks_allowed_modules(repo
     policy = mini_policy(ring=RINGS, mixed_purity=allow({"module": "app.adapters", "reason": "ranked, but allowed"}))
     assert run_purity(policy, repo, services(), as_json=False) == 0
     out = capsys.readouterr().out.splitlines()
-    assert out[1].lstrip().startswith("app.domain [domain]") and "imported by 2 modules" in out[1]
-    assert out[2].lstrip().startswith("app.adapters [adapters] (allowed)") and "imported by 1 module;" in out[2]
+    assert out[1] == "[domain] 1 mixed module(s)" and out[2].lstrip().startswith("app.domain:") and "imported by 2 modules" in out[2]
+    assert out[3] == "[adapters] 1 mixed module(s)" and out[4].lstrip().startswith("app.adapters:") and " (allowed)" in out[4]
+    assert "imported by 1 module;" in out[4]
     assert out[-1] == "2 mixed module(s)"
     assert run_purity(policy, repo, services(), as_json=True) == 0
     rows = json.loads(capsys.readouterr().out)

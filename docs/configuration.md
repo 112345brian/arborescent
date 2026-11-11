@@ -837,6 +837,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
 | `mixed-purity` | a module holds at least `min_pure_units` (default 2) substantial pure top-level functions or classes (a body of at least `min_body_lines`, default 4, lines) and at least one effectful one, or an effect that runs at import time. Enforced in every ring; see [Mixed purity](#mixed-purity-toolarborescentmixed_purity). The detail names only the ring, so the baseline key survives renaming functions; the hint lists the effect kinds, the effectful and pure definitions and the importer count. Also an `allow` entry that matches no module or no mixed module |
+| `untokenizable-source` | a file Python's `ast` accepts but `tokenize` rejects (a doubled carriage return `\r\r\n` is the usual cause, #181). Its `# noqa`, `# type: ignore` and `# deferred:` comments cannot be read, so the file gets no comment facts and this finding instead of aborting the run. A violation, so it can be baselined; the detail is fixed text (the tokenizer's line and message ride in the hint), and the fix is to remove the stray byte |
 | `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
@@ -1136,8 +1137,12 @@ only modules that are not mixed (any more), is itself a `mixed-purity` finding, 
 With `--changed` only a missing module is judged, since the other modules were not parsed.
 
 **Adopting it.** Run `arborescent baseline` to record today's findings and let the ratchet shrink them; a fixed module leaves a
-stale entry you delete. `arborescent purity` (`--json` for machines) lists every mixed module, including allowed ones, ranked by
-how many modules import it, which is the order to split them in.
+stale entry you delete. `arborescent purity` lists every mixed module, including allowed ones, ranked by
+how many modules import it (ties: more pure units first, then module name), which is the order to split them in. The
+listing is grouped by ring with per-ring counts, and each line carries the effect kinds, the effectful and pure definitions
+and the importer count. `--top N` (N >= 1; 0 or a negative number is an error) keeps only the N highest-ranked modules;
+`--json` prints the same rows for tooling. Ranking is presentation only: `check`, the baseline keys and the exit code are
+unaffected, and the importer counts are the ones `check` reports.
 
 **Excluded paths.** With the rule on, files under `exclude` are parsed (through the same content-hash cache) and the mixed ones
 are reported as `mixed-purity-excluded` notes. Tooling, tests and fixtures stay excluded; they just stop being invisible. Turn
