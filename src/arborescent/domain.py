@@ -25,6 +25,7 @@ from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 
 __all__ = [
     "ALL",
+    "CONSTRAINT_RULES",
     "EFFECT_RULES",
     "INFORMATIONAL_RULES",
     "NOISE_DIRS",
@@ -142,6 +143,9 @@ class Rule(StrEnum):
     PACKAGE_PRIVATE_IMPORT = "package-private-import"
     PACKAGE_RELEASE_POLICY_MISSING = "package-release-policy-missing"
     PACKAGE_PYPROJECT_DRIFT = "package-pyproject-drift"
+    # package constraints (`[package.constraints]`, #165): a promise about effects and imports, enforced on facts and on placement
+    PACKAGE_CONSTRAINT_FACTS = "package-constraint-facts"
+    PACKAGE_CONSTRAINT_PLACEMENT = "package-constraint-placement"
 
 
 EFFECT_RULES: Mapping[str, Rule] = {
@@ -160,6 +164,9 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "console": Rule.EFFECT_CONSOLE,
     "global": Rule.EFFECT_GLOBAL,
 }
+
+# Not catalog gaps despite the prefix: a constraint is a promise, so `modularity = "report"` never demotes these.
+CONSTRAINT_RULES: frozenset[Rule] = frozenset({Rule.PACKAGE_CONSTRAINT_FACTS, Rule.PACKAGE_CONSTRAINT_PLACEMENT})
 
 # Findings that are reported but never fail a check and never enter the baseline: a package spanning rings is normal.
 # A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).

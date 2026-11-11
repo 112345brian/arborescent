@@ -8,7 +8,7 @@ from pathlib import Path
 
 SRC = Path(__file__).parents[1] / "src" / "arborescent"
 
-RING_QUESTION = {"classify_audit.py", "coupling.py", "import_cycles.py", "package_gaps.py", "practices.py", "rules.py"}
+RING_QUESTION = {"classify_audit.py", "coupling.py", "import_cycles.py", "package_constraint_rules.py", "package_gaps.py", "practices.py", "rules.py"}
 RUNTIME_QUESTION = {"package_parts.py"}
 
 

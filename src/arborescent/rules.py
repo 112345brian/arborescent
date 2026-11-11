@@ -36,11 +36,19 @@ from .facts import (
     resolve_targets,
 )
 from .import_cycles import cyclic_components
+from .package_constraint_rules import (
+    is_exempt_path,
+    placement_violations,
+    reach_violations,
+    use_violations,
+)
+from .package_constraints import PackageConstraints
 from .purity import ModulePurity, assess, importer_counts, is_allowed, summarize
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
+NO_CONSTRAINTS = PackageConstraints()  # a policy that declares none: the constraint rules cost nothing
 
 
 @dataclass(frozen=True)
@@ -586,6 +594,17 @@ def _wildcard_findings(policy: Policy) -> list[Violation]:
     ]
 
 
+def _constraint_findings(context: RuleContext, name: str, info: ModuleInfo, imports: tuple[Collection[str], Collection[str]]) -> list[Violation]:
+    """``[package.constraints]`` (#165): effect and import facts for any module, placement for a module that has a ring. Tooling is exempt."""
+    constraints = context.policy.package_constraints
+    local_policy = context.policy_for(name)
+    if constraints == NO_CONSTRAINTS or local_policy is None or name in context.tool_modules:
+        return []
+    ring = context.resolve_ring(name)
+    found = use_violations(constraints, local_policy, info, ring, imports)
+    return found if ring is None else found + placement_violations(constraints, local_policy, info, ring)
+
+
 def _module_preamble(context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], tops: Collection[str]) -> list[Violation]:
     """Documentation, annotation, tooling-import and forbidden-name findings, which apply whether or not the module has a ring."""
     is_tool = name in context.tool_modules
@@ -599,6 +618,7 @@ def _module_preamble(context: RuleContext, name: str, info: ModuleInfo, known: C
     if not is_tool:
         out += _dev_tool_imports(context, name, info, known, tops)
     local_policy = context.policy_for(name)
+    out += _constraint_findings(context, name, info, (known, tops))
     pattern = local_policy.forbidden_module_pattern(name) if local_policy is not None else None
     if pattern is not None:
         out.append(Violation(
@@ -819,8 +839,11 @@ def _effect_via_import_violations(
 ) -> list[Violation]:
     reachable = _effect_reachable(context, modules, effect_graph)
     out: list[Violation] = []
+    constraints = context.policy.package_constraints
     for edge in edges:
         out += _effect_via_import(edge, reachable)
+        if constraints.must_be_pure and not is_exempt_path(modules[edge.name].path):
+            out += reach_violations(constraints, edge.name, edge.line, edge.targets, reachable)
     return out
 
 

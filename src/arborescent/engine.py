@@ -16,6 +16,7 @@ from .certification import PROFILE, certify, tach_multi_root_note, version_warni
 from .classify_audit import audit_classification
 from .config import find_child_policy
 from .domain import (
+    CONSTRAINT_RULES,
     INFORMATIONAL_RULES,
     Policy,
     PolicyError,
@@ -226,7 +227,7 @@ def blocking(found: Iterable[Violation]) -> list[Violation]:
 
 
 def _is_package_gap(violation: Violation) -> bool:
-    return str(violation.rule).startswith("package-")
+    return str(violation.rule).startswith("package-") and violation.rule not in CONSTRAINT_RULES
 
 
 def enforced(policy: Policy, found: Iterable[Violation]) -> tuple[list[Violation], list[Violation]]:

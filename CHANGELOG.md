@@ -17,8 +17,12 @@
 - Opt-in pytest plugin `arborescent.pytest_io_block` (`-p arborescent.pytest_io_block`, extra `arborescent[pytest]`): tests
   selected by the `arbor_io_free` globs (or `--arbor-io-block`) run with file, network, process, sqlite, clock, random and
   environment access raising `IOBlockedError`. No new runtime dependency (#105).
-- `[package.constraints]` (`must_be_pure`, `forbid_effects`) in a package's own policy file: schema and validation only, nothing
-  enforced yet. Unknown keys, unknown effect names and non-boolean `must_be_pure` are policy errors; absent means no change (#164).
+- `[package.constraints]` (`must_be_pure`, `forbid_effects`) in a package's own policy file: schema and validation. Unknown keys,
+  unknown effect names and non-boolean `must_be_pure` are policy errors; absent means no change (#164).
+- Enforcement of `[package.constraints]` (#165): `package-constraint-facts` (a module uses a forbidden effect, or under
+  `must_be_pure` imports something impure or reaches an effect through a first-party import) and `package-constraint-placement`
+  (the ring a module sits in permits what the package forbids), per module and scope; test, docs and tooling paths are exempt.
+  Blocking under `modularity = "report"` too. `selftest` probes both when constraints are declared.
 - `arborescent admit MODULE --ring R [--reason TEXT] [--yes]` (#161): strict function-level admission of a module into a
   ring (function-local, `TYPE_CHECKING` and literal dynamic imports all count; a non-literal dynamic import is refused
   unless a reason is recorded; a tighter ring that fits is refused unless a reason is recorded). New `__arbor__` key

@@ -110,6 +110,8 @@ def test_rule_id_strings_never_change() -> None:
             "package-private-import",
             "package-release-policy-missing",
             "package-pyproject-drift",
+            "package-constraint-facts",
+            "package-constraint-placement",
         ]
     )
 

@@ -137,6 +137,10 @@ path = "src/arborescent/purity_probes.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/package_constraint_probes.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/module_forbid_probes.py"
 role = "source"
 
@@ -230,6 +234,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/package_constraints.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_constraint_rules.py"
 role = "source"
 
 [[packages.paths]]
