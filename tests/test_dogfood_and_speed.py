@@ -19,6 +19,7 @@ from arborescent.adapters import (
     SystemClock,
 )
 from arborescent.config import load_policy
+from arborescent.domain import Rule
 from arborescent.engine import Options, Services, run_check, run_own
 from arborescent.engines import default_engines
 from arborescent.package_checks import AnnotationPackageChecks
@@ -35,8 +36,13 @@ def own_services(cache: Path | None = None) -> Services:
 def test_arborescent_passes_its_own_policy_and_reports_generated_preset_drift_advisorially() -> None:
     policy, root = load_policy(LocalFileSystem(), HERE / "pyproject.toml")
     report = run_check(policy, root, own_services(), Options(tools=False, use_baseline=False))
-    assert report.violations == [], [v.render() for v in report.violations]
-    assert report.ok  # existing generated files may drift; that signal is informational
+    # Everything but `mixed-purity` (#173, adopted through the baseline: the modules that mix pure and effectful code are
+    # recorded and shrink-only) must be clean with no baseline at all.
+    assert [v.render() for v in report.violations if v.rule != Rule.MIXED_PURITY] == []
+    ratcheted = run_check(policy, root, own_services(), Options(tools=False))
+    assert ratcheted.ratchet is not None and ratcheted.ratchet.ok, [v.render() for v in ratcheted.ratchet.new] if ratcheted.ratchet else None
+    assert {v.rule for v in ratcheted.violations} <= {Rule.MIXED_PURITY}
+    assert ratcheted.ok  # existing generated files may drift; that signal is informational
 
 
 # Both speed budgets are per file, not absolute: they were set when this repository had 32 modules (1.0 s cold, 0.10 s warm), and

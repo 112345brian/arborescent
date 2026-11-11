@@ -1,5 +1,9 @@
 """``arborescent annotate``: migrate existing ``classify`` glob matches into explicit ``__arbor__`` annotations.
 
+A module new since a reference never gets a ring from here: it goes through ``arborescent admit``. What remains is the
+legacy migration of rings a human already wrote into ``classify``, behind ``--legacy``; it records policy, not a
+validated placement.
+
 Reuses the scanner's ``arbor_index`` (does a file already carry an annotation, valid or not) and ``classify``
 resolution (what ring it would get without one) so the insertion logic never re-implements either.
 """
@@ -12,10 +16,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .domain import Policy
-from .ports import FileSystem, ScanResult
+from .ports import FileSystem, ScanResult, ToolRunner
 from .rules import RuleContext
 
-__all__ = ["AnnotatePlan", "apply_annotations", "insert_annotation", "plan_annotations"]
+__all__ = ["AnnotatePlan", "apply_annotations", "insert_annotation", "new_since", "plan_annotations"]
 
 
 @dataclass(frozen=True)
@@ -23,13 +27,31 @@ class AnnotatePlan:
     to_annotate: tuple[tuple[str, str, str], ...] = ()  # (module, path, ring)
     already_annotated: tuple[str, ...] = ()  # paths that already carry an __arbor__ (valid or not)
     unmatched: tuple[str, ...] = ()  # paths with no classify match and no annotation
+    new_modules: tuple[tuple[str, str], ...] = ()  # (module, path) new since the reference: refused, routed to `admit`
 
 
-def plan_annotations(policy: Policy, scan: ScanResult) -> AnnotatePlan:
+def new_since(runner: ToolRunner, root: Path, ref: str) -> frozenset[str]:
+    """Repository-relative paths of the ``.py`` files added since the merge base of ``ref`` and HEAD (a rename is not an addition).
+
+    Raises ``ValueError`` when git or the reference cannot be read: a refusal that cannot see what is new must not pass."""
+    if not runner.available("git"):
+        raise ValueError("git is not available, so the modules new since the reference cannot be listed")
+    base = runner.run(["git", "merge-base", ref, "HEAD"], root)
+    if base.returncode != 0 or not base.stdout.strip():
+        raise ValueError(f"could not resolve {ref!r} against HEAD: {(base.stderr or base.stdout).strip() or 'no merge base'}")
+    diff = runner.run(["git", "diff", "--name-status", "-M", "--diff-filter=A", "-z", base.stdout.strip(), "HEAD"], root)
+    if diff.returncode != 0:
+        raise ValueError(f"could not list files added since {ref!r}: {(diff.stderr or diff.stdout).strip()}")
+    parts = diff.stdout.split("\0")
+    return frozenset(path for status, path in zip(parts[0::2], parts[1::2], strict=False) if status == "A" and path.endswith(".py"))
+
+
+def plan_annotations(policy: Policy, scan: ScanResult, new_paths: frozenset[str] = frozenset()) -> AnnotatePlan:
     indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
     to_annotate: list[tuple[str, str, str]] = []
     already_annotated: list[str] = []
     unmatched: list[str] = []
+    new_modules: list[tuple[str, str]] = []
     for module, rel in sorted(scan.paths.items(), key=lambda item: item[1]):
         if not rel.endswith(".py"):
             continue
@@ -41,8 +63,11 @@ def plan_annotations(policy: Policy, scan: ScanResult) -> AnnotatePlan:
         if classified is None:
             unmatched.append(rel)
             continue
+        if rel in new_paths:
+            new_modules.append((module, rel))
+            continue
         to_annotate.append((module, rel, classified))
-    return AnnotatePlan(tuple(to_annotate), tuple(already_annotated), tuple(unmatched))
+    return AnnotatePlan(tuple(to_annotate), tuple(already_annotated), tuple(unmatched), tuple(new_modules))
 
 
 def _is_docstring(stmt: ast.stmt) -> bool:

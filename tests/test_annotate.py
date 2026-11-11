@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from arborescent_helpers import mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
@@ -9,6 +10,7 @@ from arborescent.annotate import (
     AnnotatePlan,
     apply_annotations,
     insert_annotation,
+    new_since,
     plan_annotations,
 )
 from arborescent.cli import main
@@ -22,14 +24,20 @@ from arborescent.typecheckers import all_checkers
 
 
 class GitFiles(FakeToolRunner):
-    def __init__(self, files: list[str] | None = None, *, available: bool = True) -> None:
+    def __init__(self, files: list[str] | None = None, *, available: bool = True, added: list[str] | None = None, ref_ok: bool = True) -> None:
         super().__init__({"git"} if available else set())
         self.files = files or []
+        self.added = added or []
+        self.ref_ok = ref_ok
 
     def run(self, argv, cwd, timeout=600.0):  # type: ignore[no-untyped-def]
         self.calls.append(list(argv))
         if argv[0] == "git" and "ls-files" in argv:
             return ToolResult(0, "\n".join(self.files), "")
+        if argv[0] == "git" and "merge-base" in argv:
+            return ToolResult(0, "abc123\n", "") if self.ref_ok else ToolResult(128, "", "fatal: Not a valid object name")
+        if argv[0] == "git" and "diff" in argv:
+            return ToolResult(0, "".join(f"A\0{path}\0" for path in self.added), "")
         return super().run(argv, cwd, timeout)
 
 
@@ -163,7 +171,7 @@ def test_cli_annotate_is_dry_run_by_default(repo: Path, capsys) -> None:  # type
         encoding="utf-8",
     )
 
-    assert main(["--config", str(config), "annotate"], services) == 0
+    assert main(["--config", str(config), "annotate", "--legacy", "--against", "main"], services) == 0
 
     output = capsys.readouterr().out
     assert "would annotate" in output
@@ -182,7 +190,7 @@ def test_cli_annotate_writes_with_yes(repo: Path, capsys) -> None:  # type: igno
         encoding="utf-8",
     )
 
-    assert main(["--config", str(config), "annotate", "--yes"], services) == 0
+    assert main(["--config", str(config), "annotate", "--legacy", "--against", "main", "--yes"], services) == 0
 
     content = (repo / "app/domain.py").read_text(encoding="utf-8")
     assert '__arbor__ = {"ring": "domain"}' in content
@@ -190,7 +198,124 @@ def test_cli_annotate_writes_with_yes(repo: Path, capsys) -> None:  # type: igno
     assert "annotated" in output
 
     # second run is a no-op: everything is already annotated
-    assert main(["--config", str(config), "annotate", "--yes"], services) == 0
+    assert main(["--config", str(config), "annotate", "--legacy", "--against", "main", "--yes"], services) == 0
     output2 = capsys.readouterr().out
     assert "0 annotated" in output2
     assert "2 already annotated" in output2
+
+
+CONFIG = (
+    'sources = ["app"]\nrings = ["domain", "composition"]\n'
+    '[ring.domain]\nexternal = []\n[ring.composition]\nmay_import = ["*"]\nexternal = ["*"]\n'
+    '[classify]\n"app" = "domain"\n"app.*" = "domain"\n'
+)
+
+
+def _config(repo: Path) -> Path:
+    config = repo / "arborescent.toml"
+    config.write_text(CONFIG, encoding="utf-8")
+    return config
+
+
+def test_plan_annotations_refuses_modules_new_since_the_reference(repo: Path) -> None:
+    services = make_services(GitFiles(["app/__init__.py", "app/domain.py", "app/fresh.py"]))
+    policy = mini_policy(classify={"app": "domain", "app.*": "domain"})
+    write_files(repo, {"app/fresh.py": "VALUE = 1\n"})
+
+    _, scan = run_own(policy, repo, services, practices=False)
+    plan = plan_annotations(policy, scan, frozenset({"app/fresh.py"}))
+
+    assert plan.new_modules == (("app.fresh", "app/fresh.py"),)
+    assert not any(rel == "app/fresh.py" for _, rel, _ in plan.to_annotate)
+    assert any(rel == "app/domain.py" for _, rel, _ in plan.to_annotate)
+
+
+def test_apply_annotations_never_writes_a_new_module() -> None:
+    fs = FakeFileSystem()
+    fs.add(Path("/r/app/fresh.py"), "VALUE = 1\n")
+    plan = AnnotatePlan(new_modules=(("app.fresh", "app/fresh.py"),))
+
+    assert apply_annotations(fs, Path("/r"), plan) == 0
+    assert "__arbor__" not in fs.read_text(Path("/r/app/fresh.py"))
+
+
+def test_new_since_reads_added_files_only(tmp_path: Path) -> None:
+    runner = GitFiles(added=["app/fresh.py", "app/sub dir/x.py"])
+    assert new_since(runner, tmp_path, "main") == frozenset({"app/fresh.py", "app/sub dir/x.py"})
+    assert ["git", "merge-base", "main", "HEAD"] in runner.calls
+    diff = next(call for call in runner.calls if "diff" in call)
+    assert "-M" in diff and "--diff-filter=A" in diff and "abc123" in diff
+
+
+def test_new_since_fails_loudly_on_an_unreadable_reference(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="nope"):
+        new_since(GitFiles(ref_ok=False), tmp_path, "nope")
+
+
+def test_new_since_fails_loudly_without_git(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="git"):
+        new_since(GitFiles(available=False), tmp_path, "main")
+
+
+def test_cli_annotate_refuses_a_new_module_and_names_admit(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    write_files(repo, {"app/fresh.py": "VALUE = 1\n"})
+    services = make_services(GitFiles(["app/__init__.py", "app/domain.py", "app/fresh.py"], added=["app/fresh.py"]))
+
+    assert main(["--config", str(_config(repo)), "annotate", "--legacy", "--against", "main", "--yes"], services) == 0
+
+    output = capsys.readouterr().out
+    assert "arborescent admit app.fresh --ring" in output
+    assert "__arbor__" not in (repo / "app/fresh.py").read_text(encoding="utf-8")
+    assert '__arbor__ = {"ring": "domain"}' in (repo / "app/domain.py").read_text(encoding="utf-8")
+
+
+def test_cli_annotate_legacy_output_says_it_records_policy_not_a_validated_placement(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    services = make_services(GitFiles(["app/__init__.py", "app/domain.py"]))
+
+    assert main(["--config", str(_config(repo)), "annotate", "--legacy", "--against", "main"], services) == 0
+
+    assert "records the policy's placement, not a validated one" in capsys.readouterr().out
+
+
+def test_cli_annotate_without_legacy_writes_nothing_and_points_to_admit(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    services = make_services(GitFiles(["app/__init__.py", "app/domain.py"]))
+
+    assert main(["--config", str(_config(repo)), "annotate", "--yes"], services) == 1
+
+    output = capsys.readouterr().out
+    assert "arborescent admit" in output and "--legacy" in output
+    assert "__arbor__" not in (repo / "app/domain.py").read_text(encoding="utf-8")
+
+
+def test_cli_annotate_legacy_requires_a_reference(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    services = make_services(GitFiles(["app/__init__.py", "app/domain.py"]))
+
+    assert main(["--config", str(_config(repo)), "annotate", "--legacy", "--yes"], services) == 1
+
+    assert "--against" in capsys.readouterr().out
+    assert "__arbor__" not in (repo / "app/domain.py").read_text(encoding="utf-8")
+
+
+def test_cli_annotate_unreadable_reference_fails_and_writes_nothing(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    services = make_services(GitFiles(["app/__init__.py", "app/domain.py"], ref_ok=False))
+
+    assert main(["--config", str(_config(repo)), "annotate", "--legacy", "--against", "nope", "--yes"], services) == 1
+
+    assert "nope" in capsys.readouterr().out
+    assert "__arbor__" not in (repo / "app/domain.py").read_text(encoding="utf-8")
+
+
+def test_a_module_renamed_since_the_reference_is_not_new(repo: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    # git reports a rename as R, so the --diff-filter=A listing is empty: the module is legacy and still migrated.
+    write_files(repo, {"app/moved.py": "VALUE = 1\n"})
+    services = make_services(GitFiles(["app/__init__.py", "app/domain.py", "app/moved.py"], added=[]))
+
+    assert main(["--config", str(_config(repo)), "annotate", "--legacy", "--against", "main", "--yes"], services) == 0
+
+    assert '__arbor__ = {"ring": "domain"}' in (repo / "app/moved.py").read_text(encoding="utf-8")
+
+
+def test_unannotated_module_message_names_the_routes_into_a_ring() -> None:
+    policy = mini_policy(classify={"app": "domain"}, require_arbor_annotations=True)
+    message = policy.annotation_required_violation({}, "app")
+    assert message is not None and "arborescent admit" in message

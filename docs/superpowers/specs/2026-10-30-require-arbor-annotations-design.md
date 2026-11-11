@@ -23,7 +23,7 @@ indefinitely, and a strict profile adds an opt-in requirement on top of it. This
   in a newly-written library while a legacy one keeps the old behavior.
 - A vendored or otherwise un-annotatable subtree within a single scope can be exempted by module-name glob
   (`require_arbor_annotations_exclude`), without forcing it into its own formal scope.
-- `arborescent annotate` is the migration path: run it to backfill annotations from `classify`, then turn the flag on
+- `arborescent annotate --legacy --against REF` is the migration path (new modules go through `arborescent admit`; see the 2026-11-10 admission design): run it to backfill annotations from `classify`, then turn the flag on
   once `discover`/`check` show nothing left unannotated.
 - `disabled_tools = ["arbor-annotations"]` and `require_arbor_annotations = true` together is a contradiction (you
   cannot require what you have turned off) and is rejected as a policy error, not silently resolved one way.
@@ -102,7 +102,7 @@ someone later enables the flag on a policy that *can* exercise it.
 ### Docs and migration story
 
 `docs/configuration.md`'s "Module ring annotations: `__arbor__`" section gains a "Requiring annotations" subsection:
-what the flag does, the exclude list, the `disabled_tools` conflict, and the three-step migration (`annotate --yes`,
+what the flag does, the exclude list, the `disabled_tools` conflict, and the three-step migration (`annotate --legacy --against REF --yes`,
 confirm `discover`/`check` show no classify-only modules left, turn the flag on). `docs/architecture.md`'s rule table
 gains the new id.
 

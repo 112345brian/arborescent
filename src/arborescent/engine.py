@@ -16,6 +16,7 @@ from .certification import PROFILE, certify, tach_multi_root_note, version_warni
 from .classify_audit import audit_classification
 from .config import find_child_policy
 from .domain import (
+    CONSTRAINT_RULES,
     INFORMATIONAL_RULES,
     Policy,
     PolicyError,
@@ -42,6 +43,7 @@ from .ports import (
     ViolationEngine,
 )
 from .practices import run_practices
+from .purity import excluded_findings
 from .ratchet_measure import Subject
 from .rules import RuleContext, check_modules
 from .suggestions import Suggestion, file_size_suggestions
@@ -77,6 +79,7 @@ class Options:
     require_visible: bool = False  # fail on every dependency tach cannot see (run-time imports) instead of only noting it
     require_modularity: bool = False  # fail unless the policy keeps `modularity = "ready"` and no package gap is open
     growth_against: str | None = None
+    admitted_against: str | None = None  # git ref: fail a module new since it that was not validly admitted (#163)
     no_cache: bool = False
     rules: tuple[str, ...] = ()  # rule families to run and exit on; empty selects everything (#137)
 
@@ -180,6 +183,7 @@ def run_own(
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
     found += _inventory_violations(scan.modules)
+    found += excluded_findings(policy, scan.excluded_modules)
     if only is None:  # the signals compare a module with its importers and peers: a whole-repository fact
         found += audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
     if "tach" not in policy.disabled_tools:
@@ -223,7 +227,7 @@ def blocking(found: Iterable[Violation]) -> list[Violation]:
 
 
 def _is_package_gap(violation: Violation) -> bool:
-    return str(violation.rule).startswith("package-")
+    return str(violation.rule).startswith("package-") and violation.rule not in CONSTRAINT_RULES
 
 
 def enforced(policy: Policy, found: Iterable[Violation]) -> tuple[list[Violation], list[Violation]]:
@@ -417,6 +421,8 @@ def child_arbor_command(config_path: Path, opts: Options) -> list[str]:
         argv.extend(("--type-checker", opts.type_checker))
     if opts.growth_against is not None:
         argv.extend(("--growth-against", opts.growth_against))
+    if opts.admitted_against is not None:
+        argv.extend(("--admitted-against", opts.admitted_against))
     return argv
 
 

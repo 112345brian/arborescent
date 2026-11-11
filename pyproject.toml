@@ -74,7 +74,7 @@ rings = ["domain", "ports", "application", "adapters", "composition"]
 type_checkers = ["ty", "pyright"]
 
 [tool.arborescent.groups]
-pure = ["__future__", "collections", "dataclasses", "enum", "fnmatch", "re", "typing", "ast", "sys", "tomllib", "io", "tokenize", "posixpath", "json"]
+pure = ["__future__", "collections", "dataclasses", "enum", "fnmatch", "re", "typing", "ast", "sys", "tomllib", "io", "tokenize", "posixpath", "json", "bisect"]
 
 [tool.arborescent.ring.domain]
 external = ["@pure", "pathlib", "hashlib", "arborescent"]
@@ -130,9 +130,14 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.generated_config" = "domain"
 "arborescent.lazy_imports" = "domain"
 "arborescent.import_cycles" = "domain"
+"arborescent.equivalence" = "domain"
+"arborescent.purity" = "domain"
+"arborescent.purity_facts" = "domain"
+"arborescent.purity_policy" = "domain"
 "arborescent.ratchet_config" = "application"
 "arborescent.ratchet_measure" = "application"
 "arborescent.ratchets" = "application"
+"arborescent.admitted_against" = "application"
 "arborescent.pytest_io_block" = "composition"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
@@ -168,6 +173,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.importable_by_probes" = "application"
 "arborescent.owned_literal_probes" = "application"
 "arborescent.construct_only_probes" = "application"
+"arborescent.purity_probes" = "application"
 "arborescent.adapters" = "adapters"
 "arborescent.installer_adapter" = "adapters"
 "arborescent.clock_adapter" = "adapters"
@@ -191,7 +197,10 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.coupling_policy" = "domain"
 "arborescent.coupling_ratchet" = "domain"
 "arborescent.package_constraints" = "domain"
+"arborescent.package_constraint_rules" = "domain"
+"arborescent.package_constraint_probes" = "application"
 "arborescent.cli_cycles" = "composition"
+"arborescent.cli_purity" = "composition"
 "arborescent.cli_admit" = "composition"
 "arborescent.cli_ratchet" = "composition"
 "arborescent.__main__" = "composition"
@@ -205,6 +214,10 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.migration_json" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
 "arborescent.migration_export" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
 "arborescent.packages" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
+
+# The tests are excluded from the scan on purpose; parsing the 80+ test files for `mixed-purity-excluded` notes would double the cold scan.
+[tool.arborescent.mixed_purity]
+report_excluded = false
 
 # Import closure of the one program entrypoint, and the importer count from which a module is a hub (#148); `arborescent coupling check` ratchets both.
 [tool.arborescent.coupling]
@@ -227,6 +240,7 @@ docs-sync = "docs/architecture.md"
 "src/arborescent/cli_migrate.py" = ["T20"]
 "src/arborescent/cli_coupling.py" = ["T20"]
 "src/arborescent/cli_cycles.py" = ["T20"]
+"src/arborescent/cli_purity.py" = ["T20"]
 "src/arborescent/cli_admit.py" = ["T20"]
 
 # Only the command line installs and reports the pre-push hook; `selftest` injects an outside import (importable_by_probes).

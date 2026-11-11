@@ -81,6 +81,10 @@ path = "src/arborescent/domain.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/equivalence.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/engine.py"
 role = "source"
 
@@ -133,6 +137,14 @@ path = "src/arborescent/construct_only_probes.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/purity_probes.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_constraint_probes.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/module_forbid_probes.py"
 role = "source"
 
@@ -169,6 +181,18 @@ path = "src/arborescent/import_cycles.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/purity.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/purity_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/purity_policy.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/rules.py"
 role = "source"
 
@@ -182,6 +206,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/admission_probes.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/admitted_against.py"
 role = "source"
 
 [[packages.paths]]
@@ -210,6 +238,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/package_constraints.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/package_constraint_rules.py"
 role = "source"
 
 [[packages.paths]]
@@ -403,6 +435,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/cli_cycles.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_purity.py"
 role = "source"
 
 [[packages.paths]]

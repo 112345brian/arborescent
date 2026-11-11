@@ -16,7 +16,8 @@ from .adapters import (
     SubprocessToolRunner,
     SystemClock,
 )
-from .annotate import apply_annotations, plan_annotations
+from .admitted_against import admission_problems
+from .annotate import apply_annotations, new_since, plan_annotations
 from .bench import run_bench
 from .classify_audit import suggest_ring
 from .cli_admit import add_admit_parser, run_admit
@@ -25,6 +26,7 @@ from .cli_coupling import add_coupling_parser, run_coupling
 from .cli_cycles import run_cycles
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
+from .cli_purity import run_purity
 from .cli_ratchet import add_ratchet_parser, growth_run, run_ratchet
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
@@ -174,6 +176,11 @@ def _add_check_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> Non
         help="verify baseline growth entries against a git ref",
     )
     c.add_argument(
+        "--admitted-against",
+        metavar="REF",
+        help="fail a module new since this git ref that was not validly admitted (explicit __arbor__ ring that `arborescent admit` would accept)",
+    )
+    c.add_argument(
         "--rule",
         action="append",
         default=[],
@@ -204,8 +211,10 @@ def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser])
     discover.add_argument("--suggest", action="store_true", help="per module, print the tightest ring its imports and effects permit, with the evidence")
     annotate = add_parser(
         "annotate",
-        help="migrate classify matches into explicit __arbor__ annotations (dry-run by default)",
+        help="migrate legacy classify matches into __arbor__ annotations (needs --legacy --against REF; new modules go through `admit`; dry-run by default)",
     )
+    annotate.add_argument("--legacy", action="store_true", help="migrate rings a human already wrote into `classify`; records policy, not a validated placement")
+    annotate.add_argument("--against", metavar="REF", help="git reference: modules added since its merge base with HEAD are refused and routed to `arborescent admit`")
     annotate.add_argument(
         "--yes",
         action="store_true",
@@ -215,6 +224,8 @@ def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser])
     add_parser("selftest", help="mutation-test the rules")
     add_coupling_parser(add_parser)
     add_parser("cycles", help="report import cycles, the edges to cut and the function-level imports that only break a cycle")
+    purity = add_parser("purity", help="rank the modules that mix substantial pure logic with effectful code by how many modules import them")
+    purity.add_argument("--json", action="store_true", help="print the ranked modules as JSON")
     add_ratchet_parser(add_parser)
 
 
@@ -337,6 +348,7 @@ def _dispatch(
         "admit": lambda: run_admit(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),
         "cycles": lambda: run_cycles(policy, root, svc),
+        "purity": lambda: run_purity(policy, root, svc, args.json),
         "ratchet": lambda: _ratchet(args, policy, root, svc),
     }
     return handlers.get(args.command, lambda: _check(args, policy, root, svc))()
@@ -536,22 +548,32 @@ def _ratchet(args: argparse.Namespace, policy: Policy, root: Path, svc: Services
 
 
 def _annotate(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    if not args.legacy:
+        print("annotate: it no longer writes rings onto modules by itself. Place a new module with `arborescent admit MODULE --ring R`;")
+        print("annotate: migrate rings that `classify` already holds with `arborescent annotate --legacy --against REF`.")
+        return 1
+    if not args.against:
+        print("annotate: --legacy needs --against REF, so modules new since REF are refused and routed to `arborescent admit`")
+        return 1
+    try:
+        new_paths = new_since(svc.runner, root, args.against)
+    except ValueError as exc:
+        print(f"annotate: {exc}")
+        return 1
     _, scan = run_own(policy, root, svc, practices=False)
-    plan = plan_annotations(policy, scan)
-    if args.yes:
-        written = apply_annotations(svc.fs, root, plan)
-        for _, rel, ring in plan.to_annotate:
-            print(f"annotated {rel} (ring: {ring})")
-    else:
-        written = 0
-        for _, rel, ring in plan.to_annotate:
-            print(f"would annotate {rel} (ring: {ring})")
+    plan = plan_annotations(policy, scan, new_paths)
+    print("annotate: --legacy records the policy's placement, not a validated one; `classify` is human-written policy and nothing here checked it against the module's facts")
+    for module, rel in plan.new_modules:
+        print(f"new since {args.against}, not annotated: {rel}; run `arborescent admit {module} --ring R`")
+    written = apply_annotations(svc.fs, root, plan) if args.yes else 0
+    for _, rel, ring in plan.to_annotate:
+        print(f"{'annotated' if args.yes else 'would annotate'} {rel} (ring: {ring})")
     for rel in plan.unmatched:
         print(f"no classify match: {rel}")
     print(
         f"annotate: {written if args.yes else len(plan.to_annotate)} "
         f"{'annotated' if args.yes else 'would be annotated'}, "
-        f"{len(plan.already_annotated)} already annotated, {len(plan.unmatched)} unmatched"
+        f"{len(plan.already_annotated)} already annotated, {len(plan.unmatched)} unmatched, {len(plan.new_modules)} new (use admit)"
     )
     return 0
 
@@ -632,6 +654,7 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         require_modularity=args.require_modularity,
         require_visible=args.require_visible,
         growth_against=args.growth_against,
+        admitted_against=args.admitted_against,
         no_cache=args.no_cache,
         rules=tuple(args.rule),
     )
@@ -642,6 +665,8 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         report.engines.append(_growth_check(args.growth_against, policy, root, svc))
         if policy.ratchets:
             report.engines.append(growth_run(args.growth_against, policy, root, svc))
+    if args.admitted_against:
+        report.engines.append(_admission_check(args.admitted_against, policy, root, svc))
     setup_command = (
         None
         if args.no_tools
@@ -694,6 +719,18 @@ def _growth_check(ref: str, policy: Policy, root: Path, svc: Services) -> Engine
         lines.append(f"could not verify ratchet growth: {exc}")
     status = "fail" if lines else "ok"
     return EngineRun("baseline growth log", status, svc.clock.now() - started, lines or [f"growth logs match ratchet changes since {ref}"])
+
+
+def _admission_check(ref: str, policy: Policy, root: Path, svc: Services) -> EngineRun:
+    """#163: every module new since ``ref`` must be validly admitted; an unreadable ref or a shallow clone fails, never passes."""
+    started = svc.clock.now()
+    try:
+        _, scan = run_own(policy, root, svc, practices=False)  # a full scan: admission needs every module's ring and importers
+        lines = admission_problems(ref, policy, root, scan, svc.runner)
+    except (ValueError, OSError) as exc:
+        lines = [f"could not verify admission: {exc}"]
+    status = "fail" if lines else "ok"
+    return EngineRun("admission", status, svc.clock.now() - started, lines or [f"every module new since {ref} was validly admitted"])
 
 
 if __name__ == "__main__":

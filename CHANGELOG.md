@@ -5,21 +5,42 @@
 ## Unreleased
 
 ### Added
+- `mixed-purity` (#173): a module with at least two substantial pure top-level definitions (4+ body lines) next to an
+  effectful one, or an import-time effect, is reported in every ring. It reuses the existing effect facts, attributes
+  them to definitions, and adds the kinds `logging`, `memo`, `state` and (configured) `ambient`; none of them feed the
+  `effect-*` rules. Configured under `[tool.arborescent.mixed_purity]` (`enabled`, `min_pure_units`, `min_body_lines`,
+  `kinds`, `ambient`, and an `allow` list that needs a `reason` per entry and fails on a stale entry). Findings carry no
+  counts in their baseline key. Files under `exclude` are assessed too and reported as informational `mixed-purity-excluded`
+  notes. New `arborescent purity [--json]` ranks mixed modules by importer count, and `selftest` gains three probes.
+  The rule is on by default; `enabled = false` or a baseline adopts it. The fact cache layout grew (`scan.json` v21), so
+  the first run after upgrading re-parses every file.
 - Opt-in pytest plugin `arborescent.pytest_io_block` (`-p arborescent.pytest_io_block`, extra `arborescent[pytest]`): tests
   selected by the `arbor_io_free` globs (or `--arbor-io-block`) run with file, network, process, sqlite, clock, random and
   environment access raising `IOBlockedError`. No new runtime dependency (#105).
-- `[package.constraints]` (`must_be_pure`, `forbid_effects`) in a package's own policy file: schema and validation only, nothing
-  enforced yet. Unknown keys, unknown effect names and non-boolean `must_be_pure` are policy errors; absent means no change (#164).
+- `[package.constraints]` (`must_be_pure`, `forbid_effects`) in a package's own policy file: schema and validation. Unknown keys,
+  unknown effect names and non-boolean `must_be_pure` are policy errors; absent means no change (#164).
+- Enforcement of `[package.constraints]` (#165): `package-constraint-facts` (a module uses a forbidden effect, or under
+  `must_be_pure` imports something impure or reaches an effect through a first-party import) and `package-constraint-placement`
+  (the ring a module sits in permits what the package forbids), per module and scope; test, docs and tooling paths are exempt.
+  Blocking under `modularity = "report"` too. `selftest` probes both when constraints are declared.
 - `arborescent admit MODULE --ring R [--reason TEXT] [--yes]` (#161): strict function-level admission of a module into a
   ring (function-local, `TYPE_CHECKING` and literal dynamic imports all count; a non-literal dynamic import is refused
   unless a reason is recorded; a tighter ring that fits is refused unless a reason is recorded). New `__arbor__` key
   `ring_reason` (a tool older than the release containing it reports `invalid-arbor-annotation` on a file that uses it).
+- `arborescent check --admitted-against REF` (#163): a module new since the merge base with `REF` (`git diff -M
+  --diff-filter=A`, renames are not new) fails unless it has an explicit `__arbor__` ring and `admit`'s strict test still
+  passes at HEAD (`admission-refused`), or a tighter ring fits and no `ring_reason` is recorded
+  (`admission-looser-than-needed`). An unreadable ref or a shallow clone fails; existing modules are untouched. The same flag
+  is forwarded to child arbors.
 - Baseline growth entries now carry `approved-by`: `baseline --allow-growth` requires `--approved-by WHO` (adoption
   records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
 - `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an
   added or raised value needs an attributed growth entry appended since the ref (#139).
 
 ### Changed
+- `arborescent annotate` no longer writes a ring by itself (#162): migrating `classify` matches needs `--legacy --against REF`,
+  modules added since `REF` are refused and routed to `arborescent admit`, an unreadable `REF` fails with exit 1, and the
+  output says the annotation records policy, not a validated placement. The `unannotated-module` message names both routes.
 - Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they
   are newer than the ref.
 - `arborescent check --rule FAMILY` (repeatable) runs and exits on one rule family, and `check` prints a
@@ -47,6 +68,9 @@
   for every added or raised count (#147).
 ### Fixed
 - The `STALE baseline entry` hint now points at `arborescent baseline --prune`, which works while other violations are unbaselined (#135).
+- `adapter-equivalence` practice: declare groups of modules that implement one port; fails when no single test function
+  calls into every member. `adapter-equivalence-report` makes the missing-test finding information; invalid groups always
+  fail. Built on `function_references`; default-argument parity (direction 2) is not implemented (#113).
 - `test-reference` practice (information): reports public functions of I/O-free rings that no function under the tests
   folder imports and calls, resolved through aliases and package re-exports. `test-reference-exempt` skips names. The
   per-function call facts it reads (`SourceFacts.function_calls`) are reusable by an adapter-equivalence check (#104).

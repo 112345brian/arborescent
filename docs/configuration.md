@@ -637,9 +637,31 @@ forbid_effects = ["network"]     # effect categories this package never uses, de
 `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`); duplicates collapse. They
 apply to paths with role `source`; test, docs and asset paths are exempt.
 
-This release **parses and validates only; nothing is enforced yet**. There is no blind spot in the schema: an unknown key
-under `package` or `package.constraints`, an unknown effect name (`netwrok`), a non-boolean `must_be_pure`, or a
-`forbid_effects` that is not a list of names is a policy error. With no `[package]` table nothing changes.
+There is no blind spot in the schema: an unknown key under `package` or `package.constraints`, an unknown effect name
+(`netwrok`), a non-boolean `must_be_pure`, or a `forbid_effects` that is not a list of names is a policy error. With no
+`[package]` table nothing changes.
+
+Two independent rules enforce the table, each module judged against **its own scope's** ladder (the table sits at the policy
+root, so in multi-scope mode one promise covers every scope and each module is checked against the ring it is placed in):
+
+- `package-constraint-facts`: the module **uses** a forbidden effect, in whatever ring it sits, so a host cannot loosen the
+  promise by placement. `forbid_effects` covers the module's own effect uses (the scanner's per-function analysis and
+  category taxonomy; no second detector). `must_be_pure` forbids every category and also: any non-type-only import of
+  something that is neither first-party nor on the pure allow-list (the structural stdlib `__future__`, `typing`,
+  `dataclasses`, `collections`, `enum`, `abc`, plus `math`, `re`, `functools`, `itertools`, `operator`, `json` and similar
+  computation-only modules; `arborescent.package_constraint_rules.PURE_STDLIB` is the list), and any import of a first-party
+  module from which a forbidden effect is reachable (the existing `effect-via-import` graph: first-party, same scope,
+  type-only imports carry nothing).
+- `package-constraint-placement`: the ring the host put the module in **permits** an effect the package forbids (a ring's
+  `forbid` list, or the preset default, leaves it open). Failing here, before any module misbehaves, is the point: tighten the
+  ring or drop the constraint. For `must_be_pure` every effect category counts bar the test-only `patch`.
+
+Limits: reachability is the file-level import graph, not a call graph, and it does not look inside third-party packages (the
+import itself is refused instead); `must_be_pure` placement compares effects and does not read a ring's `external` list;
+`forbid_effects` alone does not follow imports or restrict them; a module without a ring is left to `unclassified`. Paths
+below a `tests`, `test` or `docs` folder, `conftest.py` and `dev_tools` modules are exempt. Both rules are blocking whatever
+`modularity` says. `selftest` probes each with a new module (a clock call; an `__arbor__` annotation into a ring that permits
+the effect) and lists a probe it cannot build, with the reason, as skipped.
 
 ## Module ring annotations: `__arbor__`
 
@@ -715,9 +737,15 @@ rejected as a policy error.
 
 Migrating an existing classify-only project:
 
-1. Run `arborescent annotate` (dry-run by default) to see what it would insert; `arborescent annotate --yes` writes
-   `__arbor__ = {"ring": ...}` into every module `classify` currently resolves but that has no existing annotation.
-   It is idempotent: a second run reports already-annotated files and writes nothing.
+1. Run `arborescent annotate --legacy --against REF` (dry-run by default) to see what it would insert; add `--yes` to
+   write `__arbor__ = {"ring": ...}` into every module `classify` currently resolves but that has no existing
+   annotation. This records the policy's placement, not a validated one: `classify` is human-written and nothing
+   checks it against the module's facts. `--legacy` is required, and so is `--against REF` (any git reference, such
+   as `origin/main`): a module added since the merge base of `REF` and HEAD is never annotated here; the command
+   lists it and names `arborescent admit MODULE --ring R`, which scans its imports and effects before it writes. An
+   unreadable `REF` (unknown reference, shallow clone, no git) fails with exit 1 and writes nothing. A module git
+   sees as renamed is not new. The command is idempotent: a second run reports already-annotated files and writes
+   nothing.
 2. Run `arborescent discover` and `arborescent check` and confirm nothing is left relying on `classify` alone (add
    `require_arbor_annotations_exclude` entries for anything that genuinely cannot be annotated).
 3. Set `require_arbor_annotations = true`. From then on, a new module that lands without an annotation fails
@@ -808,6 +836,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `docstring-ring-mismatch` | `docs.module_names_ring` is on and a module's docstring does not name the ring that `classify` or `__arbor__` gives it (it says which other rings it names) |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
+| `mixed-purity` | a module holds at least `min_pure_units` (default 2) substantial pure top-level functions or classes (a body of at least `min_body_lines`, default 4, lines) and at least one effectful one, or an effect that runs at import time. Enforced in every ring; see [Mixed purity](#mixed-purity-toolarborescentmixed_purity). The detail names only the ring, so the baseline key survives renaming functions; the hint lists the effect kinds, the effectful and pure definitions and the importer count. Also an `allow` entry that matches no module or no mixed module |
+| `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
@@ -839,6 +869,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `package-public-symbol-dropped` | a module on a package's declared public surface lost a public class or function in its part |
 | `package-private-import` | a module imports another package's module outside the `public` surface that package declares (checked in the origin and in each part) |
 
+| `package-constraint-facts` | a module uses an effect `[package.constraints]` forbids (`forbid_effects`, or any effect under `must_be_pure`), or under `must_be_pure` imports a non-pure external package or a first-party module that reaches one, whatever its ring |
+| `package-constraint-placement` | the ring a module is placed in permits an effect `[package.constraints]` forbids; tighten the ring or drop the constraint |
 | `package-pyproject-drift` | information only (never fails, never baselined): `package_pyproject` is set and a derived field of an existing package `pyproject.toml` disagrees with the annotations |
 
 Effect rules detect direct imports and attribute chains, including aliases. They do not detect uses routed through
@@ -959,6 +991,22 @@ Each practice is off until it has a value.
 | `stale-config-path` | list of config file globs, e.g. `["Makefile", ".github/workflows/*.yml"]`; `stale-config-path-allow` lists path globs to ignore | a glob or `.py` path in the file matches nothing (a suite silently runs zero tests after a move), or a pyproject's hatch `packages` entry does not exist |
 | `source-root-drift` | `true`, or a list of files (default `["tach.toml", "pyproject.toml"]`) | a `sources` entry is below no `source_roots` entry, or the root list copied into `tach.toml` `source_roots`, hatch `sources`/`packages` or pytest `pythonpath` has drifted from the policy |
 | `test-reference` | tests folder, e.g. `"tests"`; `test-reference-exempt` lists `module.function` names or module globs to skip | information only: a public module-level function in an I/O-free ring (one that forbids `filesystem`, `network`, `database` and `process`; the innermost ring by default) that no function under the tests folder imports and calls. Resolved through import aliases and package re-exports; not through an object of unknown type, a fixture or a parametrized argument, and a function only a tested caller reaches is reported. Private, abstract and class members are skipped. A name that is only imported or mentioned does not count (#104) |
+| `adapter-equivalence` | list of groups of full module names, e.g. `[["pkg.fact_queries", "pkg.modes_store"]]`; `adapter-equivalence-tests` is the tests folder (default `"tests"`); `adapter-equivalence-report = true` makes the missing-test finding information only | fails when no single test function calls a function of every module in a group, so two adapters of one port cannot both ship without a differential test (#113). Group errors always fail, even with `adapter-equivalence-report`: an unknown module (not a scanned module; a unique suffix match is suggested), a group with fewer than two distinct modules, a module in two groups, a value that is not a list of lists of strings. See "Adapter equivalence" below |
+| `adapter-equivalence-report` | `true` | not a check of its own: makes `adapter-equivalence`'s missing-test finding information only (rule id `adapter-equivalence-report`, never fails, never baselined); group errors still fail |
+
+### Adapter equivalence
+
+`adapter-equivalence` forces a differential test to exist; it does not check that the test compares anything. The behaviour
+of a port is the project's contract test to write (see "Two adapters of one port can still disagree" in `docs/architecture.md`). A test
+function counts only through direct calls it makes (the machinery of `test-reference`, so aliases and package re-exports
+resolve to the defining module, which is the name to list). It does **not** count:
+
+- a call in a helper the test delegates to, or a module-level call (call one function of each module in the test body);
+- a fixture or a parametrized argument (`store.list_facts()` on an unknown-type object);
+- a bare import or a mention such as `assert a is not b`.
+
+Members may sit in different rings and scopes; no ring filter applies and the check adds no import edge. A module outside
+the scan (excluded, or misspelled) is an error rather than a skipped member.
 
 `stale-config-path` is a heuristic: it reads path-like tokens (containing `/`, and either a glob or ending in `.py`) and skips
 comments, URLs, variables, absolute and `..` paths, generated folders and `.pyc`/`.log`/`.tmp` globs. A path it should not
@@ -1037,6 +1085,67 @@ below it, and every declared entrypoint needs a `closure` entry. A count above i
 `arborescent coupling baseline` writes the file the first time and afterwards only lowers counts (a smaller or gone entry prints as
 `STALE` in `check`); a rise or a new entry needs `--allow-growth --reason TEXT` and is logged in `growth`. The file is separate
 from the check baseline and is not read by `arborescent check`.
+
+## Mixed purity: `[tool.arborescent.mixed_purity]`
+
+A ring label says where a module sits; it does not say the module is one thing. A module in a permissive ring can hold a
+large block of pure logic next to a function that reads the clock, walks the filesystem and logs, and every importer inherits
+all of it. `mixed-purity` flags that module in **every ring**: it is two modules.
+
+A module is *mixed* when it has at least `min_pure_units` **substantial pure** top-level definitions and at least one
+**effectful** one (or an effect that runs when the module is imported).
+
+- A definition is *substantial* when its body (past the docstring) spans `min_body_lines` source lines. A class counts only
+  when it has a method that is not a stub; a field-only dataclass, a `Protocol` or an ABC is a model, not logic. A pass-through
+  wrapper (the `forwarded-import` shape) does not count.
+- A definition is *effectful* when it directly uses an effect of a kind in `kinds`, **or calls an effectful function of the
+  same module by name**: a function that calls a logging helper is not pure.
+- Effects come from the facts the `effect-*` rules already extract (same table, same `effect_defaults` seam handling), so there is
+  no second detector. A use outside every top-level definition is an import-time effect, except inside an
+  `if __name__ == "__main__":` block, which runs as a program. `os-branching` and `patch` are not effects here.
+  `TYPE_CHECKING` imports create no use, so they never make a module effectful.
+- A module where every definition is effectful (an adapter, a port wrapper) or none is (a pure module, a pure model) is not mixed.
+
+```toml
+[tool.arborescent.mixed_purity]
+enabled = true            # default; false turns the rule off
+report_excluded = true    # default; false skips parsing files under `exclude` (one extra cold parse per excluded file)
+min_pure_units = 2        # default: pure definitions needed before a module counts as mixed
+min_body_lines = 4        # default: lines a definition needs to be substantial
+kinds = ["clock", "env", "filesystem", "logging", "memo", "state"]   # default: every kind below except ambient
+ambient = ["myapp.state.state_root", "myapp.env.*"]                    # globs on the absolute dotted name of an ambient lookup
+
+[[tool.arborescent.mixed_purity.allow]]
+module = "myapp.bundle_schema.hydration"   # a dotted name, a package prefix or a glob
+reason = "split tracked in #212; until then the cache slot and the validation ship together"
+```
+
+`kinds` takes the existing categories (`clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`,
+`network`, `filesystem`, `dynamic-import`, `console` for `print`/`input`, `global` for a function that rebinds a module global)
+and the kinds this rule adds, which never feed the `effect-*` rules:
+
+| kind | what it is |
+|---|---|
+| `logging` | `logging.info(...)` and friends, a call on a module-level `logging.getLogger(...)` / `structlog.get_logger(...)` result, `loguru.logger`. `getLogger` itself is not an effect |
+| `memo` | `functools.lru_cache` / `cache` / `cached_property` decorators, or a write to a module-level dict, list or set whose name contains `cache` or `memo` |
+| `state` | a write (item assignment, `del`, `append`/`update`/`setdefault`/... ) to any other module-level dict, list or set from inside a function, unless that function binds the name locally. Reads are not effects |
+| `ambient` | a call to something matching `ambient`, resolved through absolute and relative imports (`state_root()`, `os.getcwd`). Off until `ambient` lists a pattern |
+
+**Allowlist.** An entry needs a non-blank `reason`; without one the policy fails to load. An entry that matches no module, or
+only modules that are not mixed (any more), is itself a `mixed-purity` finding, so an exemption cannot outlive the code it excused.
+With `--changed` only a missing module is judged, since the other modules were not parsed.
+
+**Adopting it.** Run `arborescent baseline` to record today's findings and let the ratchet shrink them; a fixed module leaves a
+stale entry you delete. `arborescent purity` (`--json` for machines) lists every mixed module, including allowed ones, ranked by
+how many modules import it, which is the order to split them in.
+
+**Excluded paths.** With the rule on, files under `exclude` are parsed (through the same content-hash cache) and the mixed ones
+are reported as `mixed-purity-excluded` notes. Tooling, tests and fixtures stay excluded; they just stop being invisible. Turn
+`report_excluded = false` to skip that parse, which costs one extra cold parse per excluded file (a large excluded `tests` tree can double the cold scan; this repository turns it off for that reason).
+
+**Limits.** Only top-level functions and classes are units, and a class is one unit. A call through an object of unknown type
+is not followed, so a method called as `self.helper()` does not carry its effect to the caller. Developer tooling
+(`dev_tools`) has no ring and is not judged.
 
 ## Named ratchets: `[tool.arborescent.ratchet.<name>]`
 
@@ -1124,6 +1233,7 @@ against the baseline. Options:
   modularity gates you request explicitly stay in force. Every `check` also prints `by rule: <rule> N (M new)`, where
   M counts the findings not covered by the baseline.
 - `--growth-against REF`: verify baseline growth entries against the baseline at a Git ref.
+- `--admitted-against REF`: fail a module that is new since `REF` and was not validly admitted (see "Checking admission of new modules" below).
 - `--no-cache`: bypass the Arborescent AST fact cache for this run.
 
 By default, `check` is read-only with respect to the environment and prints install instructions for missing tools.
@@ -1146,6 +1256,11 @@ intentional baseline growth, its reason and its approver.
 
 `report`, `check`, `baseline` and `cost`, described under [Coupling metrics](#coupling-metrics-toolarborescentcoupling).
 `check` exits 1 on a regression; a policy or baseline error exits 2.
+
+### `arborescent purity`
+
+Lists every module `mixed-purity` finds (allowed ones marked), most imported first, with its effect kinds, effectful and pure
+definitions and importer count. `--json` prints the same as JSON. Report only: `check` is what fails.
 
 ### `arborescent ratchet`
 
@@ -1177,6 +1292,31 @@ later), and notes a `ring_reason` that excuses nothing (possibly stale). A modul
 is left alone. "Admitted" means this module's own facts fit the ring, not that its contribution to the architecture is sound
 (re-export and forwarding laundering have their own rules). Existing modules are not forced through admission, and
 `discover --suggest` remains the read-only view.
+
+#### Checking admission of new modules: `check --admitted-against REF`
+
+A CI diff check, stateless apart from the human `ring_reason`. New modules are the `.py` files that
+`git diff --name-status -M --diff-filter=A <merge-base of REF and HEAD> HEAD` reports added, mapped to module names with the
+current source roots (git is called through the `runner` port). For each one the check **recomputes admission at HEAD** with the
+same strict test as `arborescent admit`, so a hand-written `__arbor__` is accepted only if it passes. A new module fails when:
+
+- it has no explicit `__arbor__` ring: a ring that comes only from a `classify` glob does not count as admitted
+  (`admission-refused`);
+- admission refuses it: its facts violate the ring, a dynamic import cannot be read and no `ring_reason` names it, or the
+  annotation is invalid (`admission-refused`);
+- a tighter ring also fits and no `ring_reason` is recorded (`admission-looser-than-needed`).
+
+Existing modules are never judged, so adopting the flag creates no backlog; the shrink-only baseline still carries the legacy
+debt. A rename (content similarity above git's `-M` threshold) is not new; a move that falls below the threshold is new and is
+admitted afresh. A deleted module is not new. An empty diff passes. If the diff cannot be read (unknown ref, shallow clone with no
+shared history, a ref that looks like an option) the check **fails** with `could not verify admission: ...`; it never passes. In CI
+use `fetch-depth: 0` or deepen the clone. The check runs on the full module set (never `--changed`), and nothing is cached
+between runs, so the ref is part of every run. `classify-facts` "could sit in an inner ring" stays an information-tier note for
+existing modules; it skips modules with no top-level definitions, a `__main__` guard, an abstract class or an entry-script
+entry. Admission shares the underlying test (`classify_audit.tighter_ring`) but applies none of those exemptions, because a
+bare-import shim that passes every inner ring is exactly what a new module must not be admitted as. The check is not a native
+mutation-tested rule (its findings are not `Violation`s and never enter the baseline); `selftest` probes the admission gate
+itself (`admission_probes`).
 
 ### `arborescent selftest`
 

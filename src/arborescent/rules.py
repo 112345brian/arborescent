@@ -27,12 +27,28 @@ from .domain import (
     dist_name,
     in_unit,
 )
-from .facts import EffectUse, Forwarder, ModuleInfo, RawImport, resolve_targets
+from .facts import (
+    EffectUse,
+    Forwarder,
+    ModuleInfo,
+    RawImport,
+    absolute_callee,
+    resolve_targets,
+)
 from .import_cycles import cyclic_components
+from .package_constraint_rules import (
+    is_exempt_path,
+    placement_violations,
+    reach_violations,
+    use_violations,
+)
+from .package_constraints import PackageConstraints
+from .purity import ModulePurity, assess, importer_counts, is_allowed, summarize
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
+NO_CONSTRAINTS = PackageConstraints()  # a policy that declares none: the constraint rules cost nothing
 
 
 @dataclass(frozen=True)
@@ -241,7 +257,7 @@ def _result_discard_findings(context: RuleContext, name: str, info: ModuleInfo, 
     seen: dict[str, int] = {}
     out: list[Violation] = []
     for line, target in info.facts.bare_calls:
-        callee = _absolute_callee(name, info.is_package, target)
+        callee = absolute_callee(name, info.is_package, target)
         if callee is None:
             continue
         owner, _, function = callee.rpartition(".")
@@ -300,7 +316,7 @@ def _construction_findings(context: RuleContext, name: str, info: ModuleInfo) ->
         return []
     ring = context.resolve_ring(name)
     sites = {item.target: item for item in local_policy.construct_only}
-    called = ((line, sites.get(_absolute_callee(name, info.is_package, callee) or "")) for line, callee in info.facts.calls)
+    called = ((line, sites.get(absolute_callee(name, info.is_package, callee) or "")) for line, callee in info.facts.calls)
     return [
         Violation(
             Rule.CONSTRUCTION_OUTSIDE_SITE, name,
@@ -311,18 +327,6 @@ def _construction_findings(context: RuleContext, name: str, info: ModuleInfo) ->
         for line, site in called
         if site is not None and not site.permits(name, ring)
     ]
-
-
-def _absolute_callee(module: str, is_package: bool, callee: str) -> str | None:
-    """A call recorded by ``extract`` as a dotted name: relative imports keep their dots, a bare name is defined in this module."""
-    if not callee.startswith("."):
-        return callee if "." in callee else f"{module}.{callee}"
-    level = len(callee) - len(callee.lstrip("."))
-    parts = module.split(".")
-    package = parts if is_package else parts[:-1]
-    if level - 1 > len(package):
-        return None
-    return ".".join([*package[: len(package) - (level - 1)], callee[level:]])
 
 
 def _site_text(item: ConstructionSite) -> str:
@@ -590,6 +594,17 @@ def _wildcard_findings(policy: Policy) -> list[Violation]:
     ]
 
 
+def _constraint_findings(context: RuleContext, name: str, info: ModuleInfo, imports: tuple[Collection[str], Collection[str]]) -> list[Violation]:
+    """``[package.constraints]`` (#165): effect and import facts for any module, placement for a module that has a ring. Tooling is exempt."""
+    constraints = context.policy.package_constraints
+    local_policy = context.policy_for(name)
+    if constraints == NO_CONSTRAINTS or local_policy is None or name in context.tool_modules:
+        return []
+    ring = context.resolve_ring(name)
+    found = use_violations(constraints, local_policy, info, ring, imports)
+    return found if ring is None else found + placement_violations(constraints, local_policy, info, ring)
+
+
 def _module_preamble(context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], tops: Collection[str]) -> list[Violation]:
     """Documentation, annotation, tooling-import and forbidden-name findings, which apply whether or not the module has a ring."""
     is_tool = name in context.tool_modules
@@ -603,6 +618,7 @@ def _module_preamble(context: RuleContext, name: str, info: ModuleInfo, known: C
     if not is_tool:
         out += _dev_tool_imports(context, name, info, known, tops)
     local_policy = context.policy_for(name)
+    out += _constraint_findings(context, name, info, (known, tops))
     pattern = local_policy.forbidden_module_pattern(name) if local_policy is not None else None
     if pattern is not None:
         out.append(Violation(
@@ -673,7 +689,54 @@ def check_modules(
         )
     out += _effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
     out = _with_move_closures(out, context, modules, known, tops)
-    return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
+    return out + _mixed_purity_findings(context, modules, known, import_graph) + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
+
+
+def _mixed_purity_findings(
+    context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], import_graph: Mapping[str, Collection[str]],
+) -> list[Violation]:
+    """A module holding substantial pure logic next to effectful code, in any ring (#173), plus stale allowlist entries.
+
+    The detail carries no names or counts, so the baseline key stays stable as functions come and go; the effect kinds,
+    the definitions on each side and the importer count (the blast radius) are in the hint."""
+    importers = importer_counts(import_graph)
+    out: list[Violation] = []
+    mixed: set[str] = set()
+    for name, info in sorted(modules.items()):
+        local_policy, ring = context.policy_for(name), context.resolve_ring(name)
+        report = assess(info, local_policy) if local_policy is not None and ring is not None and name not in context.tool_modules else None
+        if local_policy is None or ring is None or report is None:
+            continue
+        mixed.add(name)
+        if not is_allowed(local_policy.mixed_purity, name):
+            found = replace(report, importers=importers.get(name, 0))
+            out.append(_purity_violation(ring, found))
+    return out + _stale_purity_allow(context, modules, known, mixed)
+
+
+def _purity_violation(ring: str, report: ModulePurity) -> Violation:
+    detail = f"[{ring}] mixes substantial pure logic with effectful code"
+    return Violation(Rule.MIXED_PURITY, report.module, detail, report.line, hint=summarize(report))
+
+
+def _stale_purity_allow(
+    context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], mixed: Collection[str],
+) -> list[Violation]:
+    """An allowlist entry that matches no module, or only modules that are not mixed: it would hide nothing, or hide a future regression."""
+    out: list[Violation] = []
+    policies = [(scope.policy, [n for n in known if context.scope_name(n) == scope.name]) for scope in context.policy.scopes] or [(context.policy, list(known))]
+    for policy, scope_known in policies:
+        if not policy.mixed_purity.enabled:
+            continue
+        for entry in policy.mixed_purity.allow:
+            matches = [name for name in scope_known if in_unit(name, entry.module)]
+            if not matches:
+                out.append(Violation(Rule.MIXED_PURITY, entry.module, f"`mixed_purity.allow` {entry.module!r}: matches no module"))
+            elif all(name in modules for name in matches) and not any(name in mixed for name in matches):
+                out.append(Violation(
+                    Rule.MIXED_PURITY, entry.module, f"`mixed_purity.allow` {entry.module!r}: no module it matches is mixed any more; remove the entry",
+                ))
+    return out
 
 
 def _with_move_closures(
@@ -776,8 +839,11 @@ def _effect_via_import_violations(
 ) -> list[Violation]:
     reachable = _effect_reachable(context, modules, effect_graph)
     out: list[Violation] = []
+    constraints = context.policy.package_constraints
     for edge in edges:
         out += _effect_via_import(edge, reachable)
+        if constraints.must_be_pure and not is_exempt_path(modules[edge.name].path):
+            out += reach_violations(constraints, edge.name, edge.line, edge.targets, reachable)
     return out
 
 

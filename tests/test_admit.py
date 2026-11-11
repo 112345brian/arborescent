@@ -259,7 +259,7 @@ def test_no_caller_discards_an_admission_outcome() -> None:
                 pytest.fail(f"{path.name}:{stmt.lineno} discards the outcome of admit_check")
         if any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "admit_check" for n in ast.walk(tree)):
             callers.append(path.name)
-    assert sorted(callers) == ["admission_probes.py", "cli_admit.py"]  # a new caller must be added to this scan on purpose
+    assert sorted(callers) == ["admission_probes.py", "admitted_against.py", "cli_admit.py"]  # a new caller must be added to this scan on purpose
 
 
 def test_the_result_discard_facts_see_a_dropped_outcome() -> None:
