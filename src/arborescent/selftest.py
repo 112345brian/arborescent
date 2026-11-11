@@ -6,7 +6,10 @@ Ported from the throwaway mutation script behind DeepInterview's ``tests/test_ar
 
 from __future__ import annotations
 
+import ast
 import fnmatch
+import io
+import tokenize
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -141,6 +144,12 @@ def plan(
         skipped.append("circular-import: disabled by policy")
     if anchor is not None:
         out.extend(_anchor_mutations(anchor, paths[anchor]))
+        if _rejects_doubled_cr():
+            out.append(Mutation(
+                Rule.UNTOKENIZABLE_SOURCE, "a doubled carriage return Python parses but cannot tokenize", paths[anchor], "_arborescent_probe_cr = 1\r\r",
+            ))
+        else:
+            skipped.append("untokenizable-source: this interpreter's tokenizer accepts a doubled carriage return (Python before 3.12)")
     if circular_anchor is not None:
         out.append(Mutation(
             Rule.CIRCULAR_IMPORT, "a module importing itself", paths[circular_anchor], f"import {circular_anchor}",
@@ -486,13 +495,25 @@ def _import_mutations(name: str, host: str, target: str | None, external: frozen
     return out
 
 
+def _rejects_doubled_cr() -> bool:
+    """Whether this interpreter parses ``\\r\\r\\n`` but fails to tokenize it (the C tokenizer of 3.12+ does; 3.11 does not)."""
+    probe = "x = 1\r\r\n"
+    try:
+        _ = ast.parse(probe)
+        _ = list(tokenize.generate_tokens(io.StringIO(probe).readline))
+    except tokenize.TokenError:
+        return True
+    except SyntaxError:
+        return False
+    return False
+
+
 def _anchor_mutations(anchor: str, host: str) -> list[Mutation]:
     base = host.rsplit("/", 1)[0] if "/" in host else ""
     new = (base + "/" if base else "") + "arborescent_probe_unclassified.py"
     out = [Mutation(Rule.UNCLASSIFIED, "a new module matching no pattern", new, "", new_file=True)]
     out.extend((
         Mutation(Rule.SUPPRESSION, "a new noqa suppression directive", host, "# noqa"),
-        Mutation(Rule.UNTOKENIZABLE_SOURCE, "a doubled carriage return Python parses but cannot tokenize", host, "_arborescent_probe_cr = 1\r\r"),
         Mutation(Rule.DISCARD, "a new reasoned discard call", host, 'discard(None, reason="selftest")'),
         Mutation(Rule.LAZY_IMPORT, "a new function-level import without a reason", host, "def _arborescent_probe_lazy() -> None:\n    import json"),
     ))

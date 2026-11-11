@@ -14,6 +14,7 @@ import ast
 import io
 import re
 import tokenize
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,27 @@ from arborescent.suggestions import logical_code_lines
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "arborescent"
 CRCRLF = "x = 1\r\r\ny = 2\r\r\n"
+
+
+@pytest.fixture(autouse=True)
+def strict_tokenizer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``\r\r`` untokenizable on every interpreter.
+
+    CPython 3.12+ tokenizes with the C tokenizer, which rejects a doubled carriage return that ``ast`` accepts; 3.11's
+    pure-Python tokenizer accepts it, and no input that ``ast`` accepts and the 3.11 tokenizer rejects exists (probed:
+    stray backslashes, tabs, form feeds, EOF continuations all fail ``ast`` too). So the tests run the real tokenizer
+    but raise the 3.12+ error for ``\r\r``, which keeps the premise (parses, does not tokenize) true on 3.11-3.15."""
+    real = tokenize.generate_tokens
+
+    def strict(readline: Callable[[], str]) -> Iterator[tokenize.TokenInfo]:
+        lines = list(iter(readline, ""))
+        for number, line in enumerate(lines, 1):
+            if "\r\r" in line:
+                raise tokenize.TokenError("invalid non-printable character U+000D", (number, line.index("\r\r") + 1))
+        feed = iter(lines)
+        return real(lambda: next(feed, ""))
+
+    monkeypatch.setattr(tokenize, "generate_tokens", strict)
 
 
 def _tokenizes(source: str) -> bool:
