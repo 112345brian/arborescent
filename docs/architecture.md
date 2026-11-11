@@ -142,6 +142,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.coupling` | `single` | domain |
 | `arborescent.coupling_policy` | `single` | domain |
 | `arborescent.coupling_ratchet` | `single` | domain |
+| `arborescent.package_constraints` | `single` | domain |
 | `arborescent.testing` | `single` | adapters |
 | `arborescent.typecheckers` | `single` | adapters |
 | `arborescent.__main__` | `single` | composition |

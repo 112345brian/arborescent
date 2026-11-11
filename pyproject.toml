@@ -189,6 +189,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.coupling" = "domain"
 "arborescent.coupling_policy" = "domain"
 "arborescent.coupling_ratchet" = "domain"
+"arborescent.package_constraints" = "domain"
 "arborescent.cli_cycles" = "composition"
 "arborescent.cli_ratchet" = "composition"
 "arborescent.__main__" = "composition"

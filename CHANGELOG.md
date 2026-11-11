@@ -8,6 +8,8 @@
 - Opt-in pytest plugin `arborescent.pytest_io_block` (`-p arborescent.pytest_io_block`, extra `arborescent[pytest]`): tests
   selected by the `arbor_io_free` globs (or `--arbor-io-block`) run with file, network, process, sqlite, clock, random and
   environment access raising `IOBlockedError`. No new runtime dependency (#105).
+- `[package.constraints]` (`must_be_pure`, `forbid_effects`) in a package's own policy file: schema and validation only, nothing
+  enforced yet. Unknown keys, unknown effect names and non-boolean `must_be_pure` are policy errors; absent means no change (#164).
 - Baseline growth entries now carry `approved-by`: `baseline --allow-growth` requires `--approved-by WHO` (adoption
   records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
 - `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an
