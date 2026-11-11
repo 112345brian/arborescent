@@ -5,6 +5,9 @@
 ## Unreleased
 
 ### Added
+- Opt-in pytest plugin `arborescent.pytest_io_block` (`-p arborescent.pytest_io_block`, extra `arborescent[pytest]`): tests
+  selected by the `arbor_io_free` globs (or `--arbor-io-block`) run with file, network, process, sqlite, clock, random and
+  environment access raising `IOBlockedError`. No new runtime dependency (#105).
 - Baseline growth entries now carry `approved-by`: `baseline --allow-growth` requires `--approved-by WHO` (adoption
   records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
 - `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an

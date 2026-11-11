@@ -1152,3 +1152,30 @@ distribution, then publishes through PyPI Trusted Publishing; no long-lived PyPI
 GitHub Release for the matching version tag (for example, `v0.1.0`) only after the release commit is on `main`.
 
 When `type_checkers` is omitted, Arborescent uses Ty. Set `type_checkers = ["pyright"]` to select Pyright explicitly. During `--changed`, graph-wide import-linter and Tach checks are skipped; Ruff and the selected type checker receive only changed files.
+
+## Running a ring's tests with real I/O blocked (`arborescent.pytest_io_block`)
+
+An opt-in pytest plugin (#105). It never auto-loads: there is no `pytest11` entry point and arborescent still has no
+runtime dependency. Install `arborescent[pytest]` (or have pytest 8+) and load it with `-p arborescent.pytest_io_block`
+or `addopts`. Select the tests of modules in rings you declared I/O-free:
+
+```ini
+[pytest]
+addopts = -p arborescent.pytest_io_block
+arbor_io_free =
+    tests/domain/*
+    tests/test_rules.py
+```
+
+Globs are matched against the test file's path relative to the rootdir, with `/` separators on every platform;
+`--arbor-io-block` selects every test, and `@pytest.mark.arbor_allow_io` opts one test out. During the call phase of a
+selected test (fixtures are not blocked) these raise `IOBlockedError`, an `AssertionError`: `open` of a non-source file,
+`socket.connect`, `subprocess.Popen`, `os.system`, `sqlite3.connect`, `os.remove`/`rmdir`/`rename`, `shutil.rmtree`,
+`time.time`/`monotonic`/`perf_counter`/`sleep`, `datetime.datetime.now`/`today`, the `random` module functions and
+`os.environ`. Only calls whose first non-standard-library frame is neither pytest nor the plugin raise.
+
+A passing blocked test shows the code ran on plain values or in-memory fakes **for the inputs that test chose**; it does
+not prove a branch the test did not take. Known gaps: names bound before the patch (`from time import time` at import),
+a test that patches `builtins.open`, `ctypes` and C extensions that do I/O without an audit event. The static
+`effect-*` rules and `effect-patch` remain the guards for those. For network blocking with allow-lists, `pytest-socket`
+is the maintained tool; this plugin only raises. Deriving the glob list from the policy is not done yet.
