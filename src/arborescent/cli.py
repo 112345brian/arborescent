@@ -16,6 +16,7 @@ from .adapters import (
     SubprocessToolRunner,
     SystemClock,
 )
+from .admitted_against import admission_problems
 from .annotate import apply_annotations, plan_annotations
 from .bench import run_bench
 from .classify_audit import suggest_ring
@@ -172,6 +173,11 @@ def _add_check_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> Non
         "--growth-against",
         metavar="REF",
         help="verify baseline growth entries against a git ref",
+    )
+    c.add_argument(
+        "--admitted-against",
+        metavar="REF",
+        help="fail a module new since this git ref that was not validly admitted (explicit __arbor__ ring that `arborescent admit` would accept)",
     )
     c.add_argument(
         "--rule",
@@ -632,6 +638,7 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         require_modularity=args.require_modularity,
         require_visible=args.require_visible,
         growth_against=args.growth_against,
+        admitted_against=args.admitted_against,
         no_cache=args.no_cache,
         rules=tuple(args.rule),
     )
@@ -642,6 +649,8 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         report.engines.append(_growth_check(args.growth_against, policy, root, svc))
         if policy.ratchets:
             report.engines.append(growth_run(args.growth_against, policy, root, svc))
+    if args.admitted_against:
+        report.engines.append(_admission_check(args.admitted_against, policy, root, svc))
     setup_command = (
         None
         if args.no_tools
@@ -694,6 +703,18 @@ def _growth_check(ref: str, policy: Policy, root: Path, svc: Services) -> Engine
         lines.append(f"could not verify ratchet growth: {exc}")
     status = "fail" if lines else "ok"
     return EngineRun("baseline growth log", status, svc.clock.now() - started, lines or [f"growth logs match ratchet changes since {ref}"])
+
+
+def _admission_check(ref: str, policy: Policy, root: Path, svc: Services) -> EngineRun:
+    """#163: every module new since ``ref`` must be validly admitted; an unreadable ref or a shallow clone fails, never passes."""
+    started = svc.clock.now()
+    try:
+        _, scan = run_own(policy, root, svc, practices=False)  # a full scan: admission needs every module's ring and importers
+        lines = admission_problems(ref, policy, root, scan, svc.runner)
+    except (ValueError, OSError) as exc:
+        lines = [f"could not verify admission: {exc}"]
+    status = "fail" if lines else "ok"
+    return EngineRun("admission", status, svc.clock.now() - started, lines or [f"every module new since {ref} was validly admitted"])
 
 
 if __name__ == "__main__":

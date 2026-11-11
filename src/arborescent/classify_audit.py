@@ -20,7 +20,7 @@ from .facts import ModuleInfo, RawImport, resolve_targets
 from .rules import RuleContext, fits_ring
 from .taint import TaintResult
 
-__all__ = ["AdmissionOutcome", "admission_warnings", "admit_check", "audit_classification", "suggest_ring", "with_reason"]
+__all__ = ["AdmissionOutcome", "admission_warnings", "admit_check", "audit_classification", "suggest_ring", "tighter_ring", "with_reason"]
 
 _SHOWN = 3
 
@@ -68,21 +68,37 @@ class _Subject:
         return ALL in self.policy.rings[-1].may_import
 
 
+def tighter_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, known: Collection[str]) -> str | None:
+    """The innermost ring inside ``ring`` whose per-module rules ``info`` also passes, or None. The one test behind both signals.
+
+    It applies no exemption of its own. ``_inner_ring`` (the ``classify-facts`` note, existing modules) skips a module with no
+    top-level definitions, a ``__main__`` guard, an abstract class, or an entry-script entry before asking, so a bare-import shim
+    is never noted. ``admit_check`` (new modules) does not skip them: a shim that passes every inner ring is exactly what
+    ``admission-looser-than-needed`` must refuse, and a ``ring_reason`` is the way to excuse it.
+    """
+    policy = context.policy_for(name)
+    if policy is None:
+        return None
+    names = [r.name for r in policy.rings]
+    if ring not in names:
+        return None
+    return next((c for c in names[: names.index(ring)] if fits_ring(context, name, info, c, known)), None)
+
+
 def _inner_ring(subject: _Subject, known: Collection[str]) -> Violation | None:
     facts = subject.info.facts
     if not facts.top_level_defs or facts.main_guard or any(d.is_abstract for d in facts.top_level_defs):
         return None
     if subject.name in subject.policy.entry_scripts:
         return None
-    names = [r.name for r in subject.policy.rings]
-    for candidate in names[: names.index(subject.ring)]:
-        if fits_ring(subject.context, subject.name, subject.info, candidate, known):
-            detail = (
-                f"[{subject.ring}] could sit in ring {candidate!r}: its imports, external packages and effects all pass that ring's "
-                f"rules{_taint_detail(subject.taint, subject.name)}"
-            )
-            return Violation(Rule.CLASSIFY_FACTS, subject.name, detail)
-    return None
+    candidate = tighter_ring(subject.context, subject.name, subject.info, subject.ring, known)
+    if candidate is None:
+        return None
+    detail = (
+        f"[{subject.ring}] could sit in ring {candidate!r}: its imports, external packages and effects all pass that ring's "
+        f"rules{_taint_detail(subject.taint, subject.name)}"
+    )
+    return Violation(Rule.CLASSIFY_FACTS, subject.name, detail)
 
 
 def _composition_shaped(subject: _Subject) -> Violation | None:
@@ -156,6 +172,7 @@ class AdmissionOutcome:
     refusals: tuple[str, ...]
     notes: tuple[str, ...]
     evidence: str
+    tighter: str | None = None  # set when a refusal is that this tighter ring also fits and no ring_reason excuses the looser one
 
 
 def _strict_info(info: ModuleInfo) -> ModuleInfo:
@@ -197,12 +214,13 @@ def admit_check(context: RuleContext, name: str, info: ModuleInfo, ring: str, kn
     if unreadable and given is None:
         lines = ", ".join(map(str, unreadable))
         refusals.append(f"a dynamic import with a non-literal target (line {lines}) cannot be verified; record a ring_reason that names it")
-    tighter = next((c for c in names[: names.index(ring)] if fits_ring(context, name, strict, c, known)), None)
+    tighter = tighter_ring(context, name, strict, ring, known)
+    looser = tighter if given is None else None
     if tighter is not None and given is None:
         refusals.append(f"ring {tighter!r} also fits; use it, or record why {ring!r} is needed as ring_reason")
     if given is not None and tighter is None and not unreadable:
         notes.append("ring_reason is recorded but no tighter ring fits and nothing is unverifiable: the reason may be stale")
-    return AdmissionOutcome(name, ring, not refusals, tuple(refusals), tuple(notes), evidence)
+    return AdmissionOutcome(name, ring, not refusals, tuple(refusals), tuple(notes), evidence, looser)
 
 
 def admission_warnings(

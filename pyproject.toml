@@ -133,6 +133,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.ratchet_config" = "application"
 "arborescent.ratchet_measure" = "application"
 "arborescent.ratchets" = "application"
+"arborescent.admitted_against" = "application"
 "arborescent.pytest_io_block" = "composition"
 "arborescent.annotate" = "application"
 "arborescent.generate" = "application"
