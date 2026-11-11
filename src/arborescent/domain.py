@@ -102,6 +102,7 @@ class Rule(StrEnum):
     REEXPORT_RATIO = "reexport-ratio"
     MIXED_PURITY = "mixed-purity"
     MIXED_PURITY_EXCLUDED = "mixed-purity-excluded"
+    UNTOKENIZABLE_SOURCE = "untokenizable-source"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
     CIRCULAR_IMPORT = "circular-import"

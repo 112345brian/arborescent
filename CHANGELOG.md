@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### Fixed
+- A source file that `ast` accepts but `tokenize` rejects (for example a doubled carriage return, `\r\r\n`) no longer aborts
+  the run with `tokenize.TokenError` (#181). The file keeps every `ast` fact and gets no comment facts (suppressions and
+  `# deferred:` reasons are unknowable), and a new `untokenizable-source` violation names it, so it is visible and can be
+  baselined. Newlines are not normalised first, so line numbers still match `ast`. The fact cache layout grew (`scan.json`
+  v24), so the first run after upgrading re-parses every file.
+
 ### Added
 - `mixed-purity` (#173): a module with at least two substantial pure top-level definitions (4+ body lines) next to an
   effectful one, or an import-time effect, is reported in every ring. It reuses the existing effect facts, attributes
