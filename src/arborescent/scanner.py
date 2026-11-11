@@ -19,6 +19,8 @@ from .facts import (
     Forwarder,
     FunctionCalls,
     ModuleInfo,
+    PurityFacts,
+    PurityUnit,
     RawImport,
     SourceFacts,
     TopLevelDef,
@@ -29,7 +31,7 @@ from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner
 
 _PRUNE = NOISE_DIRS
-_CACHE_VERSION = 22
+_CACHE_VERSION = 23
 _VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
@@ -193,6 +195,7 @@ class ScanData:
     scope_by_module: dict[str, str] = field(default_factory=lambda: {})
     dev_tool_modules: frozenset[str] = frozenset()  # modules below a `dev_tools` path
     misplaced_dev_tools: tuple[tuple[str, str], ...] = ()  # (module, path): annotated as dev tooling, outside every `dev_tools` path
+    excluded_modules: dict[str, ModuleInfo] = field(default_factory=lambda: {})  # files under `exclude`, parsed only for `mixed-purity` (#173)
 
 
 def _load_cache(cache_file: Path | None) -> dict[str, list[Any]]:
@@ -203,6 +206,21 @@ def _load_cache(cache_file: Path | None) -> dict[str, list[Any]]:
         return loaded["files"] if loaded.get("v") == _CACHE_VERSION else {}
     except (OSError, ValueError, KeyError):
         return {}
+
+
+def _purity_to_json(p: PurityFacts) -> list[Any]:
+    units = [
+        [u.name, u.line, u.end_line, u.body_lines, u.is_class, u.logic, [[line, kind] for line, kind in u.kinds], list(u.calls)]
+        for u in p.units
+    ]
+    return [units, [[line, kind] for line, kind in p.import_time]]
+
+
+def _purity_from_json(raw: list[Any]) -> PurityFacts:
+    units = tuple(
+        PurityUnit(u[0], u[1], u[2], u[3], u[4], u[5], tuple((item[0], item[1]) for item in u[6]), tuple(u[7])) for u in raw[0]
+    )
+    return PurityFacts(units, tuple((item[0], item[1]) for item in raw[1]))
 
 
 def _facts_to_json(f: SourceFacts) -> list[Any]:
@@ -223,6 +241,7 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
         [[c.name, c.line, list(c.calls)] for c in f.function_calls],
         f.module_doc,
         f.arbor_reason, [[line, target] for line, target in f.dynamic_imports],
+        _purity_to_json(f.purity),
     ]
 
 
@@ -243,6 +262,7 @@ def _facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple(raw[19]), tuple((item[0], item[1]) for item in raw[20]),
         tuple(FunctionCalls(c[0], c[1], tuple(c[2])) for c in raw[21]),
         raw[22], raw[23], tuple((item[0], item[1]) for item in raw[24]),
+        _purity_from_json(raw[25]),
     )
 
 
@@ -332,7 +352,7 @@ class FsScanner:
     def scan(self, policy: Policy, root: Path, only: frozenset[str] | None = None) -> ScanData:
         cache_file = self._cache_dir / "scan.json" if self._cache_dir else None
         cache = _load_cache(cache_file)
-        files, excluded, noise_files, unclassified, vendor_folders = self._discover(policy, root)
+        files, excluded, noise_files, unclassified, vendor_folders, excluded_files = self._discover(policy, root)
         known = frozenset(m for m, _, _ in files)
         scope_by_module = {
             module: scope.name
@@ -353,7 +373,10 @@ class FsScanner:
         dev_tool_modules = frozenset(m for m, _, rel in files if policy.is_dev_tool_path(rel))
         wanted |= {m for m, _, rel in files if m in dev_tool_modules and (only is None or rel in only)}
         modules, paths, fresh, parsed = _parse_files(root, files, cache, None if annotations_enabled else wanted)
-        _store_cache(cache_file, cache, fresh, only, parsed)
+        excluded_modules, extra_fresh, extra_parsed = (
+            _excluded_modules(root, excluded_files, cache) if only is None and any(p.mixed_purity.enabled and p.mixed_purity.report_excluded for p in _policies(policy)) else ({}, {}, 0)
+        )
+        _store_cache(cache_file, cache, {**fresh, **extra_fresh}, only, parsed + extra_parsed)
         misplaced = _misplaced_dev_tools(files, modules, dev_tool_modules) if annotations_enabled else ()
         if annotations_enabled:
             # This pass covers every discovered file, including unchanged import
@@ -371,7 +394,7 @@ class FsScanner:
             noise_files = tuple(path for path in noise_files if path in only)
         return ScanData(
             known, modules, entry, paths, parsed, excluded, noise_files, unclassified,
-            vendor_folders, arbor_index, scope_by_module, dev_tool_modules, misplaced,
+            vendor_folders, arbor_index, scope_by_module, dev_tool_modules, misplaced, excluded_modules,
         )
 
     def _discover(
@@ -382,10 +405,16 @@ class FsScanner:
         tuple[str, ...],
         tuple[tuple[str, str], ...],
         tuple[tuple[str, str], ...],
+        tuple[str, ...],
     ]:
         all_paths, tracked = _listed_paths(root, self._runner)
-        excluded_paths = (*policy.exclude, *_child_policy_paths(root, policy))
+        child_paths = _child_policy_paths(root, policy)
+        excluded_paths = (*policy.exclude, *child_paths)
         excluded, noise_files, vendors = _sift_paths(all_paths, tracked, policy, excluded_paths)
+        excluded_files = tuple(sorted(  # what `exclude` hides; a child package's own policy owns its source, so it is not "excluded"
+            rel for rel in all_paths
+            if rel.endswith(".py") and excluded_by_policy(rel, policy.exclude) and not excluded_by_policy(rel, child_paths)
+        ))
 
         vendor_folders = _fingerprint_vendors(vendors, root, excluded)
 
@@ -407,7 +436,42 @@ class FsScanner:
             tuple(sorted(noise_files)),
             tuple(sorted(unclassified)),
             tuple(vendor_folders),
+            excluded_files,
         )
+
+
+def _excluded_modules(
+    root: Path, rels: tuple[str, ...], cache: dict[str, list[Any]],
+) -> tuple[dict[str, ModuleInfo], dict[str, list[Any]], int]:
+    """Facts for the files the policy excludes, so ``mixed-purity`` can say what the exclusion hides (#173).
+
+    They are never ruled on, only assessed; a file that does not parse is skipped, since excluded folders hold fixtures
+    and generated code on purpose. Same content-hash cache as the scanned files, keyed by path."""
+    modules: dict[str, ModuleInfo] = {}
+    fresh: dict[str, list[Any]] = {}
+    parsed = 0
+    for rel in rels:
+        try:
+            data = (root / rel).read_bytes()
+        except OSError:
+            continue
+        digest = hashlib.blake2b(data, digest_size=16).hexdigest()
+        hit = cache.get(rel)
+        if hit is not None and hit[0] == digest:
+            facts = _facts_from_json(hit[1])
+            fresh[rel] = hit
+        else:
+            try:
+                facts = extract(data.decode("utf-8-sig"), rel)
+            except (SyntaxError, ValueError, RecursionError):
+                continue
+            fresh[rel] = [digest, _facts_to_json(facts)]
+            parsed += 1
+        parts = rel[:-3].split("/")
+        is_package = parts[-1] == "__init__"
+        name = ".".join(parts[:-1] if is_package else parts) or "__init__"
+        modules[name] = ModuleInfo(name, rel, is_package, facts)
+    return modules, fresh, parsed
 
 
 def _is_skipped(rel: str, policy: Policy, tracked: bool, excluded_paths: tuple[str, ...]) -> bool:

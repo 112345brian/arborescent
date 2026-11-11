@@ -20,6 +20,7 @@ from .presets import (
     PRESETS,
     Preset,
 )
+from .purity_policy import PurityPolicy
 from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 
 __all__ = [
@@ -98,6 +99,8 @@ class Rule(StrEnum):
     NON_ABSTRACT_PORT = "non-abstract-port"
     WEAKLY_TYPED_PORT = "weakly-typed-port"
     REEXPORT_RATIO = "reexport-ratio"
+    MIXED_PURITY = "mixed-purity"
+    MIXED_PURITY_EXCLUDED = "mixed-purity-excluded"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
     CIRCULAR_IMPORT = "circular-import"
@@ -162,7 +165,7 @@ EFFECT_RULES: Mapping[str, Rule] = {
 # A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
-    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE,
+    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE, Rule.MIXED_PURITY_EXCLUDED,
 })
 
 
@@ -389,6 +392,7 @@ class Policy:
     package_parts: tuple[str, ...] = ()  # opt-in: extracted part trees (inside the repository) checked against the catalog
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
     modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
+    mixed_purity: PurityPolicy = field(default_factory=PurityPolicy)  # #173: thresholds, effect kinds and the reasoned allowlist of `mixed-purity`
     coupling: CouplingPolicy = field(default_factory=CouplingPolicy)  # #148: entrypoints and hub threshold for `arborescent coupling`
     package_constraints: PackageConstraints = field(default_factory=PackageConstraints)  # #164: `[package.constraints]`, parsed only, not enforced
     ratchets: tuple[RatchetSpec, ...] = ()  # #147: `[ratchet.<name>]` counters compared with their baseline by `check`

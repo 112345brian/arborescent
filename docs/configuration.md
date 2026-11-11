@@ -814,6 +814,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `docstring-ring-mismatch` | `docs.module_names_ring` is on and a module's docstring does not name the ring that `classify` or `__arbor__` gives it (it says which other rings it names) |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
+| `mixed-purity` | a module holds at least `min_pure_units` (default 2) substantial pure top-level functions or classes (a body of at least `min_body_lines`, default 4, lines) and at least one effectful one, or an effect that runs at import time. Enforced in every ring; see [Mixed purity](#mixed-purity-toolarborescentmixed_purity). The detail names only the ring, so the baseline key survives renaming functions; the hint lists the effect kinds, the effectful and pure definitions and the importer count. Also an `allow` entry that matches no module or no mixed module |
+| `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
@@ -1044,6 +1046,67 @@ below it, and every declared entrypoint needs a `closure` entry. A count above i
 `STALE` in `check`); a rise or a new entry needs `--allow-growth --reason TEXT` and is logged in `growth`. The file is separate
 from the check baseline and is not read by `arborescent check`.
 
+## Mixed purity: `[tool.arborescent.mixed_purity]`
+
+A ring label says where a module sits; it does not say the module is one thing. A module in a permissive ring can hold a
+large block of pure logic next to a function that reads the clock, walks the filesystem and logs, and every importer inherits
+all of it. `mixed-purity` flags that module in **every ring**: it is two modules.
+
+A module is *mixed* when it has at least `min_pure_units` **substantial pure** top-level definitions and at least one
+**effectful** one (or an effect that runs when the module is imported).
+
+- A definition is *substantial* when its body (past the docstring) spans `min_body_lines` source lines. A class counts only
+  when it has a method that is not a stub; a field-only dataclass, a `Protocol` or an ABC is a model, not logic. A pass-through
+  wrapper (the `forwarded-import` shape) does not count.
+- A definition is *effectful* when it directly uses an effect of a kind in `kinds`, **or calls an effectful function of the
+  same module by name**: a function that calls a logging helper is not pure.
+- Effects come from the facts the `effect-*` rules already extract (same table, same `effect_defaults` seam handling), so there is
+  no second detector. A use outside every top-level definition is an import-time effect, except inside an
+  `if __name__ == "__main__":` block, which runs as a program. `os-branching` and `patch` are not effects here.
+  `TYPE_CHECKING` imports create no use, so they never make a module effectful.
+- A module where every definition is effectful (an adapter, a port wrapper) or none is (a pure module, a pure model) is not mixed.
+
+```toml
+[tool.arborescent.mixed_purity]
+enabled = true            # default; false turns the rule off
+report_excluded = true    # default; false skips parsing files under `exclude` (one extra cold parse per excluded file)
+min_pure_units = 2        # default: pure definitions needed before a module counts as mixed
+min_body_lines = 4        # default: lines a definition needs to be substantial
+kinds = ["clock", "env", "filesystem", "logging", "memo", "state"]   # default: every kind below except ambient
+ambient = ["myapp.state.state_root", "myapp.env.*"]                    # globs on the absolute dotted name of an ambient lookup
+
+[[tool.arborescent.mixed_purity.allow]]
+module = "myapp.bundle_schema.hydration"   # a dotted name, a package prefix or a glob
+reason = "split tracked in #212; until then the cache slot and the validation ship together"
+```
+
+`kinds` takes the existing categories (`clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`,
+`network`, `filesystem`, `dynamic-import`, `console` for `print`/`input`, `global` for a function that rebinds a module global)
+and the kinds this rule adds, which never feed the `effect-*` rules:
+
+| kind | what it is |
+|---|---|
+| `logging` | `logging.info(...)` and friends, a call on a module-level `logging.getLogger(...)` / `structlog.get_logger(...)` result, `loguru.logger`. `getLogger` itself is not an effect |
+| `memo` | `functools.lru_cache` / `cache` / `cached_property` decorators, or a write to a module-level dict, list or set whose name contains `cache` or `memo` |
+| `state` | a write (item assignment, `del`, `append`/`update`/`setdefault`/... ) to any other module-level dict, list or set from inside a function, unless that function binds the name locally. Reads are not effects |
+| `ambient` | a call to something matching `ambient`, resolved through absolute and relative imports (`state_root()`, `os.getcwd`). Off until `ambient` lists a pattern |
+
+**Allowlist.** An entry needs a non-blank `reason`; without one the policy fails to load. An entry that matches no module, or
+only modules that are not mixed (any more), is itself a `mixed-purity` finding, so an exemption cannot outlive the code it excused.
+With `--changed` only a missing module is judged, since the other modules were not parsed.
+
+**Adopting it.** Run `arborescent baseline` to record today's findings and let the ratchet shrink them; a fixed module leaves a
+stale entry you delete. `arborescent purity` (`--json` for machines) lists every mixed module, including allowed ones, ranked by
+how many modules import it, which is the order to split them in.
+
+**Excluded paths.** With the rule on, files under `exclude` are parsed (through the same content-hash cache) and the mixed ones
+are reported as `mixed-purity-excluded` notes. Tooling, tests and fixtures stay excluded; they just stop being invisible. Turn
+`report_excluded = false` to skip that parse, which costs one extra cold parse per excluded file (a large excluded `tests` tree can double the cold scan; this repository turns it off for that reason).
+
+**Limits.** Only top-level functions and classes are units, and a class is one unit. A call through an object of unknown type
+is not followed, so a method called as `self.helper()` does not carry its effect to the caller. Developer tooling
+(`dev_tools`) has no ring and is not judged.
+
 ## Named ratchets: `[tool.arborescent.ratchet.<name>]`
 
 A named ratchet is a per-module counter that may only go down: function-level imports, bare prints, calls to a banned
@@ -1153,6 +1216,11 @@ intentional baseline growth, its reason and its approver.
 
 `report`, `check`, `baseline` and `cost`, described under [Coupling metrics](#coupling-metrics-toolarborescentcoupling).
 `check` exits 1 on a regression; a policy or baseline error exits 2.
+
+### `arborescent purity`
+
+Lists every module `mixed-purity` finds (allowed ones marked), most imported first, with its effect kinds, effectful and pure
+definitions and importer count. `--json` prints the same as JSON. Report only: `check` is what fails.
 
 ### `arborescent ratchet`
 

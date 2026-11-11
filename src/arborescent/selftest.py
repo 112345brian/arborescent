@@ -21,6 +21,7 @@ from .importable_by_probes import importable_by_mutations
 from .module_forbid_probes import module_forbid_mutations
 from .owned_literal_probes import owned_literal_mutations
 from .ports import PackageProbes
+from .purity_probes import mixed_purity_mutations
 
 
 class ScanView(Protocol):
@@ -53,6 +54,7 @@ _SKIP_COPY = (*sorted(NOISE_DIRS), "*.pyc")
 _PRACTICE = "repository practice: selftest mutates source files only and runs no practices"
 # Rules with no mutation, and why. A test fails when a rule is in neither this table nor ``plan``'s output.
 NO_MUTATION: dict[Rule, str] = {
+    Rule.MIXED_PURITY_EXCLUDED: "informational note about files the policy excludes; the scan does not read them as modules; covered by tests/test_mixed_purity.py",
     Rule.REEXPORT_RATIO: "needs a module whose whole public surface is first-party imports, which one appended statement cannot make; covered by tests/test_reexport_ratio.py",
     Rule.FORBIDDEN_MODULE: "fires on a module name the policy forbids; selftest probes use fixed names no `forbidden_modules` pattern is written for",
     Rule.BAD_IMPORT: "a relative import above the source root is a syntax-level mistake, not a policy-dependent rule",
@@ -121,7 +123,7 @@ def plan(
     )
     for _, local_policy, local_known in local_policies:
         local_paths = {name: paths[name] for name in local_known if name in paths}
-        found, local_skipped = _local_mutations(local_policy, local_paths, local_known, arbor_index)
+        found, local_skipped = _local_mutations(local_policy, local_paths, local_known, arbor_index, scan.modules)
         out.extend(found)
         skipped.extend(local_skipped)
     anchor = next(iter(sorted(known)), None)
@@ -155,6 +157,7 @@ def plan(
 
 def _local_mutations(
     local_policy: Policy, local_paths: dict[str, str], local_known: frozenset[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+    modules: Mapping[str, ModuleInfo],
 ) -> tuple[list[Mutation], list[str]]:
     """The mutations for one policy (the whole policy, or one scope of it), plus the ones that cannot be built."""
     out: list[Mutation] = []
@@ -168,6 +171,7 @@ def _local_mutations(
     steps.append(importable_by_mutations(local_policy, local_paths, local_known))
     steps.append(owned_literal_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
+    steps.append(mixed_purity_mutations(local_policy, local_paths, local_known, arbor_index, modules))
     steps.append(_docs_mutations(local_policy, local_paths, local_known, arbor_index))
     for found, step_skipped in steps:
         out.extend(found)

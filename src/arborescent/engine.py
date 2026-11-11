@@ -42,6 +42,7 @@ from .ports import (
     ViolationEngine,
 )
 from .practices import run_practices
+from .purity import excluded_findings
 from .ratchet_measure import Subject
 from .rules import RuleContext, check_modules
 from .suggestions import Suggestion, file_size_suggestions
@@ -181,6 +182,7 @@ def run_own(
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
     found += _inventory_violations(scan.modules)
+    found += excluded_findings(policy, scan.excluded_modules)
     if only is None:  # the signals compare a module with its importers and peers: a whole-repository fact
         found += audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
     if "tach" not in policy.disabled_tools:

@@ -11,13 +11,14 @@ import re
 import tokenize
 import tomllib
 from collections.abc import Collection, Iterable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .forwarder_facts import Forwarder, forwarders
+from .purity_facts import Helpers, PurityFacts, PurityUnit, purity_facts
 
 __all__ = [
-    "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "Forwarder", "FunctionCalls", "ModuleInfo", "RawImport", "SourceFacts", "TopLevelDef",
-    "effect_category_of", "extract", "resolve_runtime_targets", "resolve_targets",
+    "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "Forwarder", "FunctionCalls", "ModuleInfo", "PurityFacts", "PurityUnit", "RawImport", "SourceFacts", "TopLevelDef",
+    "absolute_callee", "effect_category_of", "extract", "resolve_runtime_targets", "resolve_targets",
 ]
 
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
@@ -140,6 +141,7 @@ class SourceFacts:
     module_doc: str | None = None  # the module docstring, cleaned; None when there is none (#110)
     arbor_reason: str | None = None  # `__arbor__["ring_reason"]`: why the module sits in a ring a tighter one would also fit (#161)
     dynamic_imports: tuple[tuple[int, str], ...] = ()  # (line, literal module name, or "" when the target is not a plain absolute string literal) (#161)
+    purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -714,6 +716,16 @@ def _script_deps(source: str) -> tuple[str, ...] | None:
     return tuple(str(re.split(r"[<>=!~\[ ;]", dep, maxsplit=1)[0]) for dep in deps)
 
 
+def _purity_helpers(aliases: dict[str, str]) -> Helpers:
+    def is_stub(body: list[ast.stmt]) -> bool:
+        return _is_stub_body(body, aliases)
+
+    def is_abstract(node: ast.ClassDef) -> bool:
+        return _is_abstract_class(node, aliases)
+
+    return Helpers(_dotted, is_stub, is_abstract)
+
+
 def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     imports: list[RawImport] = []
@@ -747,6 +759,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         ast.get_docstring(tree),
         arbor_reason,
         _dynamic_imports(nodes, aliases),
+        purity_facts(tree, nodes, aliases, _purity_helpers(aliases)),
     )
 
 
@@ -950,6 +963,18 @@ def _main_guard_line(tree: ast.Module) -> int:
 
 def _file_ref_lines(nodes: Sequence[ast.AST]) -> tuple[int, ...]:
     return tuple(sorted(node.lineno for node in nodes if isinstance(node, ast.Name) and node.id == "__file__"))
+
+
+def absolute_callee(module: str, is_package: bool, callee: str) -> str | None:
+    """A call recorded by ``extract`` as a dotted name: relative imports keep their dots, a bare name is defined in this module."""
+    if not callee.startswith("."):
+        return callee if "." in callee else f"{module}.{callee}"
+    level = len(callee) - len(callee.lstrip("."))
+    parts = module.split(".")
+    package = parts if is_package else parts[:-1]
+    if level - 1 > len(package):
+        return None
+    return ".".join([*package[: len(package) - (level - 1)], callee[level:]])
 
 
 def resolve_targets(

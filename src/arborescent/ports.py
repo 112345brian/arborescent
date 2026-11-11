@@ -218,6 +218,9 @@ class ScanResult(Protocol):
     def excluded(self) -> Mapping[str, int]: ...  # excluded folder -> number of Python files
 
     @property
+    def excluded_modules(self) -> Mapping[str, ModuleInfo]: ...  # files under `exclude`, parsed for `mixed-purity` only (#173)
+
+    @property
     def noise_files(self) -> Sequence[str]: ...  # tracked Python files found below NOISE_DIRS
 
     @property

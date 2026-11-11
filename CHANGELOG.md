@@ -5,6 +5,15 @@
 ## Unreleased
 
 ### Added
+- `mixed-purity` (#173): a module with at least two substantial pure top-level definitions (4+ body lines) next to an
+  effectful one, or an import-time effect, is reported in every ring. It reuses the existing effect facts, attributes
+  them to definitions, and adds the kinds `logging`, `memo`, `state` and (configured) `ambient`; none of them feed the
+  `effect-*` rules. Configured under `[tool.arborescent.mixed_purity]` (`enabled`, `min_pure_units`, `min_body_lines`,
+  `kinds`, `ambient`, and an `allow` list that needs a `reason` per entry and fails on a stale entry). Findings carry no
+  counts in their baseline key. Files under `exclude` are assessed too and reported as informational `mixed-purity-excluded`
+  notes. New `arborescent purity [--json]` ranks mixed modules by importer count, and `selftest` gains three probes.
+  The rule is on by default; `enabled = false` or a baseline adopts it. The fact cache layout grew (`scan.json` v21), so
+  the first run after upgrading re-parses every file.
 - Opt-in pytest plugin `arborescent.pytest_io_block` (`-p arborescent.pytest_io_block`, extra `arborescent[pytest]`): tests
   selected by the `arbor_io_free` globs (or `--arbor-io-block`) run with file, network, process, sqlite, clock, random and
   environment access raising `IOBlockedError`. No new runtime dependency (#105).
