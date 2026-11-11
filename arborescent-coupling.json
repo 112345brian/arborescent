@@ -1,14 +1,14 @@
 {
   "fan-in": {
-    "arborescent.domain": 57,
-    "arborescent.engine": 11,
-    "arborescent.facts": 17,
+    "arborescent.domain": 63,
+    "arborescent.engine": 12,
+    "arborescent.facts": 20,
     "arborescent.package_model": 20,
     "arborescent.ports": 35,
-    "arborescent.rules": 14
+    "arborescent.rules": 15
   },
   "closure": {
-    "arborescent.__main__": 90
+    "arborescent.__main__": 98
   },
   "growth": [
     {
@@ -41,6 +41,16 @@
         "fan-in: arborescent.ports grew from 34 to 35",
         "fan-in: arborescent.rules grew from 13 to 14",
         "closure: arborescent.__main__ grew from 89 to 90"
+      ]
+    },
+    {
+      "reason": "Integration of #174 #176 #177 #178 #179: five features add modules that each import domain, facts or rules, so fan-in rises (domain 57->63, engine 11->12, facts 17->20, rules 14->15) and the __main__ closure grows 90->98",
+      "added": [
+        "fan-in: arborescent.domain grew from 57 to 63",
+        "fan-in: arborescent.engine grew from 11 to 12",
+        "fan-in: arborescent.facts grew from 17 to 20",
+        "fan-in: arborescent.rules grew from 14 to 15",
+        "closure: arborescent.__main__ grew from 90 to 98"
       ]
     }
   ]
