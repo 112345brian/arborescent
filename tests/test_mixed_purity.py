@@ -15,7 +15,8 @@ from arborescent.adapters import FsScanner
 from arborescent.cli_purity import run_purity
 from arborescent.domain import PolicyError, Rule, Violation
 from arborescent.engine import blocking, run_own
-from arborescent.facts import extract
+from arborescent.facts import ModuleInfo, extract
+from arborescent.purity import assess
 from arborescent.rules import check_modules
 from arborescent.selftest import plan, selftest
 
@@ -404,3 +405,34 @@ def test_a_partial_changed_scan_does_not_call_an_unparsed_allowed_module_stale(r
     assert "app.domain" not in scan.modules
     found = [v for v in check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index) if v.rule == Rule.MIXED_PURITY]
     assert [v.subject for v in found] == ["app.gone"]  # absence from the tree is still provable; "not mixed" is not
+
+
+PURE_BODY = "    a = value + 1\n    b = a * 2\n    c = b - 3\n    return c\n"
+FALLBACK = (
+    "import logging\n\nlog = logging.getLogger(__name__)\n\n"
+    "try:\n    import orjson\n\n    def dumps(x):\n        log.debug('encoding')\n        return orjson.dumps(x)\n"
+    "except ImportError:\n    import json\n\n    def dumps(x):\n        return json.dumps(x)\n\n"
+    f"def one(value):\n{PURE_BODY}\n\ndef two(value):\n{PURE_BODY}"
+)
+
+
+def test_a_function_defined_in_a_module_level_try_is_a_unit_not_import_time_code() -> None:
+    """Review finding: only `tree.body` was searched for definitions, so logging inside an `except ImportError` fallback
+    was reported as logging at import time and the function was not a unit."""
+    purity = extract(FALLBACK, "m.py").purity
+    assert purity.import_time == ()
+    assert {unit.name for unit in purity.units} == {"dumps", "one", "two"}
+    assert any(kind == "logging" for unit in purity.units if unit.name == "dumps" for _, kind in unit.kinds)
+
+
+def test_two_pure_definitions_of_one_name_count_as_one_pure_unit() -> None:
+    dumps = (
+        "try:\n    import orjson\n\n    def dumps(value):\n        a = value + 1\n        b = a * 2\n        c = b - 3\n        return orjson.dumps(c)\n"
+        "except ImportError:\n    import json\n\n    def dumps(value):\n        a = value + 1\n        b = a * 2\n        c = b - 3\n        return json.dumps(c)\n"
+    )
+    effect = "\n\ndef announce():\n    print('x')\n    return 1\n"
+    one_logical = ModuleInfo("m", "m.py", False, extract(dumps + effect, "m.py"))
+    two_logical = ModuleInfo("m", "m.py", False, extract(dumps + f"\n\ndef other(value):\n{PURE_BODY}" + effect, "m.py"))
+    assert assess(one_logical, mini_policy()) is None  # one pure definition (written twice) is below min_pure_units
+    report = assess(two_logical, mini_policy())
+    assert report is not None and report.pure == ("dumps", "other")

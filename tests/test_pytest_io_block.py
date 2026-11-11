@@ -90,3 +90,26 @@ def test_pure_code_fixtures_and_source_imports_still_work(tmp_path: Path) -> Non
     """
     result = run(tmp_path, body, "--arbor-io-block")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_patches_are_removed_when_the_blocked_test_ends(tmp_path: Path) -> None:
+    """Review finding: the stand-ins used to stay installed for the rest of the session, so a later, unselected test saw a
+    `datetime.datetime` that real datetimes are not instances of by type, and could not pickle one."""
+    body = """
+        import datetime, os, pickle, random, time
+        import pytest
+
+        def test_blocked():
+            pass
+
+        @pytest.mark.arbor_allow_io
+        def test_after_the_block():
+            assert datetime.datetime.__module__ == "datetime"
+            assert type(datetime.datetime(2026, 1, 1)) is datetime.datetime
+            pickle.dumps(datetime.datetime(2026, 1, 1))
+            assert isinstance(os.environ, os._Environ)
+            assert time.sleep.__module__ == "time"
+            assert random.random.__module__ != "arborescent.pytest_io_block"
+    """
+    result = run(tmp_path, body, "--arbor-io-block")
+    assert result.returncode == 0, result.stdout + result.stderr

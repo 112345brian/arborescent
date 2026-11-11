@@ -245,6 +245,16 @@ def _facts_to_json(f: SourceFacts) -> list[Any]:
     ]
 
 
+def _cached_facts(hit: list[Any]) -> SourceFacts | None:
+    """The facts of a cache record, or ``None`` when the record does not fit this layout: a record is a miss, never a crash.
+
+    The version number is bumped by hand, so a record written by another branch's layout can carry the current version."""
+    try:
+        return _facts_from_json(hit[1])
+    except (IndexError, KeyError, TypeError, ValueError, AttributeError):
+        return None
+
+
 def _facts_from_json(raw: list[Any]) -> SourceFacts:
     imports = tuple(RawImport(i[0], i[1], tuple(i[2]), i[3], i[4], i[5]) for i in raw[0])
     effects = tuple(EffectUse(u[0], u[1], u[2], u[3]) for u in raw[1])
@@ -288,8 +298,9 @@ def _parse_files(
         data = (root / rel).read_bytes()
         digest = hashlib.blake2b(data, digest_size=16).hexdigest()
         hit = cache.get(rel)
-        if hit is not None and hit[0] == digest:
-            facts = _facts_from_json(hit[1])
+        cached = _cached_facts(hit) if hit is not None and hit[0] == digest else None
+        if cached is not None and hit is not None:
+            facts = cached
             fresh[rel] = hit
         else:
             facts = extract(data.decode("utf-8-sig"), rel)
@@ -457,8 +468,9 @@ def _excluded_modules(
             continue
         digest = hashlib.blake2b(data, digest_size=16).hexdigest()
         hit = cache.get(rel)
-        if hit is not None and hit[0] == digest:
-            facts = _facts_from_json(hit[1])
+        cached = _cached_facts(hit) if hit is not None and hit[0] == digest else None
+        if cached is not None and hit is not None:
+            facts = cached
             fresh[rel] = hit
         else:
             try:

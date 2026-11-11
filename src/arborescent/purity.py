@@ -113,12 +113,13 @@ def assess(info: ModuleInfo, policy: Policy) -> ModulePurity | None:
         u for u in facts.purity.units
         if not tally.kinds[u.name] and u.logic and u.body_lines >= rule.min_body_lines and u.name not in forwarding
     ]
-    names = [u.name for u in effectful] + ([IMPORT_TIME] if tally.import_time else [])
-    if not names or len(pure) < rule.min_pure_units:
+    names = list(dict.fromkeys(u.name for u in effectful)) + ([IMPORT_TIME] if tally.import_time else [])  # a name defined twice (a fallback) is one definition
+    pure_names = tuple(dict.fromkeys(u.name for u in pure))  # a fallback defined twice is one pure definition, not two
+    if not names or len(pure_names) < rule.min_pure_units:
         return None
     kinds = tally.import_time.union(*(tally.kinds[u.name] for u in effectful))
     line = min((tally.first[name] for name in names if name in tally.first), default=0)
-    return ModulePurity(info.name, tuple(sorted(kinds)), tuple(names), tuple(u.name for u in pure), line)
+    return ModulePurity(info.name, tuple(sorted(kinds)), tuple(names), pure_names, line)
 
 
 def by_ring(rows: Collection[tuple[ModulePurity, str, bool]]) -> list[tuple[str, list[tuple[ModulePurity, str, bool]]]]:

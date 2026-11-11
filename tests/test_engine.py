@@ -271,6 +271,19 @@ def test_old_fact_cache_schema_is_discarded(repo: Path, tmp_path: Path) -> None:
     assert json.loads((cache / "scan.json").read_text(encoding="utf-8"))["v"] == 24
 
 
+def test_a_cache_record_of_the_wrong_shape_at_the_current_version_is_discarded_not_fatal(repo: Path, tmp_path: Path) -> None:
+    """Review finding: `_CACHE_VERSION` is bumped by hand, so two branches can write different record layouts under the
+    same version. Reading the other layout raised IndexError and aborted the run; a bad record must read as a miss."""
+    cache = tmp_path / "c"
+    first = run_own(mini_policy(), repo, services(cache=cache), practices=False)[1]
+    document = json.loads((cache / "scan.json").read_text(encoding="utf-8"))
+    document["files"]["app/domain.py"][1] = [[], [], None]  # a record that is too short for this version's layout
+    (cache / "scan.json").write_text(json.dumps(document), encoding="utf-8")
+    scan = run_own(mini_policy(), repo, services(cache=cache), practices=False)[1]
+    assert scan.parsed == 1  # only the damaged record was re-parsed; the rest were cache hits
+    assert first.parsed == 5
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 def test_changed_mode_checks_only_files_changed_since_the_ref(repo: Path) -> None:
     def git(*args: str) -> None:
