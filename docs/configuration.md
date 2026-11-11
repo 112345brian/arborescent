@@ -991,6 +991,22 @@ Each practice is off until it has a value.
 | `stale-config-path` | list of config file globs, e.g. `["Makefile", ".github/workflows/*.yml"]`; `stale-config-path-allow` lists path globs to ignore | a glob or `.py` path in the file matches nothing (a suite silently runs zero tests after a move), or a pyproject's hatch `packages` entry does not exist |
 | `source-root-drift` | `true`, or a list of files (default `["tach.toml", "pyproject.toml"]`) | a `sources` entry is below no `source_roots` entry, or the root list copied into `tach.toml` `source_roots`, hatch `sources`/`packages` or pytest `pythonpath` has drifted from the policy |
 | `test-reference` | tests folder, e.g. `"tests"`; `test-reference-exempt` lists `module.function` names or module globs to skip | information only: a public module-level function in an I/O-free ring (one that forbids `filesystem`, `network`, `database` and `process`; the innermost ring by default) that no function under the tests folder imports and calls. Resolved through import aliases and package re-exports; not through an object of unknown type, a fixture or a parametrized argument, and a function only a tested caller reaches is reported. Private, abstract and class members are skipped. A name that is only imported or mentioned does not count (#104) |
+| `adapter-equivalence` | list of groups of full module names, e.g. `[["pkg.fact_queries", "pkg.modes_store"]]`; `adapter-equivalence-tests` is the tests folder (default `"tests"`); `adapter-equivalence-report = true` makes the missing-test finding information only | fails when no single test function calls a function of every module in a group, so two adapters of one port cannot both ship without a differential test (#113). Group errors always fail, even with `adapter-equivalence-report`: an unknown module (not a scanned module; a unique suffix match is suggested), a group with fewer than two distinct modules, a module in two groups, a value that is not a list of lists of strings. See "Adapter equivalence" below |
+| `adapter-equivalence-report` | `true` | not a check of its own: makes `adapter-equivalence`'s missing-test finding information only (rule id `adapter-equivalence-report`, never fails, never baselined); group errors still fail |
+
+### Adapter equivalence
+
+`adapter-equivalence` forces a differential test to exist; it does not check that the test compares anything. The behaviour
+of a port is the project's contract test to write (see "Two adapters of one port can still disagree" in `docs/architecture.md`). A test
+function counts only through direct calls it makes (the machinery of `test-reference`, so aliases and package re-exports
+resolve to the defining module, which is the name to list). It does **not** count:
+
+- a call in a helper the test delegates to, or a module-level call (call one function of each module in the test body);
+- a fixture or a parametrized argument (`store.list_facts()` on an unknown-type object);
+- a bare import or a mention such as `assert a is not b`.
+
+Members may sit in different rings and scopes; no ring filter applies and the check adds no import edge. A module outside
+the scan (excluded, or misspelled) is an error rather than a skipped member.
 
 `stale-config-path` is a heuristic: it reads path-like tokens (containing `/`, and either a glob or ending in `.py`) and skips
 comments, URLs, variables, absolute and `..` paths, generated folders and `.pyc`/`.log`/`.tmp` globs. A path it should not

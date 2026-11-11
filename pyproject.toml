@@ -130,6 +130,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.generated_config" = "domain"
 "arborescent.lazy_imports" = "domain"
 "arborescent.import_cycles" = "domain"
+"arborescent.equivalence" = "domain"
 "arborescent.purity" = "domain"
 "arborescent.purity_facts" = "domain"
 "arborescent.purity_policy" = "domain"

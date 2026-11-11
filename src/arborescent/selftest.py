@@ -64,6 +64,8 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.SECRETS_GUARD: _PRACTICE,
     Rule.DOCS_SYNC: _PRACTICE,
     Rule.TEST_REFERENCE: _PRACTICE,
+    Rule.ADAPTER_EQUIVALENCE: _PRACTICE,
+    Rule.ADAPTER_EQUIVALENCE_REPORT: _PRACTICE,
     Rule.NOISE_DIR_CODE: "requires a Git-tracked Python file under a noise directory; selftest works on a temporary non-Git copy",
     Rule.WEAKLY_TYPED_PORT: "needs `require_typed_ports` on a ring and a Protocol with an untyped return; covered by focused rule tests",
     Rule.TACH_INVISIBLE_IMPORT: "informational and never baselined; focused tests cover it",

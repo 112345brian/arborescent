@@ -87,6 +87,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.generated_config` | `single` | domain |
 | `arborescent.lazy_imports` | `single` | domain |
 | `arborescent.import_cycles` | `single` | domain |
+| `arborescent.equivalence` | `single` | domain |
 | `arborescent.purity` | `single` | domain |
 | `arborescent.purity_facts` | `single` | domain |
 | `arborescent.purity_policy` | `single` | domain |
@@ -208,7 +209,8 @@ not read types or behaviour.
   upstream of the checker: keep the registry or composition-root parameter precisely typed so structural checking has
   something to check. Do not expect a missing method on an adapter to fail `check`.
 - **Two adapters of one port can still disagree.** Matching signatures say nothing about matching defaults or
-  filtering. A contract test that runs both adapters is the project's to write.
+  filtering. A contract test that runs both adapters is the project's to write; the `adapter-equivalence` practice
+  (`docs/configuration.md`) can only require that one test function calls into every declared-equivalent module.
 
 ### Violations and observations
 

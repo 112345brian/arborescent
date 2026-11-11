@@ -12,6 +12,7 @@ directory. Enable them under ``[tool.arborescent.practices]``.
 ``stale-config-path``   a Makefile glob or script path matched nothing after a move, so a suite silently ran zero tests
 ``source-root-drift``   the source-root list is copied into tach and pyproject, and one copy was not updated
 ``test-reference``      a function in an I/O-free ring that no function under the tests folder imports and calls (information, #104)
+``adapter-equivalence`` modules declared to implement one port that no single test function calls into (#113)
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from .domain import NOISE_DIRS, Policy, Rule, Violation, dist_name, in_unit
+from .equivalence import equivalence_findings
 from .facts import ModuleInfo, extract, resolve_targets
 from .ports import FileSystem, ScanResult, ToolRunner
 from .rules import RuleContext
@@ -330,6 +332,7 @@ def _config_copies(
 PRACTICES = (
     Rule.GITIGNORE_SHADOW, Rule.SIBLING_VERSIONS, Rule.SECRETS_GUARD, Rule.DOCS_SYNC, Rule.CRLF, Rule.UNDECLARED_IMPORTS,
     Rule.STALE_CONFIG_PATH, Rule.SOURCE_ROOT_DRIFT, Rule.TEST_REFERENCE,
+    Rule.ADAPTER_EQUIVALENCE,
 )  # fmt: skip
 
 
@@ -457,6 +460,12 @@ def _test_reference_findings(fs: FileSystem, root: Path, policy: Policy, scan: S
     return missing_test_references(fs, root, policy, scan, TestReferenceConfig(folder, exempt))
 
 
+def _adapter_equivalence_findings(fs: FileSystem, root: Path, scan: ScanResult, cfg: Mapping[str, object]) -> list[Violation]:
+    folder = str(cfg.get("adapter-equivalence-tests", "tests")).replace("\\", "/").strip("/")
+    tests = (frozenset(module for module, _ in test.references) for test in function_references(fs, root, folder, scan) if test.is_test)
+    return equivalence_findings(cfg[Rule.ADAPTER_EQUIVALENCE], scan.modules, tests, report=bool(cfg.get(Rule.ADAPTER_EQUIVALENCE_REPORT)))
+
+
 def run_practices(
     policy: Policy, root: Path, runner: ToolRunner, fs: FileSystem, scan: ScanResult,
 ) -> list[Violation]:
@@ -472,6 +481,7 @@ def run_practices(
         (Rule.STALE_CONFIG_PATH, lambda: _stale_config_findings(fs, root, cfg)),
         (Rule.SOURCE_ROOT_DRIFT, lambda: _source_root_findings(fs, root, policy, cfg[Rule.SOURCE_ROOT_DRIFT])),
         (Rule.TEST_REFERENCE, lambda: _test_reference_findings(fs, root, policy, scan, cfg)),
+        (Rule.ADAPTER_EQUIVALENCE, lambda: _adapter_equivalence_findings(fs, root, scan, cfg)),
     ]
     out: list[Violation] = []
     for rule, check in checks:
