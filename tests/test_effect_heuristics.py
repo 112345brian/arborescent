@@ -393,5 +393,7 @@ def test_nested_bare_pattern_names_the_entry_that_reaches_below_the_root() -> No
 def test_the_excluded_folders_listing_flags_a_nested_match_of_a_bare_name(capsys: pytest.CaptureFixture[str]) -> None:
     _print_excluded(CheckReport(excluded={"client": 2, "src/pkg/client": 53}, excluded_nested={"src/pkg/client": "client"}))
     lines = capsys.readouterr().out.splitlines()
-    assert "  client/ (2 file(s))" in lines
-    assert any(line.startswith("  src/pkg/client/ (53 file(s); nested match of the bare pattern 'client', write '/client'") for line in lines)
+    assert "  client/ (2 file(s))" in lines and "  src/pkg/client/ (53 file(s))" in lines
+    assert [line for line in lines if "note:" in line] == [
+        "  note: the bare entry 'client' also hid 1 folder(s) below the root (src/pkg/client/ ...); write '/client' to exclude only the top-level one"
+    ]

@@ -30,13 +30,19 @@ def _print_excluded(report: CheckReport) -> None:
         print("  none")
     else:
         for folder, count in sorted(excluded.items()):
-            nested = report.excluded_nested.get(folder)
-            note = f"; nested match of the bare pattern {nested!r}, write '/{nested}' to exclude only the top-level folder" if nested is not None else ""
-            print(f"  {folder}/ ({count} file(s){note})")
+            print(f"  {folder}/ ({count} file(s))")
+        _print_nested_exclusions(report.excluded_nested)
     if report.dev_tools:
         print("dev tools (no ring, may import product code, never imported by it):")
         for entry, count in sorted(report.dev_tools.items()):
             print(f"  {entry}/ ({count} module(s))")
+
+
+def _print_nested_exclusions(nested: dict[str, str]) -> None:
+    """One line per bare ``exclude`` name that reached below the repository root: it may have been meant as ``/name``."""
+    for pattern in sorted(set(nested.values())):
+        folders = sorted(folder for folder, name in nested.items() if name == pattern)
+        print(f"  note: the bare entry {pattern!r} also hid {len(folders)} folder(s) below the root ({folders[0]}/ ...); write '/{pattern}' to exclude only the top-level one")
 
 
 def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: str | None = None) -> None:
