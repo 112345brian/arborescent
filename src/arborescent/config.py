@@ -30,6 +30,14 @@ from .presets import (
     TAINT_SEED_CATEGORIES,
     Preset,
 )
+from .purity_policy import (
+    DEFAULT_KINDS,
+    DEFAULT_MIN_BODY_LINES,
+    DEFAULT_MIN_PURE_UNITS,
+    KNOWN_KINDS,
+    PurityAllow,
+    PurityPolicy,
+)
 from .ratchet_config import ratchet_specs
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")  # mirrors the scanner: only identifier-like strings are recorded
@@ -273,6 +281,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         io_modules=frozenset(io_modules),
         taint_seeds=_taint_seeds(raw),
         coupling=_coupling(raw),
+        mixed_purity=_mixed_purity(raw),
         ratchets=ratchet_specs(raw.get("ratchet", {})),
     )
 
@@ -299,6 +308,57 @@ def _coupling(raw: Mapping[str, Any]) -> CouplingPolicy:
     )
 
 
+def _positive_int(table: Mapping[str, Any], key: str, default: int) -> int:
+    value = table.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise PolicyError(f"`mixed_purity.{key}` must be a positive integer")
+    return value
+
+
+def _purity_kinds(table: Mapping[str, Any]) -> tuple[str, ...]:
+    if "kinds" not in table:
+        return DEFAULT_KINDS
+    kinds = _string_list(table, "kinds")
+    unknown = set(kinds) - KNOWN_KINDS
+    if unknown:
+        raise PolicyError(f"unknown effect kind in `mixed_purity.kinds`: {sorted(unknown)}; known: {sorted(KNOWN_KINDS)}")
+    return kinds
+
+
+def _purity_allow(table: Mapping[str, Any]) -> tuple[PurityAllow, ...]:
+    entries = table.get("allow", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
+        raise PolicyError("`mixed_purity.allow` must be an array of tables: [[tool.arborescent.mixed_purity.allow]]")
+    out: list[PurityAllow] = []
+    for entry in cast("list[Mapping[str, Any]]", entries):
+        module, reason = entry.get("module"), entry.get("reason")
+        if not isinstance(module, str) or not module.strip():
+            raise PolicyError("`mixed_purity.allow` needs a `module`: a dotted module name, prefix or glob")
+        if not isinstance(reason, str) or not reason.strip():
+            raise PolicyError(f"`mixed_purity.allow` {module!r} needs a written `reason`; an exemption without one is not allowed")
+        out.append(PurityAllow(module, reason.strip()))
+    return tuple(out)
+
+
+def _mixed_purity(raw: Mapping[str, Any]) -> PurityPolicy:
+    table = raw.get("mixed_purity", {})
+    if not isinstance(table, Mapping):
+        raise PolicyError("`mixed_purity` must be a table")
+    table = cast("Mapping[str, Any]", table)
+    unknown = set(table) - {"enabled", "report_excluded", "min_pure_units", "min_body_lines", "kinds", "ambient", "allow"}
+    if unknown:
+        raise PolicyError(f"unknown key in `mixed_purity`: {sorted(unknown)}")
+    return PurityPolicy(
+        _boolean_option(table, "enabled", True),
+        _boolean_option(table, "report_excluded", True),
+        _positive_int(table, "min_pure_units", DEFAULT_MIN_PURE_UNITS),
+        _positive_int(table, "min_body_lines", DEFAULT_MIN_BODY_LINES),
+        _purity_kinds(table),
+        _string_list(table, "ambient"),
+        _purity_allow(table),
+    )
+
+
 def _taint_seeds(raw: Mapping[str, Any]) -> tuple[str, ...]:
     if "taint_seeds" not in raw:
         return DEFAULT_TAINT_SEEDS
@@ -314,7 +374,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
-    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling",
+    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling", "mixed_purity",
     "ratchet",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({

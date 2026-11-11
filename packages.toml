@@ -129,6 +129,10 @@ path = "src/arborescent/construct_only_probes.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/purity_probes.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/module_forbid_probes.py"
 role = "source"
 
@@ -162,6 +166,18 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/import_cycles.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/purity.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/purity_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/purity_policy.py"
 role = "source"
 
 [[packages.paths]]
@@ -391,6 +407,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/cli_cycles.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_purity.py"
 role = "source"
 
 [[packages.paths]]

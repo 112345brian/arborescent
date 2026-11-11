@@ -67,6 +67,8 @@ def test_rule_id_strings_never_change() -> None:
             "non-abstract-port",
             "weakly-typed-port",
             "reexport-ratio",
+            "mixed-purity",
+            "mixed-purity-excluded",
             "circular-import",
             "external-import",
             "os-branching",

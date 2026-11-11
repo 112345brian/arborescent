@@ -1,14 +1,14 @@
 {
   "fan-in": {
-    "arborescent.domain": 54,
-    "arborescent.engine": 10,
-    "arborescent.facts": 15,
+    "arborescent.domain": 57,
+    "arborescent.engine": 11,
+    "arborescent.facts": 17,
     "arborescent.package_model": 20,
     "arborescent.ports": 34,
-    "arborescent.rules": 11
+    "arborescent.rules": 12
   },
   "closure": {
-    "arborescent.__main__": 86
+    "arborescent.__main__": 91
   },
   "growth": [
     {
@@ -20,6 +20,16 @@
         "fan-in: arborescent.ports grew from 30 to 34",
         "fan-in: arborescent.rules grew from 10 to 11",
         "closure: arborescent.__main__ grew from 74 to 86"
+      ]
+    },
+    {
+      "reason": "mixed-purity (#173) adds purity, purity_facts, purity_policy, purity_probes and cli_purity: they legitimately import domain and facts, engine and rules import purity, and the entrypoint closure gains the five modules",
+      "added": [
+        "fan-in: arborescent.domain grew from 54 to 57",
+        "fan-in: arborescent.engine grew from 10 to 11",
+        "fan-in: arborescent.facts grew from 15 to 17",
+        "fan-in: arborescent.rules grew from 11 to 12",
+        "closure: arborescent.__main__ grew from 86 to 91"
       ]
     }
   ]
