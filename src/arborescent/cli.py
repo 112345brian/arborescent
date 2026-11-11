@@ -17,7 +17,7 @@ from .adapters import (
     SystemClock,
 )
 from .admitted_against import admission_problems
-from .annotate import apply_annotations, plan_annotations
+from .annotate import apply_annotations, new_since, plan_annotations
 from .bench import run_bench
 from .classify_audit import suggest_ring
 from .cli_admit import add_admit_parser, run_admit
@@ -210,8 +210,10 @@ def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser])
     discover.add_argument("--suggest", action="store_true", help="per module, print the tightest ring its imports and effects permit, with the evidence")
     annotate = add_parser(
         "annotate",
-        help="migrate classify matches into explicit __arbor__ annotations (dry-run by default)",
+        help="migrate legacy classify matches into __arbor__ annotations (needs --legacy --against REF; new modules go through `admit`; dry-run by default)",
     )
+    annotate.add_argument("--legacy", action="store_true", help="migrate rings a human already wrote into `classify`; records policy, not a validated placement")
+    annotate.add_argument("--against", metavar="REF", help="git reference: modules added since its merge base with HEAD are refused and routed to `arborescent admit`")
     annotate.add_argument(
         "--yes",
         action="store_true",
@@ -542,22 +544,32 @@ def _ratchet(args: argparse.Namespace, policy: Policy, root: Path, svc: Services
 
 
 def _annotate(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    if not args.legacy:
+        print("annotate: it no longer writes rings onto modules by itself. Place a new module with `arborescent admit MODULE --ring R`;")
+        print("annotate: migrate rings that `classify` already holds with `arborescent annotate --legacy --against REF`.")
+        return 1
+    if not args.against:
+        print("annotate: --legacy needs --against REF, so modules new since REF are refused and routed to `arborescent admit`")
+        return 1
+    try:
+        new_paths = new_since(svc.runner, root, args.against)
+    except ValueError as exc:
+        print(f"annotate: {exc}")
+        return 1
     _, scan = run_own(policy, root, svc, practices=False)
-    plan = plan_annotations(policy, scan)
-    if args.yes:
-        written = apply_annotations(svc.fs, root, plan)
-        for _, rel, ring in plan.to_annotate:
-            print(f"annotated {rel} (ring: {ring})")
-    else:
-        written = 0
-        for _, rel, ring in plan.to_annotate:
-            print(f"would annotate {rel} (ring: {ring})")
+    plan = plan_annotations(policy, scan, new_paths)
+    print("annotate: --legacy records the policy's placement, not a validated one; `classify` is human-written policy and nothing here checked it against the module's facts")
+    for module, rel in plan.new_modules:
+        print(f"new since {args.against}, not annotated: {rel}; run `arborescent admit {module} --ring R`")
+    written = apply_annotations(svc.fs, root, plan) if args.yes else 0
+    for _, rel, ring in plan.to_annotate:
+        print(f"{'annotated' if args.yes else 'would annotate'} {rel} (ring: {ring})")
     for rel in plan.unmatched:
         print(f"no classify match: {rel}")
     print(
         f"annotate: {written if args.yes else len(plan.to_annotate)} "
         f"{'annotated' if args.yes else 'would be annotated'}, "
-        f"{len(plan.already_annotated)} already annotated, {len(plan.unmatched)} unmatched"
+        f"{len(plan.already_annotated)} already annotated, {len(plan.unmatched)} unmatched, {len(plan.new_modules)} new (use admit)"
     )
     return 0
 

@@ -715,9 +715,15 @@ rejected as a policy error.
 
 Migrating an existing classify-only project:
 
-1. Run `arborescent annotate` (dry-run by default) to see what it would insert; `arborescent annotate --yes` writes
-   `__arbor__ = {"ring": ...}` into every module `classify` currently resolves but that has no existing annotation.
-   It is idempotent: a second run reports already-annotated files and writes nothing.
+1. Run `arborescent annotate --legacy --against REF` (dry-run by default) to see what it would insert; add `--yes` to
+   write `__arbor__ = {"ring": ...}` into every module `classify` currently resolves but that has no existing
+   annotation. This records the policy's placement, not a validated one: `classify` is human-written and nothing
+   checks it against the module's facts. `--legacy` is required, and so is `--against REF` (any git reference, such
+   as `origin/main`): a module added since the merge base of `REF` and HEAD is never annotated here; the command
+   lists it and names `arborescent admit MODULE --ring R`, which scans its imports and effects before it writes. An
+   unreadable `REF` (unknown reference, shallow clone, no git) fails with exit 1 and writes nothing. A module git
+   sees as renamed is not new. The command is idempotent: a second run reports already-annotated files and writes
+   nothing.
 2. Run `arborescent discover` and `arborescent check` and confirm nothing is left relying on `classify` alone (add
    `require_arbor_annotations_exclude` entries for anything that genuinely cannot be annotated).
 3. Set `require_arbor_annotations = true`. From then on, a new module that lands without an annotation fails

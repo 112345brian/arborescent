@@ -25,6 +25,9 @@
   added or raised value needs an attributed growth entry appended since the ref (#139).
 
 ### Changed
+- `arborescent annotate` no longer writes a ring by itself (#162): migrating `classify` matches needs `--legacy --against REF`,
+  modules added since `REF` are refused and routed to `arborescent admit`, an unreadable `REF` fails with exit 1, and the
+  output says the annotation records policy, not a validated placement. The `unannotated-module` message names both routes.
 - Growth entries recorded before this release have no `approved-by`, so they fail `--growth-against` only while they
   are newer than the ref.
 - `arborescent check --rule FAMILY` (repeatable) runs and exits on one rule family, and `check` prints a
