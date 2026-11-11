@@ -226,7 +226,18 @@ def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser])
     add_parser("cycles", help="report import cycles, the edges to cut and the function-level imports that only break a cycle")
     purity = add_parser("purity", help="rank the modules that mix substantial pure logic with effectful code by how many modules import them")
     purity.add_argument("--json", action="store_true", help="print the ranked modules as JSON")
+    purity.add_argument("--top", type=_positive_int, metavar="N", help="list only the N most imported mixed modules (the findings of `check` are unchanged)")
     add_ratchet_parser(add_parser)
+
+
+def _positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
 
 
 def _add_packages_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
@@ -348,7 +359,7 @@ def _dispatch(
         "admit": lambda: run_admit(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),
         "cycles": lambda: run_cycles(policy, root, svc),
-        "purity": lambda: run_purity(policy, root, svc, args.json),
+        "purity": lambda: run_purity(policy, root, svc, args.json, args.top),
         "ratchet": lambda: _ratchet(args, policy, root, svc),
     }
     return handlers.get(args.command, lambda: _check(args, policy, root, svc))()

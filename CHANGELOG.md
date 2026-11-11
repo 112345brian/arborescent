@@ -5,6 +5,10 @@
 ## Unreleased
 
 ### Added
+- `arborescent purity --top N` (#183): list only the N mixed modules with the largest blast radius. The listing is now
+  grouped by ring with per-ring counts, and ties rank the module with more pure units first (previously more effectful
+  definitions), then by name. `--top 0` or a negative value is a usage error. Presentation only: `check` findings,
+  baseline keys and exit codes are unchanged, and the text layout of `purity` changed (ring headings, no `[ring]` suffix).
 - `mixed-purity` (#173): a module with at least two substantial pure top-level definitions (4+ body lines) next to an
   effectful one, or an import-time effect, is reported in every ring. It reuses the existing effect facts, attributes
   them to definitions, and adds the kinds `logging`, `memo`, `state` and (configured) `ambient`; none of them feed the
