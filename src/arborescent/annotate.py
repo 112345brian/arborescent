@@ -53,7 +53,7 @@ def _is_future_import(stmt: ast.stmt) -> bool:
     return isinstance(stmt, ast.ImportFrom) and stmt.module == "__future__"
 
 
-def insert_annotation(source: str, ring: str) -> str:
+def insert_annotation(source: str, ring: str, reason: str | None = None) -> str:
     """Insert ``__arbor__ = {"ring": ...}`` right after the module docstring and a following
     ``from __future__ import annotations``, when present; otherwise at the top of the file."""
     body = ast.parse(source).body
@@ -68,7 +68,8 @@ def insert_annotation(source: str, ring: str) -> str:
     prefix = lines[:insert_at]
     suffix = lines[insert_at:]
     block = ["\n"] if prefix and prefix[-1].strip() else []
-    block.append(f"__arbor__ = {json.dumps({'ring': ring})}\n")
+    annotation = {"ring": ring} if reason is None else {"ring": ring, "ring_reason": reason}
+    block.append(f"__arbor__ = {json.dumps(annotation)}\n")
     if suffix and suffix[0].strip():
         block.append("\n")
     return "".join(prefix) + "".join(block) + "".join(suffix)

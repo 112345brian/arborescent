@@ -22,6 +22,7 @@ source_modules = [
     "arborescent.migration_arguments",
     "arborescent.migration_json",
     "arborescent.package_assignment",
+    "arborescent.package_constraints",
     "arborescent.package_contracts",
     "arborescent.package_fields",
     "arborescent.package_model",
@@ -43,6 +44,7 @@ source_modules = [
 forbidden_modules = [
     "arborescent.driver_port",
     "arborescent.ports",
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -95,6 +97,7 @@ forbidden_modules = [
     "arborescent.typecheckers",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -103,6 +106,7 @@ forbidden_modules = [
     "arborescent.cli_purity",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 allow_indirect_imports = true
 
@@ -124,6 +128,7 @@ source_modules = [
     "arborescent.migration_arguments",
     "arborescent.migration_json",
     "arborescent.package_assignment",
+    "arborescent.package_constraints",
     "arborescent.package_contracts",
     "arborescent.package_fields",
     "arborescent.package_model",
@@ -167,6 +172,7 @@ name = "ports ring imports only ['domain', 'ports']"
 type = "forbidden"
 source_modules = ["arborescent.driver_port", "arborescent.ports"]
 forbidden_modules = [
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -219,6 +225,7 @@ forbidden_modules = [
     "arborescent.typecheckers",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -227,6 +234,7 @@ forbidden_modules = [
     "arborescent.cli_purity",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 allow_indirect_imports = true
 
@@ -258,6 +266,7 @@ allow_indirect_imports = true
 name = "application ring imports only ['application', 'domain', 'ports']"
 type = "forbidden"
 source_modules = [
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -312,6 +321,7 @@ forbidden_modules = [
     "arborescent.typecheckers",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -320,6 +330,7 @@ forbidden_modules = [
     "arborescent.cli_purity",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 allow_indirect_imports = true
 
@@ -327,6 +338,7 @@ allow_indirect_imports = true
 name = "application ring imports no I/O or third-party package it does not list"
 type = "forbidden"
 source_modules = [
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -404,6 +416,7 @@ source_modules = [
     "arborescent.typecheckers",
 ]
 forbidden_modules = [
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -443,6 +456,7 @@ forbidden_modules = [
     "arborescent.suggestions",
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -451,6 +465,7 @@ forbidden_modules = [
     "arborescent.cli_purity",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 allow_indirect_imports = true
 
@@ -494,6 +509,7 @@ type = "forbidden"
 source_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -502,6 +518,7 @@ source_modules = [
     "arborescent.cli_purity",
     "arborescent.cli_ratchet",
     "arborescent.cli_report",
+    "arborescent.pytest_io_block",
 ]
 forbidden_modules = [
     "asyncio",
@@ -552,6 +569,7 @@ source_modules = [
 forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -576,6 +594,7 @@ name = "package core imports only declared packages' public modules"
 type = "forbidden"
 source_modules = [
     "arborescent.adapters",
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -607,6 +626,7 @@ source_modules = [
     "arborescent.lazy_imports",
     "arborescent.module_forbid_probes",
     "arborescent.owned_literal_probes",
+    "arborescent.package_constraints",
     "arborescent.parallel_adapter",
     "arborescent.path_exclusion",
     "arborescent.ports",
@@ -616,6 +636,7 @@ source_modules = [
     "arborescent.purity_facts",
     "arborescent.purity_policy",
     "arborescent.purity_probes",
+    "arborescent.pytest_io_block",
     "arborescent.ratchet_config",
     "arborescent.ratchet_measure",
     "arborescent.ratchets",
@@ -632,6 +653,7 @@ source_modules = [
 forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -690,6 +712,7 @@ source_modules = [
 forbidden_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -753,6 +776,7 @@ type = "forbidden"
 source_modules = [
     "arborescent.__main__",
     "arborescent.cli",
+    "arborescent.cli_admit",
     "arborescent.cli_baseline_report",
     "arborescent.cli_coupling",
     "arborescent.cli_cycles",
@@ -782,6 +806,7 @@ name = "package core imports no I/O or third-party package its rings do not list
 type = "forbidden"
 source_modules = [
     "arborescent.adapters",
+    "arborescent.admission_probes",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
     "arborescent.baseline",
@@ -813,6 +838,7 @@ source_modules = [
     "arborescent.lazy_imports",
     "arborescent.module_forbid_probes",
     "arborescent.owned_literal_probes",
+    "arborescent.package_constraints",
     "arborescent.parallel_adapter",
     "arborescent.path_exclusion",
     "arborescent.ports",
@@ -822,6 +848,7 @@ source_modules = [
     "arborescent.purity_facts",
     "arborescent.purity_policy",
     "arborescent.purity_probes",
+    "arborescent.pytest_io_block",
     "arborescent.ratchet_config",
     "arborescent.ratchet_measure",
     "arborescent.ratchets",

@@ -14,6 +14,15 @@
   notes. New `arborescent purity [--json]` ranks mixed modules by importer count, and `selftest` gains three probes.
   The rule is on by default; `enabled = false` or a baseline adopts it. The fact cache layout grew (`scan.json` v21), so
   the first run after upgrading re-parses every file.
+- Opt-in pytest plugin `arborescent.pytest_io_block` (`-p arborescent.pytest_io_block`, extra `arborescent[pytest]`): tests
+  selected by the `arbor_io_free` globs (or `--arbor-io-block`) run with file, network, process, sqlite, clock, random and
+  environment access raising `IOBlockedError`. No new runtime dependency (#105).
+- `[package.constraints]` (`must_be_pure`, `forbid_effects`) in a package's own policy file: schema and validation only, nothing
+  enforced yet. Unknown keys, unknown effect names and non-boolean `must_be_pure` are policy errors; absent means no change (#164).
+- `arborescent admit MODULE --ring R [--reason TEXT] [--yes]` (#161): strict function-level admission of a module into a
+  ring (function-local, `TYPE_CHECKING` and literal dynamic imports all count; a non-literal dynamic import is refused
+  unless a reason is recorded; a tighter ring that fits is refused unless a reason is recorded). New `__arbor__` key
+  `ring_reason` (a tool older than the release containing it reports `invalid-arbor-annotation` on a file that uses it).
 - Baseline growth entries now carry `approved-by`: `baseline --allow-growth` requires `--approved-by WHO` (adoption
   records itself), and `check --growth-against` fails an entry without a non-blank `reason` and `approved-by`.
 - `ratchet_files`: numeric ratchet JSON files (`{"values": {...}, "growth": [...]}`) checked by `--growth-against`; an
@@ -50,6 +59,10 @@
 - `test-reference` practice (information): reports public functions of I/O-free rings that no function under the tests
   folder imports and calls, resolved through aliases and package re-exports. `test-reference-exempt` skips names. The
   per-function call facts it reads (`SourceFacts.function_calls`) are reusable by an adapter-equivalence check (#104).
+- `[tool.arborescent.docs]`: `module_docstring = true` reports a module with no docstring (`missing-module-docstring`) and
+  `module_names_ring = true` reports one whose docstring does not name the ring the policy enforces for it
+  (`docstring-ring-mismatch`); `exclude` takes module globs. Both join the baseline ratchet and are mutation-tested by `selftest`.
+  The scan cache is rebuilt once (#110). Not done: docstrings on public classes, functions and methods, which Ruff's `D1xx` rules cover.
 
 ## 0.6.0 — 2026-11-07
 

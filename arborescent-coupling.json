@@ -1,14 +1,14 @@
 {
   "fan-in": {
-    "arborescent.domain": 57,
-    "arborescent.engine": 11,
-    "arborescent.facts": 17,
+    "arborescent.domain": 59,
+    "arborescent.engine": 12,
+    "arborescent.facts": 19,
     "arborescent.package_model": 20,
     "arborescent.ports": 34,
-    "arborescent.rules": 12
+    "arborescent.rules": 14
   },
   "closure": {
-    "arborescent.__main__": 91
+    "arborescent.__main__": 94
   },
   "growth": [
     {
@@ -23,13 +23,25 @@
       ]
     },
     {
-      "reason": "mixed-purity (#173) adds purity, purity_facts, purity_policy, purity_probes and cli_purity: they legitimately import domain and facts, engine and rules import purity, and the entrypoint closure gains the five modules",
+      "reason": "package_constraints (#164) is a new domain module imported by domain, so the __main__ import closure grows by exactly one",
       "added": [
-        "fan-in: arborescent.domain grew from 54 to 57",
-        "fan-in: arborescent.engine grew from 10 to 11",
-        "fan-in: arborescent.facts grew from 15 to 17",
-        "fan-in: arborescent.rules grew from 11 to 12",
-        "closure: arborescent.__main__ grew from 86 to 91"
+        "closure: arborescent.__main__ grew from 86 to 87"
+      ]
+    },
+    {
+      "reason": "Integration of #169-#172: package_constraints (#164) and the admit modules (#161) each add a module on the __main__ import path, so the closure grows 87 -> 89",
+      "added": [
+        "closure: arborescent.__main__ grew from 87 to 89"
+      ]
+    },
+    {
+      "reason": "mixed-purity (#173) adds purity, purity_facts, purity_policy, purity_probes and cli_purity; they import domain and facts and are imported by engine, rules and cli",
+      "added": [
+        "fan-in: arborescent.domain grew from 56 to 59",
+        "fan-in: arborescent.engine grew from 11 to 12",
+        "fan-in: arborescent.facts grew from 17 to 19",
+        "fan-in: arborescent.rules grew from 13 to 14",
+        "closure: arborescent.__main__ grew from 89 to 94"
       ]
     }
   ]

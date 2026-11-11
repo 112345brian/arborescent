@@ -8,6 +8,7 @@ and OS-branching rules applies is the policy's preset; layering and classificati
 from __future__ import annotations
 
 import fnmatch
+import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from typing import NamedTuple
@@ -263,6 +264,27 @@ def _result_discard_findings(context: RuleContext, name: str, info: ModuleInfo, 
             line,
         ))
     return out
+
+
+def _docs_findings(context: RuleContext, name: str, info: ModuleInfo) -> list[Violation]:
+    """A module with no docstring, or whose docstring does not say the ring the policy enforces for it (#110)."""
+    local_policy = context.policy_for(name)
+    if local_policy is None or not local_policy.docs.applies_to(name):
+        return []
+    docs = local_policy.docs
+    doc = (info.facts.module_doc or "").strip()
+    if not doc:
+        return [Violation(Rule.MISSING_MODULE_DOCSTRING, name, f"[{name}] has no module docstring saying what it is")] if docs.module_docstring else []
+    ring = None if name in context.tool_modules else context.resolve_ring(name)
+    if not docs.module_names_ring or ring is None or _names_word(doc, ring):
+        return []
+    others = sorted(other.name for other in local_policy.rings if other.name != ring and _names_word(doc, other.name))
+    said = f"names ring {others[0]!r}" if len(others) == 1 else f"names rings {others}" if others else "names no ring"
+    return [Violation(Rule.DOCSTRING_RING_MISMATCH, name, f"[{name}] docstring {said}, but the module is in ring {ring!r}")]
+
+
+def _names_word(text: str, word: str) -> bool:
+    return re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text, re.IGNORECASE) is not None
 
 
 def _owner_text(item: OwnedLiteral) -> str:
@@ -565,9 +587,9 @@ def _wildcard_findings(policy: Policy) -> list[Violation]:
 
 
 def _module_preamble(context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], tops: Collection[str]) -> list[Violation]:
-    """Annotation, tooling-import and forbidden-name findings, which apply whether or not the module has a ring."""
+    """Documentation, annotation, tooling-import and forbidden-name findings, which apply whether or not the module has a ring."""
     is_tool = name in context.tool_modules
-    out: list[Violation] = []
+    out: list[Violation] = _docs_findings(context, name, info)
     detail = context.annotation_violation(name)
     if detail is not None:
         out.append(Violation(Rule.INVALID_ARBOR_ANNOTATION, name, detail))
