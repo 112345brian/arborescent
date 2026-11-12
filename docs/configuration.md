@@ -43,7 +43,7 @@ settings. The two forms cannot be mixed.
 | `dev_tools_forbid` | `["process"]` | Effect categories (`clock`, `env`, `process`, `filesystem`, …) that `dev_tools` modules may not use. The default reports raw `subprocess` use in tooling; `[]` allows everything. Reported as the matching `effect-*` rule. |
 | `dev_tools_may_import` | `[]` | Dotted-module globs of product modules that `dev_tools` modules may import. Empty means any; otherwise an import of another product module is `dev-tool-product-import`. |
 | `effect_defaults` | `"injection"` | How a bare parameter default that names an effect (`now=datetime.now`) counts. `"injection"`: never a use. `"typed"`: not a use only when the parameter is annotated `Callable` or `Mapping` (alone, in `Optional`/`Union`/`\|`, or as a string), so `x: int = datetime.now` still counts. `"count"`: always a use. Calls, aliases and lambda-wrapped defaults always count; applies to `clock`, `env`, `identity`, `randomness`, `sleep`, `threads` and `process`. Settable per scope. |
-| `taint_seeds` | every `effect-*` category that existed before 0.8.0 except `patch` and `global`, plus `network` (`monotonic`, `host` and `fs-query` are valid but not seeded unless listed) | Which I/O primitives the function-level taint pass (#98, below `classify-facts`) seeds a function as reaching. `[]` turns the pass into a no-op. Root-level (shared by all scopes). |
+| `taint_seeds` | every `effect-*` category that existed before 0.8.0 except `patch` and `global`, plus `network` (`monotonic`, `host` and `fs-query` are valid but not seeded unless listed; `state`, `registry` and `cache` mutate memory rather than do I/O and are not valid seeds) | Which I/O primitives the function-level taint pass (#98, below `classify-facts`) seeds a function as reaching. `[]` turns the pass into a no-op. Root-level (shared by all scopes). |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
@@ -758,7 +758,7 @@ Migrating an existing classify-only project:
 | `may_import` | `[]` | Inner rings this ring may import; `["*"]` means every inner ring. A ring may always import itself. An outer ring in this list is a policy error (the onion rule). |
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
-| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`, and, since 0.8.0, `state`, `monotonic`, `host` and `fs-query` (see *Effect categories*). The positional and preset defaults never include the four new ones: name them to opt in. |
+| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`, and, since 0.8.0, `state`, `monotonic`, `host` and `fs-query`, and in the next release `registry` and `cache` (see *Effect categories*). That is every detected category. The positional and preset defaults never include the six newer ones: name them to opt in. |
 | `max_reexport_ratio` | unset | A number from 0 to 1: the share of a module's public surface (a static `__all__`, else public top-level bindings; modules with fewer than 5 names are not judged) that may be first-party imports before `reexport-ratio` fires. Leave it unset on rings that legitimately aggregate (a composition root); the exemption is then visible in config. A dynamic `__all__` is ignored in favour of the bindings. Wrapping each name in a forwarding function evades it; that is the forwarded-import rule's job. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 | `require_typed_ports` | `false` | Every method of a `typing.Protocol` class in this ring must name its return type. A missing return annotation, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set`/`frozenset` or `Mapping[str, Any]` (also inside `Optional`, `\|` unions and string annotations) fires `weakly-typed-port`; `None`, named classes and parameterised containers pass. `__init__` is skipped. Parameters are not checked. |
@@ -827,7 +827,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `effect-console` | a ring that forbids `console` calls `print`, `input`, `sys.stdout.write` or `sys.stderr.write` |
 | `effect-global` | a ring that forbids `global` has a function that declares `global x` and then assigns `x` (a read-only `global` is not a use) |
-| `effect-state` | a ring that forbids `state` creates a `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local` (0.8.0) |
+| `effect-state` | a ring that forbids `state` creates a `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local` (0.8.0); a ring that forbids `registry` writes a module-level dict/list/set from a function, and one that forbids `cache` uses `functools.cache`/`lru_cache` or writes a cache-named module container (unreleased, #194) |
 | `effect-monotonic` | a ring that forbids `monotonic` calls `time.monotonic`, `perf_counter` or `process_time` (0.8.0) |
 | `effect-host` | a ring that forbids `host` reads `sys.argv`, `sys.stdin`, `locale`, `platform`, the process id, the CPU count or the host name (0.8.0) |
 | `effect-fs-query` | a ring that forbids `fs-query` asks the filesystem a question: `os.path.exists`, `os.getcwd`, `Path.cwd`, `p.exists()`, `shutil.which`... (0.8.0) |
@@ -1116,6 +1116,8 @@ Every direct use of an effectful API is classified into a category; a ring's `fo
 | `dynamic-import` | **only** run-time module loading: `importlib.import_module`, `importlib.__import__`, `importlib.reload`, `importlib.util.spec_from_file_location`/`spec_from_loader`/`module_from_spec`, `*.exec_module`, `__import__`. `importlib.resources`, `importlib.metadata` and `importlib.util.find_spec` import nothing and do not count (0.8.0) |
 | `console` | `print`, `input`, `sys.stdout.write`, `sys.stderr.write` |
 | `global` | a function that declares `global x` and assigns it |
+| `registry` | a function writes a module-level `dict`/`list`/`set` (item assignment, `del`, or `append`/`add`/`update`/`setdefault`/`pop`/`clear`... on it) that it does not bind locally; reported as `effect-state` (unreleased, #194). See *Module-level state* below |
+| `cache` | a `functools.cache`/`lru_cache` decorator, or a write to a module-level container whose name contains `cache` or `memo`; reported as `effect-state` (unreleased, #194). `cached_property` is per instance and does not count |
 | `patch` | a test patching a project target |
 
 A reference inside a type annotation (a parameter, return or variable annotation) is never a use: a hint names a type, it does not
@@ -1128,6 +1130,27 @@ Four categories were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`). 
 except that the extended `Path` detection (a path held in a variable) and the narrower `dynamic-import`, `threads`
 and `randomness` definitions change which modules the pre-existing categories report. `must_be_pure` keeps meaning "every
 pre-0.8.0 category"; list the new ones under `forbid_effects` to add them.
+
+### Module-level state: `registry` and `cache` (#194)
+
+`global x` rebinding was already the `global` category. Two further ways of keeping shared state in a module are detected (unreleased), each in
+its own category so a ring opts in to exactly what it means to ban. Both report as `effect-state` (the same rule id as locks, `state`), are in
+no default `forbid`, are not taint seeds and are not part of `must_be_pure`; `coupling` accessor counts and `discover --suggest` evidence ignore
+them. A policy that does not list them in a `forbid` keeps every finding and baseline entry it had.
+
+- **Registry.** A module-level name bound (at the top of the module) to a `dict`/`list`/`set` literal, comprehension or constructor
+  (`dict()`, `defaultdict(...)`, `OrderedDict`, `Counter`, `deque`) is a registry when a function or method writes it: `REG[k] = v`, `REG[k] += 1`,
+  `del REG[k]`, or a mutating call (`append`, `extend`, `insert`, `add`, `update`, `pop`, `popitem`, `remove`, `discard`, `clear`, `setdefault`,
+  `appendleft`, `popleft`). A name the function, or a function around it, binds itself (a parameter or an assignment) is a local, not
+  the module's container. Not seen: reads, a fill at import time (deterministic), a container imported from another module, a write through
+  `self.attr` or an alias, and `REG = REG | {...}` style rebinding (that is `global` when declared).
+- **Cache.** `@functools.cache` and `@functools.lru_cache` (aliases and `from functools import ...` resolved, on functions and methods) make a
+  loader whose result depends on call order, so they are a `cache` use at the decorator. A write to a module-level container whose name contains
+  `cache` or `memo` is also `cache`, not `registry`. A hand-rolled `global _x; if _x is None: _x = load()` slot is the `global` category.
+
+`mixed-purity` is unchanged: it keeps its own `state` and `memo` kinds for the same writes and decorators, and a `mixed_purity.kinds` list cannot
+name `registry` or `cache`. Every detected category, for a `forbid` list: `clock`, `monotonic`, `env`, `host`, `identity`, `randomness`, `sleep`,
+`threads`, `state`, `process`, `filesystem`, `fs-query`, `network`, `database`, `dynamic-import`, `console`, `global`, `registry`, `cache`, `patch`.
 
 ### `[tool.arborescent.effects]`: sanctioned seams
 

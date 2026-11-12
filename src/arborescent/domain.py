@@ -177,6 +177,8 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "monotonic": Rule.EFFECT_MONOTONIC,
     "host": Rule.EFFECT_HOST,
     "fs-query": Rule.EFFECT_FS_QUERY,
+    "registry": Rule.EFFECT_STATE,  # #194: module state besides locks; the same rule id as `state`, the category decides who opts in
+    "cache": Rule.EFFECT_STATE,
 }
 
 # Not catalog gaps despite the prefix: a constraint is a promise, so `modularity = "report"` never demotes these.
