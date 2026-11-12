@@ -17,7 +17,7 @@ from .domain import Policy, Rule, Violation, in_unit
 from .facts import ModuleInfo, absolute_callee
 from .purity_policy import AMBIENT, PurityPolicy
 
-__all__ = ["ModulePurity", "assess", "assess_in_ring", "by_ring", "excluded_findings", "importer_counts", "is_allowed", "summarize"]
+__all__ = ["Followed", "ModulePurity", "assess", "assess_in_ring", "by_ring", "excluded_findings", "explain", "importer_counts", "is_allowed", "summarize"]
 
 _NON_PROPAGATING = frozenset({"os-branching", "patch"})  # a portability fact and a test-only use: neither is an effect of the module
 IMPORT_TIME = "<import time>"
@@ -35,13 +35,41 @@ class ModulePurity:
     importers: int = 0  # blast radius: modules in the scanned tree that import this one
 
 
-def assess_in_ring(info: ModuleInfo, policy: Policy, ring: str) -> ModulePurity | None:
+def assess_in_ring(info: ModuleInfo, policy: Policy, ring: str, followed: Followed | None = None) -> ModulePurity | None:
     """``assess``, except that a module in a ring listed under ``mixed_purity.exclude_rings`` is never mixed."""
-    return None if ring in policy.mixed_purity.exclude_rings else assess(info, policy)
+    return None if ring in policy.mixed_purity.exclude_rings else assess(info, policy, followed)
 
 
 def is_allowed(policy: PurityPolicy, module: str) -> bool:
     return any(in_unit(module, entry.module) for entry in policy.allow)
+
+
+class Followed:
+    """The scanned modules, so a call into another module's function can be followed one hop (#200).
+
+    A function that calls ``save_text_atomic`` from a sibling module is as effectful as the wrapper it calls, whatever ring the
+    wrapper lives in. Only a call to a *function* of a scanned module is followed, and only that function's own effects (its direct
+    uses and its calls to siblings in its module), never the callee's own imports: one hop, like ``effect-via-import`` is one edge.
+    A class is not followed (a constructor is not its methods) and a callee that is not in the scan is unknown, not pure."""
+
+    def __init__(self, modules: Mapping[str, ModuleInfo]) -> None:
+        self.modules = modules
+        self._cache: dict[tuple[str, frozenset[str]], dict[str, set[str]]] = {}
+
+    def split(self, target: str) -> tuple[str, str] | None:
+        """(module, function) when ``target`` is ``module.function`` for a scanned module, else ``None``."""
+        module, _, name = target.rpartition(".")
+        return (module, name) if module in self.modules else None
+
+    def kinds(self, policy: Policy, wanted: Collection[str], module: str, name: str) -> set[str]:
+        key = (module, frozenset(wanted))
+        if key not in self._cache:
+            info = self.modules[module]
+            tally = _tally(info, policy, wanted, None)
+            _close_over_local_calls(info, tally.kinds)
+            functions = {u.name for u in info.facts.purity.units if not u.is_class}
+            self._cache[key] = {unit: kinds for unit, kinds in tally.kinds.items() if unit in functions}
+        return self._cache[key].get(name, set())
 
 
 class _Tally:
@@ -54,11 +82,12 @@ class _Tally:
         self.kinds: dict[str, set[str]] = {u.name: set() for u in info.facts.purity.units}
         self.first: dict[str, int] = {}
         self.import_time: set[str] = set()
+        self.evidence: dict[str, list[tuple[int, str, str]]] = {}  # owner -> (line, kind, what), for ``--explain``
 
     def owner(self, line: int) -> str | None:
         return next((name for start, end, name in self.spans if start <= line <= end), None)
 
-    def add(self, line: int, kind: str) -> None:
+    def add(self, line: int, kind: str, what: str = "") -> None:
         if kind not in self.wanted:
             return
         owner = self.owner(line)
@@ -70,24 +99,41 @@ class _Tally:
         else:
             self.kinds[owner].add(kind)
         self.first[owner] = min(self.first.get(owner, line), line)
+        self.evidence.setdefault(owner, []).append((line, kind, what))
 
 
-def _tally(info: ModuleInfo, policy: Policy, wanted: Collection[str]) -> _Tally:
+def _tally(info: ModuleInfo, policy: Policy, wanted: Collection[str], followed: Followed | None) -> _Tally:
     tally = _Tally(info, wanted)
     facts = info.facts
     for use in facts.effect_uses:
         if use.category not in _NON_PROPAGATING and policy.counts_effect_seam(use.seam):
-            tally.add(use.line, use.category)
+            tally.add(use.line, use.category, use.target)
     for unit in facts.purity.units:
         for line, kind in unit.kinds:
-            tally.add(line, kind)
+            tally.add(line, kind, kind)
     for line, kind in facts.purity.import_time:
-        tally.add(line, kind)
-    for line, callee in facts.calls if policy.mixed_purity.ambient else ():
+        tally.add(line, kind, kind)
+    _add_ambient(info, policy, tally)
+    if followed is not None:
+        _add_followed(info, policy, wanted, followed, tally)
+    return tally
+
+
+def _add_ambient(info: ModuleInfo, policy: Policy, tally: _Tally) -> None:
+    for line, callee in info.facts.calls if policy.mixed_purity.ambient else ():
         target = absolute_callee(info.name, info.is_package, callee)  # relative imports resolved: `state_root()` is usually first-party
         if target is not None and any(fnmatch.fnmatchcase(target, pattern) for pattern in policy.mixed_purity.ambient):
-            tally.add(line, AMBIENT)
-    return tally
+            tally.add(line, AMBIENT, target)
+
+
+def _add_followed(info: ModuleInfo, policy: Policy, wanted: Collection[str], followed: Followed, tally: _Tally) -> None:
+    """The effects of the other-module functions this module calls (one hop), attributed to the calling line."""
+    for line, callee in info.facts.calls:
+        target = absolute_callee(info.name, info.is_package, callee)
+        hop = followed.split(target) if target is not None else None
+        if hop is not None and hop[0] != info.name:  # a call to a sibling of this module is closed over locally
+            for kind in followed.kinds(policy, wanted, *hop):
+                tally.add(line, kind, f"{target} (calls into {hop[0]})")
 
 
 def _close_over_local_calls(info: ModuleInfo, kinds: dict[str, set[str]]) -> None:
@@ -104,13 +150,16 @@ def _close_over_local_calls(info: ModuleInfo, kinds: dict[str, set[str]]) -> Non
                     changed = True
 
 
-def assess(info: ModuleInfo, policy: Policy) -> ModulePurity | None:
-    """The module's report when it is mixed under ``policy.mixed_purity``, else ``None``. Allowlisting is the caller's business."""
+def assess(info: ModuleInfo, policy: Policy, followed: Followed | None = None) -> ModulePurity | None:
+    """The module's report when it is mixed under ``policy.mixed_purity``, else ``None``. Allowlisting is the caller's business.
+
+    ``followed``: the scanned modules, so a call into another module's effectful function counts (#200). Without it only a
+    module's own text is read. Every caller that has the scan passes it, or the same module is judged differently by two reports."""
     rule = policy.mixed_purity
     facts = info.facts
     if not rule.enabled or (not facts.purity.units and not facts.purity.import_time):
         return None
-    tally = _tally(info, policy, set(rule.kinds) | ({AMBIENT} if rule.ambient else set()))
+    tally = _tally(info, policy, set(rule.kinds) | ({AMBIENT} if rule.ambient else set()), followed)
     _close_over_local_calls(info, tally.kinds)
     forwarding = {f.name for f in facts.forwarders}
     effectful = [u for u in facts.purity.units if tally.kinds[u.name]]
@@ -169,3 +218,30 @@ def excluded_findings(policy: Policy, modules: Mapping[str, ModuleInfo]) -> list
             detail = f"{info.path} is excluded from the scan and mixes substantial pure logic with effectful code"
             found.append(Violation(Rule.MIXED_PURITY_EXCLUDED, name, detail, report.line, hint=summarize(report)))
     return found
+
+
+def explain(info: ModuleInfo, policy: Policy, followed: Followed | None = None) -> list[str]:
+    """One line per top-level definition (and import time): the effect that made it effectful, or why it does not count as pure logic.
+
+    The advice of a ``mixed-purity`` finding lists definitions as pure or effectful; this is the evidence behind each label, so a
+    wrong one is easy to report. It answers for the module whether or not the module is mixed."""
+    rule = policy.mixed_purity
+    wanted = set(rule.kinds) | ({AMBIENT} if rule.ambient else set())
+    tally = _tally(info, policy, wanted, followed)
+    _close_over_local_calls(info, tally.kinds)
+    forwarding = {f.name for f in info.facts.forwarders}
+    out: list[str] = []
+    for unit in info.facts.purity.units:
+        found = sorted(tally.evidence.get(unit.name, ()))
+        inherited = sorted(c for c in unit.calls if tally.kinds.get(c, set()))
+        if found or inherited:
+            reasons = [f"{kind} at line {line} ({what})" if what and what != kind else f"{kind} at line {line}" for line, kind, what in found]
+            reasons += [f"calls {callee} in this module ({', '.join(sorted(tally.kinds[callee]))})" for callee in inherited]
+            out.append(f"{unit.name}:{unit.line}  effectful: {'; '.join(reasons)}")
+        elif unit.name in forwarding or not unit.logic or unit.body_lines < rule.min_body_lines:
+            out.append(f"{unit.name}:{unit.line}  no effect found (too small, a stub or a forwarder to count as pure logic)")
+        else:
+            out.append(f"{unit.name}:{unit.line}  no effect found (pure)")
+    for line, kind, what in sorted(tally.evidence.get(IMPORT_TIME, ())):
+        out.append(f"{IMPORT_TIME}:{line}  effectful: {kind}" + (f" ({what})" if what and what != kind else ""))
+    return out

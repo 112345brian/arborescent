@@ -2,6 +2,19 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Fixed
+- `mixed-purity` no longer lists effectful functions as pure (#200). A method call on a module-level `Path` constant
+  (`REGISTRY = Path(...)` then `REGISTRY.read_text()` inside a function) is filesystem use, for the `effect-filesystem` rule as
+  well; a call to a function of another scanned module is followed one hop, so a caller of `save_text_atomic` (or of a
+  `@contextmanager` that takes a lock) is effectful whatever ring the wrapper is in, including through a function-level
+  import; and `fcntl.flock`/`fcntl.lockf`/`msvcrt.locking` are filesystem. Expect a few more `effect-filesystem` findings
+  and some functions moving from "pure" to "effectful" in `mixed-purity` hints (a module can newly become mixed).
+
+### Added
+- `arborescent purity --explain MODULE` prints, per definition, the call that made it effectful or `no effect found`.
+
 ## 0.8.0 — 2026-11-11
 
 Effect detection is more precise and more complete, and a project can now say which modules are its sanctioned seams. Found by an
