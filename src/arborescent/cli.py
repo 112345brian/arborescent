@@ -445,13 +445,8 @@ def _baseline(
         for key in ratchet_mod.load(svc.fs, root / policy.baseline)
     ):
         found += run_engine(svc, "ruff", root).violations
-    elif args.adopt is not None and args.adopt not in {
-        "coverage",
-        "effects",
-        "suppressions",
-        "discard",
-    }:
-        families = engine_names | {"coverage", "effects", "suppressions", "discard"}
+    elif args.adopt is not None and args.adopt not in ratchet_mod.OWN_ADOPTION_FAMILIES:
+        families = engine_names | ratchet_mod.OWN_ADOPTION_FAMILIES
         raise PolicyError(
             f"unknown adoption family {args.adopt!r}; choose from {sorted(families)}"
         )
@@ -629,7 +624,7 @@ def _list_dev_tools(policy: Policy, root: Path, svc: Services) -> int:
 
 def _validate_rule_selection(rules: list[str], svc: Services) -> None:
     """A typo in `--rule` must fail, not select nothing and report green."""
-    known = {rule.value for rule in Rule} | {item.name for item in (*svc.engines, *svc.checkers)} | {"coverage", "effects", "suppressions", "discard"}
+    known = {rule.value for rule in Rule} | {item.name for item in (*svc.engines, *svc.checkers)} | ratchet_mod.OWN_ADOPTION_FAMILIES
     unknown = sorted(r for r in rules if r not in known and not r.startswith("ruff-") and not any(k.startswith(f"{r}-") for k in known))
     if unknown:
         raise PolicyError(f"unknown rule family {unknown[0]!r}; choose from {sorted(known)}")
