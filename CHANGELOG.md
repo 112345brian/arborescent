@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## 0.9.0 — 2026-11-12
+
 ### Fixed
 - `mixed-purity` no longer lists effectful functions as pure (#200). A method call on a module-level `Path` constant
   (`REGISTRY = Path(...)` then `REGISTRY.read_text()` inside a function) is filesystem use, for the `effect-filesystem` rule as
