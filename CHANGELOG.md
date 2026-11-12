@@ -2,6 +2,17 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- `[lazy_import] rings = [...]` limits `lazy-import` to some rings (default: every ring, so nothing changes until it is set). An
+  unknown or empty ring list is a config error. Closes #199.
+- `check` folds `lazy-import` findings to one line per module (`total/deferred` plus the unjustified imports) and, while none is
+  baselined, prints `lazy-import: N new, 0 baselined; run 'arborescent baseline --adopt lazy-import' to start a ratchet`.
+
+### Fixed
+- `arborescent baseline --adopt lazy-import` was refused as an unknown family; it now adopts the `lazy-import` findings once.
+
 ## 0.8.0 — 2026-11-11
 
 Effect detection is more precise and more complete, and a project can now say which modules are its sanctioned seams. Found by an
