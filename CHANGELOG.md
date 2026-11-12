@@ -2,6 +2,15 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Added
+- A finding can name a **root cause** beside its identity key. `lazy-import` (the imported module) and
+  `effect-unsanctioned-import` (the unlisted module) do. `check` prints `N violation(s) / M root cause(s)` and per-rule cause
+  counts when findings share causes, `check --by-root-cause` lists each cause once with its fan-out, and
+  `baseline [--adopt FAMILY] --by-root-cause` records one shrink-only entry per cause (a new member of a recorded cause is
+  growth). Baselines without the new `root_causes` section behave as before (#201).
+
 ## 0.8.0 — 2026-11-11
 
 Effect detection is more precise and more complete, and a project can now say which modules are its sanctioned seams. Found by an
