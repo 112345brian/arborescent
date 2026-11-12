@@ -43,7 +43,7 @@ settings. The two forms cannot be mixed.
 | `dev_tools_forbid` | `["process"]` | Effect categories (`clock`, `env`, `process`, `filesystem`, …) that `dev_tools` modules may not use. The default reports raw `subprocess` use in tooling; `[]` allows everything. Reported as the matching `effect-*` rule. |
 | `dev_tools_may_import` | `[]` | Dotted-module globs of product modules that `dev_tools` modules may import. Empty means any; otherwise an import of another product module is `dev-tool-product-import`. |
 | `effect_defaults` | `"injection"` | How a bare parameter default that names an effect (`now=datetime.now`) counts. `"injection"`: never a use. `"typed"`: not a use only when the parameter is annotated `Callable` or `Mapping` (alone, in `Optional`/`Union`/`\|`, or as a string), so `x: int = datetime.now` still counts. `"count"`: always a use. Calls, aliases and lambda-wrapped defaults always count; applies to `clock`, `env`, `identity`, `randomness`, `sleep`, `threads` and `process`. Settable per scope. |
-| `taint_seeds` | every `effect-*` category that existed before 0.8.0 except `patch` and `global`, plus `network` (`monotonic`, `host` and `fs-query` are valid but not seeded unless listed) | Which I/O primitives the function-level taint pass (#98, below `classify-facts`) seeds a function as reaching. `[]` turns the pass into a no-op. Root-level (shared by all scopes). |
+| `taint_seeds` | every `effect-*` category that existed before 0.8.0 except `patch` and `global`, plus `network` (`monotonic`, `host` and `fs-query` are valid but not seeded unless listed; `state`, `registry` and `cache` mutate memory rather than do I/O and are not valid seeds) | Which I/O primitives the function-level taint pass (#98, below `classify-facts`) seeds a function as reaching. `[]` turns the pass into a no-op. Root-level (shared by all scopes). |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
 | `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
@@ -758,7 +758,7 @@ Migrating an existing classify-only project:
 | `may_import` | `[]` | Inner rings this ring may import; `["*"]` means every inner ring. A ring may always import itself. An outer ring in this list is a policy error (the onion rule). |
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
-| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`, and, since 0.8.0, `state`, `monotonic`, `host` and `fs-query` (see *Effect categories*). The positional and preset defaults never include the four new ones: name them to opt in. |
+| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`, and, since 0.8.0, `state`, `monotonic`, `host` and `fs-query`, and in the next release `registry` and `cache` (see *Effect categories*). That is every detected category. The positional and preset defaults never include the six newer ones: name them to opt in. |
 | `max_reexport_ratio` | unset | A number from 0 to 1: the share of a module's public surface (a static `__all__`, else public top-level bindings; modules with fewer than 5 names are not judged) that may be first-party imports before `reexport-ratio` fires. Leave it unset on rings that legitimately aggregate (a composition root); the exemption is then visible in config. A dynamic `__all__` is ignored in favour of the bindings. Wrapping each name in a forwarding function evades it; that is the forwarded-import rule's job. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 | `require_typed_ports` | `false` | Every method of a `typing.Protocol` class in this ring must name its return type. A missing return annotation, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set`/`frozenset` or `Mapping[str, Any]` (also inside `Optional`, `\|` unions and string annotations) fires `weakly-typed-port`; `None`, named classes and parameterised containers pass. `__init__` is skipped. Parameters are not checked. |
@@ -827,7 +827,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-patch` | a configured tests folder patches a project target whose ring forbids `patch` |
 | `effect-console` | a ring that forbids `console` calls `print`, `input`, `sys.stdout.write` or `sys.stderr.write` |
 | `effect-global` | a ring that forbids `global` has a function that declares `global x` and then assigns `x` (a read-only `global` is not a use) |
-| `effect-state` | a ring that forbids `state` creates a `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local` (0.8.0) |
+| `effect-state` | a ring that forbids `state` creates a `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local` (0.8.0); a ring that forbids `registry` writes a module-level dict/list/set from a function, and one that forbids `cache` uses `functools.cache`/`lru_cache` or writes a cache-named module container (unreleased, #194) |
 | `effect-monotonic` | a ring that forbids `monotonic` calls `time.monotonic`, `perf_counter` or `process_time` (0.8.0) |
 | `effect-host` | a ring that forbids `host` reads `sys.argv`, `sys.stdin`, `locale`, `platform`, the process id, the CPU count or the host name (0.8.0) |
 | `effect-fs-query` | a ring that forbids `fs-query` asks the filesystem a question: `os.path.exists`, `os.getcwd`, `Path.cwd`, `p.exists()`, `shutil.which`... (0.8.0) |
@@ -843,6 +843,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
 | `mixed-purity` | a module holds at least `min_pure_units` (default 2) substantial pure top-level functions or classes (a body of at least `min_body_lines`, default 4, lines) and at least one effectful one, or an effect that runs at import time. Enforced in every ring; see [Mixed purity](#mixed-purity-toolarborescentmixed_purity). The detail names only the ring, so the baseline key survives renaming functions; the hint lists the effect kinds, the effectful and pure definitions and the importer count. Also an `allow` entry that matches no module or no mixed module |
 | `untokenizable-source` | a file Python's `ast` accepts but `tokenize` rejects (a doubled carriage return `\r\r\n` is the usual cause, #181). Its `# noqa`, `# type: ignore` and `# deferred:` comments cannot be read, so the file gets no comment facts and this finding instead of aborting the run. A violation, so it can be baselined; the detail is fixed text (the tokenizer's line and message ride in the hint), and the fix is to remove the stray byte |
+| `mixed-purity-weak` | informational: a module that is mixed only because of `mixed_purity.weak_kinds` (for example it prints or logs). Never fails a check and never enters the baseline. Off until `weak_kinds` is set |
 | `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
@@ -910,7 +911,22 @@ def load() -> None:
     import registry
 ```
 
-The reason must not be empty. A justified import is counted but is not a finding. It still counts as an edge in the import
+The reason must not be empty. A justified import is counted but is not a finding.
+
+To start with the rings where a lazy import is a smell and leave the rest (a CLI package or composition root defers imports to keep
+startup fast), list them:
+
+```toml
+[tool.arborescent.lazy_import]
+rings = ["domain", "services", "workflows"]   # default: every ring, so nothing changes until this is set
+```
+
+A module in any other ring (or with no ring, such as a dev tool) has no `lazy-import` findings and is left out of the
+`function-level imports by module:` list. A ring name that is not defined is an error, not a silent no-op, and so is an empty list;
+with `[scopes]` a name may belong to any one scope. `check` prints one line per module, `module: [lazy-import] total/deferred`
+with the unjustified imports named, not one line per import (baseline keys are unchanged). While no `lazy-import` finding is
+baselined yet it adds `lazy-import: N new, 0 baselined; run 'arborescent baseline --adopt lazy-import' to start a ratchet`.
+Adoption works once and fails if other new findings exist; fix or baseline them first. It still counts as an edge in the import
 graph, so `circular-import` and `arborescent cycles` see it. (Excluding these imports from a closure size is not done
 here; the closure used by `internal-import` move suggestions still follows them.)
 
@@ -1027,6 +1043,27 @@ when that family has no existing baseline entries. Other growth requires
 `arborescent baseline --allow-growth --reason "why this debt is accepted" --approved-by "name or issue URL"`. The version-2 JSON baseline records each
 growth reason and the exact keys it added; version-1 baselines still load and are upgraded when written.
 
+### Root causes (#201)
+
+Some rules emit one finding per symptom: `lazy-import` one per importing module, `effect-unsanctioned-import` one per
+importer of an unlisted effect module, `effect-via-import` one per module downstream of an effectful seam. Such a finding carries a `root_cause` (`<rule>|<what they share>`, for example
+`lazy-import|psutil`) beside its identity key. The key still decides baseline matching; the root cause only groups.
+
+- `check` ends with `N violation(s) / M root cause(s)` and `by rule: lazy-import 83 / 2 root causes (0 new)` when findings
+  share causes; with no fan-out the lines are unchanged. `check --by-root-cause` lists each cause once, widest fan-out
+  first, with a sample of the modules it reaches and, where the rule has one, a fix that clears the whole cause; findings that
+  name no cause keep their own line.
+- `effect-via-import`'s cause is the effect kind plus the last edge of the import chain: `effect-via-import|env|client.bundle->state.app_root`
+  (`importer->module that uses the effect`), or `effect-via-import|env|state.app_root` for a direct importer. 623 modules that reach
+  `state.app_root` through `client.bundle` are one cause with one fix: inject a port at `client.bundle`, or list `state.app_root`
+  under `effects.sanctioned`.
+- `baseline --by-root-cause` (also with `--adopt FAMILY`) writes one entry per cause under `root_causes` in the baseline file,
+  `{cause: [modules...]}`, instead of one key per finding. The entry is shrink-only: a finding under a recorded cause is
+  tolerated while its module is listed, a module the cause gained is new (growth, needing `--allow-growth` like any other),
+  and members that stop occurring make the entry stale until `baseline --prune`. The growth log names added members as
+  `<cause>|<module>`, and `--growth-against` checks them. A finding already recorded under its own key stays there; delete
+  those entries first to regroup them. Baselines without `root_causes` work unchanged.
+
 `arborescent check --growth-against REF` compares the baseline at `REF` with the working baseline and requires every new
 key to match the keys in growth-log entries appended since that ref. This checks consistency; it does not prove the
 command wrote the file. A person could edit both the baseline and its log by hand, so review of baseline changes
@@ -1116,6 +1153,8 @@ Every direct use of an effectful API is classified into a category; a ring's `fo
 | `dynamic-import` | **only** run-time module loading: `importlib.import_module`, `importlib.__import__`, `importlib.reload`, `importlib.util.spec_from_file_location`/`spec_from_loader`/`module_from_spec`, `*.exec_module`, `__import__`. `importlib.resources`, `importlib.metadata` and `importlib.util.find_spec` import nothing and do not count (0.8.0) |
 | `console` | `print`, `input`, `sys.stdout.write`, `sys.stderr.write` |
 | `global` | a function that declares `global x` and assigns it |
+| `registry` | a function writes a module-level `dict`/`list`/`set` (item assignment, `del`, or `append`/`add`/`update`/`setdefault`/`pop`/`clear`... on it) that it does not bind locally; reported as `effect-state` (unreleased, #194). See *Module-level state* below |
+| `cache` | a `functools.cache`/`lru_cache` decorator, or a write to a module-level container whose name contains `cache` or `memo`; reported as `effect-state` (unreleased, #194). `cached_property` is per instance and does not count |
 | `patch` | a test patching a project target |
 
 A reference inside a type annotation (a parameter, return or variable annotation) is never a use: a hint names a type, it does not
@@ -1128,6 +1167,27 @@ Four categories were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`). 
 except that the extended `Path` detection (a path held in a variable) and the narrower `dynamic-import`, `threads`
 and `randomness` definitions change which modules the pre-existing categories report. `must_be_pure` keeps meaning "every
 pre-0.8.0 category"; list the new ones under `forbid_effects` to add them.
+
+### Module-level state: `registry` and `cache` (#194)
+
+`global x` rebinding was already the `global` category. Two further ways of keeping shared state in a module are detected (unreleased), each in
+its own category so a ring opts in to exactly what it means to ban. Both report as `effect-state` (the same rule id as locks, `state`), are in
+no default `forbid`, are not taint seeds and are not part of `must_be_pure`; `coupling` accessor counts and `discover --suggest` evidence ignore
+them. A policy that does not list them in a `forbid` keeps every finding and baseline entry it had.
+
+- **Registry.** A module-level name bound (at the top of the module) to a `dict`/`list`/`set` literal, comprehension or constructor
+  (`dict()`, `defaultdict(...)`, `OrderedDict`, `Counter`, `deque`) is a registry when a function or method writes it: `REG[k] = v`, `REG[k] += 1`,
+  `del REG[k]`, or a mutating call (`append`, `extend`, `insert`, `add`, `update`, `pop`, `popitem`, `remove`, `discard`, `clear`, `setdefault`,
+  `appendleft`, `popleft`). A name the function, or a function around it, binds itself (a parameter or an assignment) is a local, not
+  the module's container. Not seen: reads, a fill at import time (deterministic), a container imported from another module, a write through
+  `self.attr` or an alias, and `REG = REG | {...}` style rebinding (that is `global` when declared).
+- **Cache.** `@functools.cache` and `@functools.lru_cache` (aliases and `from functools import ...` resolved, on functions and methods) make a
+  loader whose result depends on call order, so they are a `cache` use at the decorator. A write to a module-level container whose name contains
+  `cache` or `memo` is also `cache`, not `registry`. A hand-rolled `global _x; if _x is None: _x = load()` slot is the `global` category.
+
+`mixed-purity` is unchanged: it keeps its own `state` and `memo` kinds for the same writes and decorators, and a `mixed_purity.kinds` list cannot
+name `registry` or `cache`. Every detected category, for a `forbid` list: `clock`, `monotonic`, `env`, `host`, `identity`, `randomness`, `sleep`,
+`threads`, `state`, `process`, `filesystem`, `fs-query`, `network`, `database`, `dynamic-import`, `console`, `global`, `registry`, `cache`, `patch`.
 
 ### `[tool.arborescent.effects]`: sanctioned seams
 
@@ -1182,6 +1242,9 @@ min_body_lines = 4        # default: lines a definition needs to be substantial
 kinds = ["clock", "env", "filesystem", "logging", "memo", "state"]   # default: every kind below except ambient
 ambient = ["myapp.state.state_root", "myapp.env.*"]                    # globs on the absolute dotted name of an ambient lookup
 exclude_rings = ["entrypoints", "effects"]                             # default []: rings whose modules are never reported (they are meant to be effectful)
+rings = ["domain", "application"]                                      # default []: when set, the only rings the rule looks at
+skip_unrestricted_rings = true                                         # default false: skip every ring whose effective `forbid` is empty
+weak_kinds = ["console", "logging", "memo"]                            # default []: effects that alone do not make a module worth splitting
 
 [[tool.arborescent.mixed_purity.allow]]
 module = "myapp.bundle_schema.hydration"   # a dotted name, a package prefix or a glob
@@ -1196,13 +1259,21 @@ and the kinds this rule adds, which never feed the `effect-*` rules:
 | kind | what it is |
 |---|---|
 | `logging` | `logging.info(...)` and friends, a call on a module-level `logging.getLogger(...)` / `structlog.get_logger(...)` result, `loguru.logger`. `getLogger` itself is not an effect |
-| `memo` | `functools.lru_cache` / `cache` / `cached_property` decorators, or a write to a module-level dict, list or set whose name contains `cache` or `memo` |
+| `memo` | a write to a module-level dict, list or set whose name contains `cache` or `memo`. A `functools.lru_cache` / `cache` / `cached_property` decorator is no longer a memo: a memoised pure function is pure |
 | `state` | a write (item assignment, `del`, `append`/`update`/`setdefault`/... ) to any other module-level dict, list or set from inside a function, unless that function binds the name locally; and, since 0.8.0, a `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local`. Reads are not effects |
-| `ambient` | a call to something matching `ambient`, resolved through absolute and relative imports (`state_root()`, `os.getcwd`). Off until `ambient` lists a pattern |
+| `ambient` | a call to something matching `ambient`, resolved through absolute and relative imports (`state_root()`, `os.getcwd`), or a method call on a parameter annotated with a matching class (`reader: Reader` then `reader.read()` matches `myapp.ports.Reader.read`; also `Reader | None`, `Optional[Reader]` and `"Reader"`; a parameter the function reassigns is skipped). Off until `ambient` lists a pattern; `ambient = ["myapp.ports.*"]` makes a loader that calls a port effectful |
 
 **Why is this function listed as pure?** `arborescent purity --explain MODULE` prints, for each top-level definition of one
 module (mixed or not), the effect kind, the line and the call behind an "effectful" label, or `no effect found`. Attach its
 output to a report of a wrong label.
+
+**Rings.** `rings` limits the rule to the listed rings (a name that is not a declared ring is an error); `exclude_rings` removes rings;
+`skip_unrestricted_rings = true` skips every ring whose effective `forbid` is empty, since effects are allowed there. The three
+combine and all apply to `arborescent purity` and to `selftest`.
+
+**Weak kinds.** `weak_kinds` names effects that alone should not ask for a split. A module whose effects are all weak is
+reported as an informational `mixed-purity-weak` note instead of a `mixed-purity` finding (and as `weak` in
+`arborescent purity --json`); one strong effect keeps it a finding. Existing baselines are unaffected until the key is set.
 
 **Choosing what counts.** The default `kinds` count everything above, so a CLI `main` that prints, a module that only logs, and an `lru_cache` on a regex compiler all make a module "mixed". To report only the splits that separate real effects, restrict `kinds` (for example drop `console`, `logging`, `memo`, `state`, `global`) and list the rings that are meant to be effectful under `exclude_rings`. `exclude_rings` also applies to `arborescent purity`. Both default to today's behaviour.
 
@@ -1329,7 +1400,7 @@ projects, its dependency group and lockfile.
 
 Create the initial baseline or shrink it by removing findings that no longer occur. New findings are rejected by
 default. `--adopt FAMILY` adopts a previously unrecorded family once; `--allow-growth --reason TEXT --approved-by WHO` records other
-intentional baseline growth, its reason and its approver.
+intentional baseline growth, its reason and its approver. `--by-root-cause` records fan-out findings once per root cause (see [Root causes](#root-causes-201)).
 
 ### `arborescent coupling`
 

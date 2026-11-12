@@ -187,6 +187,10 @@ def _add_check_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> Non
         metavar="FAMILY",
         help="run and exit on this rule family only (repeatable; the families `baseline --adopt` accepts, or any rule id)",
     )
+    c.add_argument(
+        "--by-root-cause", action="store_true",
+        help="list findings grouped by root cause (widest fan-out first) instead of one line per finding (#201)",
+    )
     c.add_argument("--no-cache", action="store_true")
 
 
@@ -202,6 +206,10 @@ def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser])
     )
     b.add_argument("--reason", help="explain why new baseline keys are being recorded")
     b.add_argument("--approved-by", metavar="WHO", help="who approved the growth: a name or issue URL (required with --allow-growth)")
+    b.add_argument(
+        "--by-root-cause", action="store_true",
+        help="record findings that name a root cause (fan-out rules) as one shrink-only entry per cause, listing the modules it reaches (#201)",
+    )
     b.add_argument("--prune", action="store_true", help="only remove stale entries; never adds, works while the tree has new violations")
     add_report_parser(b)
     discover = add_parser(
@@ -424,7 +432,7 @@ def _report_git_hook(outcome: HookOutcome) -> None:
 def _stale_engine_findings(svc: Services, root: Path, policy: Policy) -> list[Violation]:
     """``--prune`` judges every baseline entry, so each engine that owns a baselined rule family must be re-run, or its
     still-valid entries would look stale and be dropped."""
-    rules = {key.split("|", 1)[0] for key in ratchet_mod.load(svc.fs, root / policy.baseline)}
+    rules = ratchet_mod.recorded_rules(svc.fs, root / policy.baseline)
     names = {item.name for item in (*svc.engines, *svc.checkers)} - {"ruff"}  # `_baseline` already re-ran ruff for its entries
     extra: list[Violation] = []
     for name in sorted(names):
@@ -442,24 +450,18 @@ def _baseline(
     if args.adopt in engine_names:
         found += run_engine(svc, args.adopt, root).violations
     elif args.adopt is None and any(
-        key.split("|", 1)[0].startswith("ruff-")
-        for key in ratchet_mod.load(svc.fs, root / policy.baseline)
+        rule.startswith("ruff-") for rule in ratchet_mod.recorded_rules(svc.fs, root / policy.baseline)
     ):
         found += run_engine(svc, "ruff", root).violations
-    elif args.adopt is not None and args.adopt not in {
-        "coverage",
-        "effects",
-        "suppressions",
-        "discard",
-    }:
-        families = engine_names | {"coverage", "effects", "suppressions", "discard"}
+    elif args.adopt is not None and args.adopt not in ratchet_mod.OWN_ADOPTION_FAMILIES:
+        families = engine_names | ratchet_mod.OWN_ADOPTION_FAMILIES
         raise PolicyError(
             f"unknown adoption family {args.adopt!r}; choose from {sorted(families)}"
         )
     if args.prune:
         found = [*found, *_stale_engine_findings(svc, root, policy)]
-        if args.adopt is not None or args.allow_growth or args.reason is not None or args.approved_by is not None:
-            raise PolicyError("`--prune` cannot be combined with `--adopt`, `--allow-growth`, `--reason` or `--approved-by`")
+        if args.adopt is not None or args.allow_growth or args.reason is not None or args.approved_by is not None or args.by_root_cause:
+            raise PolicyError("`--prune` cannot be combined with `--adopt`, `--allow-growth`, `--reason`, `--approved-by` or `--by-root-cause`")
         removed = ratchet_mod.prune(svc.fs, root / policy.baseline, found)
         print(f"baseline: pruned {removed} stale entr{'y' if removed == 1 else 'ies'} from {policy.baseline}")
         return 0
@@ -473,10 +475,13 @@ def _baseline(
         adopt=args.adopt,
         allow_growth=args.allow_growth,
         reason=args.reason,
+        by_root_cause=args.by_root_cause,
     )
     if approved_by is not None:
         ratchet_mod.stamp_approval(svc.fs, path, approved_by, logged)
-    print(f"baseline: recorded {count} violation(s) in {policy.baseline}")
+    grouped = len(ratchet_mod.load_root_causes(svc.fs, path))
+    detail = f" under {grouped} root cause entr{'y' if grouped == 1 else 'ies'}" if grouped else ""
+    print(f"baseline: recorded {count} violation(s){detail} in {policy.baseline}")
     summary = ratchet_mod.internal_import_summary(found)
     if summary is not None:
         print(summary)
@@ -630,7 +635,7 @@ def _list_dev_tools(policy: Policy, root: Path, svc: Services) -> int:
 
 def _validate_rule_selection(rules: list[str], svc: Services) -> None:
     """A typo in `--rule` must fail, not select nothing and report green."""
-    known = {rule.value for rule in Rule} | {item.name for item in (*svc.engines, *svc.checkers)} | {"coverage", "effects", "suppressions", "discard"}
+    known = {rule.value for rule in Rule} | {item.name for item in (*svc.engines, *svc.checkers)} | ratchet_mod.OWN_ADOPTION_FAMILIES
     unknown = sorted(r for r in rules if r not in known and not r.startswith("ruff-") and not any(k.startswith(f"{r}-") for k in known))
     if unknown:
         raise PolicyError(f"unknown rule family {unknown[0]!r}; choose from {sorted(known)}")

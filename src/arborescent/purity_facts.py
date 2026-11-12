@@ -11,7 +11,11 @@ What is and is not seen, by design:
 - A logger is a module-level name bound to ``logging.getLogger(...)`` (or ``structlog.get_logger``), or ``loguru.logger``.
 - Module state is a module-level name bound to a ``dict``/``list``/``set`` literal or constructor, written from inside a
   function by item assignment, ``del`` or a mutating method call, unless the function binds that name locally. A name
-  containing ``cache`` or ``memo`` is a memo, any other is plain state.
+  containing ``cache`` or ``memo`` is a memo, any other is plain state. ``functools.lru_cache``/``cache`` on a function is
+  *not* a memo kind: a memoised pure function is still pure (#195); only a written module-level cache is.
+- A method call on a parameter annotated with an imported or module-level class (``reader: Reader`` then ``reader.read()``)
+  is recorded as ``port_calls`` so ``mixed_purity.ambient`` patterns can match ``pkg.ports.Reader.read``; a parameter the
+  function reassigns is not recorded.
 - A call by bare name to another unit of the same module is recorded so the rule can follow it: a function that calls an
   effectful sibling is not pure.
 """
@@ -25,7 +29,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple
 
-__all__ = ["LOGGING", "MEMO", "STATE", "Helpers", "PurityFacts", "PurityUnit", "purity_facts"]
+__all__ = ["LOGGING", "MEMO", "STATE", "Helpers", "PurityFacts", "PurityUnit", "local_names", "module_containers", "mutated_container", "purity_facts"]
 
 LOGGING = "logging"
 MEMO = "memo"
@@ -35,7 +39,6 @@ _LOG_METHODS = frozenset({"debug", "info", "warning", "warn", "error", "exceptio
 _LOGGING_FUNCTIONS = frozenset(f"logging.{name}" for name in (*_LOG_METHODS, "basicConfig", "disable", "captureWarnings"))
 _LOGGER_FACTORIES = frozenset({"logging.getLogger", "structlog.get_logger", "structlog.getLogger"})
 _LOGGER_OBJECTS = frozenset({"loguru.logger"})
-_MEMO_DECORATORS = frozenset({"functools.lru_cache", "functools.cache", "functools.cached_property"})
 _CONTAINER_CALLS = frozenset({"dict", "list", "set", "defaultdict", "OrderedDict", "Counter", "deque"})
 _CONTAINER_LITERALS = (ast.Dict, ast.List, ast.Set, ast.DictComp, ast.ListComp, ast.SetComp)
 _MUTATORS = frozenset({
@@ -64,6 +67,7 @@ class PurityUnit:
 class PurityFacts:
     units: tuple[PurityUnit, ...] = ()
     import_time: tuple[tuple[int, str], ...] = ()  # (line, logging) outside every unit: logging at import time
+    port_calls: tuple[tuple[int, str, str, bool], ...] = ()  # (line, class, method, class is defined in this module) of `param.method()` on a typed parameter
 
 
 def _module_level_defs(body: Sequence[ast.stmt]) -> list[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
@@ -135,15 +139,51 @@ def _local_names(unit: ast.AST) -> set[str]:
     return bound - declared
 
 
-def _decorator_kinds(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef, aliases: dict[str, str], dotted: Dotted) -> list[tuple[int, str]]:
-    members = [node, *(m for m in node.body if isinstance(m, ast.FunctionDef | ast.AsyncFunctionDef))] if isinstance(node, ast.ClassDef) else [node]
-    found: list[tuple[int, str]] = []
-    for member in members:
-        for decorator in member.decorator_list:
-            target = dotted(decorator.func if isinstance(decorator, ast.Call) else decorator, aliases)
-            if target in _MEMO_DECORATORS:
-                found.append((decorator.lineno, MEMO))
-    return found
+def _class_name(node: ast.Name | ast.Attribute, aliases: dict[str, str], local: set[str], dotted: Dotted) -> list[tuple[str, bool]]:
+    """The class a plain name or ``m.X`` stands for when it is imported or defined in this module; nothing for ``str`` and the like."""
+    head: ast.expr = node
+    while isinstance(head, ast.Attribute):
+        head = head.value
+    name = dotted(node, aliases)
+    if not isinstance(head, ast.Name) or name is None:
+        return []
+    if head.id in aliases:
+        return [(name, False)]
+    return [(name, True)] if head.id in local and isinstance(node, ast.Name) else []
+
+
+def _annotation_types(node: ast.expr | None, aliases: dict[str, str], local: set[str], dotted: Dotted) -> list[tuple[str, bool]]:
+    """(dotted class name, defined in this module) for the classes an annotation names: ``X``, ``m.X``, ``"X"``, ``X | None``, ``Optional[X]``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            return _annotation_types(ast.parse(node.value.strip(), mode="eval").body, aliases, local, dotted)
+        except SyntaxError:
+            return []
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _annotation_types(node.left, aliases, local, dotted) + _annotation_types(node.right, aliases, local, dotted)
+    if isinstance(node, ast.Subscript):
+        base = dotted(node.value, aliases) or ""
+        return _annotation_types(node.slice, aliases, local, dotted) if base.rsplit(".", 1)[-1] == "Optional" else []
+    return _class_name(node, aliases, local, dotted) if isinstance(node, ast.Name | ast.Attribute) else []
+
+
+def _port_calls(func: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str], local: set[str], dotted: Dotted) -> list[tuple[int, str, str, bool]]:
+    """(line, class, method, local) for ``param.method(...)`` where the parameter is annotated with an imported or module-level class."""
+    typed: dict[str, list[tuple[str, bool]]] = {}
+    for arg in (*func.args.posonlyargs, *func.args.args, *func.args.kwonlyargs):
+        if arg.annotation is not None and (types := _annotation_types(arg.annotation, aliases, local, dotted)):
+            typed[arg.arg] = types
+    if not typed:
+        return []
+    inner = list(ast.walk(func))
+    rebound = {n.id for n in inner if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+    return [
+        (node.lineno, name, node.func.attr, is_local)
+        for node in inner
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in typed and node.func.value.id not in rebound
+        for name, is_local in typed[node.func.value.id]
+    ]
 
 
 def _is_logging_call(node: ast.Call, loggers: set[str], aliases: dict[str, str], dotted: Dotted) -> bool:
@@ -191,6 +231,7 @@ class _Collector:
         self.calls: dict[int, set[str]] = {i: set() for i in range(len(self.defs))}
         self.candidates: list[tuple[int, int, str]] = []  # (unit index, line, container name)
         self.import_time: set[tuple[int, str]] = set()
+        self.port_calls: set[tuple[int, str, str, bool]] = set()
 
     def owner(self, line: int) -> int | None:
         slot = bisect_right(self.starts, line) - 1
@@ -219,22 +260,45 @@ class _Collector:
             if name not in shadows[owner]:
                 self.kinds[owner].add((line, MEMO if _MEMO_NAME.search(name) else STATE))
 
+    def collect_port_calls(self, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> None:
+        """Calls on typed parameters, for every function or method with an annotated parameter; ``aliases`` keep relative imports' dots."""
+        for node in nodes:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(a.annotation for a in (*node.args.args, *node.args.kwonlyargs, *node.args.posonlyargs)):
+                self.port_calls.update(_port_calls(node, aliases, self.unit_names, self.helpers.dotted))
+
     def unit(self, index: int) -> PurityUnit:
         node = self.defs[index]
         helpers = self.helpers
         skipped = helpers.is_abstract(node) if isinstance(node, ast.ClassDef) else helpers.is_stub(node.body)
-        self.kinds[index].update(_decorator_kinds(node, self.aliases, helpers.dotted))
         return PurityUnit(
             node.name, self.first_line[index], node.end_lineno or node.lineno, _body_lines(node.body), isinstance(node, ast.ClassDef),
             _has_logic(node, helpers.is_stub, skipped), tuple(sorted(self.kinds[index])), tuple(sorted(self.calls[index] - {node.name})),
         )
 
 
-def purity_facts(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, str], helpers: Helpers) -> PurityFacts:
+def purity_facts(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, str], helpers: Helpers, call_aliases: dict[str, str] | None = None) -> PurityFacts:
     """``nodes`` is the walk of ``tree`` that ``extract`` already made; nothing here walks the module again except to
     check one definition for a shadowing local, and only when it mutates a module-level container."""
     collector = _Collector(tree, aliases, helpers)
     for node in nodes:
         collector.visit(node)
     collector.resolve_writes()
-    return PurityFacts(tuple(collector.unit(i) for i in range(len(collector.defs))), tuple(sorted(collector.import_time)))
+    collector.collect_port_calls(nodes, call_aliases if call_aliases is not None else aliases)
+    return PurityFacts(
+        tuple(collector.unit(i) for i in range(len(collector.defs))), tuple(sorted(collector.import_time)), tuple(sorted(collector.port_calls)),
+    )
+
+
+def module_containers(tree: ast.Module, aliases: dict[str, str], dotted: Dotted) -> set[str]:
+    """Module-level names bound to a ``dict``/``list``/``set`` (#194 reads them as ``registry`` effect uses)."""
+    return _module_names(tree, aliases, dotted)[1]
+
+
+def local_names(unit: ast.AST) -> set[str]:
+    """Names a function binds locally (parameters and assignments), minus those it declares ``global``."""
+    return _local_names(unit)
+
+
+def mutated_container(node: ast.AST, containers: set[str]) -> str | None:
+    """The module container ``node`` writes by item assignment, ``del`` or a mutating method call, else ``None``."""
+    return _mutated_container(node, containers)

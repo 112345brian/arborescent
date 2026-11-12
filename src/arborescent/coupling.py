@@ -14,6 +14,7 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
 from .facts import ModuleInfo, RawImport, resolve_targets
+from .presets import MODULE_STATE_CATEGORIES
 
 Graph = Mapping[str, frozenset[str]]
 
@@ -155,7 +156,7 @@ def accessor_surface(info: ModuleInfo) -> tuple[tuple[str, ...], int]:
     module-level state and belongs to none, so it never makes a surface look like accessors.
     """
     defs = sorted(info.facts.top_level_defs, key=lambda item: item.line)
-    uses = [use.line for use in info.facts.effect_uses if use.seam == 0]
+    uses = [use.line for use in info.facts.effect_uses if use.seam == 0 and use.category not in MODULE_STATE_CATEGORIES]
     accessors: list[str] = []
     public = 0
     for index, item in enumerate(defs):

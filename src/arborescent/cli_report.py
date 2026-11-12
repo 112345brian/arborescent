@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 
 from . import baseline as ratchet_mod
-from .domain import Policy
+from .domain import Policy, Rule, Violation, root_cause_hint
 from .engine import CheckReport
+from .lazy_imports import lazy_import_adoption_hint, lazy_import_lines
 
 
 def _print_rule_label(policy: Policy) -> None:
@@ -66,11 +68,45 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
 
 def _print_findings(args: argparse.Namespace, report: CheckReport) -> None:
     shown = report.ratchet.new if report.ratchet and not args.no_baseline else report.violations
-    for v in shown:
-        print(f"FAIL   {v.render()}")
+    if getattr(args, "by_root_cause", False):
+        shown = _print_root_causes(shown)
+    for line in _finding_lines(shown, report):
+        print(f"FAIL   {line}")
+    hint = _adoption_hint(args, report)
+    if hint is not None:
+        print(f"NOTE   {hint}")
     if report.ratchet:
         for key in report.ratchet.stale:
             print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline --prune`): {key}")
+
+
+_SAMPLE = 5
+
+
+def _print_root_causes(shown: list[Violation]) -> list[Violation]:
+    """One line per root cause, widest fan-out first, with a sample of the modules it reaches (#201); returns the findings that name none."""
+    for cause, members in ratchet_mod.root_cause_groups(shown):
+        subjects = sorted({v.subject for v in members})
+        more = f", ... +{len(subjects) - _SAMPLE}" if len(subjects) > _SAMPLE else ""
+        print(f"CAUSE  {len(subjects):>5} module(s), {len(members)} finding(s)  {cause}  e.g. {', '.join(subjects[:_SAMPLE])}{more}")
+        advice = root_cause_hint(cause, len(members))
+        if advice:
+            print(f"         fix: {advice}")
+    return [v for v in shown if not v.root_cause]
+
+
+def _finding_lines(shown: Sequence[Violation], report: CheckReport) -> list[str]:
+    """Findings as printed lines; the ``lazy-import`` ones are folded to one line per module (#199)."""
+    others = [v.render() for v in shown if v.rule != Rule.LAZY_IMPORT]
+    return others + lazy_import_lines([v for v in shown if v.rule == Rule.LAZY_IMPORT], report.lazy_import_counts)
+
+
+def _adoption_hint(args: argparse.Namespace, report: CheckReport) -> str | None:
+    if report.ratchet is None or args.no_baseline:
+        return None
+    new = {v.key for v in report.ratchet.new}
+    found = [v for v in report.violations if v.rule == Rule.LAZY_IMPORT]
+    return lazy_import_adoption_hint(len(new.intersection(v.key for v in found)), sum(1 for v in found if v.key not in new))
 
 
 def _print_engines(report: CheckReport) -> None:
@@ -151,9 +187,11 @@ def _print_summary(report: CheckReport) -> None:
         by_rule = ratchet_mod.rule_summary(report.violations, report.ratchet.new)
         if by_rule is not None:
             print(by_rule)
+    causes = ratchet_mod.cause_count(report.violations)
+    shared = f" / {causes} root cause(s)" if causes != len(report.violations) else ""
     print(
         f"arborescent check: {'OK' if report.ok else 'FAILED'} in {report.seconds:.2f}s "
-        f"({len(report.violations)} violation(s), {tolerated} baselined, {report.parsed} file(s) parsed"
+        f"({len(report.violations)} violation(s){shared}, {tolerated} baselined, {report.parsed} file(s) parsed"
         f"{', partial: --changed' if report.partial else ''})"
     )
 

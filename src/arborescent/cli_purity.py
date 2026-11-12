@@ -80,6 +80,6 @@ def run_purity(policy: Policy, root: Path, svc: Services, as_json: bool, top: in
     for ring, group in by_ring(rows):
         print(f"[{ring}] {totals[ring]} mixed module(s)" + (f", showing {len(group)}" if len(group) != totals[ring] else ""))
         for report, _, allowed in group:
-            print(f"  {report.module}:{report.line}{' (allowed)' if allowed else ''}{summarize(report)}")
+            print(f"  {report.module}:{report.line}{' (allowed)' if allowed else ''}{' (weak)' if report.weak else ''}{summarize(report)}")
     print(f"{len(everything)} mixed module(s)" if len(rows) == len(everything) else f"showing {len(rows)} of {len(everything)} mixed module(s)")
     return 0

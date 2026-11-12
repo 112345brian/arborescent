@@ -14,9 +14,28 @@
 - `effect-unsanctioned-import` only fires when the imported `effects.rings` module has measured effects of its own. A pure module
   (which `admit` steers into the innermost ring) is importable by anyone, so `effects.sanctioned` means exactly "a designated seam
   that does raw effects". What a pure module imports still reaches its importers through `effect-via-import` (#202).
+- A memoised pure function is no longer a `memo` effect in `mixed-purity`: `functools.lru_cache`/`cache`/`cached_property` do not
+  count (a written module-level cache still does). Fewer findings; stale baseline entries can be deleted (#195).
+- `selftest` no longer reports the `mixed-purity` mutations as surviving when the host module's ring is excluded by `exclude_rings`.
+- `arborescent baseline --adopt lazy-import` was refused as an unknown family; it now adopts the `lazy-import` findings once.
 
 ### Added
-- `arborescent purity --explain MODULE` prints, per definition, the call that made it effectful or `no effect found`.
+  counts when findings share causes, `check --by-root-cause` lists each cause once with its fan-out, and
+  `baseline [--adopt FAMILY] --by-root-cause` records one shrink-only entry per cause (a new member of a recorded cause is
+  growth). `check --by-root-cause` prints a fix per cause (inject a port at the edge, or list the module under
+  `effects.sanctioned`, to clear N findings). Baselines without the new `root_causes` section behave as before (#201, #198).
+- `[lazy_import] rings = [...]` limits `lazy-import` to some rings (default: every ring, so nothing changes until it is set). An
+  unknown or empty ring list is a config error. Closes #199.
+- `check` folds `lazy-import` findings to one line per module (`total/deferred` plus the unjustified imports) and, while none is
+  baselined, prints `lazy-import: N new, 0 baselined; run 'arborescent baseline --adopt lazy-import' to start a ratchet`.
+- Categories `registry` (a function writes a module-level `dict`/`list`/`set`) and `cache` (`functools.cache`/`lru_cache`, or a write to
+  a cache- or memo-named module container), both reported as `effect-state` (refs #194). They are detected in every module but are in
+  no default `forbid`, no taint seed and no `must_be_pure`, and `coupling` and `discover --suggest` ignore them, so check and taint
+  output and baselines are unchanged until a ring lists them in `forbid` (or a package in `forbid_effects`). `mixed-purity` is unchanged.
+  The forbid docs now list every detected category. Not covered: containers imported from another module, writes through `self`
+  or an alias, and `global` slot loaders beyond the existing `global` category.
+- The scan cache is invalidated once (format version 25).
+
 
 ## 0.8.0 — 2026-11-11
 

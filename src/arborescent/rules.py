@@ -739,6 +739,9 @@ def _mixed_purity_findings(
 
 
 def _purity_violation(ring: str, report: ModulePurity) -> Violation:
+    if report.weak:
+        detail = f"[{ring}] mixes substantial pure logic with code whose only effects are weak kinds"
+        return Violation(Rule.MIXED_PURITY_WEAK, report.module, detail, report.line, hint=summarize(report))
     detail = f"[{ring}] mixes substantial pure logic with effectful code"
     return Violation(Rule.MIXED_PURITY, report.module, detail, report.line, hint=summarize(report))
 
@@ -877,7 +880,7 @@ def _unsanctioned_effect_imports(context: RuleContext, modules: Mapping[str, Mod
             f"[{edge.ring}] imports {target!r}, a module of the {target_ring!r} ring that is not listed in `effects.sanctioned`; "
             "reach the effect through a sanctioned seam, or list the module if it is one"
         )
-        out.append(Violation(Rule.EFFECT_UNSANCTIONED_IMPORT, edge.name, detail, edge.imp.line))
+        out.append(Violation(Rule.EFFECT_UNSANCTIONED_IMPORT, edge.name, detail, edge.imp.line, root_cause=f"{Rule.EFFECT_UNSANCTIONED_IMPORT}|{target}"))
     return out
 
 
@@ -936,6 +939,15 @@ def _effect_reachable(
     return {name: compute(name) for name in modules}
 
 
+def _via_import_cause(category: str, chain: tuple[str, ...]) -> str:
+    """The root cause of one reaching effect (#198): its kind and the last edge of the chain, ``importer->origin``.
+
+    ``chain`` starts at the imported module and ends at the one that uses the effect directly, so every module that
+    reaches the effect through the same final edge shares one cause. A chain of one has no edge: the cause is the origin."""
+    edge = f"{chain[-2]}->{chain[-1]}" if len(chain) > 1 else chain[-1]
+    return f"{Rule.EFFECT_VIA_IMPORT}|{category}|{edge}"
+
+
 def _effect_via_import(edge: _EffectEdge, reachable: Mapping[str, Mapping[str, tuple[str, ...]]]) -> list[Violation]:
     forbidden = edge.policy.forbidden_effects(edge.ring)
     if not forbidden:
@@ -948,7 +960,7 @@ def _effect_via_import(edge: _EffectEdge, reachable: Mapping[str, Mapping[str, t
                 continue
             seen.add(category)
             detail = f"[{edge.ring}] imports {target!r}; effect {category} reaches it via {' -> '.join(chain)}; inject a port instead"
-            out.append(Violation(Rule.EFFECT_VIA_IMPORT, edge.name, detail, edge.line))
+            out.append(Violation(Rule.EFFECT_VIA_IMPORT, edge.name, detail, edge.line, root_cause=_via_import_cause(category, chain)))
     return out
 
 

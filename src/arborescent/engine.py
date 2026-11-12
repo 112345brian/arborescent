@@ -4,7 +4,7 @@ shared parse, then apply the baseline ratchet."""
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -27,7 +27,12 @@ from .domain import (
 )
 from .generate import generate_for_scan
 from .generated_config import GENERATED_MARKER
-from .lazy_imports import LazyImportCount, lazy_import_counts, lazy_import_violations
+from .lazy_imports import (
+    LazyImportCount,
+    lazy_import_counts,
+    lazy_import_in_scope,
+    lazy_import_violations,
+)
 from .path_exclusion import nested_bare_pattern
 from .ports import (
     Clock,
@@ -184,7 +189,7 @@ def run_own(
     ]
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
-    found += _inventory_violations(scan.modules)
+    found += _inventory_violations(scan.modules, policy.lazy_import_rings, indexes)
     found += excluded_findings(policy, scan.excluded_modules)
     if only is None:  # the signals compare a module with its importers and peers: a whole-repository fact
         found += audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
@@ -291,7 +296,7 @@ def _modularity_failures(policy: Policy, gaps: Sequence[Violation], complete: bo
     return tuple(f"open package gap: {v.render()}" for v in gaps)
 
 
-def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:
+def _inventory_violations(modules: Mapping[str, ModuleInfo], lazy_rings: tuple[str, ...], context: RuleContext) -> list[Violation]:
     found: list[Violation] = []
     for module in modules.values():
         suppressions: dict[str, int] = {}
@@ -300,7 +305,8 @@ def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:
             found.append(Violation(Rule.SUPPRESSION, module.name, f"{kind}#{suppressions[kind]}"))
         for index, _ in enumerate(module.facts.discard_calls, start=1):
             found.append(Violation(Rule.DISCARD, module.name, f"call#{index}"))
-        found.extend(lazy_import_violations(module))
+        if lazy_import_in_scope(lazy_rings, context.resolve_ring(module.name)):
+            found.extend(lazy_import_violations(module))
     return found
 
 
@@ -316,9 +322,10 @@ def _inventory_counts(modules: Mapping[str, ModuleInfo]) -> tuple[dict[tuple[str
     return suppressions, discards
 
 
-def _record_inventories(report: CheckReport, modules: Mapping[str, ModuleInfo]) -> None:
+def _record_inventories(report: CheckReport, modules: Mapping[str, ModuleInfo], lazy_rings: tuple[str, ...], context: RuleContext) -> None:
     report.suppression_counts, report.discard_counts = _inventory_counts(modules)
-    counts = ((module.name, lazy_import_counts(module)) for module in modules.values())
+    scoped = (module for module in modules.values() if lazy_import_in_scope(lazy_rings, context.resolve_ring(module.name)))
+    counts = ((module.name, lazy_import_counts(module)) for module in scoped)
     report.lazy_import_counts = {name: count for name, count in counts if count.total}
 
 
@@ -536,13 +543,25 @@ def _plan_engines(policy: Policy, services: Services, opts: Options, files: Sequ
     return futures
 
 
-def _apply_ratchet(report: CheckReport, base: set[str], rules: tuple[str, ...], complete: bool) -> ratchet_mod.Ratchet:
+def _apply_ratchet(
+    report: CheckReport, base: set[str], rules: tuple[str, ...], complete: bool, causes: Mapping[str, Collection[str]] | None = None,
+) -> ratchet_mod.Ratchet:
     """Narrow findings and the baseline to the `--rule` families first, so nothing outside them is new or stale (#137)."""
+    causes = causes or {}
     if rules:
         report.rules = rules
         report.violations = [v for v in report.violations if ratchet_mod.in_any_family(v.key, rules)]
         base = {key for key in base if ratchet_mod.in_any_family(key, rules)}
-    return ratchet_mod.apply(report.violations, base, complete=complete)
+        causes = {cause: members for cause, members in causes.items() if ratchet_mod.in_any_family(cause, rules)}
+    return ratchet_mod.apply(report.violations, base, complete=complete, root_causes=causes)
+
+
+def _recorded(policy: Policy, root: Path, services: Services, opts: Options) -> tuple[set[str], dict[str, frozenset[str]]]:
+    """The baseline's own-key entries and its root-cause entries (#201); empty under `--no-baseline`."""
+    if not opts.use_baseline:
+        return set(), {}
+    path = root / policy.baseline
+    return ratchet_mod.load(services.fs, path), ratchet_mod.load_root_causes(services.fs, path)
 
 
 def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
@@ -566,7 +585,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         found, scan = run_own(policy, root, services, only)
         report.engines.append(EngineRun("arborescent", "ok", services.clock.now() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
         report.parsed = scan.parsed
-        _record_inventories(report, scan.modules)
+        _record_inventories(report, scan.modules, policy.lazy_import_rings, RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules)))
         report.excluded, report.excluded_nested = dict(scan.excluded), _nested_exclusions(scan.excluded, policy.exclude)
         report.vendor_folders = tuple(scan.vendor_folders)
         report.dev_tools = _dev_tool_counts(policy, scan)
@@ -581,12 +600,12 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         report.engines += [*engine_runs, *_ratchet_runs(policy, root, services, scan, found)]
         report.notes = [v for v in found if v.rule in INFORMATIONAL_RULES]
         report.violations = _apply_modularity(policy, report, found, opts, only is None) + [v for run in engine_runs for v in run.violations]
-        base: set[str] = ratchet_mod.load(services.fs, root / policy.baseline) if opts.use_baseline else set()
+        base, causes = _recorded(policy, root, services, opts)
         ruff_skipped = any(run.name == "ruff" and run.status in {"skipped", "disabled"} for run in engine_runs)
         if not opts.tools or ruff_skipped:
             # Ruff is the only external engine whose findings enter the baseline; absent output cannot prove them stale.
             base = {key for key in base if not key.split("|", 1)[0].startswith("ruff-")}
-        report.ratchet = _apply_ratchet(report, base, opts.rules, only is None)
+        report.ratchet = _apply_ratchet(report, base, opts.rules, only is None, causes)
         if opts.require_profile:
             report.profile = PROFILE
             report.profile_failures = certify(root, policy, scan, services.runner, services.fs)

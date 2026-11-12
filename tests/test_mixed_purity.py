@@ -232,8 +232,6 @@ def test_parameter_default_seams_are_not_effects(repo: Path) -> None:
         ("import logging\nlog = logging.getLogger('x')\n\n\ndef go() -> None:\n    log.info('x')\n", "logging"),
         ("import logging\n\n\ndef go() -> None:\n    logging.warning('x')\n", "logging"),
         ("from logging import info\n\n\ndef go() -> None:\n    info('x')\n", "logging"),
-        ("import functools\n\n\n@functools.lru_cache(maxsize=None)\ndef go(x: int) -> int:\n    return x\n", "memo"),
-        ("from functools import cache\n\n\n@cache\ndef go(x: int) -> int:\n    return x\n", "memo"),
         ("_CACHE: dict[int, int] = {}\n\n\ndef go(x: int) -> int:\n    _CACHE[x] = x\n    return x\n", "memo"),
         ("_REGISTRY: list[int] = []\n\n\ndef go(x: int) -> None:\n    _REGISTRY.append(x)\n", "state"),
         ("_SLOT = None\n\n\ndef go(x: int) -> None:\n    global _SLOT\n    _SLOT = x\n", "global"),

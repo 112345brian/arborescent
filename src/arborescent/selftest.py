@@ -58,6 +58,7 @@ _SKIP_COPY = (*sorted(NOISE_DIRS), "*.pyc")
 _PRACTICE = "repository practice: selftest mutates source files only and runs no practices"
 # Rules with no mutation, and why. A test fails when a rule is in neither this table nor ``plan``'s output.
 NO_MUTATION: dict[Rule, str] = {
+    Rule.MIXED_PURITY_WEAK: "informational note: a module whose only effects are `mixed_purity.weak_kinds`; covered by tests/test_purity_rings.py",
     Rule.MIXED_PURITY_EXCLUDED: "informational note about files the policy excludes; the scan does not read them as modules; covered by tests/test_mixed_purity.py",
     Rule.REEXPORT_RATIO: "needs a module whose whole public surface is first-party imports, which one appended statement cannot make; covered by tests/test_reexport_ratio.py",
     Rule.FORBIDDEN_MODULE: "fires on a module name the policy forbids; selftest probes use fixed names no `forbidden_modules` pattern is written for",

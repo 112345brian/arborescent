@@ -29,6 +29,7 @@ __all__ = [
     "ALL",
     "CONSTRAINT_RULES",
     "EFFECT_RULES",
+    "FAN_OUT_RULES",
     "INFORMATIONAL_RULES",
     "NOISE_DIRS",
     "TACH_EXCLUDED_FOLDERS",
@@ -50,6 +51,7 @@ __all__ = [
     "Violation",
     "dist_name",
     "path_under",
+    "root_cause_hint",
 ]
 
 NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".arborescent", ".mypy_cache", ".ruff_cache", ".tox"})
@@ -109,6 +111,7 @@ class Rule(StrEnum):
     REEXPORT_RATIO = "reexport-ratio"
     MIXED_PURITY = "mixed-purity"
     MIXED_PURITY_EXCLUDED = "mixed-purity-excluded"
+    MIXED_PURITY_WEAK = "mixed-purity-weak"
     UNTOKENIZABLE_SOURCE = "untokenizable-source"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
@@ -177,6 +180,8 @@ EFFECT_RULES: Mapping[str, Rule] = {
     "monotonic": Rule.EFFECT_MONOTONIC,
     "host": Rule.EFFECT_HOST,
     "fs-query": Rule.EFFECT_FS_QUERY,
+    "registry": Rule.EFFECT_STATE,  # #194: module state besides locks; the same rule id as `state`, the category decides who opts in
+    "cache": Rule.EFFECT_STATE,
 }
 
 # Not catalog gaps despite the prefix: a constraint is a promise, so `modularity = "report"` never demotes these.
@@ -186,7 +191,7 @@ CONSTRAINT_RULES: frozenset[Rule] = frozenset({Rule.PACKAGE_CONSTRAINT_FACTS, Ru
 # A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
-    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE, Rule.MIXED_PURITY_EXCLUDED,
+    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE, Rule.MIXED_PURITY_EXCLUDED, Rule.MIXED_PURITY_WEAK,
     Rule.ADAPTER_EQUIVALENCE_REPORT,
 })
 
@@ -225,15 +230,44 @@ class Violation:
     line: int = 0
     target: str = field(default="", compare=False)  # the imported module, for import findings; not part of the key
     hint: str = field(default="", compare=False)  # extra advice appended when rendered (#133); not part of the key
+    root_cause: str = field(default="", compare=False)  # fan-out rules only (FAN_OUT_RULES): the shared cause, `<rule>|...`; not part of the key (#201)
 
     @property
     def key(self) -> str:
         return f"{self.rule}|{self.subject}|{self.detail}"
 
+    @property
+    def cause(self) -> str:
+        """What counts as one root cause: the declared ``root_cause``, else the finding itself."""
+        return self.root_cause or self.key
+
     def render(self) -> str:
         where = f"{self.subject}:{self.line}" if self.line else self.subject
         hint = _RENDER_HINTS.get(self.rule, "")
         return f"{where}: [{self.rule}] {self.detail}{hint}{self.hint}"
+
+
+# Rules that emit one finding per symptom and so must name the cause they share (#201); a test scans their construct sites.
+FAN_OUT_RULES = frozenset({Rule.LAZY_IMPORT, Rule.EFFECT_UNSANCTIONED_IMPORT, Rule.EFFECT_VIA_IMPORT})
+
+def root_cause_hint(cause: str, findings: int) -> str:
+    """What one fix to a shared root cause achieves, for the `--by-root-cause` view; empty when the rule has no advice (#198)."""
+    parts = cause.split("|")
+    count = f"{findings} finding{'' if findings == 1 else 's'}"
+    if parts[0] == Rule.EFFECT_VIA_IMPORT and len(parts) == 3:
+        edge = parts[2]
+        importer, arrow, origin = edge.partition("->")
+        if arrow:
+            return (
+                f"inject a port at {importer} (so it stops importing {origin}), or add {origin} to `effects.sanctioned` "
+                f"if it is a capability seam, to clear {count}"
+            )
+        return f"add {edge} to `effects.sanctioned` if it is a capability seam, or inject a port in each importer, to clear {count}"
+    if parts[0] == Rule.EFFECT_UNSANCTIONED_IMPORT and len(parts) == 2:
+        return f"list {parts[1]} in `effects.sanctioned` if it is a capability seam, or reach it through one, to clear {count}"
+    if parts[0] == Rule.LAZY_IMPORT and len(parts) == 2:
+        return f"import {parts[1]} at module level, or record why with `# deferred: <reason>`, to clear {count}"
+    return ""
 
 
 _RENDER_HINTS = {
@@ -414,6 +448,7 @@ class Policy:
     package_parts: tuple[str, ...] = ()  # opt-in: extracted part trees (inside the repository) checked against the catalog
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
     modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
+    lazy_import_rings: tuple[str, ...] = ()  # #199: rings whose function-level imports are findings; empty means every ring
     mixed_purity: PurityPolicy = field(default_factory=PurityPolicy)  # #173: thresholds, effect kinds and the reasoned allowlist of `mixed-purity`
     coupling: CouplingPolicy = field(default_factory=CouplingPolicy)  # #148: entrypoints and hub threshold for `arborescent coupling`
     package_constraints: PackageConstraints = field(default_factory=PackageConstraints)  # #164: `[package.constraints]`, parsed only, not enforced
