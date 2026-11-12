@@ -1031,12 +1031,17 @@ growth reason and the exact keys it added; version-1 baselines still load and ar
 ### Root causes (#201)
 
 Some rules emit one finding per symptom: `lazy-import` one per importing module, `effect-unsanctioned-import` one per
-importer of an unlisted effect module. Such a finding carries a `root_cause` (`<rule>|<what they share>`, for example
+importer of an unlisted effect module, `effect-via-import` one per module downstream of an effectful seam. Such a finding carries a `root_cause` (`<rule>|<what they share>`, for example
 `lazy-import|psutil`) beside its identity key. The key still decides baseline matching; the root cause only groups.
 
 - `check` ends with `N violation(s) / M root cause(s)` and `by rule: lazy-import 83 / 2 root causes (0 new)` when findings
   share causes; with no fan-out the lines are unchanged. `check --by-root-cause` lists each cause once, widest fan-out
-  first, with a sample of the modules it reaches; findings that name no cause keep their own line.
+  first, with a sample of the modules it reaches and, where the rule has one, a fix that clears the whole cause; findings that
+  name no cause keep their own line.
+- `effect-via-import`'s cause is the effect kind plus the last edge of the import chain: `effect-via-import|env|client.bundle->state.app_root`
+  (`importer->module that uses the effect`), or `effect-via-import|env|state.app_root` for a direct importer. 623 modules that reach
+  `state.app_root` through `client.bundle` are one cause with one fix: inject a port at `client.bundle`, or list `state.app_root`
+  under `effects.sanctioned`.
 - `baseline --by-root-cause` (also with `--adopt FAMILY`) writes one entry per cause under `root_causes` in the baseline file,
   `{cause: [modules...]}`, instead of one key per finding. The entry is shrink-only: a finding under a recorded cause is
   tolerated while its module is listed, a module the cause gained is new (growth, needing `--allow-growth` like any other),

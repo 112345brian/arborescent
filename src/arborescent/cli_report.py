@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 from . import baseline as ratchet_mod
-from .domain import Policy, Violation
+from .domain import Policy, Violation, root_cause_hint
 from .engine import CheckReport
 
 
@@ -84,8 +84,9 @@ def _print_root_causes(shown: list[Violation]) -> list[Violation]:
         subjects = sorted({v.subject for v in members})
         more = f", ... +{len(subjects) - _SAMPLE}" if len(subjects) > _SAMPLE else ""
         print(f"CAUSE  {len(subjects):>5} module(s), {len(members)} finding(s)  {cause}  e.g. {', '.join(subjects[:_SAMPLE])}{more}")
-        if members[0].hint:
-            print(f"         {members[0].hint.strip()}")
+        advice = root_cause_hint(cause, len(members))
+        if advice:
+            print(f"         fix: {advice}")
     return [v for v in shown if not v.root_cause]
 
 
