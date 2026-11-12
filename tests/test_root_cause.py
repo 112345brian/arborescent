@@ -306,7 +306,7 @@ def test_baseline_by_root_cause_then_a_new_importer_of_the_same_module_fails(rep
     write_files(repo, {"app/ports.py": "def h() -> None:\n    import os\n"})
     assert main(["--config", str(config), "check", "--no-tools"], svc) == 1
     out = capsys.readouterr().out
-    assert [ln for ln in out.splitlines() if "[lazy-import]" in ln] == ["FAIL   app.ports:2: [lazy-import] os#1 (put it at module level, or record why it stays with `# deferred: <reason>` on or above the line)"]
+    assert [ln for ln in out.splitlines() if "[lazy-import]" in ln] == ["FAIL   app.ports: [lazy-import] 1/0 (total/deferred), unjustified: os#1 (put each at module level, or record why it stays with `# deferred: <reason>` on or above the line)"]
 
     # a different imported module is a different, uncovered cause
     write_files(repo, {"app/ports.py": "", "app/domain.py": "def g() -> None:\n    import os\n    import re\n"})
