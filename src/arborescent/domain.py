@@ -29,6 +29,7 @@ __all__ = [
     "ALL",
     "CONSTRAINT_RULES",
     "EFFECT_RULES",
+    "FAN_OUT_RULES",
     "INFORMATIONAL_RULES",
     "NOISE_DIRS",
     "TACH_EXCLUDED_FOLDERS",
@@ -226,16 +227,25 @@ class Violation:
     line: int = 0
     target: str = field(default="", compare=False)  # the imported module, for import findings; not part of the key
     hint: str = field(default="", compare=False)  # extra advice appended when rendered (#133); not part of the key
+    root_cause: str = field(default="", compare=False)  # fan-out rules only (FAN_OUT_RULES): the shared cause, `<rule>|...`; not part of the key (#201)
 
     @property
     def key(self) -> str:
         return f"{self.rule}|{self.subject}|{self.detail}"
+
+    @property
+    def cause(self) -> str:
+        """What counts as one root cause: the declared ``root_cause``, else the finding itself."""
+        return self.root_cause or self.key
 
     def render(self) -> str:
         where = f"{self.subject}:{self.line}" if self.line else self.subject
         hint = _RENDER_HINTS.get(self.rule, "")
         return f"{where}: [{self.rule}] {self.detail}{hint}{self.hint}"
 
+
+# Rules that emit one finding per symptom and so must name the cause they share (#201); a test scans their construct sites.
+FAN_OUT_RULES = frozenset({Rule.LAZY_IMPORT, Rule.EFFECT_UNSANCTIONED_IMPORT})
 
 _RENDER_HINTS = {
     Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on or above the line)",

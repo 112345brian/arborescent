@@ -25,7 +25,7 @@
     "ruff-PLC0415|tests/test_todo.py|`import` should be at the top-level of a file|a9925898",
     "ruff-PLC0415|tests/test_todo.py|`import` should be at the top-level of a file|b09121a1",
     "ruff-PLC0415|tests/test_todo.py|`import` should be at the top-level of a file|c6fd2aaf",
-    "ruff-PLR0913|src/arborescent/baseline.py|Too many arguments in function definition (6 > 5)|190df293",
+    "ruff-PLR0913|src/arborescent/baseline.py|Too many arguments in function definition (7 > 5)|190df293",
     "ruff-PLR0913|src/arborescent/practices.py|Too many arguments in function definition (6 > 5)|0c5f9ebe",
     "ruff-PLR0913|src/arborescent/rules.py|Too many arguments in function definition (7 > 5)|38b06e2a",
     "ruff-T201|src/arborescent/bench.py|`print` found|298e02da",
@@ -112,6 +112,13 @@
         "mixed-purity|arborescent.pytest_io_block|[composition] mixes substantial pure logic with effectful code"
       ],
       "approved-by": "https://github.com/112345brian/arborescent/issues/173"
+    },
+    {
+      "reason": "ruff PLR0913 on baseline.record: same finding, argument count 6 -> 7 because record gained by_root_cause (#201); not new debt",
+      "added": [
+        "ruff-PLR0913|src/arborescent/baseline.py|Too many arguments in function definition (7 > 5)|190df293"
+      ],
+      "approved-by": "#201"
     }
   ]
 }

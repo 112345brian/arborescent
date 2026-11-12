@@ -880,7 +880,7 @@ def _unsanctioned_effect_imports(context: RuleContext, modules: Mapping[str, Mod
             f"[{edge.ring}] imports {target!r}, a module of the {target_ring!r} ring that is not listed in `effects.sanctioned`; "
             "reach the effect through a sanctioned seam, or list the module if it is one"
         )
-        out.append(Violation(Rule.EFFECT_UNSANCTIONED_IMPORT, edge.name, detail, edge.imp.line))
+        out.append(Violation(Rule.EFFECT_UNSANCTIONED_IMPORT, edge.name, detail, edge.imp.line, root_cause=f"{Rule.EFFECT_UNSANCTIONED_IMPORT}|{target}"))
     return out
 
 

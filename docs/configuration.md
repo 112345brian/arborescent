@@ -1028,6 +1028,22 @@ when that family has no existing baseline entries. Other growth requires
 `arborescent baseline --allow-growth --reason "why this debt is accepted" --approved-by "name or issue URL"`. The version-2 JSON baseline records each
 growth reason and the exact keys it added; version-1 baselines still load and are upgraded when written.
 
+### Root causes (#201)
+
+Some rules emit one finding per symptom: `lazy-import` one per importing module, `effect-unsanctioned-import` one per
+importer of an unlisted effect module. Such a finding carries a `root_cause` (`<rule>|<what they share>`, for example
+`lazy-import|psutil`) beside its identity key. The key still decides baseline matching; the root cause only groups.
+
+- `check` ends with `N violation(s) / M root cause(s)` and `by rule: lazy-import 83 / 2 root causes (0 new)` when findings
+  share causes; with no fan-out the lines are unchanged. `check --by-root-cause` lists each cause once, widest fan-out
+  first, with a sample of the modules it reaches; findings that name no cause keep their own line.
+- `baseline --by-root-cause` (also with `--adopt FAMILY`) writes one entry per cause under `root_causes` in the baseline file,
+  `{cause: [modules...]}`, instead of one key per finding. The entry is shrink-only: a finding under a recorded cause is
+  tolerated while its module is listed, a module the cause gained is new (growth, needing `--allow-growth` like any other),
+  and members that stop occurring make the entry stale until `baseline --prune`. The growth log names added members as
+  `<cause>|<module>`, and `--growth-against` checks them. A finding already recorded under its own key stays there; delete
+  those entries first to regroup them. Baselines without `root_causes` work unchanged.
+
 `arborescent check --growth-against REF` compares the baseline at `REF` with the working baseline and requires every new
 key to match the keys in growth-log entries appended since that ref. This checks consistency; it does not prove the
 command wrote the file. A person could edit both the baseline and its log by hand, so review of baseline changes
@@ -1341,7 +1357,7 @@ projects, its dependency group and lockfile.
 
 Create the initial baseline or shrink it by removing findings that no longer occur. New findings are rejected by
 default. `--adopt FAMILY` adopts a previously unrecorded family once; `--allow-growth --reason TEXT --approved-by WHO` records other
-intentional baseline growth, its reason and its approver.
+intentional baseline growth, its reason and its approver. `--by-root-cause` records fan-out findings once per root cause (see [Root causes](#root-causes-201)).
 
 ### `arborescent coupling`
 
