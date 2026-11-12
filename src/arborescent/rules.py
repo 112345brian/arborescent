@@ -692,7 +692,7 @@ def check_modules(
                 out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
             out += (
                 _scope_imports(context, name, imp.line, internal) + _scope_effect_leaks(context, modules, name, imp.line, internal)
-                + _unsanctioned_effect_imports(context, _EffectImport(local_policy, name, ring, imp, internal))
+                + _unsanctioned_effect_imports(context, modules, _EffectImport(local_policy, name, ring, imp, internal))
             )
             out += _internal_imports(context, name, ring, imp.line, internal) + _forwarded_imports(context, name, imp, _ImportEnv(modules, known, tops, import_graph))
             out += _external_imports(local_policy, name, ring, imp.line, external, third_party, siblings)
@@ -848,10 +848,12 @@ def is_sanctioned(policy: Policy, module: str) -> bool:
     return any(in_unit(module, pattern) for pattern in policy.effects.sanctioned)
 
 
-def _unsanctioned_effect_imports(context: RuleContext, edge: _EffectImport) -> list[Violation]:
+def _unsanctioned_effect_imports(context: RuleContext, modules: Mapping[str, ModuleInfo], edge: _EffectImport) -> list[Violation]:
     """The guard that makes ``effects.sanctioned`` safe: a ring that forbids effects imports a provider-ring module only if it is a listed seam.
 
-    Off unless the policy sets ``effects.sanctioned``. Type-only imports never run and are not checked."""
+    Off unless the policy sets ``effects.sanctioned``. Type-only imports never run and are not checked. A target with no measured
+    direct effects of its own (a pure module that ``admit`` steers into the effects ring) is not a seam and needs no listing (#202);
+    what it imports still reaches the importer through ``effect-via-import``."""
     policy = edge.policy
     if not policy.effects.configured or edge.imp.type_only or not policy.forbidden_effects(edge.ring):
         return []
@@ -859,6 +861,9 @@ def _unsanctioned_effect_imports(context: RuleContext, edge: _EffectImport) -> l
     for target in sorted(set(edge.internal)):
         target_ring = context.resolve_ring(target)
         if target_ring not in policy.effects.rings or context.scope_name(target) != context.scope_name(edge.name) or is_sanctioned(policy, target):
+            continue
+        target_policy = context.policy_for(target)
+        if target in modules and target_policy is not None and not _direct_propagating_effects(target_policy, modules[target]):
             continue
         detail = (
             f"[{edge.ring}] imports {target!r}, a module of the {target_ring!r} ring that is not listed in `effects.sanctioned`; "
