@@ -843,6 +843,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
 | `mixed-purity` | a module holds at least `min_pure_units` (default 2) substantial pure top-level functions or classes (a body of at least `min_body_lines`, default 4, lines) and at least one effectful one, or an effect that runs at import time. Enforced in every ring; see [Mixed purity](#mixed-purity-toolarborescentmixed_purity). The detail names only the ring, so the baseline key survives renaming functions; the hint lists the effect kinds, the effectful and pure definitions and the importer count. Also an `allow` entry that matches no module or no mixed module |
 | `untokenizable-source` | a file Python's `ast` accepts but `tokenize` rejects (a doubled carriage return `\r\r\n` is the usual cause, #181). Its `# noqa`, `# type: ignore` and `# deferred:` comments cannot be read, so the file gets no comment facts and this finding instead of aborting the run. A violation, so it can be baselined; the detail is fixed text (the tokenizer's line and message ride in the hint), and the fix is to remove the stray byte |
+| `mixed-purity-weak` | informational: a module that is mixed only because of `mixed_purity.weak_kinds` (for example it prints or logs). Never fails a check and never enters the baseline. Off until `weak_kinds` is set |
 | `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
@@ -1182,6 +1183,9 @@ min_body_lines = 4        # default: lines a definition needs to be substantial
 kinds = ["clock", "env", "filesystem", "logging", "memo", "state"]   # default: every kind below except ambient
 ambient = ["myapp.state.state_root", "myapp.env.*"]                    # globs on the absolute dotted name of an ambient lookup
 exclude_rings = ["entrypoints", "effects"]                             # default []: rings whose modules are never reported (they are meant to be effectful)
+rings = ["domain", "application"]                                      # default []: when set, the only rings the rule looks at
+skip_unrestricted_rings = true                                         # default false: skip every ring whose effective `forbid` is empty
+weak_kinds = ["console", "logging", "memo"]                            # default []: effects that alone do not make a module worth splitting
 
 [[tool.arborescent.mixed_purity.allow]]
 module = "myapp.bundle_schema.hydration"   # a dotted name, a package prefix or a glob
@@ -1196,13 +1200,21 @@ and the kinds this rule adds, which never feed the `effect-*` rules:
 | kind | what it is |
 |---|---|
 | `logging` | `logging.info(...)` and friends, a call on a module-level `logging.getLogger(...)` / `structlog.get_logger(...)` result, `loguru.logger`. `getLogger` itself is not an effect |
-| `memo` | `functools.lru_cache` / `cache` / `cached_property` decorators, or a write to a module-level dict, list or set whose name contains `cache` or `memo` |
+| `memo` | a write to a module-level dict, list or set whose name contains `cache` or `memo`. A `functools.lru_cache` / `cache` / `cached_property` decorator is no longer a memo: a memoised pure function is pure |
 | `state` | a write (item assignment, `del`, `append`/`update`/`setdefault`/... ) to any other module-level dict, list or set from inside a function, unless that function binds the name locally; and, since 0.8.0, a `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local`. Reads are not effects |
-| `ambient` | a call to something matching `ambient`, resolved through absolute and relative imports (`state_root()`, `os.getcwd`). Off until `ambient` lists a pattern |
+| `ambient` | a call to something matching `ambient`, resolved through absolute and relative imports (`state_root()`, `os.getcwd`), or a method call on a parameter annotated with a matching class (`reader: Reader` then `reader.read()` matches `myapp.ports.Reader.read`; also `Reader | None`, `Optional[Reader]` and `"Reader"`; a parameter the function reassigns is skipped). Off until `ambient` lists a pattern; `ambient = ["myapp.ports.*"]` makes a loader that calls a port effectful |
 
 **Why is this function listed as pure?** `arborescent purity --explain MODULE` prints, for each top-level definition of one
 module (mixed or not), the effect kind, the line and the call behind an "effectful" label, or `no effect found`. Attach its
 output to a report of a wrong label.
+
+**Rings.** `rings` limits the rule to the listed rings (a name that is not a declared ring is an error); `exclude_rings` removes rings;
+`skip_unrestricted_rings = true` skips every ring whose effective `forbid` is empty, since effects are allowed there. The three
+combine and all apply to `arborescent purity` and to `selftest`.
+
+**Weak kinds.** `weak_kinds` names effects that alone should not ask for a split. A module whose effects are all weak is
+reported as an informational `mixed-purity-weak` note instead of a `mixed-purity` finding (and as `weak` in
+`arborescent purity --json`); one strong effect keeps it a finding. Existing baselines are unaffected until the key is set.
 
 **Choosing what counts.** The default `kinds` count everything above, so a CLI `main` that prints, a module that only logs, and an `lru_cache` on a regex compiler all make a module "mixed". To report only the splits that separate real effects, restrict `kinds` (for example drop `console`, `logging`, `memo`, `state`, `global`) and list the rings that are meant to be effectful under `exclude_rings`. `exclude_rings` also applies to `arborescent purity`. Both default to today's behaviour.
 

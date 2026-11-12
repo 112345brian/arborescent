@@ -78,6 +78,7 @@ def test_rule_id_strings_never_change() -> None:
             "reexport-ratio",
             "mixed-purity",
             "mixed-purity-excluded",
+            "mixed-purity-weak",
             "untokenizable-source",
             "circular-import",
             "external-import",

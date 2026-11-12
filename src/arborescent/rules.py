@@ -739,6 +739,9 @@ def _mixed_purity_findings(
 
 
 def _purity_violation(ring: str, report: ModulePurity) -> Violation:
+    if report.weak:
+        detail = f"[{ring}] mixes substantial pure logic with code whose only effects are weak kinds"
+        return Violation(Rule.MIXED_PURITY_WEAK, report.module, detail, report.line, hint=summarize(report))
     detail = f"[{ring}] mixes substantial pure logic with effectful code"
     return Violation(Rule.MIXED_PURITY, report.module, detail, report.line, hint=summarize(report))
 

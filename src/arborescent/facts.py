@@ -979,7 +979,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         ast.get_docstring(tree),
         arbor_reason,
         _dynamic_imports(nodes, aliases),
-        purity_facts(tree, nodes, aliases, _purity_helpers(aliases)),
+        purity_facts(tree, nodes, aliases, _purity_helpers(aliases), call_aliases),
         untokenizable,
     )
 

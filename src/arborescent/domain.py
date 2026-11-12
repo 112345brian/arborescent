@@ -109,6 +109,7 @@ class Rule(StrEnum):
     REEXPORT_RATIO = "reexport-ratio"
     MIXED_PURITY = "mixed-purity"
     MIXED_PURITY_EXCLUDED = "mixed-purity-excluded"
+    MIXED_PURITY_WEAK = "mixed-purity-weak"
     UNTOKENIZABLE_SOURCE = "untokenizable-source"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
@@ -186,7 +187,7 @@ CONSTRAINT_RULES: frozenset[Rule] = frozenset({Rule.PACKAGE_CONSTRAINT_FACTS, Ru
 # A package's pyproject.toml is owner-edited, so a differing derived field is advice, not a failure (like generated-preset drift).
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
-    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE, Rule.MIXED_PURITY_EXCLUDED,
+    Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE, Rule.MIXED_PURITY_EXCLUDED, Rule.MIXED_PURITY_WEAK,
     Rule.ADAPTER_EQUIVALENCE_REPORT,
 })
 

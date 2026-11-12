@@ -12,7 +12,7 @@ from collections.abc import Collection, Mapping
 
 from .domain import Mutation, Policy, Rule
 from .facts import ModuleInfo
-from .purity import Followed, assess, is_allowed
+from .purity import Followed, assess, is_allowed, ring_scanned
 
 __all__ = ["mixed_purity_mutations"]
 
@@ -44,18 +44,18 @@ def mixed_purity_mutations(
     rule = policy.mixed_purity
     if not rule.enabled:
         return [], ["mixed-purity: disabled by policy"]
-    effects = _effects(rule.kinds)
+    effects = _effects([kind for kind in rule.kinds if kind not in rule.weak_kinds])  # a weak-only host would be a note, not the finding the probe expects
     if not effects:
-        return [], ["mixed-purity: no probe shape for the configured `mixed_purity.kinds` (needs console, filesystem or logging)"]
+        return [], ["mixed-purity: no probe shape for the configured `mixed_purity.kinds` less `weak_kinds` (needs console, filesystem or logging)"]
     followed = Followed(modules)
     host = next((
         name for name in sorted(known)
         if name in paths and name in modules and not paths[name].endswith("__init__.py")
-        and policy.resolve_ring(arbor_index, name) is not None
+        and (ring := policy.resolve_ring(arbor_index, name)) is not None and ring_scanned(policy, ring)
         and not is_allowed(rule, name) and assess(modules[name], policy, followed) is None
     ), None)
     if host is None:
-        return [], ["mixed-purity: every module is already mixed or allowed, so none can be mutated"]
+        return [], ["mixed-purity: every module is already mixed, allowed or in a ring the rule skips, so none can be mutated"]
     pure = _pure_block(policy)
     return [
         Mutation(Rule.MIXED_PURITY, f"mixed-purity: {label} beside {rule.min_pure_units} pure functions in {host}", paths[host], pure + source)

@@ -17,7 +17,7 @@ from .domain import Policy, Rule, Violation, in_unit
 from .facts import ModuleInfo, absolute_callee
 from .purity_policy import AMBIENT, PurityPolicy
 
-__all__ = ["Followed", "ModulePurity", "assess", "assess_in_ring", "by_ring", "excluded_findings", "explain", "importer_counts", "is_allowed", "summarize"]
+__all__ = ["Followed", "ModulePurity", "assess", "assess_in_ring", "by_ring", "excluded_findings", "explain", "importer_counts", "is_allowed", "ring_scanned", "summarize"]
 
 _NON_PROPAGATING = frozenset({"os-branching", "patch"})  # a portability fact and a test-only use: neither is an effect of the module
 IMPORT_TIME = "<import time>"
@@ -33,11 +33,21 @@ class ModulePurity:
     pure: tuple[str, ...]  # substantial pure definitions (the ones that count towards the threshold)
     line: int  # the first effectful line, where the finding is anchored
     importers: int = 0  # blast radius: modules in the scanned tree that import this one
+    weak: bool = False  # every effect kind is one of ``mixed_purity.weak_kinds``: reported as a note, not a finding (#195)
+
+
+def ring_scanned(policy: Policy, ring: str) -> bool:
+    """Whether ``mixed-purity`` looks at modules of ``ring``: not in ``exclude_rings``, in ``rings`` when that is set, and (with
+    ``skip_unrestricted_rings``) in a ring whose effective ``forbid`` is not empty."""
+    rule = policy.mixed_purity
+    if ring in rule.exclude_rings or (rule.rings and ring not in rule.rings):
+        return False
+    return not (rule.skip_unrestricted_rings and not policy.forbidden_effects(ring))
 
 
 def assess_in_ring(info: ModuleInfo, policy: Policy, ring: str, followed: Followed | None = None) -> ModulePurity | None:
-    """``assess``, except that a module in a ring listed under ``mixed_purity.exclude_rings`` is never mixed."""
-    return None if ring in policy.mixed_purity.exclude_rings else assess(info, policy, followed)
+    """``assess``, except that a module in a ring the ring filter skips (``exclude_rings``, ``rings``, ``skip_unrestricted_rings``) is never mixed."""
+    return assess(info, policy, followed) if ring_scanned(policy, ring) else None
 
 
 def is_allowed(policy: PurityPolicy, module: str) -> bool:
@@ -120,9 +130,15 @@ def _tally(info: ModuleInfo, policy: Policy, wanted: Collection[str], followed: 
 
 
 def _add_ambient(info: ModuleInfo, policy: Policy, tally: _Tally) -> None:
-    for line, callee in info.facts.calls if policy.mixed_purity.ambient else ():
+    patterns = policy.mixed_purity.ambient
+    if not patterns:
+        return
+    calls = list(info.facts.calls)
+    # `reader.read()` on a parameter annotated `Reader`: the call a port makes, named `<module of Reader>.Reader.read` (#195)
+    calls += [(line, f"{info.name}.{cls}.{method}" if local else f"{cls}.{method}") for line, cls, method, local in info.facts.purity.port_calls]
+    for line, callee in calls:
         target = absolute_callee(info.name, info.is_package, callee)  # relative imports resolved: `state_root()` is usually first-party
-        if target is not None and any(fnmatch.fnmatchcase(target, pattern) for pattern in policy.mixed_purity.ambient):
+        if target is not None and any(fnmatch.fnmatchcase(target, pattern) for pattern in patterns):
             tally.add(line, AMBIENT, target)
 
 
@@ -173,7 +189,8 @@ def assess(info: ModuleInfo, policy: Policy, followed: Followed | None = None) -
         return None
     kinds = tally.import_time.union(*(tally.kinds[u.name] for u in effectful))
     line = min((tally.first[name] for name in names if name in tally.first), default=0)
-    return ModulePurity(info.name, tuple(sorted(kinds)), tuple(names), pure_names, line)
+    weak = bool(rule.weak_kinds) and kinds <= set(rule.weak_kinds)
+    return ModulePurity(info.name, tuple(sorted(kinds)), tuple(names), pure_names, line, weak=weak)
 
 
 def by_ring(rows: Collection[tuple[ModulePurity, str, bool]]) -> list[tuple[str, list[tuple[ModulePurity, str, bool]]]]:
