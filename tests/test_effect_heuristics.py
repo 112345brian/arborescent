@@ -294,6 +294,45 @@ def test_a_sanctioned_seam_that_imports_a_raw_effect_module_still_propagates(rep
     assert [f.rule for f in found if f.rule == "effect-via-import"] == ["effect-via-import"]
 
 
+def _pure_provider_repo(root: Path, provider: str) -> dict[str, Any]:
+    write_files(root, {"app/ports.py": provider, "app/adapters.py": "from . import ports\n\n\ndef go():\n    return ports.VALUE\n"})
+    return ring_with(
+        ports={"may_import": ["domain"], "external": ["os"], "forbid": []},
+        adapters={"may_import": ["domain", "ports"], "external": [], "forbid": ["env"]},
+    )
+
+
+def test_importing_a_pure_provider_ring_module_is_not_a_finding(repo: Path) -> None:
+    """#202: `admit` steers a pure module into the effects ring; `check` must not then call its importers unsanctioned."""
+    ring = _pure_provider_repo(repo, "VALUE = 1\n")
+    assert _effect_rules(_run(repo, ring=ring, effects={"sanctioned": [], "rings": ["ports"]})) == set()
+
+
+def test_an_empty_provider_module_is_not_a_finding(repo: Path) -> None:
+    ring = _pure_provider_repo(repo, "")
+    assert _effect_rules(_run(repo, ring=ring, effects={"sanctioned": [], "rings": ["ports"]})) == set()
+
+
+def test_a_provider_module_with_a_raw_effect_is_still_a_finding(repo: Path) -> None:
+    ring = _pure_provider_repo(repo, "import os\n\nVALUE = os.environ.get('X')\n")
+    assert "effect-unsanctioned-import" in _effect_rules(_run(repo, ring=ring, effects={"sanctioned": [], "rings": ["ports"]}))
+
+
+def test_a_pure_provider_module_that_reaches_a_raw_effect_still_taints_its_importer(repo: Path) -> None:
+    write_files(repo, {
+        "app/domain.py": PORT,
+        "app/ports.py": "from . import domain\n\nVALUE = 1\n",
+        "app/adapters.py": "from . import ports\n",
+    })
+    ring = ring_with(
+        domain={"external": ["os"], "forbid": []},
+        ports={"may_import": ["domain"], "external": [], "forbid": []},
+        adapters={"may_import": ["ports"], "external": [], "forbid": ["env"]},
+    )
+    found = _run(repo, ring=ring, effects={"sanctioned": [], "rings": ["domain", "ports"]})
+    assert "effect-via-import" in _effect_rules(found)
+
+
 def test_effects_table_validation() -> None:
     assert policy_from_mapping({**_mini(), "effects": {"sanctioned": ["a.*"]}}).effects.sanctioned == ("a.*",)
     assert policy_from_mapping({**_mini(), "effects": {"sanctioned": ["a.*"]}}).effects.rings == ("effects",)
