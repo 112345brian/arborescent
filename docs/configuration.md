@@ -911,7 +911,22 @@ def load() -> None:
     import registry
 ```
 
-The reason must not be empty. A justified import is counted but is not a finding. It still counts as an edge in the import
+The reason must not be empty. A justified import is counted but is not a finding.
+
+To start with the rings where a lazy import is a smell and leave the rest (a CLI package or composition root defers imports to keep
+startup fast), list them:
+
+```toml
+[tool.arborescent.lazy_import]
+rings = ["domain", "services", "workflows"]   # default: every ring, so nothing changes until this is set
+```
+
+A module in any other ring (or with no ring, such as a dev tool) has no `lazy-import` findings and is left out of the
+`function-level imports by module:` list. A ring name that is not defined is an error, not a silent no-op, and so is an empty list;
+with `[scopes]` a name may belong to any one scope. `check` prints one line per module, `module: [lazy-import] total/deferred`
+with the unjustified imports named, not one line per import (baseline keys are unchanged). While no `lazy-import` finding is
+baselined yet it adds `lazy-import: N new, 0 baselined; run 'arborescent baseline --adopt lazy-import' to start a ratchet`.
+Adoption works once and fails if other new findings exist; fix or baseline them first. It still counts as an edge in the import
 graph, so `circular-import` and `arborescent cycles` see it. (Excluding these imports from a closure size is not done
 here; the closure used by `internal-import` move suggestions still follows them.)
 

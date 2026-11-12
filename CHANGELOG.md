@@ -17,13 +17,17 @@
 - A memoised pure function is no longer a `memo` effect in `mixed-purity`: `functools.lru_cache`/`cache`/`cached_property` do not
   count (a written module-level cache still does). Fewer findings; stale baseline entries can be deleted (#195).
 - `selftest` no longer reports the `mixed-purity` mutations as surviving when the host module's ring is excluded by `exclude_rings`.
+- `arborescent baseline --adopt lazy-import` was refused as an unknown family; it now adopts the `lazy-import` findings once.
 
 ### Added
-
   counts when findings share causes, `check --by-root-cause` lists each cause once with its fan-out, and
   `baseline [--adopt FAMILY] --by-root-cause` records one shrink-only entry per cause (a new member of a recorded cause is
   growth). `check --by-root-cause` prints a fix per cause (inject a port at the edge, or list the module under
   `effects.sanctioned`, to clear N findings). Baselines without the new `root_causes` section behave as before (#201, #198).
+- `[lazy_import] rings = [...]` limits `lazy-import` to some rings (default: every ring, so nothing changes until it is set). An
+  unknown or empty ring list is a config error. Closes #199.
+- `check` folds `lazy-import` findings to one line per module (`total/deferred` plus the unjustified imports) and, while none is
+  baselined, prints `lazy-import: N new, 0 baselined; run 'arborescent baseline --adopt lazy-import' to start a ratchet`.
 
 
 ## 0.8.0 — 2026-11-11

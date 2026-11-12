@@ -290,6 +290,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         taint_seeds=_taint_seeds(raw),
         coupling=_coupling(raw),
         mixed_purity=_mixed_purity(raw),
+        lazy_import_rings=_lazy_import_rings(raw, {rule.name for rule in core.rings}),
         effects=_effects(raw),
         package_constraints=_package_constraints(raw),
         ratchets=ratchet_specs(raw.get("ratchet", {})),
@@ -396,6 +397,28 @@ def _mixed_purity(raw: Mapping[str, Any]) -> PurityPolicy:
     )
 
 
+def _lazy_import_rings(raw: Mapping[str, Any], known: Collection[str]) -> tuple[str, ...]:
+    """``[lazy_import] rings``: the rings whose function-level imports are findings. Absent means every ring.
+
+    An unknown ring name is an error, not a silent no-op: a typo would otherwise switch the rule off for that ring."""
+    table = raw.get("lazy_import", {})
+    if not isinstance(table, Mapping):
+        raise PolicyError("`lazy_import` must be a table")
+    table = cast("Mapping[str, Any]", table)
+    unknown_keys = set(table) - {"rings"}
+    if unknown_keys:
+        raise PolicyError(f"unknown key in `lazy_import`: {sorted(unknown_keys)}")
+    if "rings" not in table:
+        return ()
+    rings = _string_list(table, "rings")
+    if not rings:
+        raise PolicyError("`lazy_import.rings` must name at least one ring; omit it to cover every ring")
+    unknown = sorted(set(rings) - set(known))
+    if unknown:
+        raise PolicyError(f"unknown ring in `lazy_import.rings`: {unknown}; known: {sorted(known)}")
+    return rings
+
+
 def _effects(raw: Mapping[str, Any]) -> EffectsPolicy:
     table = raw.get("effects", {})
     if not isinstance(table, Mapping):
@@ -475,6 +498,7 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
         first,
         coupling=_coupling(raw),
         package_constraints=_package_constraints(raw),
+        lazy_import_rings=_lazy_import_rings(raw, {ring.name for scope in scopes for ring in scope.policy.rings}),
         rings=(),
         classify=(),
         sources=tuple(path for scope in scopes for path in scope.policy.sources),

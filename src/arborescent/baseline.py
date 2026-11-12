@@ -12,11 +12,12 @@ from .domain import PolicyError, Rule, Violation
 from .ports import FileSystem
 
 __all__ = [
-    "Ratchet", "apply", "cause_count", "growth_consistent", "growth_count", "internal_import_summary", "load", "load_root_causes",
-    "prune", "record", "recorded_rules", "root_cause_groups", "save", "stamp_approval", "values_growth_problems",
+    "OWN_ADOPTION_FAMILIES", "Ratchet", "apply", "cause_count", "growth_consistent", "growth_count", "internal_import_summary", "load",
+    "load_root_causes", "prune", "record", "recorded_rules", "root_cause_groups", "save", "stamp_approval", "values_growth_problems",
 ]
 
 VERSION = 2
+OWN_ADOPTION_FAMILIES = frozenset({"coverage", "effects", "suppressions", "discard", "lazy-import"})  # `--adopt` families that need no external engine
 
 
 class BaselineError(PolicyError):

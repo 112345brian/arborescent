@@ -27,7 +27,12 @@ from .domain import (
 )
 from .generate import generate_for_scan
 from .generated_config import GENERATED_MARKER
-from .lazy_imports import LazyImportCount, lazy_import_counts, lazy_import_violations
+from .lazy_imports import (
+    LazyImportCount,
+    lazy_import_counts,
+    lazy_import_in_scope,
+    lazy_import_violations,
+)
 from .path_exclusion import nested_bare_pattern
 from .ports import (
     Clock,
@@ -184,7 +189,7 @@ def run_own(
     ]
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
-    found += _inventory_violations(scan.modules)
+    found += _inventory_violations(scan.modules, policy.lazy_import_rings, indexes)
     found += excluded_findings(policy, scan.excluded_modules)
     if only is None:  # the signals compare a module with its importers and peers: a whole-repository fact
         found += audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
@@ -291,7 +296,7 @@ def _modularity_failures(policy: Policy, gaps: Sequence[Violation], complete: bo
     return tuple(f"open package gap: {v.render()}" for v in gaps)
 
 
-def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:
+def _inventory_violations(modules: Mapping[str, ModuleInfo], lazy_rings: tuple[str, ...], context: RuleContext) -> list[Violation]:
     found: list[Violation] = []
     for module in modules.values():
         suppressions: dict[str, int] = {}
@@ -300,7 +305,8 @@ def _inventory_violations(modules: Mapping[str, ModuleInfo]) -> list[Violation]:
             found.append(Violation(Rule.SUPPRESSION, module.name, f"{kind}#{suppressions[kind]}"))
         for index, _ in enumerate(module.facts.discard_calls, start=1):
             found.append(Violation(Rule.DISCARD, module.name, f"call#{index}"))
-        found.extend(lazy_import_violations(module))
+        if lazy_import_in_scope(lazy_rings, context.resolve_ring(module.name)):
+            found.extend(lazy_import_violations(module))
     return found
 
 
@@ -316,9 +322,10 @@ def _inventory_counts(modules: Mapping[str, ModuleInfo]) -> tuple[dict[tuple[str
     return suppressions, discards
 
 
-def _record_inventories(report: CheckReport, modules: Mapping[str, ModuleInfo]) -> None:
+def _record_inventories(report: CheckReport, modules: Mapping[str, ModuleInfo], lazy_rings: tuple[str, ...], context: RuleContext) -> None:
     report.suppression_counts, report.discard_counts = _inventory_counts(modules)
-    counts = ((module.name, lazy_import_counts(module)) for module in modules.values())
+    scoped = (module for module in modules.values() if lazy_import_in_scope(lazy_rings, context.resolve_ring(module.name)))
+    counts = ((module.name, lazy_import_counts(module)) for module in scoped)
     report.lazy_import_counts = {name: count for name, count in counts if count.total}
 
 
@@ -578,7 +585,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         found, scan = run_own(policy, root, services, only)
         report.engines.append(EngineRun("arborescent", "ok", services.clock.now() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
         report.parsed = scan.parsed
-        _record_inventories(report, scan.modules)
+        _record_inventories(report, scan.modules, policy.lazy_import_rings, RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules)))
         report.excluded, report.excluded_nested = dict(scan.excluded), _nested_exclusions(scan.excluded, policy.exclude)
         report.vendor_folders = tuple(scan.vendor_folders)
         report.dev_tools = _dev_tool_counts(policy, scan)

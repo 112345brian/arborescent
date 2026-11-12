@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 
 from . import baseline as ratchet_mod
-from .domain import Policy, Violation, root_cause_hint
+from .domain import Policy, Rule, Violation, root_cause_hint
 from .engine import CheckReport
+from .lazy_imports import lazy_import_adoption_hint, lazy_import_lines
 
 
 def _print_rule_label(policy: Policy) -> None:
@@ -68,8 +70,11 @@ def _print_findings(args: argparse.Namespace, report: CheckReport) -> None:
     shown = report.ratchet.new if report.ratchet and not args.no_baseline else report.violations
     if getattr(args, "by_root_cause", False):
         shown = _print_root_causes(shown)
-    for v in shown:
-        print(f"FAIL   {v.render()}")
+    for line in _finding_lines(shown, report):
+        print(f"FAIL   {line}")
+    hint = _adoption_hint(args, report)
+    if hint is not None:
+        print(f"NOTE   {hint}")
     if report.ratchet:
         for key in report.ratchet.stale:
             print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline --prune`): {key}")
@@ -88,6 +93,20 @@ def _print_root_causes(shown: list[Violation]) -> list[Violation]:
         if advice:
             print(f"         fix: {advice}")
     return [v for v in shown if not v.root_cause]
+
+
+def _finding_lines(shown: Sequence[Violation], report: CheckReport) -> list[str]:
+    """Findings as printed lines; the ``lazy-import`` ones are folded to one line per module (#199)."""
+    others = [v.render() for v in shown if v.rule != Rule.LAZY_IMPORT]
+    return others + lazy_import_lines([v for v in shown if v.rule == Rule.LAZY_IMPORT], report.lazy_import_counts)
+
+
+def _adoption_hint(args: argparse.Namespace, report: CheckReport) -> str | None:
+    if report.ratchet is None or args.no_baseline:
+        return None
+    new = {v.key for v in report.ratchet.new}
+    found = [v for v in report.violations if v.rule == Rule.LAZY_IMPORT]
+    return lazy_import_adoption_hint(len(new.intersection(v.key for v in found)), sum(1 for v in found if v.key not in new))
 
 
 def _print_engines(report: CheckReport) -> None:
