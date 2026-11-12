@@ -4,7 +4,7 @@ shared parse, then apply the baseline ratchet."""
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -536,13 +536,25 @@ def _plan_engines(policy: Policy, services: Services, opts: Options, files: Sequ
     return futures
 
 
-def _apply_ratchet(report: CheckReport, base: set[str], rules: tuple[str, ...], complete: bool) -> ratchet_mod.Ratchet:
+def _apply_ratchet(
+    report: CheckReport, base: set[str], rules: tuple[str, ...], complete: bool, causes: Mapping[str, Collection[str]] | None = None,
+) -> ratchet_mod.Ratchet:
     """Narrow findings and the baseline to the `--rule` families first, so nothing outside them is new or stale (#137)."""
+    causes = causes or {}
     if rules:
         report.rules = rules
         report.violations = [v for v in report.violations if ratchet_mod.in_any_family(v.key, rules)]
         base = {key for key in base if ratchet_mod.in_any_family(key, rules)}
-    return ratchet_mod.apply(report.violations, base, complete=complete)
+        causes = {cause: members for cause, members in causes.items() if ratchet_mod.in_any_family(cause, rules)}
+    return ratchet_mod.apply(report.violations, base, complete=complete, root_causes=causes)
+
+
+def _recorded(policy: Policy, root: Path, services: Services, opts: Options) -> tuple[set[str], dict[str, frozenset[str]]]:
+    """The baseline's own-key entries and its root-cause entries (#201); empty under `--no-baseline`."""
+    if not opts.use_baseline:
+        return set(), {}
+    path = root / policy.baseline
+    return ratchet_mod.load(services.fs, path), ratchet_mod.load_root_causes(services.fs, path)
 
 
 def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
@@ -581,12 +593,12 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         report.engines += [*engine_runs, *_ratchet_runs(policy, root, services, scan, found)]
         report.notes = [v for v in found if v.rule in INFORMATIONAL_RULES]
         report.violations = _apply_modularity(policy, report, found, opts, only is None) + [v for run in engine_runs for v in run.violations]
-        base: set[str] = ratchet_mod.load(services.fs, root / policy.baseline) if opts.use_baseline else set()
+        base, causes = _recorded(policy, root, services, opts)
         ruff_skipped = any(run.name == "ruff" and run.status in {"skipped", "disabled"} for run in engine_runs)
         if not opts.tools or ruff_skipped:
             # Ruff is the only external engine whose findings enter the baseline; absent output cannot prove them stale.
             base = {key for key in base if not key.split("|", 1)[0].startswith("ruff-")}
-        report.ratchet = _apply_ratchet(report, base, opts.rules, only is None)
+        report.ratchet = _apply_ratchet(report, base, opts.rules, only is None, causes)
         if opts.require_profile:
             report.profile = PROFILE
             report.profile_failures = certify(root, policy, scan, services.runner, services.fs)

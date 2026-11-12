@@ -3,7 +3,8 @@ longer occur must be deleted (``arborescent baseline`` rewrites the file), so th
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,8 +12,8 @@ from .domain import PolicyError, Rule, Violation
 from .ports import FileSystem
 
 __all__ = [
-    "Ratchet", "apply", "growth_consistent", "growth_count", "internal_import_summary", "load", "prune", "record", "save",
-    "stamp_approval", "values_growth_problems",
+    "Ratchet", "apply", "cause_count", "growth_consistent", "growth_count", "internal_import_summary", "load", "load_root_causes",
+    "prune", "record", "recorded_rules", "root_cause_groups", "save", "stamp_approval", "values_growth_problems",
 ]
 
 VERSION = 2
@@ -40,8 +41,42 @@ def load(fs: FileSystem, path: Path) -> set[str]:
     return {str(k) for k in violations}
 
 
+def load_root_causes(fs: FileSystem, path: Path) -> dict[str, frozenset[str]]:
+    """The per-root-cause entries (#201): root cause -> the fan-out members (importing modules, say) recorded under it."""
+    return _root_causes(document(fs, path))
+
+
+def recorded_rules(fs: FileSystem, path: Path) -> set[str]:
+    """Every rule id the baseline holds an entry for, whether recorded per finding or per root cause."""
+    return {key.split("|", 1)[0] for key in (*load(fs, path), *load_root_causes(fs, path))}
+
+
+def _root_causes(doc: Mapping[str, object]) -> dict[str, frozenset[str]]:
+    raw = doc.get("root_causes", {})
+    if not isinstance(raw, dict):
+        raise ValueError("baseline root_causes must be an object")
+    out: dict[str, frozenset[str]] = {}
+    for cause, members in raw.items():
+        if not isinstance(members, list):
+            raise ValueError(f"baseline root cause {cause!r} must list its members")
+        out[str(cause)] = frozenset(str(member) for member in members)
+    return out
+
+
+def _member_id(cause: str, subject: str) -> str:
+    """The growth-log name of one fan-out member of a root cause (it starts with the rule id, like a key)."""
+    return f"{cause}|{subject}"
+
+
+def _ids(doc: Mapping[str, object]) -> set[str]:
+    """Everything a baseline records, as the names a growth log uses: plain keys and ``<root cause>|<member>``."""
+    keys = doc.get("violations", [])
+    plain = {str(key) for key in keys} if isinstance(keys, list) else set[str]()
+    return plain | {_member_id(cause, str(member)) for cause, members in _root_causes(doc).items() for member in members}
+
+
 def document(fs: FileSystem, path: Path) -> dict[str, object]:
-    """Read a v1 or v2 baseline as a normalized document."""
+    """Read a v1 or v2 baseline as a normalized document; ``root_causes`` appears only when the file has it."""
     if not fs.is_file(path):
         return {"version": VERSION, "violations": [], "growth": []}
     data = fs.read_json(path)
@@ -54,7 +89,11 @@ def document(fs: FileSystem, path: Path) -> dict[str, object]:
     growth = data.get("growth", [])
     if not isinstance(violations, list) or not isinstance(growth, list):
         raise ValueError("baseline violations and growth must be arrays")
-    return {"version": VERSION, "violations": [str(key) for key in violations], "growth": growth}
+    doc: dict[str, object] = {"version": VERSION, "violations": [str(key) for key in violations], "growth": growth}
+    if "root_causes" in data:
+        _root_causes(data)  # reject a malformed section here, not later in apply
+        doc["root_causes"] = data["root_causes"]
+    return doc
 
 
 def save(fs: FileSystem, path: Path, violations: Iterable[Violation]) -> int:
@@ -71,38 +110,82 @@ def record(
     adopt: str | None = None,
     allow_growth: bool = False,
     reason: str | None = None,
+    by_root_cause: bool = False,
 ) -> int:
-    """Create or shrink a baseline; growth requires a one-time adoption or an explicit reason."""
-    _validate_record_options(adopt, allow_growth, reason)
-    current = {v.key for v in violations}
-    if not fs.is_file(path):
-        fs.write_json(path, {"version": VERSION, "violations": sorted(current), "growth": []})
-        return len(current)
+    """Create or shrink a baseline; growth requires a one-time adoption or an explicit reason.
 
+    ``by_root_cause`` records a finding that names a root cause as a member of that cause's entry instead of as its own key (#201).
+    The layout is sticky: a finding already recorded under its own key stays there, and a cause already in the file keeps grouping."""
+    _validate_record_options(adopt, allow_growth, reason)
+    found = list({v.key: v for v in violations}.values())
     old_doc = document(fs, path)
-    old_violations = old_doc["violations"]
-    existing_growth = old_doc["growth"]
-    if not isinstance(old_violations, list) or not isinstance(existing_growth, list):
+    old_plain = {str(key) for key in _list(old_doc["violations"])}
+    old_causes = _root_causes(old_doc)
+    plain, grouped = _layout(found, old_plain, old_causes, by_root_cause)
+    entries = _entries(plain, grouped)
+    if not fs.is_file(path):
+        fs.write_json(path, {"version": VERSION, "violations": entries["violations"], "growth": [], **_causes_part(entries)})
+        return len(found)
+    growth = [*_list(old_doc["growth"]), *_growth_entries(_ids(old_doc), _ids(entries), adopt, allow_growth, reason)]
+    fs.write_json(path, {"version": VERSION, "violations": entries["violations"], "growth": growth, **_causes_part(entries)})
+    return len(found)
+
+
+def _list(value: object) -> list[object]:
+    if not isinstance(value, list):
         raise ValueError("baseline violations and growth must be arrays")
-    old = {str(key) for key in old_violations}
-    growth = [*existing_growth, *_growth_entries(old, current, adopt, allow_growth, reason)]
-    fs.write_json(path, {"version": VERSION, "violations": sorted(current), "growth": growth})
-    return len(current)
+    return list[object](value)
+
+
+def _layout(
+    found: Iterable[Violation], old_plain: Collection[str], old_causes: Mapping[str, Collection[str]], by_root_cause: bool,
+) -> tuple[set[str], dict[str, set[str]]]:
+    """Split findings into own-key entries and per-root-cause members (cause -> subjects)."""
+    plain: set[str] = set()
+    grouped: dict[str, set[str]] = {}
+    for item in found:
+        if item.root_cause and item.key not in old_plain and (by_root_cause or item.root_cause in old_causes):
+            grouped.setdefault(item.root_cause, set()).add(item.subject)
+        else:
+            plain.add(item.key)
+    return plain, grouped
+
+
+def _entries(plain: Collection[str], grouped: Mapping[str, Collection[str]]) -> dict[str, object]:
+    entries: dict[str, object] = {"violations": sorted(plain)}
+    if grouped:
+        entries["root_causes"] = {cause: sorted(members) for cause, members in sorted(grouped.items())}
+    return entries
+
+
+def _causes_part(entries: Mapping[str, object]) -> dict[str, object]:
+    return {"root_causes": entries["root_causes"]} if "root_causes" in entries else {}
 
 
 def prune(fs: FileSystem, path: Path, violations: Iterable[Violation]) -> int:
-    """Drop baseline entries that no longer occur; never add one, never touch the growth log. Returns how many were removed."""
+    """Drop baseline entries that no longer occur; never add one, never touch the growth log. Returns how many were removed.
+
+    A root-cause entry loses the members that no longer occur, and goes when none is left."""
     if not fs.is_file(path):
         return 0
+    found = list(violations)
     doc = document(fs, path)
-    old_violations = doc["violations"]
-    if not isinstance(old_violations, list):
-        raise ValueError("baseline violations must be an array")
-    old = {str(key) for key in old_violations}
-    kept = old & {v.key for v in violations}
-    if kept != old:
-        fs.write_json(path, {**doc, "violations": sorted(kept)})
-    return len(old - kept)
+    old = {str(key) for key in _list(doc["violations"])}
+    kept = old & {v.key for v in found}
+    causes = _root_causes(doc)
+    now: dict[str, set[str]] = {}
+    for item in found:
+        if item.root_cause:
+            now.setdefault(item.root_cause, set()).add(item.subject)
+    kept_causes = {cause: members & now.get(cause, set()) for cause, members in causes.items()}
+    kept_causes = {cause: members for cause, members in kept_causes.items() if members}
+    removed = len(old - kept) + sum(len(members) for members in causes.values()) - sum(len(members) for members in kept_causes.values())
+    if removed:
+        pruned: dict[str, object] = {**doc, "violations": sorted(kept)}
+        if "root_causes" in doc:
+            pruned["root_causes"] = {cause: sorted(members) for cause, members in sorted(kept_causes.items())}
+        fs.write_json(path, pruned)
+    return removed
 
 
 def _validate_record_options(adopt: str | None, allow_growth: bool, reason: str | None) -> None:
@@ -147,13 +230,13 @@ def in_family(key: str, family: str) -> bool:
 
 
 def growth_consistent(current: dict[str, object], at_ref: dict[str, object]) -> bool:
-    """Check that every newly added key is listed in growth entries appended since ``at_ref``."""
-    current_violations = current.get("violations", [])
-    ref_violations = at_ref.get("violations", [])
-    if not isinstance(current_violations, list) or not isinstance(ref_violations, list):
+    """Check that every newly added key (or root-cause member) is listed in growth entries appended since ``at_ref``."""
+    if not isinstance(current.get("violations", []), list) or not isinstance(at_ref.get("violations", []), list):
         return False
-    current_keys = {str(key) for key in current_violations}
-    ref_keys = {str(key) for key in ref_violations}
+    try:
+        current_keys, ref_keys = _ids(current), _ids(at_ref)  # plain keys and root-cause members (#201)
+    except ValueError:
+        return False
     current_log = current.get("growth", [])
     ref_log = at_ref.get("growth", [])
     if not isinstance(current_log, list) or not isinstance(ref_log, list) or current_log[: len(ref_log)] != ref_log:
@@ -212,17 +295,36 @@ def in_any_family(key: str, families: Iterable[str]) -> bool:
     return any(in_family(key, family) for family in families)
 
 
-def rule_summary(violations: Iterable[Violation], new: Iterable[Violation]) -> str | None:
-    """One line splitting findings by rule id, with how many of each are not covered by the baseline (#137)."""
-    totals: dict[str, int] = {}
+def root_cause_groups(violations: Iterable[Violation]) -> list[tuple[str, list[Violation]]]:
+    """Findings that name a root cause, grouped by it, widest fan-out first (ties by cause name). Others are not grouped."""
+    groups: dict[str, list[Violation]] = {}
     for item in violations:
-        totals[item.rule] = totals.get(item.rule, 0) + 1
+        if item.root_cause:
+            groups.setdefault(item.root_cause, []).append(item)
+    return sorted(groups.items(), key=lambda pair: (-len({v.subject for v in pair[1]}), pair[0]))
+
+
+def cause_count(violations: Iterable[Violation]) -> int:
+    """How many distinct root causes the findings come from; a finding naming none is its own cause."""
+    return len({item.cause for item in violations})
+
+
+def rule_summary(violations: Iterable[Violation], new: Iterable[Violation]) -> str | None:
+    """One line splitting findings by rule id, with how many of each are not covered by the baseline (#137).
+
+    A rule whose findings share root causes also says how many causes there are: ``effect-via-import 713 / 5 root causes``."""
+    items = list(violations)
+    totals = Counter(item.rule for item in items)
     if not totals:
         return None
-    fresh: dict[str, int] = {}
-    for item in new:
-        fresh[item.rule] = fresh.get(item.rule, 0) + 1
-    return "by rule: " + ", ".join(f"{rule} {count} ({fresh.get(rule, 0)} new)" for rule, count in sorted(totals.items()))
+    fresh = Counter(item.rule for item in new)
+    causes = {rule: cause_count(item for item in items if item.rule == rule) for rule in totals}
+
+    def label(rule: str) -> str:
+        shared = f" / {causes[rule]} root cause{'' if causes[rule] == 1 else 's'}" if causes[rule] != totals[rule] else ""
+        return f"{rule} {totals[rule]}{shared} ({fresh[rule]} new)"
+
+    return "by rule: " + ", ".join(label(rule) for rule in sorted(totals))
 
 
 def internal_import_summary(baselined: Iterable[Violation]) -> str | None:
@@ -242,10 +344,37 @@ def internal_import_summary(baselined: Iterable[Violation]) -> str | None:
     )
 
 
-def apply(violations: Iterable[Violation], baseline: set[str], complete: bool = True) -> Ratchet:
-    """``complete`` is False for a partial (``--changed``) run, where an absent entry proves nothing."""
+def apply(
+    violations: Iterable[Violation], baseline: set[str], complete: bool = True, root_causes: Mapping[str, Collection[str]] | None = None,
+) -> Ratchet:
+    """``complete`` is False for a partial (``--changed``) run, where an absent entry proves nothing.
+
+    ``root_causes`` maps a recorded root cause to its fan-out members (#201). A finding under a recorded cause is covered
+    while its subject is among them; a subject the cause gained since is new, like any finding the baseline lacks."""
     current = list(violations)
+    causes = root_causes or {}
+
+    def covered(item: Violation) -> bool:
+        return item.key in baseline or (bool(item.root_cause) and item.subject in causes.get(item.root_cause, ()))
+
+    new = [v for v in current if not covered(v)]
     keys = {v.key for v in current}
-    new = [v for v in current if v.key not in baseline]
     stale = sorted(baseline - keys) if complete else []
-    return Ratchet(new, stale, len(keys & baseline))
+    if complete:
+        stale = sorted([*stale, *_stale_causes(current, causes)])
+    return Ratchet(new, stale, len({v.key for v in current if covered(v)}))
+
+
+def _stale_causes(current: list[Violation], causes: Mapping[str, Collection[str]]) -> list[str]:
+    """One line per recorded root cause with members that no longer occur (the whole cause when none does)."""
+    now: dict[str, set[str]] = {}
+    for item in current:
+        if item.root_cause:
+            now.setdefault(item.root_cause, set()).add(item.subject)
+    out: list[str] = []
+    for cause, members in causes.items():
+        gone = sorted(set(members) - now.get(cause, set()))
+        if gone:
+            shown = ", ".join(gone[:3]) + (", ..." if len(gone) > 3 else "")
+            out.append(f"{cause} ({'all ' if len(gone) == len(members) else ''}{len(gone)} of {len(members)} recorded fan-out member(s) gone: {shown})")
+    return out

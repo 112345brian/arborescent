@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 from . import baseline as ratchet_mod
-from .domain import Policy
+from .domain import Policy, Violation
 from .engine import CheckReport
 
 
@@ -66,11 +66,27 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
 
 def _print_findings(args: argparse.Namespace, report: CheckReport) -> None:
     shown = report.ratchet.new if report.ratchet and not args.no_baseline else report.violations
+    if getattr(args, "by_root_cause", False):
+        shown = _print_root_causes(shown)
     for v in shown:
         print(f"FAIL   {v.render()}")
     if report.ratchet:
         for key in report.ratchet.stale:
             print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline --prune`): {key}")
+
+
+_SAMPLE = 5
+
+
+def _print_root_causes(shown: list[Violation]) -> list[Violation]:
+    """One line per root cause, widest fan-out first, with a sample of the modules it reaches (#201); returns the findings that name none."""
+    for cause, members in ratchet_mod.root_cause_groups(shown):
+        subjects = sorted({v.subject for v in members})
+        more = f", ... +{len(subjects) - _SAMPLE}" if len(subjects) > _SAMPLE else ""
+        print(f"CAUSE  {len(subjects):>5} module(s), {len(members)} finding(s)  {cause}  e.g. {', '.join(subjects[:_SAMPLE])}{more}")
+        if members[0].hint:
+            print(f"         {members[0].hint.strip()}")
+    return [v for v in shown if not v.root_cause]
 
 
 def _print_engines(report: CheckReport) -> None:
@@ -151,9 +167,11 @@ def _print_summary(report: CheckReport) -> None:
         by_rule = ratchet_mod.rule_summary(report.violations, report.ratchet.new)
         if by_rule is not None:
             print(by_rule)
+    causes = ratchet_mod.cause_count(report.violations)
+    shared = f" / {causes} root cause(s)" if causes != len(report.violations) else ""
     print(
         f"arborescent check: {'OK' if report.ok else 'FAILED'} in {report.seconds:.2f}s "
-        f"({len(report.violations)} violation(s), {tolerated} baselined, {report.parsed} file(s) parsed"
+        f"({len(report.violations)} violation(s){shared}, {tolerated} baselined, {report.parsed} file(s) parsed"
         f"{', partial: --changed' if report.partial else ''})"
     )
 
