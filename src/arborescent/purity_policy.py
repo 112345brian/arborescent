@@ -39,3 +39,6 @@ class PurityPolicy:
     ambient: tuple[str, ...] = ()  # globs on the dotted name of an imported callable, e.g. ``myapp.state.state_root``
     allow: tuple[PurityAllow, ...] = ()
     exclude_rings: tuple[str, ...] = ()  # rings whose modules the rule skips: a ring that is meant to be effectful has nothing to split
+    rings: tuple[str, ...] = ()  # when set, the only rings the rule looks at (#195)
+    skip_unrestricted_rings: bool = False  # skip every ring whose effective `forbid` is empty: effects are allowed there (#195)
+    weak_kinds: tuple[str, ...] = ()  # kinds that alone do not make a module worth splitting: such a module is a `mixed-purity-weak` note (#195)

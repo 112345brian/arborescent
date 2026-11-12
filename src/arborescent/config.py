@@ -342,6 +342,22 @@ def _purity_kinds(table: Mapping[str, Any]) -> tuple[str, ...]:
     return kinds
 
 
+def _purity_rings(table: Mapping[str, Any], raw: Mapping[str, Any]) -> tuple[str, ...]:
+    rings = _string_list(table, "rings")
+    declared = raw.get("rings")
+    if isinstance(declared, list) and (unknown := set(rings) - set(cast("list[str]", declared))):
+        raise PolicyError(f"unknown ring in `mixed_purity.rings`: {sorted(unknown)}; declared: {sorted(cast('list[str]', declared))}")
+    return rings
+
+
+def _purity_weak_kinds(table: Mapping[str, Any]) -> tuple[str, ...]:
+    weak = _string_list(table, "weak_kinds")
+    unknown = set(weak) - KNOWN_KINDS
+    if unknown:
+        raise PolicyError(f"unknown effect kind in `mixed_purity.weak_kinds`: {sorted(unknown)}; known: {sorted(KNOWN_KINDS)}")
+    return weak
+
+
 def _purity_allow(table: Mapping[str, Any]) -> tuple[PurityAllow, ...]:
     entries = table.get("allow", [])
     if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
@@ -362,7 +378,7 @@ def _mixed_purity(raw: Mapping[str, Any]) -> PurityPolicy:
     if not isinstance(table, Mapping):
         raise PolicyError("`mixed_purity` must be a table")
     table = cast("Mapping[str, Any]", table)
-    unknown = set(table) - {"enabled", "report_excluded", "min_pure_units", "min_body_lines", "kinds", "ambient", "allow", "exclude_rings"}
+    unknown = set(table) - {"enabled", "report_excluded", "min_pure_units", "min_body_lines", "kinds", "ambient", "allow", "exclude_rings", "rings", "skip_unrestricted_rings", "weak_kinds"}
     if unknown:
         raise PolicyError(f"unknown key in `mixed_purity`: {sorted(unknown)}")
     return PurityPolicy(
@@ -374,6 +390,9 @@ def _mixed_purity(raw: Mapping[str, Any]) -> PurityPolicy:
         _string_list(table, "ambient"),
         _purity_allow(table),
         _string_list(table, "exclude_rings"),
+        _purity_rings(table, raw),
+        _boolean_option(table, "skip_unrestricted_rings", False),
+        _purity_weak_kinds(table),
     )
 
 

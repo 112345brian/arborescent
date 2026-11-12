@@ -15,7 +15,15 @@
   (which `admit` steers into the innermost ring) is importable by anyone, so `effects.sanctioned` means exactly "a designated seam
   that does raw effects". What a pure module imports still reaches its importers through `effect-via-import` (#202).
 
+- A memoised pure function is no longer a `memo` effect in `mixed-purity`: `functools.lru_cache`/`cache`/`cached_property` do not
+  count (a written module-level cache still does). Fewer findings; stale baseline entries can be deleted (#195).
+- `selftest` no longer reports the `mixed-purity` mutations as surviving when the host module's ring is excluded by `exclude_rings`.
+
 ### Added
+- `[mixed_purity] rings` (only these rings), `skip_unrestricted_rings` (skip rings with an empty `forbid`) and `weak_kinds` (a module
+  mixed only by those kinds is an informational `mixed-purity-weak` note). All off by default (#195).
+- `mixed_purity.ambient` patterns also match a method call on a parameter annotated with a matching class, so a loader that calls an
+  injected port can be counted as effectful (#195).
 - `arborescent purity --explain MODULE` prints, per definition, the call that made it effectful or `no effect found`.
 
 ## 0.8.0 — 2026-11-11
