@@ -923,6 +923,15 @@ def _effect_reachable(
     return {name: compute(name) for name in modules}
 
 
+def _via_import_cause(category: str, chain: tuple[str, ...]) -> str:
+    """The root cause of one reaching effect (#198): its kind and the last edge of the chain, ``importer->origin``.
+
+    ``chain`` starts at the imported module and ends at the one that uses the effect directly, so every module that
+    reaches the effect through the same final edge shares one cause. A chain of one has no edge: the cause is the origin."""
+    edge = f"{chain[-2]}->{chain[-1]}" if len(chain) > 1 else chain[-1]
+    return f"{Rule.EFFECT_VIA_IMPORT}|{category}|{edge}"
+
+
 def _effect_via_import(edge: _EffectEdge, reachable: Mapping[str, Mapping[str, tuple[str, ...]]]) -> list[Violation]:
     forbidden = edge.policy.forbidden_effects(edge.ring)
     if not forbidden:
@@ -935,7 +944,7 @@ def _effect_via_import(edge: _EffectEdge, reachable: Mapping[str, Mapping[str, t
                 continue
             seen.add(category)
             detail = f"[{edge.ring}] imports {target!r}; effect {category} reaches it via {' -> '.join(chain)}; inject a port instead"
-            out.append(Violation(Rule.EFFECT_VIA_IMPORT, edge.name, detail, edge.line))
+            out.append(Violation(Rule.EFFECT_VIA_IMPORT, edge.name, detail, edge.line, root_cause=_via_import_cause(category, chain)))
     return out
 
 

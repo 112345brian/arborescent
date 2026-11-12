@@ -51,6 +51,7 @@ __all__ = [
     "Violation",
     "dist_name",
     "path_under",
+    "root_cause_hint",
 ]
 
 NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".arborescent", ".mypy_cache", ".ruff_cache", ".tox"})
@@ -244,7 +245,27 @@ class Violation:
 
 
 # Rules that emit one finding per symptom and so must name the cause they share (#201); a test scans their construct sites.
-FAN_OUT_RULES = frozenset({Rule.LAZY_IMPORT, Rule.EFFECT_UNSANCTIONED_IMPORT})
+FAN_OUT_RULES = frozenset({Rule.LAZY_IMPORT, Rule.EFFECT_UNSANCTIONED_IMPORT, Rule.EFFECT_VIA_IMPORT})
+
+def root_cause_hint(cause: str, findings: int) -> str:
+    """What one fix to a shared root cause achieves, for the `--by-root-cause` view; empty when the rule has no advice (#198)."""
+    parts = cause.split("|")
+    count = f"{findings} finding{'' if findings == 1 else 's'}"
+    if parts[0] == Rule.EFFECT_VIA_IMPORT and len(parts) == 3:
+        edge = parts[2]
+        importer, arrow, origin = edge.partition("->")
+        if arrow:
+            return (
+                f"inject a port at {importer} (so it stops importing {origin}), or add {origin} to `effects.sanctioned` "
+                f"if it is a capability seam, to clear {count}"
+            )
+        return f"add {edge} to `effects.sanctioned` if it is a capability seam, or inject a port in each importer, to clear {count}"
+    if parts[0] == Rule.EFFECT_UNSANCTIONED_IMPORT and len(parts) == 2:
+        return f"list {parts[1]} in `effects.sanctioned` if it is a capability seam, or reach it through one, to clear {count}"
+    if parts[0] == Rule.LAZY_IMPORT and len(parts) == 2:
+        return f"import {parts[1]} at module level, or record why with `# deferred: <reason>`, to clear {count}"
+    return ""
+
 
 _RENDER_HINTS = {
     Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on or above the line)",

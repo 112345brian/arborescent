@@ -5,11 +5,13 @@
 ## Unreleased
 
 ### Added
-- A finding can name a **root cause** beside its identity key. `lazy-import` (the imported module) and
-  `effect-unsanctioned-import` (the unlisted module) do. `check` prints `N violation(s) / M root cause(s)` and per-rule cause
+- A finding can name a **root cause** beside its identity key. `lazy-import` (the imported module),
+  `effect-unsanctioned-import` (the unlisted module) and `effect-via-import` (the effect kind plus the last edge of the import
+  chain, `env|client.bundle->state.app_root`) do. `check` prints `N violation(s) / M root cause(s)` and per-rule cause
   counts when findings share causes, `check --by-root-cause` lists each cause once with its fan-out, and
   `baseline [--adopt FAMILY] --by-root-cause` records one shrink-only entry per cause (a new member of a recorded cause is
-  growth). Baselines without the new `root_causes` section behave as before (#201).
+  growth). `check --by-root-cause` prints a fix per cause (inject a port at the edge, or list the module under
+  `effects.sanctioned`, to clear N findings). Baselines without the new `root_causes` section behave as before (#201, #198).
 
 ## 0.8.0 — 2026-11-11
 
