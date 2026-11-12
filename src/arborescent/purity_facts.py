@@ -29,7 +29,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple
 
-__all__ = ["LOGGING", "MEMO", "STATE", "Helpers", "PurityFacts", "PurityUnit", "purity_facts"]
+__all__ = ["LOGGING", "MEMO", "STATE", "Helpers", "PurityFacts", "PurityUnit", "local_names", "module_containers", "mutated_container", "purity_facts"]
 
 LOGGING = "logging"
 MEMO = "memo"
@@ -287,3 +287,18 @@ def purity_facts(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, 
     return PurityFacts(
         tuple(collector.unit(i) for i in range(len(collector.defs))), tuple(sorted(collector.import_time)), tuple(sorted(collector.port_calls)),
     )
+
+
+def module_containers(tree: ast.Module, aliases: dict[str, str], dotted: Dotted) -> set[str]:
+    """Module-level names bound to a ``dict``/``list``/``set`` (#194 reads them as ``registry`` effect uses)."""
+    return _module_names(tree, aliases, dotted)[1]
+
+
+def local_names(unit: ast.AST) -> set[str]:
+    """Names a function binds locally (parameters and assignments), minus those it declares ``global``."""
+    return _local_names(unit)
+
+
+def mutated_container(node: ast.AST, containers: set[str]) -> str | None:
+    """The module container ``node`` writes by item assignment, ``del`` or a mutating method call, else ``None``."""
+    return _mutated_container(node, containers)

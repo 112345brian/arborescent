@@ -14,7 +14,15 @@ from collections.abc import Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 
 from .forwarder_facts import Forwarder, forwarders
-from .purity_facts import Helpers, PurityFacts, PurityUnit, purity_facts
+from .purity_facts import (
+    Helpers,
+    PurityFacts,
+    PurityUnit,
+    local_names,
+    module_containers,
+    mutated_container,
+    purity_facts,
+)
 
 __all__ = [
     "DEV_TOOL_ROLE", "OS_BRANCH_ATTRS", "EffectUse", "Forwarder", "FunctionCalls", "ModuleInfo", "PurityFacts", "PurityUnit", "RawImport", "SourceFacts", "TopLevelDef",
@@ -565,6 +573,39 @@ def _global_effect_uses(nodes: Sequence[ast.AST]) -> list[EffectUse]:
     return uses
 
 
+_CACHE_DECORATORS = frozenset({"functools.cache", "functools.lru_cache"})  # not `cached_property`: that cache is per instance
+_CACHE_NAME = re.compile(r"cache|memo", re.IGNORECASE)
+
+
+def _module_state_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> list[EffectUse]:
+    """#194, module state that is not a ``global`` rebinding. A function that writes a module-level ``dict``/``list``/``set`` (item
+    assignment, ``del`` or a mutating method call) is a ``registry`` use, or a ``cache`` use when the container's name says cache or
+    memo; a ``functools.cache``/``lru_cache`` decorator is a ``cache`` use. A name the function (or one around it) binds itself is a
+    local, not the module's container; import-time fills and reads are not uses. Recorded in every module, failing only where a ring
+    lists the category in ``forbid`` (see ``MODULE_STATE_CATEGORIES``)."""
+    uses = [
+        EffectUse(decorator.lineno, "cache", target)
+        for func in nodes if isinstance(func, ast.FunctionDef | ast.AsyncFunctionDef)
+        for decorator in func.decorator_list
+        if (target := _dotted(decorator.func if isinstance(decorator, ast.Call) else decorator, aliases)) in _CACHE_DECORATORS
+    ]
+    containers = module_containers(tree, aliases, _dotted) if isinstance(tree, ast.Module) else set()
+    if not containers:
+        return uses
+    stack: list[tuple[ast.AST, tuple[tuple[str, set[str]], ...]]] = [(tree, ())]
+    while stack:
+        node, scopes = stack.pop()
+        for child in ast.iter_child_nodes(node):
+            inner = scopes
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                inner = (*scopes, (child.name, local_names(child)))
+            elif scopes and (name := mutated_container(child, containers)) is not None and not any(name in bound for _, bound in scopes):
+                category = "cache" if _CACHE_NAME.search(name) else "registry"
+                uses.append(EffectUse(getattr(child, "lineno", 0), category, f"{scopes[-1][0]}.{name}"))
+            stack.append((child, inner))
+    return uses
+
+
 def _annotation_node_ids(nodes: Sequence[ast.AST]) -> set[int]:
     """Ids of every node inside a type annotation (parameter, return, variable): a hint names a type, it does not use it."""
     ids: set[int] = set()
@@ -600,6 +641,7 @@ def _effect_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str
     seeded = _seeded_random_ids(nodes, aliases)
     uses: set[EffectUse] = set(_global_effect_uses(nodes))
     uses.update(_path_receiver_uses(tree, nodes, aliases))
+    uses.update(_module_state_uses(tree, nodes, aliases))
     imported_os_names: set[str] = set()
     for node in nodes:
         if isinstance(node, ast.ImportFrom):

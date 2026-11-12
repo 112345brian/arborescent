@@ -28,6 +28,13 @@
   unknown or empty ring list is a config error. Closes #199.
 - `check` folds `lazy-import` findings to one line per module (`total/deferred` plus the unjustified imports) and, while none is
   baselined, prints `lazy-import: N new, 0 baselined; run 'arborescent baseline --adopt lazy-import' to start a ratchet`.
+- Categories `registry` (a function writes a module-level `dict`/`list`/`set`) and `cache` (`functools.cache`/`lru_cache`, or a write to
+  a cache- or memo-named module container), both reported as `effect-state` (refs #194). They are detected in every module but are in
+  no default `forbid`, no taint seed and no `must_be_pure`, and `coupling` and `discover --suggest` ignore them, so check and taint
+  output and baselines are unchanged until a ring lists them in `forbid` (or a package in `forbid_effects`). `mixed-purity` is unchanged.
+  The forbid docs now list every detected category. Not covered: containers imported from another module, writes through `self`
+  or an alias, and `global` slot loaders beyond the existing `global` category.
+- The scan cache is invalidated once (format version 25).
 
 
 ## 0.8.0 — 2026-11-11
