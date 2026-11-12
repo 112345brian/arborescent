@@ -2,6 +2,13 @@
 
 0.x: a minor release may break the public surface, a patch release may not.
 
+## Unreleased
+
+### Fixed
+- `effect-unsanctioned-import` only fires when the imported `effects.rings` module has measured effects of its own. A pure module
+  (which `admit` steers into the innermost ring) is importable by anyone, so `effects.sanctioned` means exactly "a designated seam
+  that does raw effects". What a pure module imports still reaches its importers through `effect-via-import` (#202).
+
 ## 0.8.0 — 2026-11-11
 
 Effect detection is more precise and more complete, and a project can now say which modules are its sanctioned seams. Found by an

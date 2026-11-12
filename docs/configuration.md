@@ -831,7 +831,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-monotonic` | a ring that forbids `monotonic` calls `time.monotonic`, `perf_counter` or `process_time` (0.8.0) |
 | `effect-host` | a ring that forbids `host` reads `sys.argv`, `sys.stdin`, `locale`, `platform`, the process id, the CPU count or the host name (0.8.0) |
 | `effect-fs-query` | a ring that forbids `fs-query` asks the filesystem a question: `os.path.exists`, `os.getcwd`, `Path.cwd`, `p.exists()`, `shutil.which`... (0.8.0) |
-| `effect-unsanctioned-import` | with `[effects] sanctioned` set, a ring that forbids effects imports a module of an `effects.rings` ring that is not listed as a sanctioned seam (0.8.0) |
+| `effect-unsanctioned-import` | with `[effects] sanctioned` set, a ring that forbids effects imports a module of an `effects.rings` ring that is not listed as a sanctioned seam and has effects of its own (0.8.0) |
 | `effect-via-import` | a ring forbids an effect that a module it imports (directly or through that module's own imports, same scope, not an `if TYPE_CHECKING` import) uses directly; the message names the import chain |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `forwarded-import` | a module imports a pass-through function (`def f(a): return other.f(a)`: one call to an imported name, arguments exactly the parameters, no default, decorator or other statement) whose target `module_forbid_imports` forbids it: the dependency one hop away. Chains of forwarders are followed. Only `from B import f` is seen, not `B.f` attribute use; wrappers that add logic are real boundaries and are not flagged. Counts against the importing module and takes its own baseline key |
@@ -1144,8 +1144,8 @@ rings = ["effects"]                                              # default: the 
 - A sanctioned module's **own direct uses** do not propagate to its importers. What it imports still does: a seam that reaches a
   raw-effect module is not a seam.
 - The guard that makes this safe, `effect-unsanctioned-import`: once the table is present (even `sanctioned = []`), a module in a
-  ring that forbids effects may import a module of a `rings` ring only if that module is `sanctioned`. Otherwise it is a
-  finding, so a domain module importing a raw environment reader cannot hide behind the stopped propagation. `TYPE_CHECKING`
+  ring that forbids effects may import a module of a `rings` ring only if that module is `sanctioned` or has no effects of its own (a pure module is not a
+  seam and needs no listing). Otherwise it is a finding, so a domain module importing a raw environment reader cannot hide behind the stopped propagation. `TYPE_CHECKING`
   imports and rings that forbid nothing are not checked; modules in another scope are not checked.
 - Without the table nothing changes. Never stop propagation for a whole ring: list the seams.
 
