@@ -5,9 +5,18 @@
 ## Unreleased
 
 ### Fixed
+- `mixed-purity` no longer lists effectful functions as pure (#200). A method call on a module-level `Path` constant
+  (`REGISTRY = Path(...)` then `REGISTRY.read_text()` inside a function) is filesystem use, for the `effect-filesystem` rule as
+  well; a call to a function of another scanned module is followed one hop, so a caller of `save_text_atomic` (or of a
+  `@contextmanager` that takes a lock) is effectful whatever ring the wrapper is in, including through a function-level
+  import; and `fcntl.flock`/`fcntl.lockf`/`msvcrt.locking` are filesystem. Expect a few more `effect-filesystem` findings
+  and some functions moving from "pure" to "effectful" in `mixed-purity` hints (a module can newly become mixed).
 - `effect-unsanctioned-import` only fires when the imported `effects.rings` module has measured effects of its own. A pure module
   (which `admit` steers into the innermost ring) is importable by anyone, so `effects.sanctioned` means exactly "a designated seam
   that does raw effects". What a pure module imports still reaches its importers through `effect-via-import` (#202).
+
+### Added
+- `arborescent purity --explain MODULE` prints, per definition, the call that made it effectful or `no effect found`.
 
 ## 0.8.0 — 2026-11-11
 

@@ -10,7 +10,15 @@ from pathlib import Path
 from .domain import Policy
 from .engine import Services
 from .import_cycles import import_edges
-from .purity import ModulePurity, assess_in_ring, by_ring, is_allowed, summarize
+from .purity import (
+    Followed,
+    ModulePurity,
+    assess_in_ring,
+    by_ring,
+    explain,
+    is_allowed,
+    summarize,
+)
 from .rules import RuleContext
 
 _HEADER = "mixed modules, most imported first (a module's importers are the ones that inherit its effects):"
@@ -26,12 +34,32 @@ def ranked(policy: Policy, root: Path, svc: Services) -> list[tuple[ModulePurity
     for edge in edges:
         importers.setdefault(edge.target, set()).add(edge.source)
     rows: list[tuple[ModulePurity, str, bool]] = []
+    followed = Followed(scan.modules)
     for name, ring in rings.items():
         local = context.policy_for(name)
-        report = assess_in_ring(scan.modules[name], local, ring) if local is not None else None
+        report = assess_in_ring(scan.modules[name], local, ring, followed) if local is not None else None
         if local is not None and report is not None:
             rows.append((replace(report, importers=len(importers.get(name, ()))), ring, is_allowed(local.mixed_purity, name)))
     return sorted(rows, key=lambda row: (-row[0].importers, -len(row[0].pure), row[0].module))
+
+
+def run_explain(policy: Policy, root: Path, svc: Services, module: str) -> int:
+    """Per definition of one module: the call that made it effectful, or ``no effect found``. Works on a module that is not mixed."""
+    scan = svc.scanner.scan(policy, root)
+    info = scan.modules.get(module)
+    if info is None:
+        print(f"no scanned module named {module!r}", file=sys.stderr)
+        return 2
+    context = RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules))
+    local = context.policy_for(module)
+    if local is None:
+        print(f"{module} is not covered by a policy scope", file=sys.stderr)
+        return 2
+    print(f"{module} ({info.path}):")
+    lines = explain(info, local, Followed(scan.modules))
+    for line in lines or ["no top-level functions or classes"]:
+        print(f"  {line}")
+    return 0
 
 
 def run_purity(policy: Policy, root: Path, svc: Services, as_json: bool, top: int | None = None) -> int:

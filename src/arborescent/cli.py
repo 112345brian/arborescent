@@ -26,7 +26,7 @@ from .cli_coupling import add_coupling_parser, run_coupling
 from .cli_cycles import run_cycles
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
-from .cli_purity import run_purity
+from .cli_purity import run_explain, run_purity
 from .cli_ratchet import add_ratchet_parser, growth_run, run_ratchet
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
@@ -227,6 +227,7 @@ def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser])
     purity = add_parser("purity", help="rank the modules that mix substantial pure logic with effectful code by how many modules import them")
     purity.add_argument("--json", action="store_true", help="print the ranked modules as JSON")
     purity.add_argument("--top", type=_positive_int, metavar="N", help="list only the N most imported mixed modules (the findings of `check` are unchanged)")
+    purity.add_argument("--explain", metavar="MODULE", help="print, for each definition of MODULE, the call that made it effectful or `no effect found`")
     add_ratchet_parser(add_parser)
 
 
@@ -359,7 +360,7 @@ def _dispatch(
         "admit": lambda: run_admit(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),
         "cycles": lambda: run_cycles(policy, root, svc),
-        "purity": lambda: run_purity(policy, root, svc, args.json, args.top),
+        "purity": lambda: run_explain(policy, root, svc, args.explain) if args.explain else run_purity(policy, root, svc, args.json, args.top),
         "ratchet": lambda: _ratchet(args, policy, root, svc),
     }
     return handlers.get(args.command, lambda: _check(args, policy, root, svc))()

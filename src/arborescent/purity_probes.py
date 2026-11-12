@@ -12,7 +12,7 @@ from collections.abc import Collection, Mapping
 
 from .domain import Mutation, Policy, Rule
 from .facts import ModuleInfo
-from .purity import assess, is_allowed
+from .purity import Followed, assess, is_allowed
 
 __all__ = ["mixed_purity_mutations"]
 
@@ -47,11 +47,12 @@ def mixed_purity_mutations(
     effects = _effects(rule.kinds)
     if not effects:
         return [], ["mixed-purity: no probe shape for the configured `mixed_purity.kinds` (needs console, filesystem or logging)"]
+    followed = Followed(modules)
     host = next((
         name for name in sorted(known)
         if name in paths and name in modules and not paths[name].endswith("__init__.py")
         and policy.resolve_ring(arbor_index, name) is not None
-        and not is_allowed(rule, name) and assess(modules[name], policy) is None
+        and not is_allowed(rule, name) and assess(modules[name], policy, followed) is None
     ), None)
     if host is None:
         return [], ["mixed-purity: every module is already mixed or allowed, so none can be mutated"]

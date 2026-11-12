@@ -39,6 +39,7 @@ _FILESYSTEM_APIS = frozenset({
     "os.removedirs", "os.listdir", "os.scandir", "os.walk", "os.stat", "os.chmod", "os.symlink", "os.truncate", "glob.glob", "glob.iglob",
     "shutil.copy", "shutil.copy2", "shutil.copyfile", "shutil.copyfileobj", "shutil.copymode", "shutil.copystat", "shutil.copytree",
     "shutil.move", "shutil.rmtree", "shutil.make_archive", "shutil.unpack_archive", "shutil.chown",
+    "fcntl.flock", "fcntl.lockf", "msvcrt.locking",  # a cross-process file lock is an operation on a file
     "tempfile.NamedTemporaryFile", "tempfile.TemporaryFile", "tempfile.TemporaryDirectory", "tempfile.SpooledTemporaryFile",
     "tempfile.mkstemp", "tempfile.mkdtemp", "tempfile.mktemp",
 })
@@ -439,9 +440,20 @@ def _path_binding(node: ast.AST, aliases: dict[str, str]) -> tuple[list[str], as
     return [], None
 
 
-def _scope_path_names(scope: ast.AST, aliases: dict[str, str]) -> set[str]:
-    """Names one scope binds to a path: a parameter or variable annotated ``Path``, or assigned a path expression."""
-    bound: set[str] = set()
+def _scope_local_names(scope: ast.AST) -> set[str]:
+    """Names one scope binds itself (parameters and plain stores), which hide a module-level name of the same spelling."""
+    return {
+        node.arg if isinstance(node, ast.arg) else node.id for node in _own_scope_nodes(scope)
+        if isinstance(node, ast.arg) or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store))
+    }
+
+
+def _scope_path_names(scope: ast.AST, aliases: dict[str, str], inherited: Collection[str] = ()) -> set[str]:
+    """Names one scope binds to a path: a parameter or variable annotated ``Path``, or assigned a path expression.
+
+    ``inherited``: path-valued module-level names the scope can read (``REGISTRY = Path(...)`` then ``REGISTRY.read_text()``
+    inside a function), already minus the ones this scope rebinds."""
+    bound: set[str] = set(inherited)
     assigns: list[tuple[list[str], ast.expr]] = []
     for node in _own_scope_nodes(scope):
         names, value = _path_binding(node, aliases)
@@ -468,8 +480,10 @@ def _path_receiver_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[s
         return []
     uses: list[EffectUse] = []
     scopes = [tree, *(n for n in nodes if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef))]
+    module_paths = _scope_path_names(tree, aliases)
     for scope in scopes:
-        bound = _scope_path_names(scope, aliases)
+        inherited = module_paths - _scope_local_names(scope) if scope is not tree else ()
+        bound = _scope_path_names(scope, aliases, inherited) if scope is not tree else module_paths
         if not bound:
             continue
         for node in _own_scope_nodes(scope):

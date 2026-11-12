@@ -43,7 +43,14 @@ from .package_constraint_rules import (
     use_violations,
 )
 from .package_constraints import PackageConstraints
-from .purity import ModulePurity, assess_in_ring, importer_counts, is_allowed, summarize
+from .purity import (
+    Followed,
+    ModulePurity,
+    assess_in_ring,
+    importer_counts,
+    is_allowed,
+    summarize,
+)
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
@@ -716,11 +723,12 @@ def _mixed_purity_findings(
     The detail carries no names or counts, so the baseline key stays stable as functions come and go; the effect kinds,
     the definitions on each side and the importer count (the blast radius) are in the hint."""
     importers = importer_counts(import_graph)
+    followed = Followed(modules)
     out: list[Violation] = []
     mixed: set[str] = set()
     for name, info in sorted(modules.items()):
         local_policy, ring = context.policy_for(name), context.resolve_ring(name)
-        report = assess_in_ring(info, local_policy, ring) if local_policy is not None and ring is not None and name not in context.tool_modules else None
+        report = assess_in_ring(info, local_policy, ring, followed) if local_policy is not None and ring is not None and name not in context.tool_modules else None
         if local_policy is None or ring is None or report is None:
             continue
         mixed.add(name)

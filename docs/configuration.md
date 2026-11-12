@@ -1162,7 +1162,11 @@ A module is *mixed* when it has at least `min_pure_units` **substantial pure** t
   when it has a method that is not a stub; a field-only dataclass, a `Protocol` or an ABC is a model, not logic. A pass-through
   wrapper (the `forwarded-import` shape) does not count.
 - A definition is *effectful* when it directly uses an effect of a kind in `kinds`, **or calls an effectful function of the
-  same module by name**: a function that calls a logging helper is not pure.
+  same module by name**: a function that calls a logging helper is not pure. It is also effectful when it calls a **function of
+  another scanned module** (by `from m import f`, `m.f()`, an alias, or a function-level import) that is itself effectful by
+  these rules: one hop, so `save_text_atomic` in an `effects` module makes its caller effectful, but the caller's callers are
+  not. A class is not followed (building it is not calling its methods) and a callee outside the scan is unknown, not pure.
+  A method call on a module-level `Path` constant (`REGISTRY = Path(...)`, then `REGISTRY.read_text()`) is filesystem use.
 - Effects come from the facts the `effect-*` rules already extract (same table, same `effect_defaults` seam handling), so there is
   no second detector. A use outside every top-level definition is an import-time effect, except inside an
   `if __name__ == "__main__":` block, which runs as a program. `os-branching` and `patch` are not effects here.
@@ -1195,6 +1199,10 @@ and the kinds this rule adds, which never feed the `effect-*` rules:
 | `memo` | `functools.lru_cache` / `cache` / `cached_property` decorators, or a write to a module-level dict, list or set whose name contains `cache` or `memo` |
 | `state` | a write (item assignment, `del`, `append`/`update`/`setdefault`/... ) to any other module-level dict, list or set from inside a function, unless that function binds the name locally; and, since 0.8.0, a `threading.Lock`/`RLock`/`Semaphore`/`Event`/`Condition`/`local`. Reads are not effects |
 | `ambient` | a call to something matching `ambient`, resolved through absolute and relative imports (`state_root()`, `os.getcwd`). Off until `ambient` lists a pattern |
+
+**Why is this function listed as pure?** `arborescent purity --explain MODULE` prints, for each top-level definition of one
+module (mixed or not), the effect kind, the line and the call behind an "effectful" label, or `no effect found`. Attach its
+output to a report of a wrong label.
 
 **Choosing what counts.** The default `kinds` count everything above, so a CLI `main` that prints, a module that only logs, and an `lru_cache` on a regex compiler all make a module "mixed". To report only the splits that separate real effects, restrict `kinds` (for example drop `console`, `logging`, `memo`, `state`, `global`) and list the rings that are meant to be effectful under `exclude_rings`. `exclude_rings` also applies to `arborescent purity`. Both default to today's behaviour.
 
