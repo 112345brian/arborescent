@@ -8,16 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from .facts import (
-    EffectUse,
-    Forwarder,
-    FunctionCalls,
-    PurityFacts,
-    PurityUnit,
-    RawImport,
-    SourceFacts,
-    TopLevelDef,
-)
+from .call_facts import FunctionCalls
+from .definition_facts import TopLevelDef
+from .effect_facts import EffectUse
+from .facts import Forwarder, PurityFacts, PurityUnit, SourceFacts
+from .import_facts import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 

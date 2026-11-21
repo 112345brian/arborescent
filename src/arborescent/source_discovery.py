@@ -9,8 +9,9 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 
-from .domain import NOISE_DIRS, Policy, PolicyError
-from .facts import DEV_TOOL_ROLE, ModuleInfo
+from .declaration_facts import DEV_TOOL_ROLE
+from .domain import NOISE_DIRS, ArchitecturePolicy, Policy, PolicyError
+from .facts import ModuleInfo
 from .path_exclusion import excluded_by_policy, matches_exclusion
 
 __all__ = [
@@ -40,7 +41,7 @@ def _under_sources(rel: str, sources: Sequence[str]) -> bool:
     return False
 
 
-def policies(policy: Policy) -> tuple[Policy, ...]:
+def policies(policy: Policy) -> tuple[ArchitecturePolicy, ...]:
     return tuple(scope.policy for scope in policy.scopes) if policy.scopes else (policy,)
 
 
