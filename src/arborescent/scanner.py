@@ -11,20 +11,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .call_facts import FunctionCalls
+from .declaration_facts import DEV_TOOL_ROLE
+from .definition_facts import TopLevelDef
 from .domain import NOISE_DIRS, Policy, PolicyError
-from .facts import (
-    DEV_TOOL_ROLE,
-    EffectUse,
-    Forwarder,
-    FunctionCalls,
-    ModuleInfo,
-    PurityFacts,
-    PurityUnit,
-    RawImport,
-    SourceFacts,
-    TopLevelDef,
-    extract,
-)
+from .effect_facts import EffectUse
+from .facts import Forwarder, ModuleInfo, PurityFacts, PurityUnit, SourceFacts, extract
+from .import_facts import RawImport
 from .path_exclusion import excluded_by_policy, matches_exclusion
 from .ports import ToolRunner
 from .tool_runner import SubprocessToolRunner

@@ -17,7 +17,8 @@ from arborescent_helpers import mini_policy, write_files
 
 from arborescent.adapters import FsScanner
 from arborescent.domain import Rule
-from arborescent.facts import EffectUse, extract
+from arborescent.effect_facts import EffectUse
+from arborescent.facts import extract
 from arborescent.rules import check_modules
 
 HYDRATION = '''\

@@ -6,7 +6,8 @@ from collections.abc import Collection, Mapping
 from pathlib import Path, PurePosixPath
 
 from .domain import Policy
-from .facts import ModuleInfo, resolve_runtime_targets
+from .facts import ModuleInfo
+from .import_facts import resolve_runtime_targets
 from .package_manifest import load_extracted_package
 from .package_model import CatalogError
 from .package_preservation import PartFacts

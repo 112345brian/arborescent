@@ -13,7 +13,8 @@ from collections import deque
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
-from .facts import ModuleInfo, RawImport, resolve_targets
+from .facts import ModuleInfo
+from .import_facts import RawImport, resolve_targets
 
 Graph = Mapping[str, frozenset[str]]
 

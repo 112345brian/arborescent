@@ -7,8 +7,9 @@ from pathlib import Path
 from arborescent_helpers import RINGS, mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem
+from arborescent.call_facts import FunctionCalls
 from arborescent.domain import INFORMATIONAL_RULES, Policy, Rule, Violation
-from arborescent.facts import FunctionCalls, extract
+from arborescent.facts import extract
 from arborescent.practices import (
     TestReferenceConfig,
     function_references,

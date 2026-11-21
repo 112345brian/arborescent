@@ -18,7 +18,8 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 
 from .domain import Policy, Rule, Violation
-from .facts import ModuleInfo, resolve_targets
+from .facts import ModuleInfo
+from .import_facts import resolve_targets
 from .package_constraints import PackageConstraints
 from .presets import DEFAULT_FORBID_CATEGORIES, STRUCTURAL_STDLIB
 

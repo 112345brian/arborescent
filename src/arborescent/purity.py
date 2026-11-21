@@ -13,8 +13,9 @@ import fnmatch
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
+from .call_facts import absolute_callee
 from .domain import Policy, Rule, Violation, in_unit
-from .facts import ModuleInfo, absolute_callee
+from .facts import ModuleInfo
 from .purity_policy import AMBIENT, PurityPolicy
 
 __all__ = ["Followed", "ModulePurity", "assess", "assess_in_ring", "by_ring", "excluded_findings", "explain", "importer_counts", "is_allowed", "summarize"]

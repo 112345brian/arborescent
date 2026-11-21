@@ -33,7 +33,7 @@ What is and is not followed, by design (see "Non-goals" in #98):
   another function.
 - ``Path(...).read_text()`` and similar are real I/O but are a method call on the *result* of a call, not on an
   import alias; recognising them needs a type, which this module does not have. They are a known false
-  negative, the same one ``facts._path_io_use`` documents for the module-level effect scan.
+  negative, the same one ``effect_facts._path_io_use`` documents for the module-level effect scan.
 - Lazy (function-local) imports are not read as aliases; only module-level ``import``/``from ... import`` lines
   bind a name this pass will follow.
 """
@@ -47,7 +47,8 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from .facts import ModuleInfo, effect_category_of
+from .effect_categories import effect_category_of
+from .facts import ModuleInfo
 from .presets import DEFAULT_TAINT_SEEDS
 
 __all__ = ["DEFAULT_TAINT_SEEDS", "TaintCacheStore", "TaintResult", "TaintedFunction", "compute_taint"]
