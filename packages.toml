@@ -241,6 +241,18 @@ path = "src/arborescent/rules.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/rule_context.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/purity_rules.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/effect_import_rules.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/scanner.py"
 role = "source"
 
