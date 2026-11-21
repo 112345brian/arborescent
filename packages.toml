@@ -93,6 +93,10 @@ path = "src/arborescent/policy_imports.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/architecture_policy.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/equivalence.py"
 role = "source"
 

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .domain import NOISE_DIRS, Policy, PolicyError
+from .domain import NOISE_DIRS, ArchitecturePolicy, Policy, PolicyError
 from .facts import (
     DEV_TOOL_ROLE,
     EffectUse,
@@ -42,7 +42,7 @@ def _under_sources(rel: str, sources: Sequence[str]) -> bool:
     return False
 
 
-def _policies(policy: Policy) -> tuple[Policy, ...]:
+def _policies(policy: Policy) -> tuple[ArchitecturePolicy, ...]:
     return tuple(scope.policy for scope in policy.scopes) if policy.scopes else (policy,)
 
 
@@ -384,7 +384,7 @@ class FsScanner:
         wanted |= {m for m, _, rel in files if m in dev_tool_modules and (only is None or rel in only)}
         modules, paths, fresh, parsed = _parse_files(root, files, cache, None if annotations_enabled else wanted)
         excluded_modules, extra_fresh, extra_parsed = (
-            _excluded_modules(root, excluded_files, cache) if only is None and any(p.mixed_purity.enabled and p.mixed_purity.report_excluded for p in _policies(policy)) else ({}, {}, 0)
+            _excluded_modules(root, excluded_files, cache) if only is None and policy.mixed_purity.enabled and policy.mixed_purity.report_excluded else ({}, {}, 0)
         )
         _store_cache(cache_file, cache, {**fresh, **extra_fresh}, only, parsed + extra_parsed)
         misplaced = _misplaced_dev_tools(files, modules, dev_tool_modules) if annotations_enabled else ()

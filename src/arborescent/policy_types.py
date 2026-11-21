@@ -1,24 +1,20 @@
-"""Shared vocabulary `policy_rings`/`policy_imports` and `domain` all need, with no dependency back on either: breaks
-what would otherwise be a `domain` <-> `policy_rings`/`policy_imports` circular import. `domain` re-exports these names
-so every existing `from .domain import PolicyError` (etc.) caller is unaffected.
+"""Shared vocabulary `policy_rings`/`policy_imports`, `architecture_policy` and `domain` all need, with no dependency back
+on any of them, including `ArchitectureFields`, the per-scope rule data the query facets read. `domain` re-exports these
+names so every existing `from .domain import PolicyError` (etc.) caller is unaffected.
 """
 
 from __future__ import annotations
 
 import fnmatch
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Protocol
 
-from .coupling_policy import CouplingPolicy
-from .package_constraints import PackageConstraints
-from .presets import Preset
-from .purity_policy import PurityPolicy
+from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
-    "ALL", "ArchitectureScope", "ConstructionSite", "OwnedLiteral", "PolicyError", "PolicyLike", "RingRule", "in_unit",
-    "normalized_source", "path_contains", "path_under", "unit_permits",
+    "ALL", "ArchitectureFields", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError", "ResultDiscard", "RingRule",
+    "in_unit", "normalized_source_path", "path_under", "unit_permits",
 ]
 
 ALL = "*"  # in `may_import` or `external`: no restriction
@@ -47,22 +43,6 @@ def unit_permits(modules: Sequence[str], rings: Sequence[str], module: str, ring
 
 def normalized_source_path(value: str) -> str:
     return PurePosixPath(value).as_posix().removeprefix("./").rstrip("/") or "."
-
-
-_NORMALIZED_SOURCES: dict[str, str] = {}
-
-
-def normalized_source(value: str) -> str:
-    """Memoized for configured source roots only (a small fixed set); per-file paths must not enter this cache."""
-    cached = _NORMALIZED_SOURCES.get(value)
-    if cached is None:
-        cached = _NORMALIZED_SOURCES[value] = normalized_source_path(value)
-    return cached
-
-
-def path_contains(source: str, path: str) -> bool:
-    source = normalized_source(source)
-    return source == "." or path == source or path.startswith(source + "/")
 
 
 @dataclass(frozen=True)
@@ -107,86 +87,55 @@ class ConstructionSite:
         return unit_permits(self.modules, self.rings, module, ring)
 
 
-class PolicyLike(Protocol):
-    """The subset of `Policy`'s fields and methods `policy_rings`/`policy_imports` (and every `scope.policy.*` caller
-    elsewhere) actually touch. Exists so `ArchitectureScope.policy` need not name the concrete `Policy` class, which
-    would recreate the very `domain` <-> `policy_rings`/`policy_imports` cycle this module was split out to avoid:
-    `Policy` structurally satisfies this Protocol, so every real `Policy` instance is already a valid `PolicyLike`."""
+@dataclass(frozen=True)
+class ResultDiscard:
+    """Opt-in ``result_discard`` (#141): a bare call statement that drops the value of a result-bearing function."""
 
-    # `@property`, not plain attributes: a Protocol attribute implies read+write, which a frozen dataclass can
-    # never satisfy (assignment raises), so `Policy` itself would fail the structural check against this Protocol.
-    @property
-    def rings(self) -> tuple[RingRule, ...]: ...
-    @property
-    def classify(self) -> tuple[tuple[str, str], ...]: ...
-    @property
-    def sources(self) -> tuple[str, ...]: ...
-    @property
-    def source_roots(self) -> tuple[str, ...]: ...
-    @property
-    def scopes(self) -> tuple[ArchitectureScope, ...]: ...
-    @property
-    def disabled_tools(self) -> tuple[str, ...]: ...
-    @property
-    def require_arbor_annotations(self) -> bool: ...
-    @property
-    def require_arbor_annotations_exclude(self) -> tuple[str, ...]: ...
-    @property
-    def effect_defaults(self) -> str: ...
-    @property
-    def dev_tools_may_import(self) -> tuple[str, ...]: ...
-    @property
-    def dev_tools(self) -> tuple[str, ...]: ...
-    @property
-    def forbidden_modules(self) -> tuple[str, ...]: ...
-    @property
-    def module_forbid_imports(self) -> tuple[tuple[str, tuple[str, ...]], ...]: ...
-    @property
-    def importable_by(self) -> tuple[tuple[str, tuple[str, ...]], ...]: ...
-    @property
-    def entry_scripts(self) -> tuple[str, ...]: ...
-    @property
-    def dependencies(self) -> Mapping[str, str]: ...
-    @property
-    def forbid_everywhere(self) -> tuple[str, ...]: ...
-    @property
-    def forbid_circular_imports(self) -> bool: ...
-    @property
-    def customization_labels(self) -> tuple[str, ...]: ...
-    @property
-    def preset(self) -> Preset: ...
-    @property
-    def io_modules(self) -> frozenset[str]: ...
-    @property
-    def coupling(self) -> CouplingPolicy: ...
-    @property
-    def package_constraints(self) -> PackageConstraints: ...
-    @property
-    def mixed_purity(self) -> PurityPolicy: ...
-    @property
-    def tach_external_exclude(self) -> tuple[str, ...]: ...
-    @property
-    def owned_literals(self) -> tuple[OwnedLiteral, ...]: ...
-    @property
-    def construct_only(self) -> tuple[ConstructionSite, ...]: ...
-
-    def scope(self, name: str) -> ArchitectureScope: ...
-    def ring(self, name: str) -> RingRule: ...
-    def ring_of(self, module: str) -> str | None: ...
-    def resolve_ring(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None: ...
-    def annotation_violation(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None: ...
-    def annotation_required_violation(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None: ...
-    def allowed_rings(self, ring: str) -> frozenset[str]: ...
-    def counts_effect_seam(self, seam: int) -> bool: ...
-    def forbidden_effects(self, ring: str) -> frozenset[str]: ...
-    def forbids_module_import(self, module: str, target: str) -> str | None: ...
+    functions: tuple[str, ...] = ()  # dotted names marked result-bearing in addition to the naming convention
+    rings: tuple[str, ...] = ()  # rings whose modules are checked; empty means every ring
+    convention: bool = True  # a module-level `-> *Result` / `-> *Outcome` function is result-bearing
 
 
 @dataclass(frozen=True)
-class ArchitectureScope:
-    """One independently governed source tree and its import boundary."""
+class DocsPolicy:
+    """``[tool.arborescent.docs]``: which module documentation rules are on (#110)."""
 
-    name: str
-    policy: PolicyLike
-    public: tuple[str, ...] = ()
-    depends_on: tuple[str, ...] = ()
+    module_docstring: bool = False  # every module has a non-blank docstring
+    module_names_ring: bool = False  # the docstring says the module's effective ring, as a whole word
+    exclude: tuple[str, ...] = ()  # module globs the rules skip
+
+    def applies_to(self, module: str) -> bool:
+        return not any(in_unit(module, glob) for glob in self.exclude)
+
+
+@dataclass(frozen=True)
+class ArchitectureFields:
+    """The data half of `architecture_policy.ArchitecturePolicy`: what one module or ring obeys, settable per scope.
+
+    The fields are `config._LEGACY_ARCHITECTURE_KEYS` as parsed (`ring`, `groups` and `middle_forbid` fold into `rings` and
+    `preset`; `git_hook` is read off the raw table), plus `disabled_tools`: a root global every scope inherits unchanged,
+    kept here because the annotation queries consult it. Pure data, so `policy_rings`/`policy_imports` can type against
+    it without importing the class whose methods delegate to them (that import would be a cycle)."""
+
+    rings: tuple[RingRule, ...]  # innermost first
+    classify: tuple[tuple[str, str], ...]  # (glob on dotted module name, ring); first match wins
+    sources: tuple[str, ...] = (".",)
+    source_roots: tuple[str, ...] = (".",)
+    module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    owned_literals: tuple[OwnedLiteral, ...] = ()
+    construct_only: tuple[ConstructionSite, ...] = ()  # #85
+    result_discard: ResultDiscard | None = None
+    docs: DocsPolicy = DocsPolicy()
+    importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
+    entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts
+    dependencies: Mapping[str, str] = field(default_factory=lambda: {})  # import name -> distribution
+    forbid_everywhere: tuple[str, ...] = ()
+    forbidden_modules: tuple[str, ...] = ()  # globs on dotted first-party module names that must not exist
+    effect_defaults: str = "injection"  # how a parameter default naming an effect counts: injection | typed | count
+    tach_external_exclude: tuple[str, ...] = ()  # written to tach `[external] exclude`
+    forbid_circular_imports: bool = True
+    preset: Preset = PRESETS[DEFAULT_PRESET]
+    io_modules: frozenset[str] = IO_MODULES  # stdlib modules that mean "I/O, process or OS"
+    require_arbor_annotations: bool = False
+    require_arbor_annotations_exclude: tuple[str, ...] = ()
+    disabled_tools: tuple[str, ...] = ()  # root global inherited by every scope; `arbor-annotations` switches annotations off

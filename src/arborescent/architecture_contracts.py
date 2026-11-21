@@ -13,12 +13,12 @@ from .domain import (
     ALL,
     Allowance,
     ArchitectureContracts,
+    ArchitecturePolicy,
     ArchitectureScope,
     Contract,
     ModuleLayer,
     Policy,
 )
-from .policy_types import PolicyLike
 from .ports import PackageBoundaries
 from .rules import RuleContext
 
@@ -68,7 +68,7 @@ def compile_contracts(
 
 
 def _ring_forbidden(
-    label: str, local: PolicyLike, ring_modules: Mapping[str, list[str]],
+    label: str, local: ArchitecturePolicy, ring_modules: Mapping[str, list[str]],
 ) -> list[Contract]:
     out: list[Contract] = []
     prefix = f"{label} " if label else ""

@@ -17,8 +17,14 @@ from typing import Protocol
 
 from .admission_probes import admission_probes
 from .construct_only_probes import construct_only_mutations
-from .domain import NOISE_DIRS, ArchitectureScope, Mutation, Policy, Rule
-from .policy_types import PolicyLike
+from .domain import (
+    NOISE_DIRS,
+    ArchitecturePolicy,
+    ArchitectureScope,
+    Mutation,
+    Policy,
+    Rule,
+)
 from .engine import Services, package_checks, run_own
 from .facts import ModuleInfo
 from .importable_by_probes import importable_by_mutations
@@ -26,6 +32,7 @@ from .module_forbid_probes import module_forbid_mutations
 from .owned_literal_probes import owned_literal_mutations
 from .package_constraint_probes import constraint_mutations
 from .ports import PackageProbes
+from .purity_policy import PurityPolicy
 from .purity_probes import mixed_purity_mutations
 
 
@@ -135,7 +142,7 @@ def plan(
     )
     for _, local_policy, local_known in local_policies:
         local_paths = {name: paths[name] for name in local_known if name in paths}
-        found, local_skipped = _local_mutations(local_policy, local_paths, local_known, arbor_index, scan.modules)
+        found, local_skipped = _local_mutations(local_policy, policy.mixed_purity, local_paths, local_known, scan)
         out.extend(found)
         skipped.extend(local_skipped)
     anchor = next(iter(sorted(known)), None)
@@ -177,10 +184,12 @@ def plan(
 
 
 def _local_mutations(
-    local_policy: Policy, local_paths: dict[str, str], local_known: frozenset[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
-    modules: Mapping[str, ModuleInfo],
+    local_policy: ArchitecturePolicy, purity: PurityPolicy, local_paths: dict[str, str], local_known: frozenset[str], scan: ScanView,
 ) -> tuple[list[Mutation], list[str]]:
-    """The mutations for one policy (the whole policy, or one scope of it), plus the ones that cannot be built."""
+    """The mutations for one policy (the whole policy, or one scope of it), plus the ones that cannot be built.
+
+    ``purity`` is the root's ``mixed_purity``: whole-run configuration, so a scope's ``ArchitecturePolicy`` does not carry it."""
+    arbor_index = scan.arbor_index
     out: list[Mutation] = []
     skipped: list[str] = []
     steps = [
@@ -192,7 +201,7 @@ def _local_mutations(
     steps.append(importable_by_mutations(local_policy, local_paths, local_known))
     steps.append(owned_literal_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
-    steps.append(mixed_purity_mutations(local_policy, local_paths, local_known, arbor_index, modules))
+    steps.append(mixed_purity_mutations(local_policy, purity, local_paths, arbor_index, scan.modules))
     steps.append(_docs_mutations(local_policy, local_paths, local_known, arbor_index))
     for found, step_skipped in steps:
         out.extend(found)
@@ -202,7 +211,7 @@ def _local_mutations(
 
 
 def _docs_mutations(
-    policy: Policy, paths: dict[str, str], known: Collection[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+    policy: ArchitecturePolicy, paths: dict[str, str], known: Collection[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> tuple[list[Mutation], list[str]]:
     """Probe the documentation rules (#110) with an added module: one with no docstring, one whose docstring names another ring."""
     docs = policy.docs
@@ -234,7 +243,7 @@ def _docs_mutations(
 
 
 def _entry_dependency_mutations(
-    local_policy: Policy, local_paths: dict[str, str], local_known: frozenset[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+    local_policy: ArchitecturePolicy, local_paths: dict[str, str], local_known: frozenset[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> list[Mutation]:
     if not local_policy.entry_scripts:
         return []
@@ -293,7 +302,7 @@ def _import_propagation_mutations(policy: Policy, scan: ScanView) -> tuple[list[
 
 
 def _one_import_propagation_mutation(
-    policy: PolicyLike, known: Collection[str], paths: Mapping[str, str],
+    policy: ArchitecturePolicy, known: Collection[str], paths: Mapping[str, str],
     arbor_index: Mapping[str, tuple[str | None, str | None]], modules: Mapping[str, ModuleInfo],
 ) -> Mutation | None:
     for ring in policy.rings:
@@ -321,7 +330,7 @@ def _one_import_propagation_mutation(
 
 
 def _leaking_sibling(
-    policy: PolicyLike, forbidden: frozenset[str], known: Collection[str], modules: Mapping[str, ModuleInfo], host: tuple[str, ModuleInfo],
+    policy: ArchitecturePolicy, forbidden: frozenset[str], known: Collection[str], modules: Mapping[str, ModuleInfo], host: tuple[str, ModuleInfo],
 ) -> tuple[str, str] | None:
     """A module within reach that isn't already imported by ``host`` and directly uses a forbidden effect."""
     host_name, host_info = host
@@ -387,7 +396,7 @@ def _already_imports(info: ModuleInfo, target: str) -> bool:
 
 
 def _ring_mutations(
-    policy: Policy, name: str, paths: dict[str, str], known: frozenset[str],
+    policy: ArchitecturePolicy, name: str, paths: dict[str, str], known: frozenset[str],
     arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> tuple[list[Mutation], list[str]]:
     mine = sorted(module for module in known if policy.resolve_ring(arbor_index, module) == name and not paths[module].endswith("__init__.py"))
@@ -412,7 +421,7 @@ def _ring_mutations(
 
 
 def _arbor_annotation_mutations(
-    policy: Policy, paths: dict[str, str], known: Collection[str],
+    policy: ArchitecturePolicy, paths: dict[str, str], known: Collection[str],
     arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> tuple[list[Mutation], list[str]]:
     """Probe the annotation-hardening rules: unknown keys, conditional assignment, and ring/classify disagreement."""
@@ -450,7 +459,7 @@ def _arbor_annotation_mutations(
 
 
 def _require_annotation_plan(
-    policy: Policy, known: Collection[str], paths: Mapping[str, str],
+    policy: ArchitecturePolicy, known: Collection[str], paths: Mapping[str, str],
     arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> tuple[list[Mutation], list[str]]:
     if not policy.require_arbor_annotations:
@@ -462,7 +471,7 @@ def _require_annotation_plan(
 
 
 def _require_annotation_mutation(
-    policy: Policy, known: Collection[str], paths: Mapping[str, str],
+    policy: ArchitecturePolicy, known: Collection[str], paths: Mapping[str, str],
     arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> Mutation | None:
     """Overwrite a validly annotated module's `__arbor__` with an invalid one, for `require_arbor_annotations`.
@@ -526,7 +535,7 @@ def _anchor_mutations(anchor: str, host: str) -> list[Mutation]:
     return out
 
 
-def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
+def _effect_mutations(policy: ArchitecturePolicy, ring: str, host: str) -> list[Mutation]:
     forbidden = policy.forbidden_effects(ring)
     out: list[Mutation] = []
     if "clock" in forbidden:
@@ -547,7 +556,7 @@ def _effect_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
     return out
 
 
-def _abstraction_mutations(policy: Policy, ring: str, host: str) -> list[Mutation]:
+def _abstraction_mutations(policy: ArchitecturePolicy, ring: str, host: str) -> list[Mutation]:
     if not policy.ring(ring).require_abstract:
         return []
     return [

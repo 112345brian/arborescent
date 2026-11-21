@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
-from .domain import Policy, Rule, Violation
+from .domain import ArchitecturePolicy, Rule, Violation
 from .facts import ModuleInfo, resolve_targets
 from .package_constraints import PackageConstraints
 from .presets import DEFAULT_FORBID_CATEGORIES, STRUCTURAL_STDLIB
@@ -52,7 +52,7 @@ def _source(constraints: PackageConstraints) -> str:
 
 
 def use_violations(
-    constraints: PackageConstraints, policy: Policy, info: ModuleInfo, ring: str | None, imports: tuple[Collection[str], Collection[str]],
+    constraints: PackageConstraints, policy: ArchitecturePolicy, info: ModuleInfo, ring: str | None, imports: tuple[Collection[str], Collection[str]],
 ) -> list[Violation]:
     """``package-constraint-facts`` for one module's own effect uses and, under ``must_be_pure``, its external imports.
 
@@ -100,7 +100,7 @@ def reach_violations(
     return out
 
 
-def placement_violations(constraints: PackageConstraints, policy: Policy, info: ModuleInfo, ring: str) -> list[Violation]:
+def placement_violations(constraints: PackageConstraints, policy: ArchitecturePolicy, info: ModuleInfo, ring: str) -> list[Violation]:
     """``package-constraint-placement``: the ring this module is placed in permits an effect the package promises not to use."""
     if is_exempt_path(info.path):
         return []

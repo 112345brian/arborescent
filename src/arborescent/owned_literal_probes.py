@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
-from .domain import Mutation, Policy, Rule
+from .domain import ArchitecturePolicy, Mutation, Rule
 
 __all__ = ["owned_literal_mutations"]
 
 
 def owned_literal_mutations(
-    policy: Policy, paths: Mapping[str, str], known: Collection[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+    policy: ArchitecturePolicy, paths: Mapping[str, str], known: Collection[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> tuple[list[Mutation], list[str]]:
     """(mutations, reasons an entry got none). An entry every module is allowed to spell is reported, never skipped silently."""
     out: list[Mutation] = []
