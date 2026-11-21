@@ -202,7 +202,7 @@ def test_explain_reports_an_unknown_module(repo: Path, capsys: pytest.CaptureFix
 def test_every_caller_with_a_scan_passes_it_to_assess() -> None:
     """``assess`` without ``followed`` silently reads only the module's own text, so two reports could judge one module differently."""
     src = Path(__file__).resolve().parent.parent / "src" / "arborescent"
-    needed = {"assess": 3, "assess_in_ring": 4}
+    needed = {"assess": 4, "assess_in_ring": 5}
     missing: list[str] = []
     for path in sorted(src.glob("*.py")):
         if path.name == "purity.py":

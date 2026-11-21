@@ -9,6 +9,7 @@ name = "domain ring imports only ['domain']"
 type = "forbidden"
 source_modules = [
     "arborescent.admission_probes",
+    "arborescent.architecture_policy",
     "arborescent.baseline_report",
     "arborescent.classify_audit",
     "arborescent.construct_only_probes",
@@ -124,6 +125,7 @@ name = "domain ring imports no I/O or third-party package it does not list"
 type = "forbidden"
 source_modules = [
     "arborescent.admission_probes",
+    "arborescent.architecture_policy",
     "arborescent.baseline_report",
     "arborescent.classify_audit",
     "arborescent.construct_only_probes",
@@ -599,6 +601,7 @@ source_modules = [
     "arborescent.admitted_against",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
+    "arborescent.architecture_policy",
     "arborescent.baseline",
     "arborescent.baseline_history",
     "arborescent.baseline_report",
@@ -822,6 +825,7 @@ source_modules = [
     "arborescent.admitted_against",
     "arborescent.annotate",
     "arborescent.architecture_contracts",
+    "arborescent.architecture_policy",
     "arborescent.baseline",
     "arborescent.baseline_history",
     "arborescent.baseline_report",

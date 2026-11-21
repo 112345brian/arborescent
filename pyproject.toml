@@ -107,6 +107,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.policy_types" = "domain"
 "arborescent.policy_rings" = "domain"
 "arborescent.policy_imports" = "domain"
+"arborescent.architecture_policy" = "domain"
 "arborescent.facts" = "domain"
 "arborescent.forwarder_facts" = "domain"
 "arborescent.rules" = "domain"

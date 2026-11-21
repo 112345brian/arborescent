@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
-from .domain import Mutation, Policy, Rule
+from .domain import ArchitecturePolicy, Mutation, Policy, Rule
 from .package_constraint_rules import forbidden_by
 
 __all__ = ["constraint_mutations"]
@@ -27,7 +27,7 @@ _FILE = "arborescent_probe_constraint.py"
 
 
 def constraint_mutations(
-    policy: Policy, paths: Mapping[str, str], scopes: Collection[tuple[Policy, frozenset[str]]],
+    policy: Policy, paths: Mapping[str, str], scopes: Collection[tuple[ArchitecturePolicy, frozenset[str]]],
     arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> tuple[list[Mutation], list[str]]:
     """(mutations, reasons one could not be built). ``scopes`` is each ladder with the modules it holds (the policy itself when unscoped)."""
@@ -59,7 +59,7 @@ def constraint_mutations(
 
 
 def _host(
-    local: Policy, known: Collection[str], paths: Mapping[str, str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+    local: ArchitecturePolicy, known: Collection[str], paths: Mapping[str, str], arbor_index: Mapping[str, tuple[str | None, str | None]],
 ) -> str | None:
     return next((
         name for name in sorted(known)

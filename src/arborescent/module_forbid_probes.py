@@ -10,13 +10,13 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Collection, Mapping
 
-from .domain import Mutation, Policy, Rule
+from .domain import ArchitecturePolicy, Mutation, Rule
 
 __all__ = ["module_forbid_mutations"]
 
 
 def module_forbid_mutations(
-    policy: Policy, paths: Mapping[str, str], known: Collection[str]
+    policy: ArchitecturePolicy, paths: Mapping[str, str], known: Collection[str]
 ) -> tuple[list[Mutation], list[str]]:
     """(mutations, reasons a pattern got none). A pattern with no host or no target module is reported, never skipped silently."""
     out: list[Mutation] = []

@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 
-from .domain import ALL, Policy, Rule, Violation
+from .domain import ALL, ArchitecturePolicy, Rule, Violation
 from .facts import ModuleInfo, RawImport, resolve_targets
 from .rules import RuleContext, fits_ring
 from .taint import TaintResult
@@ -55,7 +55,7 @@ class _Subject:
     """One module under judgement, with the policy and ring it is judged against and the import graph around it."""
 
     context: RuleContext
-    policy: Policy
+    policy: ArchitecturePolicy
     name: str
     info: ModuleInfo
     ring: str
