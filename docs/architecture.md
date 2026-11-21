@@ -47,7 +47,7 @@ The driver is five modules, one per ring, and the annotation layer never imports
 - ports, `driver_port`: the `MigrationLibrary` protocol (availability, the arguments it cannot apply, the exact arguments, `supply`) and, separately, `ImportRewriter` (statements it cannot rewrite safely, the exact commands, `apply`).
 - application, `driver_plan`: `plan_supply` turns a `PackageArguments` into a request, refusing while an error gap, a bypass edge or an undeclared first-party dependency is open, and for a workspace member (it keeps its history where it is); `supply` calls the port. `driver_rewrite` turns the plan into rewrite requests for the second port.
 - application, `local_targets`: the git-ignored local config that says where a package's new repository is checked out on this machine (found through `ARBORESCENT_LOCAL_CONFIG`, a `.env`, or `.arborescent/local.toml`). Machine-specific, so only `packages migrate` reads it; the export, derived files and contracts never do. Files go through the `FileSystem` port and the environment arrives as a mapping.
-- adapters, `driver_filter_repo`: git filter-repo behind the port, reached through `ToolRunner`. `driver_libcst`: LibCST's rename command behind `ImportRewriter`, through an isolated subprocess; `driver_libcst_scan` is the entry it runs to parse with LibCST (never imported by `cli`).
+- adapters, `driver_filter_repo`: git filter-repo behind the port, reached through `ToolRunner`. `driver_libcst`: LibCST's rename command behind `ImportRewriter`, through an isolated subprocess; `driver_libcst_scan` is the entry it runs (walking, reading and writing files), and `driver_libcst_forms` the pure LibCST analysis and rewrite it calls; neither is imported by `cli`.
 - composition, `cli_migrate`: `arborescent packages migrate`; `cli` binds the adapter.
 
 The constraint "the annotation layer must not import the driver" is `module_forbid_imports` in Arborescent's own policy,
@@ -149,11 +149,14 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.filesystem_adapter` | `single` | adapters |
 | `arborescent.parallel_adapter` | `single` | adapters |
 | `arborescent.scanner` | `single` | adapters |
+| `arborescent.scan_cache_codec` | `single` | domain |
+| `arborescent.source_discovery` | `single` | domain |
 | `arborescent.tool_runner` | `single` | adapters |
 | `arborescent.engines` | `single` | adapters |
 | `arborescent.driver_filter_repo` | `single` | application |
 | `arborescent.driver_libcst` | `single` | application |
 | `arborescent.driver_libcst_scan` | `single` | adapters |
+| `arborescent.driver_libcst_forms` | `single` | adapters |
 | `arborescent.tach_visibility` | `single` | domain |
 | `arborescent.classify_audit` | `single` | domain |
 | `arborescent.taint` | `single` | domain |
@@ -167,12 +170,16 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.typecheckers` | `single` | domain |
 | `arborescent.__main__` | `single` | composition |
 | `arborescent.cli` | `single` | composition |
+| `arborescent.check_gates` | `single` | application |
+| `arborescent.cli_arguments` | `single` | composition |
 | `arborescent.cli_ratchet` | `single` | composition |
 | `arborescent.cli_install` | `single` | composition |
 | `arborescent.cli_report` | `single` | composition |
 | `arborescent.cli_baseline_report` | `single` | composition |
+| `arborescent.baseline_report_view` | `single` | application |
 | `arborescent.cli_migrate` | `single` | composition |
 | `arborescent.cli_coupling` | `single` | composition |
+| `arborescent.coupling_measure` | `single` | application |
 | `arborescent.cli_cycles` | `single` | application |
 | `arborescent.cycles_report` | `single` | application |
 | `arborescent.cli_purity` | `single` | application |

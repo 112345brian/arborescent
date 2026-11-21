@@ -1,16 +1,8 @@
 {
   "version": 2,
   "violations": [
-    "mixed-purity|arborescent.bench|[application] mixes substantial pure logic with effectful code",
-    "mixed-purity|arborescent.cli_baseline_report|[composition] mixes substantial pure logic with effectful code",
-    "mixed-purity|arborescent.cli_coupling|[composition] mixes substantial pure logic with effectful code",
-    "mixed-purity|arborescent.cli_migrate|[composition] mixes substantial pure logic with effectful code",
-    "mixed-purity|arborescent.cli|[composition] mixes substantial pure logic with effectful code",
     "mixed-purity|arborescent.domain|[domain] mixes substantial pure logic with effectful code",
-    "mixed-purity|arborescent.driver_libcst_scan|[adapters] mixes substantial pure logic with effectful code",
     "mixed-purity|arborescent.engine|[application] mixes substantial pure logic with effectful code",
-    "mixed-purity|arborescent.pytest_io_block|[composition] mixes substantial pure logic with effectful code",
-    "mixed-purity|arborescent.scanner|[adapters] mixes substantial pure logic with effectful code",
     "ruff-PLC0415|tests/test_engine_ports.py|`import` should be at the top-level of a file|10d907f9",
     "ruff-PLC0415|tests/test_engine_ports.py|`import` should be at the top-level of a file|77c5b6e9",
     "ruff-PLC0415|tests/test_engine_ports.py|`import` should be at the top-level of a file|797d891e",

@@ -21,10 +21,10 @@ from arborescent.adapters import (
 from arborescent.cli import (
     _check,
     _install_tools,
-    _parser,
     _setup_install_command,
     main,
 )
+from arborescent.cli_arguments import build_parser as _parser
 from arborescent.domain import ToolResult
 from arborescent.engine import Services
 from arborescent.engines import default_engines

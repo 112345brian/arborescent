@@ -27,6 +27,7 @@ from arborescent.local_targets import (
     load_local_targets,
     locate_config,
     read_dotenv_value,
+    resolve_target,
 )
 from arborescent.testing import FakeMigrationLibrary, FakeToolRunner
 
@@ -154,6 +155,22 @@ def test_nothing_configured_is_none_so_the_caller_can_explain_after_the_plan(tmp
     assert choose_target("core", None, targets) is None
 
 
+def test_resolve_target_never_reads_the_config_when_the_flag_names_the_directory(tmp_path: Path) -> None:
+    missing = ConfigLocation(tmp_path / "gone.toml", "test", True)  # loading it would raise
+    chosen = resolve_target("core", tmp_path / "flag-core", missing, FS, ("core",))
+    assert chosen is not None
+    assert (chosen.path, chosen.source) == (tmp_path / "flag-core", "--target")
+
+
+def test_resolve_target_falls_back_to_the_config_and_to_none(tmp_path: Path) -> None:
+    location = write_config(tmp_path, '[targets]\ncore = "cfg-core"\n')
+    chosen = resolve_target("core", None, location, FS, ("core", "web"))
+    assert chosen is not None and chosen.path == tmp_path / "cfg-core"
+    assert resolve_target("web", None, location, FS, ("core", "web")) is None
+    with pytest.raises(LocalTargetsError):
+        resolve_target("core", None, ConfigLocation(tmp_path / "gone.toml", "test", True), FS, ("core",))
+
+
 # -- the command ---------------------------------------------------------------------------------------------------
 
 
@@ -237,7 +254,7 @@ def test_only_the_driver_command_and_its_own_module_may_use_the_local_config() -
         tree = ast.parse(path.read_text(encoding="utf-8"))
         names = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module and n.level == 1 for a in n.names}
         modules = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module and n.level == 1}
-        if "local_targets" in modules or {"CONFIG_VARIABLE", "locate_config", "load_local_targets"} & names:
+        if "local_targets" in modules or {"CONFIG_VARIABLE", "locate_config", "load_local_targets", "resolve_target"} & names:
             readers.append(path.name)
     assert set(readers) <= allowed, readers
     text = "".join((SRC / name).read_text(encoding="utf-8") for name in ("generate.py", "migration_export.py", "migration_json.py", "package_pyproject.py"))

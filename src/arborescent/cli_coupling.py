@@ -12,21 +12,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import coupling_ratchet as ratchet
-from .coupling import (
-    Closure,
-    FanIn,
-    Hub,
-    ImportEdges,
-    NewModule,
-    ambient_hubs,
-    cost_of_new_modules,
-    entrypoint_closure,
-    fan_in,
-    import_edges,
-)
+from .coupling import NewModule, ambient_hubs, cost_of_new_modules
+from .coupling_measure import Measure, document, load_baseline
 from .domain import Policy, PolicyError
 from .engine import Services
-from .ports import FileSystem, ScanResult
+from .ports import FileSystem
 
 __all__ = ["add_coupling_parser", "run_coupling"]
 
@@ -55,34 +45,8 @@ def add_coupling_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     cost.add_argument("--modules", type=int, default=3, help="how many modules are added (default 3: port, service, adapter)")
 
 
-class _Measure:
-    """Everything one scan says about coupling; built once per command."""
-
-    def __init__(self, policy: Policy, scan: ScanResult) -> None:
-        self.policy = policy
-        self.scan = scan
-        self.edges: ImportEdges = import_edges(scan.modules, scan.known)
-        self.rows: list[FanIn] = fan_in(self.edges, scan.modules)
-        missing = [name for name in policy.coupling.entrypoints if name not in scan.known]
-        if missing:
-            raise PolicyError(f"`coupling.entrypoints` names modules that do not exist: {missing}")
-        self.closures: list[Closure] = [entrypoint_closure(self.edges, name) for name in policy.coupling.entrypoints]
-
-    def ring(self, module: str) -> str | None:
-        scope = self.scan.scope_by_module.get(module)
-        local = self.policy.scope(scope).policy if scope is not None and self.policy.scopes else self.policy
-        return local.resolve_ring(self.scan.arbor_index, module)
-
-    def over_cap(self, row: FanIn) -> int | None:
-        cap = dict(self.policy.coupling.fan_in_max).get(self.ring(row.module) or "")
-        return cap if cap is not None and row.direct > cap else None
-
-    def counts(self) -> dict[str, dict[str, int]]:
-        return ratchet.measured(self.policy.coupling, self.rows, self.closures)
-
-
 def run_coupling(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
-    measure = _Measure(policy, svc.scanner.scan(policy, root))
+    measure = Measure(policy, svc.scanner.scan(policy, root))
     path = root / policy.coupling.baseline
     action = args.coupling_action
     if action == "report":
@@ -94,10 +58,10 @@ def run_coupling(args: argparse.Namespace, policy: Policy, root: Path, svc: Serv
     return _check(measure, svc.fs, path)
 
 
-def _report(measure: _Measure, top: int, as_json: bool) -> int:
+def _report(measure: Measure, top: int, as_json: bool) -> int:
     hubs = ambient_hubs(measure.rows, measure.scan.modules, measure.policy.coupling.hub_fan_in)
     if as_json:
-        print(json.dumps(_document(measure, hubs), indent=2))
+        print(json.dumps(document(measure, hubs), indent=2))
         return 0
     print(f"fan-in (distinct importing modules), top {top}:")
     for row in measure.rows[:top]:
@@ -117,24 +81,7 @@ def _report(measure: _Measure, top: int, as_json: bool) -> int:
     return 0
 
 
-def _document(measure: _Measure, hubs: list[Hub]) -> dict[str, object]:
-    return {
-        "fan_in": [
-            {"module": r.module, "direct": r.direct, "module_level": r.runtime, "transitive": r.transitive, "ring": measure.ring(r.module)}
-            for r in measure.rows
-        ],
-        "closures": [
-            {"entrypoint": c.entrypoint, "modules": len(c.modules), "function_level_only": len(c.lazy_only), "type_only": len(c.type_only)}
-            for c in measure.closures
-        ],
-        "hubs": [
-            {"module": h.module, "importers": h.direct, "accessors": list(h.accessors), "public": h.public}
-            for h in hubs
-        ],
-    }
-
-
-def _cost(measure: _Measure, new: NewModule) -> int:
+def _cost(measure: Measure, new: NewModule) -> int:
     if new.importer not in measure.scan.known:
         raise PolicyError(f"{new.importer!r} is not a module of this repository")
     unknown = [name for name in new.imports if name not in measure.scan.known]
@@ -150,15 +97,8 @@ def _cost(measure: _Measure, new: NewModule) -> int:
     return 0
 
 
-def _load(fs: FileSystem, path: Path) -> tuple[ratchet.Counts, list[object]] | None:
-    try:
-        return ratchet.load(fs, path)
-    except ValueError as exc:
-        raise PolicyError(f"{path.name}: {exc}") from exc
-
-
-def _check(measure: _Measure, fs: FileSystem, path: Path) -> int:
-    loaded = _load(fs, path)
+def _check(measure: Measure, fs: FileSystem, path: Path) -> int:
+    loaded = load_baseline(fs, path)
     if loaded is None:
         raise PolicyError(f"no coupling baseline at {path.name}; create it with `arborescent coupling baseline`")
     counts = measure.counts()
@@ -171,12 +111,12 @@ def _check(measure: _Measure, fs: FileSystem, path: Path) -> int:
     return 1 if failures else 0
 
 
-def _baseline(measure: _Measure, fs: FileSystem, path: Path, args: argparse.Namespace) -> int:
+def _baseline(measure: Measure, fs: FileSystem, path: Path, args: argparse.Namespace) -> int:
     try:
         counts = measure.counts()
-        document = ratchet.next_document(_load(fs, path), counts, args.allow_growth, args.reason)
+        recorded = ratchet.next_document(load_baseline(fs, path), counts, args.allow_growth, args.reason)
     except ValueError as exc:
         raise PolicyError(str(exc)) from exc
-    ratchet.save(fs, path, document)
+    ratchet.save(fs, path, recorded)
     print(f"coupling baseline: recorded {sum(len(table) for table in counts.values())} count(s) in {path.name}")
     return 0

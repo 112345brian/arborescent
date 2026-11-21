@@ -2,9 +2,9 @@
 
 What the rule touches, and the callers found by grep:
 
-- ``facts.extract`` / ``SourceFacts``: built in ``scanner._facts_from_json`` (positional, indexes 0-21) and ``extract``;
+- ``facts.extract`` / ``SourceFacts``: built in ``scan_cache_codec.facts_from_json`` (positional, indexes 0-21) and ``extract``;
   read by rules, ``classify_audit``, ``coupling``, ``practices``, ``taint``, ``selftest``.
-- ``scanner._CACHE_VERSION`` and the per-file JSON layout: ``tests/test_engine.py`` pins the version.
+- ``scan_cache_codec.CACHE_VERSION`` and the per-file JSON layout: ``tests/test_engine.py`` pins the version.
 - ``check_modules``: every rule test; a module with pure and effectful code must stay silent unless the new rule is on.
 - ``ScanData`` / ``ScanResult``: built in ``scanner`` and two ``test_fs_behaviour`` fixtures (keyword arguments).
 """
