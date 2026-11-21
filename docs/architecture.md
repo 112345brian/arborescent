@@ -70,6 +70,12 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.policy_imports` | `single` | domain |
 | `arborescent.architecture_policy` | `single` | domain |
 | `arborescent.facts` | `single` | domain |
+| `arborescent.import_facts` | `single` | domain |
+| `arborescent.effect_facts` | `single` | domain |
+| `arborescent.effect_categories` | `single` | domain |
+| `arborescent.declaration_facts` | `single` | domain |
+| `arborescent.definition_facts` | `single` | domain |
+| `arborescent.call_facts` | `single` | domain |
 | `arborescent.forwarder_facts` | `single` | domain |
 | `arborescent.stdlib` | `single` | domain |
 | `arborescent.presets` | `single` | domain |

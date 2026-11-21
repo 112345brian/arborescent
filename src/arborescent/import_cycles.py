@@ -15,7 +15,8 @@ from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from .facts import ModuleInfo, RawImport, resolve_targets
+from .facts import ModuleInfo
+from .import_facts import RawImport, resolve_targets
 
 __all__ = ["Cycle", "EdgeKind", "ImportEdge", "cyclic_components", "find_cycles", "import_edges"]
 

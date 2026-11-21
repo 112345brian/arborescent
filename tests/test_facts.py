@@ -5,12 +5,8 @@ from pathlib import Path
 from arborescent_helpers import MINI_FILES, mini_policy, write_files
 
 from arborescent.adapters import FsScanner
-from arborescent.facts import (
-    RawImport,
-    extract,
-    resolve_runtime_targets,
-    resolve_targets,
-)
+from arborescent.facts import extract
+from arborescent.import_facts import RawImport, resolve_runtime_targets, resolve_targets
 
 
 def test_effect_facts_resolve_module_and_from_import_aliases() -> None:

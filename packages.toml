@@ -113,6 +113,30 @@ path = "src/arborescent/facts.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/import_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/effect_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/effect_categories.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/declaration_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/definition_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/call_facts.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/forwarder_facts.py"
 role = "source"
 

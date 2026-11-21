@@ -11,7 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .domain import Rule, Violation
-from .facts import ModuleInfo, RawImport
+from .facts import ModuleInfo
+from .import_facts import RawImport
 
 __all__ = ["LazyImportCount", "lazy_import_counts", "lazy_import_violations", "lazy_imports_of"]
 

@@ -477,7 +477,7 @@ def _require_annotation_mutation(
     """Overwrite a validly annotated module's `__arbor__` with an invalid one, for `require_arbor_annotations`.
 
     Appending text to an existing file can only ever add an `__arbor__` assignment, never remove one — and the
-    last unconditional assignment wins (`facts.py`) — so the only way to make a module *newly* lose a valid
+    last unconditional assignment wins (`declaration_facts.py`) — so the only way to make a module *newly* lose a valid
     annotation within this append-only harness is to append a second, invalid one over a host that currently has
     a valid one. A classify-only host would already violate the rule in the baseline (nothing "new" to detect).
     """

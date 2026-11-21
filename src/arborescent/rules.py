@@ -13,6 +13,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from typing import NamedTuple
 
+from .call_facts import absolute_callee
 from .domain import (
     ALL,
     EFFECT_RULES,
@@ -28,16 +29,11 @@ from .domain import (
     dist_name,
     in_unit,
 )
+from .effect_facts import EffectUse
 from .effects_policy import EffectsPolicy
-from .facts import (
-    EffectUse,
-    Forwarder,
-    ModuleInfo,
-    RawImport,
-    absolute_callee,
-    resolve_targets,
-)
+from .facts import Forwarder, ModuleInfo
 from .import_cycles import cyclic_components
+from .import_facts import RawImport, resolve_targets
 from .package_constraint_rules import (
     is_exempt_path,
     placement_violations,

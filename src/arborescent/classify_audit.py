@@ -16,7 +16,8 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 
 from .domain import ALL, ArchitecturePolicy, Rule, Violation
-from .facts import ModuleInfo, RawImport, resolve_targets
+from .facts import ModuleInfo
+from .import_facts import RawImport, resolve_targets
 from .rules import RuleContext, fits_ring
 from .taint import TaintResult
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .domain import Policy, Violation
-from .facts import resolve_targets
+from .import_facts import resolve_targets
 from .package_assignment import WorkspaceFacts, assignment_violations
 from .package_contracts import PackageLayout, layout_of
 from .package_model import CatalogDocument, CatalogError
