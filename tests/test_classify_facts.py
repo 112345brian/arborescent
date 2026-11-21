@@ -7,8 +7,9 @@ from pathlib import Path
 from arborescent_helpers import MINI, mini_policy, services, write_files
 
 from arborescent.adapters import FsScanner
+from arborescent.check_runner import run_check
 from arborescent.domain import INFORMATIONAL_RULES, Policy, Rule, Violation
-from arborescent.engine import Options, blocking, run_check, run_own
+from arborescent.engine import Options, blocking, run_own
 from arborescent.facts import extract
 
 OPTS = Options(tools=False, use_baseline=False)

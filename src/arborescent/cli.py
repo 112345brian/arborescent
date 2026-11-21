@@ -19,6 +19,7 @@ from .adapters import (
 from .annotate import apply_annotations, new_since, plan_annotations
 from .bench import run_bench
 from .check_gates import admission_check, growth_check, stale_engine_findings
+from .check_runner import run_check
 from .classify_audit import suggest_ring
 from .cli_admit import run_admit
 from .cli_arguments import (
@@ -46,7 +47,6 @@ from .engine import (
     Services,
     enforced,
     pick_checker,
-    run_check,
     run_engine,
     run_own,
     write_generated,

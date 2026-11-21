@@ -31,6 +31,7 @@ from arborescent.adapters import (
     SystemClock,
 )
 from arborescent.bench import bench_one
+from arborescent.check_runner import run_check
 from arborescent.cli import main
 from arborescent.config import policy_from_mapping
 from arborescent.domain import PolicyError, ToolResult, Violation
@@ -38,7 +39,6 @@ from arborescent.engine import (
     Options,
     Services,
     pick_checker,
-    run_check,
     run_own,
     write_generated,
 )

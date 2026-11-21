@@ -11,8 +11,9 @@ from arborescent_helpers import MINI_FILES, mini_policy, services, write_files
 
 import arborescent.package_checks as package_checks
 from arborescent.adapters import FsScanner, LocalFileSystem
+from arborescent.check_runner import run_check
 from arborescent.domain import Rule
-from arborescent.engine import Options, run_check, run_own
+from arborescent.engine import Options, run_own
 from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_model import CatalogError, PackageDescriptor, ReleasePolicy
 from arborescent.package_parse import PACKAGE_KEYS, parse_catalog

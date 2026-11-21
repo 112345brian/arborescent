@@ -6,7 +6,8 @@ from pathlib import Path
 from arborescent_helpers import MINI_FILES, mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
-from arborescent.engine import Options, Services, run_check, write_generated
+from arborescent.check_runner import run_check
+from arborescent.engine import Options, Services, write_generated
 from arborescent.engines import default_engines
 from arborescent.suggestions import file_size_suggestions, logical_code_lines
 from arborescent.testing import FakeToolRunner

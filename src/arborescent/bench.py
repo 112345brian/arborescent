@@ -12,6 +12,7 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from .check_runner import run_check
 from .config import load_policy
 from .domain import Policy
 from .engine import (
@@ -19,7 +20,6 @@ from .engine import (
     Services,
     contract_renderers,
     pick_checker,
-    run_check,
     run_own,
     write_generated,
 )

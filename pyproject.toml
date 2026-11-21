@@ -161,6 +161,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.baseline_history" = "application"
 "arborescent.config" = "application"
 "arborescent.engine" = "application"
+"arborescent.check_runner" = "application"
 "arborescent.certification" = "application"
 "arborescent.install_tools" = "application"
 "arborescent.git_hook" = "application"

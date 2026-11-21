@@ -9,9 +9,10 @@ from arborescent_helpers import MINI_FILES, mini_policy, services, write_files
 
 import arborescent.package_checks as package_checks
 from arborescent.adapters import FsScanner, LocalFileSystem
+from arborescent.check_runner import run_check
 from arborescent.cli import main
 from arborescent.domain import INFORMATIONAL_RULES, PolicyError, Rule
-from arborescent.engine import Options, run_check, run_own
+from arborescent.engine import Options, run_own
 from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_gaps import load_package_catalog
 from arborescent.package_model import CatalogError

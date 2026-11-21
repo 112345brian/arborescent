@@ -9,9 +9,10 @@ from arborescent_helpers import mini_policy, write_files
 
 from arborescent import baseline
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.check_runner import run_check
 from arborescent.cli import main
 from arborescent.domain import ToolResult, Violation
-from arborescent.engine import Options, Services, run_check
+from arborescent.engine import Options, Services
 from arborescent.engines import default_engines
 from arborescent.testing import FakeFileSystem, FakeToolRunner
 from arborescent.typecheckers import all_checkers

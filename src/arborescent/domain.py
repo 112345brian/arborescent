@@ -372,19 +372,8 @@ class Policy(ArchitecturePolicy):
         """Whether a repository-relative path is, or lies below, a `dev_tools` entry."""
         return policy_imports.is_dev_tool_path(self.dev_tools, rel)
 
-_NORMALIZED_SOURCES: dict[str, str] = {}
-
-
-def _normalized_source(value: str) -> str:
-    """Memoized for configured source roots only (a small fixed set); per-file paths must not enter this cache."""
-    cached = _NORMALIZED_SOURCES.get(value)
-    if cached is None:
-        cached = _NORMALIZED_SOURCES[value] = normalized_source_path(value)
-    return cached
-
-
 def _path_contains(source: str, path: str) -> bool:
-    source = _normalized_source(source)
+    source = normalized_source_path(source)
     return source == "." or path == source or path.startswith(source + "/")
 
 

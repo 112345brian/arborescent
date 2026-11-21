@@ -6,12 +6,12 @@ from pathlib import Path
 
 from arborescent_helpers import mini_policy, services, write_files
 
+from arborescent.check_runner import run_check
 from arborescent.domain import INFORMATIONAL_RULES, TACH_EXCLUDED_FOLDERS, Rule
 from arborescent.engine import (
     Options,
     blocking,
     child_arbor_command,
-    run_check,
     run_own,
 )
 from arborescent.tach_visibility import TACH_EXCLUDED_PARTS

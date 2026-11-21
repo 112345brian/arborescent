@@ -105,6 +105,10 @@ path = "src/arborescent/engine.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/check_runner.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/engines.py"
 role = "source"
 

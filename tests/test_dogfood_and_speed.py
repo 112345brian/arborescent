@@ -18,9 +18,10 @@ from arborescent.adapters import (
     SubprocessToolRunner,
     SystemClock,
 )
+from arborescent.check_runner import run_check
 from arborescent.config import load_policy
 from arborescent.domain import Rule
-from arborescent.engine import Options, Services, run_check, run_own
+from arborescent.engine import Options, Services, run_own
 from arborescent.engines import default_engines
 from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.typecheckers import all_checkers

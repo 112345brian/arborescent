@@ -9,8 +9,9 @@ from arborescent_helpers import mini_policy, services, write_files
 from test_baseline_ratchet import write_policy
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.check_runner import run_check
 from arborescent.cli import main
-from arborescent.engine import Options, Services, run_check
+from arborescent.engine import Options, Services
 from arborescent.engines import default_engines
 from arborescent.import_cycles import (
     EdgeKind,

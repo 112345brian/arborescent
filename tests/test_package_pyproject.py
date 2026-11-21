@@ -11,8 +11,9 @@ from jsonschema import Draft202012Validator, ValidationError
 
 import arborescent.package_checks as package_checks
 from arborescent.adapters import FsScanner, LocalFileSystem
+from arborescent.check_runner import run_check
 from arborescent.domain import INFORMATIONAL_RULES, PolicyError, Rule
-from arborescent.engine import Options, run_check, run_own, write_generated
+from arborescent.engine import Options, run_own, write_generated
 from arborescent.migration_export import migration_arguments_of
 from arborescent.migration_json import SCHEMA, export_document
 from arborescent.package_checks import AnnotationPackageChecks

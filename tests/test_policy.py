@@ -476,13 +476,10 @@ def test_unclassified_detail_hints_when_a_glob_names_only_the_parent_package() -
     assert "did you mean" not in p.unclassified_detail("pkg")
 
 
-def test_scope_path_normalization_memoizes_sources_but_not_file_paths() -> None:
-    domain._NORMALIZED_SOURCES.clear()
+def test_scope_path_normalization_handles_trailing_slashes_and_dot_prefixes() -> None:
     assert domain._path_contains("./libs/alpha/src/", "libs/alpha/src/x.py")
-    assert domain._NORMALIZED_SOURCES == {"./libs/alpha/src/": "libs/alpha/src"}
     p = policy_from_mapping({"rings": ["domain"], "classify": {}})
     assert p.scope_for_path("libs/alpha/src/y.py") is None
-    assert "libs/alpha/src/y.py" not in domain._NORMALIZED_SOURCES
 
 
 def _classify_from_repo(tmp_path, arbor: str, tach: str | None = None):  # type: ignore[no-untyped-def]

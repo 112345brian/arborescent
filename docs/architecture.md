@@ -120,6 +120,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.git_hook` | `single` | application |
 | `arborescent.install_tools` | `single` | application |
 | `arborescent.engine` | `single` | application |
+| `arborescent.check_runner` | `single` | application |
 | `arborescent.generate` | `single` | application |
 | `arborescent.architecture_contracts` | `single` | application |
 | `arborescent.practices` | `single` | application |
