@@ -41,7 +41,7 @@ def measure(spec: RatchetSpec, subject: Subject) -> dict[str, int]:
 
 
 def _in_scope(spec: RatchetSpec, module: str) -> bool:
-    return not spec.scope or any(in_unit(module, glob) for glob in spec.scope)
+    return not spec.modules or any(in_unit(module, glob) for glob in spec.modules)
 
 
 def _by_rule(rule: str, found: Sequence[Violation]) -> dict[str, int]:

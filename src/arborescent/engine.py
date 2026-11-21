@@ -424,7 +424,7 @@ def _tool(services: Services, engine: Engine, files: Sequence[str], root: Path, 
     findings: list[Violation] = []
     try:
         findings = _engine_violations(engine, result, root, services.fs)
-    except Exception as exc:
+    except (ValueError, TypeError, OSError) as exc:
         status = "fail"
         text.append(f"failed to collect violations: {exc}")
     return EngineRun(name, status, result.seconds, text[-15:] if status == "fail" else text[-1:], findings)

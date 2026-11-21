@@ -39,3 +39,12 @@ class PurityPolicy:
     ambient: tuple[str, ...] = ()  # globs on the dotted name of an imported callable, e.g. ``myapp.state.state_root``
     allow: tuple[PurityAllow, ...] = ()
     exclude_rings: tuple[str, ...] = ()  # rings whose modules the rule skips: a ring that is meant to be effectful has nothing to split
+
+    def __post_init__(self) -> None:
+        if self.min_pure_units < 1:
+            raise ValueError("`mixed_purity.min_pure_units` must be a positive integer")
+        if self.min_body_lines < 1:
+            raise ValueError("`mixed_purity.min_body_lines` must be a positive integer")
+        unknown = set(self.kinds) - KNOWN_KINDS
+        if unknown:
+            raise ValueError(f"unknown effect kind in `mixed_purity.kinds`: {sorted(unknown)}; known: {sorted(KNOWN_KINDS)}")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fnmatch
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -10,11 +9,23 @@ from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
+from . import policy_imports, policy_rings
 from .coupling_policy import CouplingPolicy
 from .effects_policy import EffectsPolicy
 from .package_constraints import PackageConstraints
+from .policy_types import (
+    ALL,
+    ArchitectureScope,
+    ConstructionSite,
+    OwnedLiteral,
+    PolicyError,
+    RingRule,
+    in_unit,
+    normalized_source_path,
+    path_contains,
+    path_under,
+)
 from .presets import (
-    DEFAULT_FORBID_CATEGORIES,
     DEFAULT_PRESET,
     DEFAULT_TAINT_SEEDS,
     EFFECT_CATEGORIES,
@@ -58,9 +69,6 @@ DISABLED_TOOL_NAMES = frozenset({"import-linter", "tach", "ruff", "pyright", "ba
 
 TACH_EXCLUDED_FOLDERS = ("__pycache__", "tests", ".venv", "venv", "node_modules")
 # The generated tach.toml `exclude` (engines.py); tach_visibility reads the same names, so the two never drift apart.
-
-ALL = "*"  # in `may_import` or `external`: no restriction
-
 
 class Rule(StrEnum):
     """Every rule id, in one place. The values are stored in baseline files (``rule|subject|detail``): never rename one."""
@@ -191,10 +199,6 @@ INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
 })
 
 
-class PolicyError(ValueError):
-    """The policy is malformed or contradicts itself (reported, never silently repaired)."""
-
-
 def _validate_disabled_tools(tools: tuple[str, ...]) -> None:
     unknown = set(tools) - DISABLED_TOOL_NAMES
     if unknown:
@@ -206,13 +210,6 @@ def _validate_disabled_tools(tools: tuple[str, ...]) -> None:
 def dist_name(name: str) -> str:
     """PEP 503 normalised distribution name."""
     return re.sub(r"[-_.]+", "-", name).lower()
-
-
-def path_under(rel: str, entry: str) -> bool:
-    """Whether repository-relative ``rel`` is ``entry`` or lies below it; both use ``/`` or ``\\`` separators."""
-    path = rel.replace("\\", "/").strip("/")
-    folder = entry.replace("\\", "/").strip("/")
-    return path == folder or path.startswith(folder + "/")
 
 
 @dataclass(frozen=True)
@@ -259,17 +256,6 @@ class ToolResult:
         return self.returncode is not None
 
 
-@dataclass(frozen=True)
-class RingRule:
-    name: str
-    may_import: frozenset[str]  # internal rings (its own is implicit); ALL = every inner ring
-    external: frozenset[str]  # top-level third-party/stdlib names; ALL = unrestricted
-    os_branching: bool = False
-    forbid: frozenset[str] | None = None  # None means the positional preset default; [] explicitly allows all effects
-    require_abstract: bool = False  # every public class/function in this ring must be an abc.ABC/typing.Protocol shape
-    require_typed_ports: bool = False  # every typing.Protocol method in this ring must name its return type (no Any/object/bare container)
-    max_reexport_ratio: float | None = None  # share of a module's public surface that may be first-party imports; None = unchecked (#136)
-
 
 @dataclass(frozen=True)
 class RatchetSpec:
@@ -278,38 +264,8 @@ class RatchetSpec:
     name: str
     measure: str  # "rule" (findings of one rule id) | "regex" (matches in the source) | "ast_call" (calls of a dotted name) | "command"
     argument: tuple[str, ...]  # the rule id, the pattern or the dotted callee (one item); the command's argv
-    scope: tuple[str, ...] = ()  # module globs; empty means every scanned module
+    modules: tuple[str, ...] = ()  # module globs (the `scope` key in `[ratchet.<name>]`); empty means every scanned module
     baseline: str = "arborescent-ratchets.json"
-
-
-@dataclass(frozen=True)
-class OwnedLiteral:
-    """A string only some modules and rings may spell (an environment variable, a protocol key): #112."""
-
-    literal: str
-    modules: tuple[str, ...] = ()  # module globs; empty means any module
-    rings: tuple[str, ...] = ()  # ring names; empty means any ring
-    reason: str = ""
-
-    def permits(self, module: str, ring: str | None) -> bool:
-        return unit_permits(self.modules, self.rings, module, ring)
-
-
-@dataclass(frozen=True)
-class ConstructionSite:
-    """A class or factory only some modules and rings may call (the composition root builds it, nothing else does): #85."""
-
-    target: str  # dotted name of the callable, e.g. "app.queries.UnfilteredQueries"
-    modules: tuple[str, ...] = ()  # module globs; empty means any module
-    rings: tuple[str, ...] = ()  # ring names; empty means any ring
-    reason: str = ""
-
-    @property
-    def target_module(self) -> str:
-        return self.target.rpartition(".")[0]
-
-    def permits(self, module: str, ring: str | None) -> bool:
-        return unit_permits(self.modules, self.rings, module, ring)
 
 
 @dataclass(frozen=True)
@@ -334,16 +290,6 @@ class DocsPolicy:
 
 
 @dataclass(frozen=True)
-class ArchitectureScope:
-    """One independently governed source tree and its import boundary."""
-
-    name: str
-    policy: Policy
-    public: tuple[str, ...] = ()
-    depends_on: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class ChildArbor:
     """A nested package root whose own direct Arborescent policy owns its source."""
 
@@ -354,16 +300,6 @@ def _validate_pattern_table(setting: str, table: Sequence[tuple[str, tuple[str, 
     for pattern, names in table:
         if not pattern or not names:
             raise PolicyError(f"`{setting}` needs non-empty module patterns and {what} lists")
-
-
-def in_unit(module: str, pattern: str) -> bool:
-    """Whether ``module`` is the module ``pattern`` names, one of its submodules, or matches it as a glob."""
-    return module == pattern or module.startswith(pattern + ".") or fnmatch.fnmatchcase(module, pattern)
-
-
-def unit_permits(modules: Sequence[str], rings: Sequence[str], module: str, ring: str | None) -> bool:
-    """The one rule behind ``owned_literal`` and ``construct_only``: an empty list allows anyone, else ``module``/``ring`` must match."""
-    return (not modules or any(in_unit(module, glob) for glob in modules)) and (not rings or ring in rings)
 
 
 @dataclass(frozen=True)
@@ -449,184 +385,105 @@ class Policy:
         """Top-level stdlib module names of the policy's target Python, not of the interpreter running arborescent."""
         return stdlib_for(self.python)
 
+    # Ring/scope/annotation lookup lives in `policy_rings`; import/effect/dev-tool rules in `policy_imports`. Both are
+    # pure query facets over this struct's fields: delegation only, so no caller's call site moves.
+
     def ring(self, name: str) -> RingRule:
-        for r in self.rings:
-            if r.name == name:
-                return r
-        raise PolicyError(f"unknown ring {name!r}")
+        return policy_rings.ring(self, name)
 
     def scope(self, name: str) -> ArchitectureScope:
         """Return a named scope or fail with a policy error."""
-        for scope in self.scopes:
-            if scope.name == name:
-                return scope
-        raise PolicyError(f"unknown scope {name!r}")
+        return policy_rings.scope(self, name)
 
     def scope_for_path(self, path: str) -> ArchitectureScope | None:
         """Find the scope whose source path owns a repository-relative file path."""
-        normalized = _normalized_source_path(path)
-        for scope in self.scopes:
-            if any(_path_contains(source, normalized) for source in scope.policy.sources):
-                return scope
-        return None
+        return policy_rings.scope_for_path(self, path)
 
     def resolve_scope_ring(
         self, scope_name: str, arbor_index: Mapping[str, tuple[str | None, str | None]], module: str,
     ) -> str | None:
         """Resolve annotations against only the named scope's ring set."""
-        return self.scope(scope_name).policy.resolve_ring(arbor_index, module)
+        return policy_rings.resolve_scope_ring(self, scope_name, arbor_index, module)
 
     def scope_annotation_violation(
         self, scope_name: str, arbor_index: Mapping[str, tuple[str | None, str | None]], module: str,
     ) -> str | None:
         """Validate a module annotation against only its owning scope's rings."""
-        return self.scope(scope_name).policy.annotation_violation(arbor_index, module)
+        return policy_rings.scope_annotation_violation(self, scope_name, arbor_index, module)
 
     def scope_annotation_required_violation(
         self, scope_name: str, arbor_index: Mapping[str, tuple[str | None, str | None]], module: str,
     ) -> str | None:
         """Validate `require_arbor_annotations` against only its owning scope's policy."""
-        return self.scope(scope_name).policy.annotation_required_violation(arbor_index, module)
+        return policy_rings.scope_annotation_required_violation(self, scope_name, arbor_index, module)
 
     def ring_of(self, module: str) -> str | None:
-        for pattern, ring in self.classify:
-            if fnmatch.fnmatchcase(module, pattern):
-                return ring
-        return None
+        return policy_rings.ring_of(self, module)
 
     def counts_effect_seam(self, seam: int) -> bool:
         """Whether an effect reference with this `EffectUse.seam` kind is a use under `effect_defaults`."""
-        if self.effect_defaults == "count":
-            return True
-        return seam == 0 if self.effect_defaults == "injection" else seam != 1
+        return policy_imports.counts_effect_seam(self, seam)
 
     def tool_may_import(self, target: str) -> bool:
-        return not self.dev_tools_may_import or any(fnmatch.fnmatchcase(target, pattern) for pattern in self.dev_tools_may_import)
+        return policy_imports.tool_may_import(self, target)
 
     def is_dev_tool_path(self, rel: str) -> bool:
         """Whether a repository-relative path is, or lies below, a `dev_tools` entry."""
-        return any(path_under(rel, entry) for entry in self.dev_tools)
+        return policy_imports.is_dev_tool_path(self, rel)
 
     def forbidden_module_pattern(self, module: str) -> str | None:
         """The first `forbidden_modules` glob matching the module's full dotted name, or None."""
-        return next((p for p in self.forbidden_modules if fnmatch.fnmatchcase(module, p)), None)
+        return policy_imports.forbidden_module_pattern(self, module)
 
     def unclassified_detail(self, module: str) -> str:
         """Explain a missing ring, hinting at ``pkg*`` when a `classify` glob names only a parent package."""
-        detail = "module matches no [classify] pattern; every module needs a ring"
-        parts = module.split(".")
-        parents = {".".join(parts[:end]) for end in range(1, len(parts))}
-        hint = next((pattern for pattern, _ in self.classify if pattern in parents), None)
-        if hint is None:
-            return detail
-        return f"{detail}; `classify` matches whole module names, so {hint!r} does not cover submodules (did you mean {hint + '*'!r}?)"
+        return policy_rings.unclassified_detail(self, module)
 
     def resolve_ring(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
         """Resolve a module's annotated ring, falling back to ``classify`` when unavailable or invalid."""
-        if self._has_valid_annotation(arbor_index, name):
-            ring, _ = arbor_index[name]
-            return ring
-        return self.ring_of(name)
+        return policy_rings.resolve_ring(self, arbor_index, name)
 
     def annotation_violation(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
         """Return why a present annotation is invalid, independently of ring fallback."""
-        if "arbor-annotations" in self.disabled_tools:
-            return None
-        annotation = arbor_index.get(name)
-        if annotation is None:
-            return None
-        ring, violation = annotation
-        if violation is not None:
-            return violation
-        if ring is not None and not any(rule.name == ring for rule in self.rings):
-            return f"__arbor__ names unknown ring {ring!r}"
-        return None
+        return policy_rings.annotation_violation(self, arbor_index, name)
 
     def annotation_ring_mismatch(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
         """Return why a valid annotation's ring disagrees with what ``classify`` would assign, if it does."""
-        if "arbor-annotations" in self.disabled_tools or self.annotation_violation(arbor_index, name) is not None:
-            return None
-        annotation = arbor_index.get(name)
-        if annotation is None:
-            return None
-        ring, _ = annotation
-        if ring is None:
-            return None
-        classify_ring = self.ring_of(name)
-        if classify_ring is not None and classify_ring != ring:
-            return f"__arbor__ names ring {ring!r}, but `classify` would assign {classify_ring!r}"
-        return None
-
-    def _has_valid_annotation(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> bool:
-        if "arbor-annotations" in self.disabled_tools:
-            return False
-        annotation = arbor_index.get(name)
-        if annotation is None:
-            return False
-        ring, violation = annotation
-        return violation is None and ring is not None and any(rule.name == ring for rule in self.rings)
+        return policy_rings.annotation_ring_mismatch(self, arbor_index, name)
 
     def annotation_required_violation(self, arbor_index: Mapping[str, tuple[str | None, str | None]], name: str) -> str | None:
         """Return why a module needs, but lacks, a valid `__arbor__` annotation, under `require_arbor_annotations`."""
-        if not self.require_arbor_annotations:
-            return None
-        if any(fnmatch.fnmatchcase(name, pattern) for pattern in self.require_arbor_annotations_exclude):
-            return None
-        if self._has_valid_annotation(arbor_index, name):
-            return None
-        ring = self.ring_of(name)
-        if ring is None:
-            return None  # unclassified's job, not this rule's
-        return f"module has no __arbor__ annotation; `classify` assigns {ring!r} only as a legacy fallback; place a new module with `arborescent admit {name} --ring R`, or migrate a legacy one with `arborescent annotate --legacy --against REF`"
+        return policy_rings.annotation_required_violation(self, arbor_index, name)
 
     def forbidden_imports(self, module: str) -> frozenset[str]:
         """Module-specific internal import restrictions, additive across matching globs."""
-        return frozenset(target for pattern, targets in self.module_forbid_imports if fnmatch.fnmatchcase(module, pattern) for target in targets)
+        return policy_imports.forbidden_imports(self, module)
 
     def restricted_importers(self, importer: str, target: str) -> tuple[str, ...] | None:
         """The importer globs that forbid ``importer`` from importing ``target`` under ``importable_by``, or None when it is allowed.
 
         A module inside a restricted unit (the module itself or its submodules) may always import within it."""
-        for pattern, allowed in self.importable_by:
-            if in_unit(target, pattern) and not in_unit(importer, pattern) and not any(fnmatch.fnmatchcase(importer, glob) for glob in allowed):
-                return allowed
-        return None
+        return policy_imports.restricted_importers(self, importer, target)
 
     def forbids_module_import(self, module: str, target: str) -> str | None:
         """Return the configured target restriction that matches an imported module, if any."""
-        return next((banned for banned in sorted(self.forbidden_imports(module)) if target == banned or target.startswith(banned + ".") or fnmatch.fnmatchcase(target, banned)), None)
+        return policy_imports.forbids_module_import(self, module, target)
 
     def allowed_rings(self, ring: str) -> frozenset[str]:
         """The rings a module of ``ring`` may import: itself plus its declared inner rings."""
-        rule = self.ring(ring)
-        names = [r.name for r in self.rings]
-        inner = names[: names.index(ring)]
-        return frozenset({ring, *(inner if ALL in rule.may_import else rule.may_import & set(inner))})
+        return policy_rings.allowed_rings(self, ring)
 
     def forbidden_effects(self, ring: str) -> frozenset[str]:
         """Resolve a ring's effect policy; the outermost ring wins for a one-ring policy."""
-        rule = self.ring(ring)
-        position = next(i for i, candidate in enumerate(self.rings) if candidate.name == ring)
-        forbidden: frozenset[str]
-        if rule.forbid is not None:
-            forbidden = rule.forbid
-        elif position == len(self.rings) - 1:
-            forbidden = frozenset[str]()
-        elif position == 0:
-            forbidden = DEFAULT_FORBID_CATEGORIES
-        else:
-            forbidden = self.preset.middle_forbid
-        if forbidden and "dynamic-import" not in forbidden:
-            forbidden = forbidden | frozenset[str]({"dynamic-import"})
-        return forbidden
+        return policy_imports.forbidden_effects(self, ring)
 
     def restricts_external(self, top: str, is_stdlib: bool) -> bool:
         """Whether importing external package ``top`` needs an entry in the importing ring's allow-list."""
-        return self.preset.restricts(top, is_stdlib, self.io_modules)
+        return policy_imports.restricts_external(self, top, is_stdlib)
 
     def expressible_by_layers(self) -> bool:
         """True when every ring may import ALL inner rings, so tach's layers alone state the policy."""
-        return all(self.allowed_rings(r.name) == frozenset(x.name for x in self.rings[: i + 1]) for i, r in enumerate(self.rings))
+        return policy_rings.expressible_by_layers(self)
 
 
 def _validate_package_catalog(value: str | None) -> None:
@@ -682,26 +539,6 @@ def _validate_rings(rings: tuple[RingRule, ...], classify: tuple[tuple[str, str]
             raise PolicyError(f"classify {pattern!r} names unknown ring {ring!r}")
 
 
-_NORMALIZED_SOURCES: dict[str, str] = {}
-
-
-def _normalized_source_path(value: str) -> str:
-    return PurePosixPath(value).as_posix().removeprefix("./").rstrip("/") or "."
-
-
-def _normalized_source(value: str) -> str:
-    """Memoized for configured source roots only (a small fixed set); per-file paths must not enter this cache."""
-    cached = _NORMALIZED_SOURCES.get(value)
-    if cached is None:
-        cached = _NORMALIZED_SOURCES[value] = _normalized_source_path(value)
-    return cached
-
-
-def _path_contains(source: str, path: str) -> bool:
-    source = _normalized_source(source)
-    return source == "." or path == source or path.startswith(source + "/")
-
-
 def _validate_scopes(scopes: tuple[ArchitectureScope, ...]) -> None:
     names = [scope.name for scope in scopes]
     if any(not name for name in names) or len(names) != len(set(names)):
@@ -731,7 +568,7 @@ def _validate_child_arbors(children: tuple[ChildArbor, ...]) -> None:
         raise PolicyError("child arbor paths must be unique")
     for index, path in enumerate(paths):
         for other in paths[index + 1 :]:
-            if _path_contains(path, other) or _path_contains(other, path):
+            if path_contains(path, other) or path_contains(other, path):
                 raise PolicyError(f"child arbor paths may not overlap: {path!r} and {other!r}")
 
 
@@ -754,9 +591,9 @@ def _validate_scope_source_paths(scopes: tuple[ArchitectureScope, ...]) -> None:
         for source in scope.policy.sources:
             if any(char in source for char in "*?["):
                 raise PolicyError(f"scope source paths must be literal paths, got {source!r}")
-            normalized = _normalized_source_path(source)
+            normalized = normalized_source_path(source)
             for other_name, other_path in owned:
-                if _path_contains(normalized, other_path) or _path_contains(other_path, normalized):
+                if path_contains(normalized, other_path) or path_contains(other_path, normalized):
                     raise PolicyError(
                         f"scope source paths overlap: {other_name!r} owns {other_path!r} and "
                         f"{scope.name!r} owns {normalized!r}"

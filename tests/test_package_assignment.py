@@ -9,7 +9,7 @@ import pytest
 
 from arborescent.domain import INFORMATIONAL_RULES, Rule, Violation
 from arborescent.package_assignment import (
-    RepositoryFacts,
+    WorkspaceFacts,
     assignment_violations,
     owners_of,
 )
@@ -35,12 +35,12 @@ def package(identifier: str, *paths: str, depends_on: tuple[str, ...] = ()) -> P
 def facts(
     modules: dict[str, str] | None = None, *, rings: dict[str, str | None] | None = None,
     imports: dict[str, tuple[str, ...]] | None = None, assets: tuple[str, ...] = (),
-) -> RepositoryFacts:
+) -> WorkspaceFacts:
     modules = modules or {}
-    return RepositoryFacts(modules, rings or dict.fromkeys(modules, "domain"), imports or {}, assets)
+    return WorkspaceFacts(modules, rings or dict.fromkeys(modules, "domain"), imports or {}, assets)
 
 
-def found(catalog: CatalogDocument, data: RepositoryFacts, rule: Rule) -> list[Violation]:
+def found(catalog: CatalogDocument, data: WorkspaceFacts, rule: Rule) -> list[Violation]:
     return [v for v in assignment_violations(catalog, data) if v.rule == rule]
 
 

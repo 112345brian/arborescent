@@ -18,6 +18,7 @@ from typing import Protocol
 from .admission_probes import admission_probes
 from .construct_only_probes import construct_only_mutations
 from .domain import NOISE_DIRS, ArchitectureScope, Mutation, Policy, Rule
+from .policy_types import PolicyLike
 from .engine import Services, package_checks, run_own
 from .facts import ModuleInfo
 from .importable_by_probes import importable_by_mutations
@@ -292,7 +293,7 @@ def _import_propagation_mutations(policy: Policy, scan: ScanView) -> tuple[list[
 
 
 def _one_import_propagation_mutation(
-    policy: Policy, known: Collection[str], paths: Mapping[str, str],
+    policy: PolicyLike, known: Collection[str], paths: Mapping[str, str],
     arbor_index: Mapping[str, tuple[str | None, str | None]], modules: Mapping[str, ModuleInfo],
 ) -> Mutation | None:
     for ring in policy.rings:
@@ -320,7 +321,7 @@ def _one_import_propagation_mutation(
 
 
 def _leaking_sibling(
-    policy: Policy, forbidden: frozenset[str], known: Collection[str], modules: Mapping[str, ModuleInfo], host: tuple[str, ModuleInfo],
+    policy: PolicyLike, forbidden: frozenset[str], known: Collection[str], modules: Mapping[str, ModuleInfo], host: tuple[str, ModuleInfo],
 ) -> tuple[str, str] | None:
     """A module within reach that isn't already imported by ``host`` and directly uses a forbidden effect."""
     host_name, host_info = host

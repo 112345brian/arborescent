@@ -65,6 +65,9 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 |---|---|---|
 | `arborescent` | `single` | domain |
 | `arborescent.domain` | `single` | domain |
+| `arborescent.policy_types` | `single` | domain |
+| `arborescent.policy_rings` | `single` | domain |
+| `arborescent.policy_imports` | `single` | domain |
 | `arborescent.facts` | `single` | domain |
 | `arborescent.forwarder_facts` | `single` | domain |
 | `arborescent.stdlib` | `single` | domain |
@@ -95,9 +98,9 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.driver_port` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
-| `arborescent.baseline_report` | `single` | application |
+| `arborescent.baseline_report` | `single` | domain |
 | `arborescent.baseline_history` | `single` | application |
-| `arborescent.ratchet_config` | `single` | application |
+| `arborescent.ratchet_config` | `single` | domain |
 | `arborescent.ratchet_measure` | `single` | application |
 | `arborescent.ratchets` | `single` | application |
 | `arborescent.pytest_io_block` | `single` | composition |
@@ -111,7 +114,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.architecture_contracts` | `single` | application |
 | `arborescent.practices` | `single` | application |
 | `arborescent.selftest` | `single` | application |
-| `arborescent.admission_probes` | `single` | application |
+| `arborescent.admission_probes` | `single` | domain |
 | `arborescent.admitted_against` | `single` | application |
 | `arborescent.suggestions` | `single` | application |
 | `arborescent.packages` | `single` | application |
@@ -128,11 +131,11 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.driver_plan` | `single` | application |
 | `arborescent.local_targets` | `single` | application |
 | `arborescent.driver_rewrite` | `single` | application |
-| `arborescent.module_forbid_probes` | `single` | application |
-| `arborescent.importable_by_probes` | `single` | application |
-| `arborescent.owned_literal_probes` | `single` | application |
-| `arborescent.construct_only_probes` | `single` | application |
-| `arborescent.purity_probes` | `single` | application |
+| `arborescent.module_forbid_probes` | `single` | domain |
+| `arborescent.importable_by_probes` | `single` | domain |
+| `arborescent.owned_literal_probes` | `single` | domain |
+| `arborescent.construct_only_probes` | `single` | domain |
+| `arborescent.purity_probes` | `single` | domain |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |
@@ -141,20 +144,20 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.scanner` | `single` | adapters |
 | `arborescent.tool_runner` | `single` | adapters |
 | `arborescent.engines` | `single` | adapters |
-| `arborescent.driver_filter_repo` | `single` | adapters |
-| `arborescent.driver_libcst` | `single` | adapters |
+| `arborescent.driver_filter_repo` | `single` | application |
+| `arborescent.driver_libcst` | `single` | application |
 | `arborescent.driver_libcst_scan` | `single` | adapters |
 | `arborescent.tach_visibility` | `single` | domain |
 | `arborescent.classify_audit` | `single` | domain |
 | `arborescent.taint` | `single` | domain |
 | `arborescent.coupling` | `single` | domain |
 | `arborescent.coupling_policy` | `single` | domain |
-| `arborescent.coupling_ratchet` | `single` | domain |
+| `arborescent.coupling_ratchet` | `single` | application |
 | `arborescent.package_constraints` | `single` | domain |
 | `arborescent.package_constraint_rules` | `single` | domain |
-| `arborescent.package_constraint_probes` | `single` | application |
+| `arborescent.package_constraint_probes` | `single` | domain |
 | `arborescent.testing` | `single` | adapters |
-| `arborescent.typecheckers` | `single` | adapters |
+| `arborescent.typecheckers` | `single` | domain |
 | `arborescent.__main__` | `single` | composition |
 | `arborescent.cli` | `single` | composition |
 | `arborescent.cli_ratchet` | `single` | composition |
@@ -163,8 +166,9 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.cli_baseline_report` | `single` | composition |
 | `arborescent.cli_migrate` | `single` | composition |
 | `arborescent.cli_coupling` | `single` | composition |
-| `arborescent.cli_cycles` | `single` | composition |
-| `arborescent.cli_purity` | `single` | composition |
+| `arborescent.cli_cycles` | `single` | application |
+| `arborescent.cycles_report` | `single` | application |
+| `arborescent.cli_purity` | `single` | application |
 | `arborescent.cli_admit` | `single` | composition |
 
 ## Data flow of `arborescent check`

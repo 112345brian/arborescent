@@ -151,10 +151,8 @@ def _cost(measure: _Measure, new: NewModule) -> int:
 
 
 def _load(fs: FileSystem, path: Path) -> tuple[ratchet.Counts, list[object]] | None:
-    if not fs.exists(path):
-        return None
     try:
-        return ratchet.parse(fs.read_json(path))
+        return ratchet.load(fs, path)
     except ValueError as exc:
         raise PolicyError(f"{path.name}: {exc}") from exc
 
@@ -179,6 +177,6 @@ def _baseline(measure: _Measure, fs: FileSystem, path: Path, args: argparse.Name
         document = ratchet.next_document(_load(fs, path), counts, args.allow_growth, args.reason)
     except ValueError as exc:
         raise PolicyError(str(exc)) from exc
-    fs.write_json(path, document)
+    ratchet.save(fs, path, document)
     print(f"coupling baseline: recorded {sum(len(table) for table in counts.values())} count(s) in {path.name}")
     return 0

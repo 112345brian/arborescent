@@ -9,7 +9,6 @@ the algorithms cost.
 from __future__ import annotations
 
 import dataclasses
-import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -35,11 +34,12 @@ def _clear(fs: FileSystem, root: Path) -> None:
 
 
 class _Timer:
-    """Times each step twice (cold, then warm), printing progress to stderr and keeping the table rows."""
+    """Times each step twice (cold, then warm), reporting progress through the injected callback and keeping the table rows."""
 
-    def __init__(self, svc: Services, root: Path) -> None:
+    def __init__(self, svc: Services, root: Path, report: Callable[[str], None]) -> None:
         self._svc = svc
         self._root = root
+        self._report = report
         self.rows: list[tuple[str, str, str, str]] = []  # engine, cold, warm, note
 
     def twice(self, label: str, fn: Callable[[], str], reset: Callable[[], None] | None = None) -> None:
@@ -54,7 +54,7 @@ class _Timer:
         fn()
         warm = clock.now() - t0
         self.rows.append((label, f"{cold:.2f}", f"{warm:.2f}", note))
-        print(f"  [{root.name}] {label}: cold {cold:.2f}s warm {warm:.2f}s {note}", file=sys.stderr, flush=True)
+        self._report(f"  [{root.name}] {label}: cold {cold:.2f}s warm {warm:.2f}s {note}")
 
 
 def _tool(svc: Services, root: Path, argv: list[str]) -> Callable[[], str]:
@@ -84,13 +84,15 @@ def _whole_check(policy: Policy, root: Path, svc: Services, first: str) -> Calla
     return whole
 
 
-def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]) -> list[str]:
+def bench_one(
+    root: Path, names: Sequence[str], make: Callable[[Path], Services], report: Callable[[str], None] = lambda _line: None,
+) -> list[str]:
     svc = make(root)
     fs = svc.fs
     policy, _ = load_policy(fs, root / "arborescent.toml")
     policy = dataclasses.replace(policy, type_checkers=tuple(names))
     _ = pick_checker(policy, svc)  # an unknown checker name is a PolicyError before anything is timed
-    timer = _Timer(svc, root)
+    timer = _Timer(svc, root, report)
     scan = svc.scanner.scan(policy, root)
     _clear(fs, root)
     timer.twice("arborescent own checks (parse+rules)", _own_checks(policy, root, svc), lambda: _clear(fs, root))
@@ -114,7 +116,8 @@ def bench_one(root: Path, names: Sequence[str], make: Callable[[Path], Services]
     return out
 
 
-def run_bench(dirs: Sequence[Path], names: Sequence[str], make: Callable[[Path], Services]) -> int:
-    for d in dirs:
-        print("\n".join(bench_one(d.resolve(), list(names), make)) + "\n")
-    return 0
+def run_bench(
+    dirs: Sequence[Path], names: Sequence[str], make: Callable[[Path], Services], report: Callable[[str], None] = lambda _line: None,
+) -> list[str]:
+    """One markdown block per directory; the caller (the delivery layer) decides where that text goes."""
+    return [("\n".join(bench_one(d.resolve(), list(names), make, report)) + "\n") for d in dirs]

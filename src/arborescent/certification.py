@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .domain import Policy, RingRule
     from .facts import ModuleInfo
+    from .policy_types import PolicyLike
     from .ports import FileSystem, ScanResult, ToolRunner
 
 from .domain import NOISE_DIRS, ToolResult
@@ -87,7 +88,7 @@ def _native_minimum(policy: Policy, scan: object) -> list[str]:
     return failures
 
 
-def _native_scope_minimum(scope_name: str, policy: Policy) -> list[str]:
+def _native_scope_minimum(scope_name: str, policy: PolicyLike) -> list[str]:
     failures: list[str] = []
     outer = policy.rings[-1].name
     prefix = f"scope {scope_name} " if scope_name else ""

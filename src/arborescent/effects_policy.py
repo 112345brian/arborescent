@@ -23,3 +23,7 @@ class EffectsPolicy:
     sanctioned: tuple[str, ...] = ()
     rings: tuple[str, ...] = DEFAULT_PROVIDER_RINGS
     configured: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.rings:
+            raise ValueError("`effects.rings` must name at least one ring")

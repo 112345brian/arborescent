@@ -289,6 +289,15 @@ def _add_bench_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> Non
     )
 
 
+def _run_bench(args: argparse.Namespace) -> int:
+    def report_progress(line: str) -> None:
+        print(line, file=sys.stderr, flush=True)
+
+    for block in run_bench(args.dirs, args.checkers, default_services, report_progress):
+        print(block)
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None, services: Services | None = None, library: MigrationLibrary | None = None,
     rewriter: ImportRewriter | None = None, environ: Mapping[str, str] | None = None,
@@ -301,7 +310,7 @@ def main(
         parser.error("--with-dependencies was removed: a dependency is a separate package, so extract each one on its own")
     try:
         if args.command == "bench":
-            return run_bench(args.dirs, args.checkers, default_services)
+            return _run_bench(args)
         fs = services.fs if services else LocalFileSystem()
         if args.command == "packages" and args.package_action == "schema":
             sys.stdout.write(render_schema())
@@ -470,9 +479,7 @@ def _baseline(
         svc.fs,
         root / policy.baseline,
         found,
-        adopt=args.adopt,
-        allow_growth=args.allow_growth,
-        reason=args.reason,
+        ratchet_mod.RecordOptions(adopt=args.adopt, allow_growth=args.allow_growth, reason=args.reason),
     )
     if approved_by is not None:
         ratchet_mod.stamp_approval(svc.fs, path, approved_by, logged)

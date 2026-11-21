@@ -23,7 +23,7 @@ class FilterRepo:
 
     def __init__(self, runner: ToolRunner, fs: FileSystem) -> None:
         self._runner = runner
-        self._fs = fs
+        self.fs = fs
 
     def available(self) -> bool:
         return self._runner.available(EXECUTABLE) and self._runner.available("git")
@@ -40,7 +40,7 @@ class FilterRepo:
         return tuple(out)
 
     def supply(self, request: MigrationRequest) -> MigrationOutcome:
-        if self._fs.exists(request.target):
+        if self.fs.exists(request.target):
             return MigrationOutcome(False, f"{request.target} exists; the new repository must not")
         made = self._runner.run(["git", "init", "--quiet", "--initial-branch", request.branch, str(request.target)], request.source)
         if made.returncode != 0:

@@ -43,6 +43,7 @@ from .package_constraint_rules import (
     use_violations,
 )
 from .package_constraints import PackageConstraints
+from .policy_types import PolicyLike
 from .purity import (
     Followed,
     ModulePurity,
@@ -307,7 +308,7 @@ def _owner_text(item: OwnedLiteral) -> str:
     return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
 
 
-def _stale_owned_literals(policy: Policy, modules: Collection[str]) -> list[Violation]:
+def _stale_owned_literals(policy: PolicyLike, modules: Collection[str]) -> list[Violation]:
     """An owner glob that matches no module: after a rename the literal would be owned by nobody."""
     return [
         Violation(Rule.LITERAL_OUTSIDE_OWNER, item.literal, f"`owned_literal` {item.literal!r}: modules glob {glob!r} matches no module")
@@ -341,7 +342,7 @@ def _site_text(item: ConstructionSite) -> str:
     return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
 
 
-def _stale_construction_sites(policy: Policy, modules: Collection[str]) -> list[Violation]:
+def _stale_construction_sites(policy: PolicyLike, modules: Collection[str]) -> list[Violation]:
     """A target module or owner glob that matches no module: after a rename the rule would restrict, or allow, nothing."""
     out: list[Violation] = []
     for item in policy.construct_only:
@@ -354,7 +355,7 @@ def _stale_construction_sites(policy: Policy, modules: Collection[str]) -> list[
     return out
 
 
-def _stale_importable_by(policy: Policy, modules: Collection[str]) -> list[Violation]:
+def _stale_importable_by(policy: PolicyLike, modules: Collection[str]) -> list[Violation]:
     """Each `importable_by` key or importer glob that matches no module: a rename would otherwise leave the rule restricting nothing."""
     out: list[Violation] = []
     for pattern, allowed in policy.importable_by:
@@ -498,7 +499,7 @@ def _reexport_findings(name: str, ring: str, rule: RingRule, info: ModuleInfo, p
 
 
 def _entry_dependencies(
-    policy: Policy, known: Collection[str], entry_deps: Mapping[str, tuple[str, ...] | None], third_party: ThirdParty
+    policy: PolicyLike, known: Collection[str], entry_deps: Mapping[str, tuple[str, ...] | None], third_party: ThirdParty
 ) -> list[Violation]:
     out: list[Violation] = []
     for script in policy.entry_scripts:

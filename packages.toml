@@ -81,6 +81,18 @@ path = "src/arborescent/domain.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/policy_types.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/policy_rings.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/policy_imports.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/equivalence.py"
 role = "source"
 
@@ -439,6 +451,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/cli_cycles.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cycles_report.py"
 role = "source"
 
 [[packages.paths]]

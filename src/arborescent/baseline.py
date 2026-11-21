@@ -11,8 +11,8 @@ from .domain import PolicyError, Rule, Violation
 from .ports import FileSystem
 
 __all__ = [
-    "Ratchet", "apply", "growth_consistent", "growth_count", "internal_import_summary", "load", "prune", "record", "save",
-    "stamp_approval", "values_growth_problems",
+    "Ratchet", "RecordOptions", "apply", "growth_consistent", "growth_count", "internal_import_summary", "load", "prune",
+    "record", "save", "stamp_approval", "values_growth_problems",
 ]
 
 VERSION = 2
@@ -63,17 +63,19 @@ def save(fs: FileSystem, path: Path, violations: Iterable[Violation]) -> int:
     return len(keys)
 
 
-def record(
-    fs: FileSystem,
-    path: Path,
-    violations: Iterable[Violation],
-    *,
-    adopt: str | None = None,
-    allow_growth: bool = False,
-    reason: str | None = None,
-) -> int:
+@dataclass(frozen=True)
+class RecordOptions:
+    """How `record` may grow the baseline: a one-time adoption, an unconditional allowance, or an explicit reason."""
+
+    adopt: str | None = None
+    allow_growth: bool = False
+    reason: str | None = None
+
+
+def record(fs: FileSystem, path: Path, violations: Iterable[Violation], options: RecordOptions | None = None) -> int:
     """Create or shrink a baseline; growth requires a one-time adoption or an explicit reason."""
-    _validate_record_options(adopt, allow_growth, reason)
+    opts = options or RecordOptions()
+    _validate_record_options(opts.adopt, opts.allow_growth, opts.reason)
     current = {v.key for v in violations}
     if not fs.is_file(path):
         fs.write_json(path, {"version": VERSION, "violations": sorted(current), "growth": []})
@@ -85,7 +87,7 @@ def record(
     if not isinstance(old_violations, list) or not isinstance(existing_growth, list):
         raise ValueError("baseline violations and growth must be arrays")
     old = {str(key) for key in old_violations}
-    growth = [*existing_growth, *_growth_entries(old, current, adopt, allow_growth, reason)]
+    growth = [*existing_growth, *_growth_entries(old, current, opts.adopt, opts.allow_growth, opts.reason)]
     fs.write_json(path, {"version": VERSION, "violations": sorted(current), "growth": growth})
     return len(current)
 

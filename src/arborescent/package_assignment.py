@@ -15,11 +15,11 @@ from .domain import Rule, Violation
 from .package_fields import glob_match
 from .package_model import CatalogDocument
 
-__all__ = ["OwnershipIndex", "RepositoryFacts", "assignment_violations", "dependency_cycle", "owners_of"]
+__all__ = ["OwnershipIndex", "WorkspaceFacts", "assignment_violations", "dependency_cycle", "owners_of"]
 
 
 @dataclass(frozen=True, slots=True)
-class RepositoryFacts:
+class WorkspaceFacts:
     modules: Mapping[str, str]  # first-party module -> posix path relative to the repository root
     rings: Mapping[str, str | None]  # module -> its effective ring (None when unclassified)
     imports: Mapping[str, tuple[str, ...]]  # module -> first-party modules it imports
@@ -66,7 +66,7 @@ def owners_of(catalog: CatalogDocument, path: str, *, asset: bool = False, index
     return tuple(sorted(found))
 
 
-def assignment_violations(catalog: CatalogDocument, facts: RepositoryFacts) -> list[Violation]:
+def assignment_violations(catalog: CatalogDocument, facts: WorkspaceFacts) -> list[Violation]:
     out: list[Violation] = []
     index = OwnershipIndex(catalog)
     sole: dict[str, str] = {}  # module -> its only owning package
@@ -105,7 +105,7 @@ def _names(owners: Sequence[str]) -> str:
 
 
 def _ring_spans(
-    catalog: CatalogDocument, facts: RepositoryFacts, claimed: Mapping[str, tuple[str, ...]]
+    catalog: CatalogDocument, facts: WorkspaceFacts, claimed: Mapping[str, tuple[str, ...]]
 ) -> list[Violation]:
     out: list[Violation] = []
     for package in catalog.packages:
@@ -120,7 +120,7 @@ def _ring_spans(
     return out
 
 
-def _undeclared_edges(catalog: CatalogDocument, facts: RepositoryFacts, sole: Mapping[str, str]) -> list[Violation]:
+def _undeclared_edges(catalog: CatalogDocument, facts: WorkspaceFacts, sole: Mapping[str, str]) -> list[Violation]:
     declared = {package.id: set(package.depends_on) for package in catalog.packages}
     out: list[Violation] = []
     for module, owner in sorted(sole.items()):
@@ -169,7 +169,7 @@ def _dependency_cycle(catalog: CatalogDocument) -> list[Violation]:
     )]
 
 
-def _unused_dependencies(catalog: CatalogDocument, facts: RepositoryFacts, sole: Mapping[str, str]) -> list[Violation]:
+def _unused_dependencies(catalog: CatalogDocument, facts: WorkspaceFacts, sole: Mapping[str, str]) -> list[Violation]:
     """A declared ``depends_on`` that no module of the package uses widens what the package may import, unnoticed. Information:
     a dependency can be real without a static import (a plugin, a runtime-loaded or asset-only one)."""
     used: dict[str, set[str]] = {}
@@ -186,7 +186,7 @@ def _unused_dependencies(catalog: CatalogDocument, facts: RepositoryFacts, sole:
     ]
 
 
-def _never_depended_on(catalog: CatalogDocument, facts: RepositoryFacts, sole: Mapping[str, str]) -> list[Violation]:
+def _never_depended_on(catalog: CatalogDocument, facts: WorkspaceFacts, sole: Mapping[str, str]) -> list[Violation]:
     """A package that depends on nothing and that no other package declares or imports is dead weight the other package checks
     cannot see (#130). Information: a package with its own ``depends_on`` is a consumer or entrypoint, not an orphan, and a
     single-package catalog has nobody to depend on it."""
@@ -209,7 +209,7 @@ def _never_depended_on(catalog: CatalogDocument, facts: RepositoryFacts, sole: M
     ]
 
 
-def _owns_everything(catalog: CatalogDocument, facts: RepositoryFacts, sole: Mapping[str, str]) -> list[Violation]:
+def _owns_everything(catalog: CatalogDocument, facts: WorkspaceFacts, sole: Mapping[str, str]) -> list[Violation]:
     """One package owning every module is not a partition: every ownership and dependency check passes trivially.
     Information, because a one-package catalog is a legitimate way to own assets."""
     owners = set(sole.values())

@@ -18,3 +18,11 @@ class CouplingPolicy:
     fan_in_max: tuple[tuple[str, int], ...] = ()
     hub_fan_in: int = DEFAULT_HUB_FAN_IN
     baseline: str = DEFAULT_BASELINE
+
+    def __post_init__(self) -> None:
+        if self.hub_fan_in < 1:
+            raise ValueError("`coupling.hub_fan_in` must be a positive integer")
+        if not self.baseline:
+            raise ValueError("`coupling.baseline` must be a file path")
+        if any(cap < 1 for _, cap in self.fan_in_max):
+            raise ValueError("`coupling.fan_in_max` must map ring names to positive integers")

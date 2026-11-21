@@ -94,7 +94,7 @@ def test_each_measure_is_read_from_its_table() -> None:
         "c": {"ast_call": "json5.load"},
         "k": {"command": ["python", "scan.py"]},
     })
-    assert [(s.name, s.measure, s.argument, s.scope, s.baseline) for s in specs] == [
+    assert [(s.name, s.measure, s.argument, s.modules, s.baseline) for s in specs] == [
         ("c", "ast_call", ("json5.load",), (), BASELINE),
         ("g", "regex", (r"TODO\b",), (), "x.json"),
         ("k", "command", ("python", "scan.py"), (), BASELINE),
@@ -145,8 +145,8 @@ def write_modules(root: Path, sources: Mapping[str, str]) -> dict[str, str]:
     return {m: f"{m.replace('.', '/')}.py" for m in sources}
 
 
-def spec(measure_name: str, *argument: str, scope: tuple[str, ...] = ()) -> RatchetSpec:
-    return RatchetSpec("n", measure_name, argument, scope)
+def spec(measure_name: str, *argument: str, modules: tuple[str, ...] = ()) -> RatchetSpec:
+    return RatchetSpec("n", measure_name, argument, modules)
 
 
 def test_ast_call_counts_dotted_calls_not_names_strings_or_comments(tmp_path: Path) -> None:
@@ -166,13 +166,13 @@ def test_regex_counts_matches_per_line_start_and_skips_zero(tmp_path: Path) -> N
 
 def test_scope_limits_which_modules_count(tmp_path: Path) -> None:
     paths = write_modules(tmp_path, {"a": "print(1)\n", "b": "print(1)\n"})
-    assert measure(spec("ast_call", "print", scope=("b",)), subject(tmp_path, paths)) == {"b": 1}
+    assert measure(spec("ast_call", "print", modules=("b",)), subject(tmp_path, paths)) == {"b": 1}
 
 
 def test_rule_counts_findings_by_subject() -> None:
     found = [Violation(Rule.SUPPRESSION, "a", "x#1"), Violation(Rule.SUPPRESSION, "a", "x#2"), Violation(Rule.DISCARD, "a", "c#1"), Violation(Rule.SUPPRESSION, "b", "x#1")]
     assert measure(spec("rule", "suppression"), subject(Path(), {}, found)) == {"a": 2, "b": 1}
-    assert measure(spec("rule", "suppression", scope=("b",)), subject(Path(), {}, found)) == {"b": 1}
+    assert measure(spec("rule", "suppression", modules=("b",)), subject(Path(), {}, found)) == {"b": 1}
 
 
 @pytest.mark.parametrize("source", ["def (:\n", "x = '\x00'\n"])

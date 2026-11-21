@@ -14,7 +14,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields
 
 from .domain import Rule, Violation
-from .package_assignment import OwnershipIndex, RepositoryFacts, owners_of
+from .package_assignment import OwnershipIndex, WorkspaceFacts, owners_of
 from .package_model import (
     CatalogDocument,
     ExtractedPath,
@@ -41,7 +41,7 @@ class PartFacts:
     imports: Mapping[str, tuple[str, ...]]  # module -> modules it imports; those of other parts resolve by origin identity
 
 
-def sole_owners(catalog: CatalogDocument, facts: RepositoryFacts) -> dict[str, str]:
+def sole_owners(catalog: CatalogDocument, facts: WorkspaceFacts) -> dict[str, str]:
     """Module -> its only owning package (modules owned by none or by several are #52's findings, not ours)."""
     index = OwnershipIndex(catalog)
     return {
@@ -60,7 +60,7 @@ def is_public(module: str, patterns: Iterable[str]) -> bool:
 
 
 def preservation_violations(
-    catalog: CatalogDocument, facts: RepositoryFacts, parts: Sequence[PartFacts]
+    catalog: CatalogDocument, facts: WorkspaceFacts, parts: Sequence[PartFacts]
 ) -> list[Violation]:
     """Private-import bypasses in the origin, then the drift of each configured part against the catalog."""
     sole = sole_owners(catalog, facts)
@@ -142,7 +142,7 @@ def _changed_paths(part: PartFacts, package: PackageDescriptor) -> list[Violatio
 
 
 def _membership(
-    sole: Mapping[str, str], facts: RepositoryFacts, part: PartFacts, expected: set[str]
+    sole: Mapping[str, str], facts: WorkspaceFacts, part: PartFacts, expected: set[str]
 ) -> list[Violation]:
     out = [
         Violation(Rule.PACKAGE_MEMBERSHIP_DRIFT, module, f"part {part.location!r}: module of package {sole[module]!r} is missing")
@@ -159,7 +159,7 @@ def _membership(
     return out
 
 
-def _rings(facts: RepositoryFacts, part: PartFacts, expected: set[str]) -> list[Violation]:
+def _rings(facts: WorkspaceFacts, part: PartFacts, expected: set[str]) -> list[Violation]:
     return [
         Violation(
             Rule.PACKAGE_RING_DRIFT, module,
@@ -171,7 +171,7 @@ def _rings(facts: RepositoryFacts, part: PartFacts, expected: set[str]) -> list[
 
 
 def _symbols(
-    sole: Mapping[str, str], public: Mapping[str, tuple[str, ...]], facts: RepositoryFacts, part: PartFacts, expected: set[str]
+    sole: Mapping[str, str], public: Mapping[str, tuple[str, ...]], facts: WorkspaceFacts, part: PartFacts, expected: set[str]
 ) -> list[Violation]:
     out: list[Violation] = []
     for module in sorted(expected & part.module_paths.keys()):
