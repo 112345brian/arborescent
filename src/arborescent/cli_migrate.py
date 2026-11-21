@@ -27,12 +27,9 @@ from .engine import Services
 from .installer_adapter import manual_install_command, shell_join
 from .local_targets import (
     DEFAULT_CONFIG,
-    ChosenTarget,
-    ConfigLocation,
-    choose_target,
-    load_local_targets,
     locate_config,
     missing_target_message,
+    resolve_target,
 )
 from .migration_export import migration_arguments_of
 from .package_gaps import load_package_context
@@ -82,7 +79,11 @@ def add_migrate_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> No
 def run_migrate(args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: MigrationTools) -> int:
     library, rewriter = tools.library, tools.rewriter
     arguments = migration_arguments_of(policy, root, svc.fs, svc.scanner.scan(policy, root), svc.scanner)
-    location, chosen = _resolve_target(args, root, svc, tools, tuple(item.id for item in arguments.packages))
+    # Machine-specific, so never in the export or a derived file: the flag (relative to the current directory), else the
+    # git-ignored local config, which only this command reads.
+    flag = None if args.target is None else (args.target if args.target.is_absolute() else Path.cwd() / args.target)
+    location = locate_config(root, tools.environ, svc.fs)
+    chosen = resolve_target(args.package_id, flag, location, svc.fs, tuple(item.id for item in arguments.packages))
     # A target is only needed once the plan turns out to be ready, so a blocked package is still explained without one.
     site = MigrationSite(root, root / DEFAULT_CONFIG.parent / "no-target" if chosen is None else chosen.path, args.branch)
     plan = plan_supply(arguments, args.package_id, library, site)
@@ -151,20 +152,6 @@ def _supply_and_rewrite(plan: DriverPlan, tools: MigrationTools, site: Migration
     print(f"ok: {rewritten.detail}")
     print(f"the rewrite is an uncommitted change in {site.target}: review it with `git -C {site.target} diff`, then commit it")
     return 0
-
-
-def _resolve_target(
-    args: argparse.Namespace, root: Path, svc: Services, tools: MigrationTools, known: tuple[str, ...]
-) -> tuple[ConfigLocation, ChosenTarget | None]:
-    """Where the new repository is checked out is machine-specific: the flag, else the git-ignored local config.
-
-    This command is the only reader of that config; the export, derived files and contracts never see it. The config is
-    not read at all when the flag already names the directory.
-    """
-    flag = None if args.target is None else (args.target if args.target.is_absolute() else Path.cwd() / args.target)
-    location = locate_config(root, tools.environ, svc.fs)
-    targets = None if flag is not None else load_local_targets(svc.fs, location, known)
-    return location, choose_target(args.package_id, flag, targets)
 
 
 def _setup_line(library: MigrationLibrary | ImportRewriter, root: Path, svc: Services) -> str:

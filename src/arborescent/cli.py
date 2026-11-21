@@ -16,26 +16,32 @@ from .adapters import (
     SubprocessToolRunner,
     SystemClock,
 )
-from .admitted_against import admission_problems
 from .annotate import apply_annotations, new_since, plan_annotations
 from .bench import run_bench
+from .check_gates import admission_check, growth_check, stale_engine_findings
 from .classify_audit import suggest_ring
-from .cli_admit import add_admit_parser, run_admit
-from .cli_baseline_report import add_report_parser, run_report
-from .cli_coupling import add_coupling_parser, run_coupling
+from .cli_admit import run_admit
+from .cli_arguments import (
+    build_parser,
+    catalog_root,
+    core_mode_conflict,
+    growth_approver,
+    validate_rule_selection,
+)
+from .cli_baseline_report import run_report
+from .cli_coupling import run_coupling
 from .cli_cycles import run_cycles
 from .cli_install import _install_tools, _setup_install_command
-from .cli_migrate import MigrationTools, add_migrate_parser, run_migrate
+from .cli_migrate import MigrationTools, run_migrate
 from .cli_purity import run_explain, run_purity
-from .cli_ratchet import add_ratchet_parser, growth_run, run_ratchet
+from .cli_ratchet import growth_run, run_ratchet
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
-from .domain import Policy, PolicyError, Rule, Violation, path_under
+from .domain import Policy, PolicyError, path_under
 from .driver_filter_repo import FilterRepo
 from .driver_libcst import LibCstRename
 from .driver_port import ImportRewriter, MigrationLibrary
 from .engine import (
-    EngineRun,
     Options,
     Services,
     enforced,
@@ -74,221 +80,6 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
     )
 
 
-def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="arborescent",
-        description="One architecture policy -> import-linter, tach, a type checker.",
-    )
-    p.add_argument(
-        "--config",
-        type=Path,
-        help="arborescent.toml or pyproject.toml (default: search upwards)",
-    )
-    sub = p.add_subparsers(dest="command", required=True)
-    sub.add_parser("generate", help="create missing optional tool config presets")
-    install = sub.add_parser(
-        "install-tools",
-        help="install missing check tools into the active Python environment",
-    )
-    install.add_argument(
-        "--type-checker",
-        choices=sorted(all_checkers()),
-        help="install this type checker instead of the policy default",
-    )
-    install.add_argument(
-        "--yes",
-        action="store_true",
-        help="install without prompting (explicitly mutates this environment)",
-    )
-    _add_check_parser(sub.add_parser)
-    _add_maintenance_parsers(sub.add_parser)
-    _add_packages_parser(sub.add_parser)
-    _add_bench_parser(sub.add_parser)
-    return p
-
-
-def _add_check_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
-    c = add_parser(
-        "check", help="drift, engines (parallel), own checks, baseline ratchet"
-    )
-    c.add_argument(
-        "--changed", metavar="REF", help="check only files changed since this git ref"
-    )
-    c.add_argument(
-        "--type-checker",
-        choices=sorted(all_checkers()),
-        help="override the policy's type checker",
-    )
-    c.add_argument(
-        "--no-tools",
-        action="store_true",
-        help="skip import-linter, tach and the type checker",
-    )
-    c.add_argument(
-        "--engines",
-        choices=("all", "core"),
-        default="all",
-        help="`core` runs only Arborescent's own checks (the same as --no-tools): no import-linter, tach, ruff or type checker is invoked or installed",
-    )
-    c.add_argument(
-        "--list-dev-tools",
-        action="store_true",
-        help="print every `dev_tools` path with the modules below it, and annotated dev tools outside them, then exit",
-    )
-    c.add_argument(
-        "--require-tools",
-        action="store_true",
-        help="a missing engine fails instead of skipping",
-    )
-    c.add_argument(
-        "--install-tools",
-        action="store_true",
-        help="prompt to install missing check tools before checking",
-    )
-    c.add_argument(
-        "--yes",
-        action="store_true",
-        help="install missing check tools without prompting (requires --install-tools)",
-    )
-    c.add_argument(
-        "--require-profile",
-        action="store_true",
-        help="require Arborescent minimum profile v1",
-    )
-    c.add_argument(
-        "--require-modularity",
-        action="store_true",
-        help="fail unless `modularity` is \"ready\" with a package_catalog and no package gap is open",
-    )
-    c.add_argument(
-        "--require-visible",
-        action="store_true",
-        help="fail on every run-time import (importlib, __import__) that tach cannot follow",
-    )
-    c.add_argument(
-        "--no-baseline",
-        action="store_true",
-        help="ignore the baseline: report every violation",
-    )
-    c.add_argument(
-        "--growth-against",
-        metavar="REF",
-        help="verify baseline growth entries against a git ref",
-    )
-    c.add_argument(
-        "--admitted-against",
-        metavar="REF",
-        help="fail a module new since this git ref that was not validly admitted (explicit __arbor__ ring that `arborescent admit` would accept)",
-    )
-    c.add_argument(
-        "--rule",
-        action="append",
-        default=[],
-        metavar="FAMILY",
-        help="run and exit on this rule family only (repeatable; the families `baseline --adopt` accepts, or any rule id)",
-    )
-    c.add_argument("--no-cache", action="store_true")
-
-
-def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
-    b = add_parser(
-        "baseline", help="create or shrink the baseline; growth must be explicit"
-    )
-    b.add_argument("--adopt", metavar="FAMILY", help="adopt one new rule family once")
-    b.add_argument(
-        "--allow-growth",
-        action="store_true",
-        help="allow baseline growth with a required reason",
-    )
-    b.add_argument("--reason", help="explain why new baseline keys are being recorded")
-    b.add_argument("--approved-by", metavar="WHO", help="who approved the growth: a name or issue URL (required with --allow-growth)")
-    b.add_argument("--prune", action="store_true", help="only remove stale entries; never adds, works while the tree has new violations")
-    add_report_parser(b)
-    discover = add_parser(
-        "discover",
-        help="list in-scope Python files that still need a ring classification",
-    )
-    discover.add_argument("--suggest", action="store_true", help="per module, print the tightest ring its imports and effects permit, with the evidence")
-    annotate = add_parser(
-        "annotate",
-        help="migrate legacy classify matches into __arbor__ annotations (needs --legacy --against REF; new modules go through `admit`; dry-run by default)",
-    )
-    annotate.add_argument("--legacy", action="store_true", help="migrate rings a human already wrote into `classify`; records policy, not a validated placement")
-    annotate.add_argument("--against", metavar="REF", help="git reference: modules added since its merge base with HEAD are refused and routed to `arborescent admit`")
-    annotate.add_argument(
-        "--yes",
-        action="store_true",
-        help="write the annotations instead of printing what would change",
-    )
-    add_admit_parser(add_parser)
-    add_parser("selftest", help="mutation-test the rules")
-    add_coupling_parser(add_parser)
-    add_parser("cycles", help="report import cycles, the edges to cut and the function-level imports that only break a cycle")
-    purity = add_parser("purity", help="rank the modules that mix substantial pure logic with effectful code by how many modules import them")
-    purity.add_argument("--json", action="store_true", help="print the ranked modules as JSON")
-    purity.add_argument("--top", type=_positive_int, metavar="N", help="list only the N most imported mixed modules (the findings of `check` are unchanged)")
-    purity.add_argument("--explain", metavar="MODULE", help="print, for each definition of MODULE, the call that made it effectful or `no effect found`")
-    add_ratchet_parser(add_parser)
-
-
-def _positive_int(text: str) -> int:
-    try:
-        value = int(text)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
-    if value < 1:
-        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
-    return value
-
-
-def _add_packages_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
-    packages = add_parser(
-        "packages", help="validate, list or extract declared package metadata"
-    )
-    package_actions = packages.add_subparsers(dest="package_action", required=True)
-    for action in ("validate", "list"):
-        command = package_actions.add_parser(action)
-        command.add_argument(
-            "--catalog",
-            default="packages.toml",
-            help="package metadata file relative to repository root",
-        )
-    _ = package_actions.choices["validate"].add_argument(
-        "--extracted",
-        type=Path,
-        help="validate an extracted package directory instead of the repository catalog",
-    )
-    export = package_actions.add_parser(
-        "export", help="write the read-only migration export (JSON) for the policy's package_catalog"
-    )
-    export.add_argument("--output", type=Path, help="file to write (default: standard output)")
-    export.add_argument(
-        "--require-ready",
-        action="store_true",
-        help="exit 1 when the export still has an annotation gap of severity error",
-    )
-    _ = package_actions.add_parser("schema", help="print the JSON Schema the export validates against")
-    add_migrate_parser(package_actions.add_parser)
-
-
-def _add_bench_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> None:
-    b = add_parser(
-        "bench", help="time every engine, cold and warm, on prepared codebases"
-    )
-    b.add_argument(
-        "dirs",
-        nargs="+",
-        type=Path,
-        help="directories that each contain an arborescent.toml",
-    )
-    b.add_argument(
-        "--checkers",
-        nargs="*",
-        choices=sorted(all_checkers()),
-        default=sorted(all_checkers()),
-    )
-
-
 def _run_bench(args: argparse.Namespace) -> int:
     def report_progress(line: str) -> None:
         print(line, file=sys.stderr, flush=True)
@@ -302,7 +93,7 @@ def main(
     argv: Sequence[str] | None = None, services: Services | None = None, library: MigrationLibrary | None = None,
     rewriter: ImportRewriter | None = None, environ: Mapping[str, str] | None = None,
 ) -> int:
-    parser = _parser()
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "check" and args.yes and not args.install_tools:
         parser.error("--yes requires --install-tools")
@@ -323,7 +114,7 @@ def main(
             root = (
                 args.config.parent
                 if args.config
-                else _find_catalog_root(fs, Path.cwd(), args.catalog)
+                else catalog_root(fs, Path.cwd(), args.catalog)
             )
             return _packages(args, root, fs)
         policy, root = load_policy(fs, args.config or find_policy(fs, Path.cwd()))
@@ -339,18 +130,6 @@ def main(
     except PolicyError as exc:
         print(f"arborescent: {exc}", file=sys.stderr)
         return 2
-
-
-def _find_catalog_root(fs: FileSystem, start: Path, catalog_path: str) -> Path:
-    candidate = Path(catalog_path)
-    if candidate.is_absolute():
-        if not fs.is_file(candidate):
-            raise PolicyError(f"package catalog does not exist: {candidate}")
-        return candidate.parent
-    for folder in (start, *start.parents):
-        if fs.is_file(folder / candidate):
-            return folder
-    raise PolicyError(f"no {catalog_path!r} found from {start}")
 
 
 def _dispatch(
@@ -430,18 +209,6 @@ def _report_git_hook(outcome: HookOutcome) -> None:
         )
 
 
-def _stale_engine_findings(svc: Services, root: Path, policy: Policy) -> list[Violation]:
-    """``--prune`` judges every baseline entry, so each engine that owns a baselined rule family must be re-run, or its
-    still-valid entries would look stale and be dropped."""
-    rules = {key.split("|", 1)[0] for key in ratchet_mod.load(svc.fs, root / policy.baseline)}
-    names = {item.name for item in (*svc.engines, *svc.checkers)} - {"ruff"}  # `_baseline` already re-ran ruff for its entries
-    extra: list[Violation] = []
-    for name in sorted(names):
-        if any(r == name or r.startswith(f"{name}-") for r in rules):
-            extra += run_engine(svc, name, root).violations
-    return extra
-
-
 def _baseline(
     args: argparse.Namespace, policy: Policy, root: Path, svc: Services
 ) -> int:
@@ -466,13 +233,13 @@ def _baseline(
             f"unknown adoption family {args.adopt!r}; choose from {sorted(families)}"
         )
     if args.prune:
-        found = [*found, *_stale_engine_findings(svc, root, policy)]
+        found = [*found, *stale_engine_findings(svc, root, policy)]
         if args.adopt is not None or args.allow_growth or args.reason is not None or args.approved_by is not None:
             raise PolicyError("`--prune` cannot be combined with `--adopt`, `--allow-growth`, `--reason` or `--approved-by`")
         removed = ratchet_mod.prune(svc.fs, root / policy.baseline, found)
         print(f"baseline: pruned {removed} stale entr{'y' if removed == 1 else 'ies'} from {policy.baseline}")
         return 0
-    approved_by = _growth_approver(args)
+    approved_by = growth_approver(args)
     path = root / policy.baseline
     logged = ratchet_mod.growth_count(svc.fs, path)
     count = ratchet_mod.record(
@@ -611,16 +378,6 @@ def _selftest(policy: Policy, root: Path, svc: Services) -> int:
     return 0 if rep.ok else 1
 
 
-def _core_mode_conflict(args: argparse.Namespace) -> str | None:
-    """Core mode runs no external engine, so an option that demands one is rejected rather than silently passing."""
-    if not (args.no_tools or args.engines == "core"):
-        return None
-    demanded = [flag for flag, on in (("--require-tools", args.require_tools), ("--require-profile", args.require_profile), ("--install-tools", args.install_tools)) if on]
-    if not demanded:
-        return None
-    return f"{', '.join(demanded)} cannot be combined with core mode (--no-tools / --engines core): no external engine runs"
-
-
 def _list_dev_tools(policy: Policy, root: Path, svc: Services) -> int:
     scan = svc.scanner.scan(policy, root)
     if not policy.dev_tools:
@@ -635,17 +392,9 @@ def _list_dev_tools(policy: Policy, root: Path, svc: Services) -> int:
     return 1 if scan.misplaced_dev_tools else 0
 
 
-def _validate_rule_selection(rules: list[str], svc: Services) -> None:
-    """A typo in `--rule` must fail, not select nothing and report green."""
-    known = {rule.value for rule in Rule} | {item.name for item in (*svc.engines, *svc.checkers)} | {"coverage", "effects", "suppressions", "discard"}
-    unknown = sorted(r for r in rules if r not in known and not r.startswith("ruff-") and not any(k.startswith(f"{r}-") for k in known))
-    if unknown:
-        raise PolicyError(f"unknown rule family {unknown[0]!r}; choose from {sorted(known)}")
-
-
 def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
-    _validate_rule_selection(args.rule, svc)
-    conflict = _core_mode_conflict(args)
+    validate_rule_selection(args.rule, svc)
+    conflict = core_mode_conflict(args)
     if conflict is not None:
         print(f"arborescent check: {conflict}", file=sys.stderr)
         return 2
@@ -681,11 +430,11 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
     _print_rule_label(policy)
     _print_excluded(report)
     if args.growth_against:
-        report.engines.append(_growth_check(args.growth_against, policy, root, svc))
+        report.engines.append(growth_check(args.growth_against, policy, root, svc))
         if policy.ratchets:
             report.engines.append(growth_run(args.growth_against, policy, root, svc))
     if args.admitted_against:
-        report.engines.append(_admission_check(args.admitted_against, policy, root, svc))
+        report.engines.append(admission_check(args.admitted_against, policy, root, svc))
     setup_command = (
         None
         if args.no_tools
@@ -693,63 +442,6 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
     )
     _print_report(args, report, setup_command)
     return 1 if install_status else (0 if report.ok else 1)
-
-
-def _growth_approver(args: argparse.Namespace) -> str | None:
-    """Who is on record as approving growth: required for ``--allow-growth``; an adoption is attributed to itself."""
-    raw = args.approved_by
-    approver = raw if isinstance(raw, str) else None
-    if approver is not None and not (approver.strip() and args.allow_growth):
-        raise PolicyError("`--approved-by` needs a non-blank value and `--allow-growth`")
-    if args.allow_growth and approver is None:
-        raise PolicyError("`--allow-growth` requires `--approved-by` (a name or issue URL)")
-    if args.adopt is not None:
-        return f"arborescent baseline --adopt {args.adopt}"
-    return approver
-
-
-def _json_at_ref(ref: str, path: str, root: Path, svc: Services) -> dict[str, object]:
-    """The JSON object stored at ``path`` in git ``ref``; ValueError when it cannot be read."""
-    git = svc.runner.run(["git", "show", f"{ref}:./{path}"], root)  # `./`: relative to `root`, which may be below the repository root
-    if git.returncode != 0:
-        raise ValueError(f"could not read {path} at {ref}: {git.stderr.strip() or git.stdout.strip()}")
-    with svc.fs.temporary_directory("arborescent-growth-") as temp:
-        copy = temp / "ratchet.json"
-        svc.fs.write_text(copy, git.stdout)
-        data = svc.fs.read_json(copy)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} at {ref} is not a JSON object")
-    return {str(key): value for key, value in data.items()}
-
-
-def _growth_check(ref: str, policy: Policy, root: Path, svc: Services) -> EngineRun:
-    started = svc.clock.now()
-    lines: list[str] = []
-    try:
-        current = ratchet_mod.document(svc.fs, root / policy.baseline)
-        if not ratchet_mod.growth_consistent(current, _json_at_ref(ref, policy.baseline, root, svc)):
-            lines.append(f"baseline changes since {ref} are not fully accounted for by new growth log entries with a reason and approved-by")
-        for name in policy.ratchet_files:
-            current_values = svc.fs.read_json(root / name)
-            if not isinstance(current_values, dict):
-                raise ValueError(f"{name} is not a JSON object")
-            lines.extend(f"{name}: {p}" for p in ratchet_mod.values_growth_problems(current_values, _json_at_ref(ref, name, root, svc)))
-    except (ValueError, TypeError, OSError) as exc:
-        lines.append(f"could not verify ratchet growth: {exc}")
-    status = "fail" if lines else "ok"
-    return EngineRun("baseline growth log", status, svc.clock.now() - started, lines or [f"growth logs match ratchet changes since {ref}"])
-
-
-def _admission_check(ref: str, policy: Policy, root: Path, svc: Services) -> EngineRun:
-    """#163: every module new since ``ref`` must be validly admitted; an unreadable ref or a shallow clone fails, never passes."""
-    started = svc.clock.now()
-    try:
-        _, scan = run_own(policy, root, svc, practices=False)  # a full scan: admission needs every module's ring and importers
-        lines = admission_problems(ref, policy, root, scan, svc.runner)
-    except (ValueError, OSError) as exc:
-        lines = [f"could not verify admission: {exc}"]
-    status = "fail" if lines else "ok"
-    return EngineRun("admission", status, svc.clock.now() - started, lines or [f"every module new since {ref} was validly admitted"])
 
 
 if __name__ == "__main__":

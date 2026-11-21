@@ -68,7 +68,7 @@ package_catalog = "packages.toml"
 source_roots = ["src"]
 exclude = ["__pycache__", "tests", "tools"]
 forbid_circular_imports = true
-# Optional extras that are only imported by modules run as a subprocess (driver_libcst_scan): not required dependencies.
+# Optional extras that are only imported by modules run as a subprocess (driver_libcst_scan and its driver_libcst_forms): not required dependencies.
 tach_external_exclude = ["libcst", "pytest"]
 rings = ["domain", "ports", "application", "adapters", "composition"]
 type_checkers = ["ty", "pyright"]
@@ -184,19 +184,26 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.filesystem_adapter" = "adapters"
 "arborescent.parallel_adapter" = "adapters"
 "arborescent.scanner" = "adapters"
+"arborescent.scan_cache_codec" = "domain"
+"arborescent.source_discovery" = "domain"
 "arborescent.tool_runner" = "adapters"
 "arborescent.typecheckers" = "domain"
 "arborescent.engines" = "adapters"
 "arborescent.driver_filter_repo" = "application"
 "arborescent.driver_libcst" = "application"
 "arborescent.driver_libcst_scan" = "adapters"
+"arborescent.driver_libcst_forms" = "adapters"
 "arborescent.testing" = "adapters"
 "arborescent.cli" = "composition"
+"arborescent.check_gates" = "application"
+"arborescent.cli_arguments" = "composition"
 "arborescent.cli_install" = "composition"
 "arborescent.cli_report" = "composition"
 "arborescent.cli_baseline_report" = "composition"
+"arborescent.baseline_report_view" = "application"
 "arborescent.cli_migrate" = "composition"
 "arborescent.cli_coupling" = "composition"
+"arborescent.coupling_measure" = "application"
 "arborescent.coupling" = "domain"
 "arborescent.coupling_policy" = "domain"
 "arborescent.coupling_ratchet" = "application"
@@ -213,16 +220,25 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 # The annotation layer never depends on the driver (#67): the driver sits on top of it and may import it, not the reverse.
 # `selftest` injects one forbidden import per line (module_forbid_probes); tests/test_driver_boundary.py pins the lists.
 [tool.arborescent.module_forbid_imports]
-"arborescent.package_*" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
-"arborescent.path_exclusion" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
-"arborescent.migration_arguments" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
-"arborescent.migration_json" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
-"arborescent.migration_export" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
-"arborescent.packages" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.cli_migrate"]
+"arborescent.package_*" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.driver_libcst_forms", "arborescent.cli_migrate"]
+"arborescent.path_exclusion" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.driver_libcst_forms", "arborescent.cli_migrate"]
+"arborescent.migration_arguments" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.driver_libcst_forms", "arborescent.cli_migrate"]
+"arborescent.migration_json" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.driver_libcst_forms", "arborescent.cli_migrate"]
+"arborescent.migration_export" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.driver_libcst_forms", "arborescent.cli_migrate"]
+"arborescent.packages" = ["arborescent.driver_request", "arborescent.driver_port", "arborescent.driver_plan", "arborescent.driver_rewrite", "arborescent.driver_filter_repo", "arborescent.driver_libcst", "arborescent.driver_libcst_scan", "arborescent.driver_libcst_forms", "arborescent.cli_migrate"]
 
 # The tests are excluded from the scan on purpose; parsing the 80+ test files for `mixed-purity-excluded` notes would double the cold scan.
 [tool.arborescent.mixed_purity]
 report_excluded = false
+
+# Exemptions where a split would not separate anything with a reader of its own (see each reason).
+[[tool.arborescent.mixed_purity.allow]]
+module = "arborescent.bench"
+reason = "A benchmark harness: its 'pure' units (_Timer, _tool, _own_checks) are the step builders bench_one times, closures over the services and policy whose only purpose is to be run under the clock alongside the effectful whole-check step. No other module could use them, so a split would scatter one timing loop over two files."
+
+[[tool.arborescent.mixed_purity.allow]]
+module = "arborescent.pytest_io_block"
+reason = "An opt-in pytest plugin (loaded only with -p, imported by no module): its 'pure' units are the stand-ins it patches in (_blocked, _BlockedEnviron, _BlockedDatetime, _audit). Each reads the module's own mutable _active flag, and _from_host recognises the plugin by its own __name__ when walking frames, so moving them out would share that state across modules and widen the host check for no reader."
 
 # Import closure of the one program entrypoint, and the importer count from which a module is a hub (#148); `arborescent coupling check` ratchets both.
 [tool.arborescent.coupling]

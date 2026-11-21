@@ -17,7 +17,7 @@ from arborescent.config import policy_from_mapping
 from arborescent.domain import NOISE_DIRS, PolicyError
 from arborescent.engine import Services
 from arborescent.ports import Engine, TypeChecker
-from arborescent.scanner import _PRUNE
+from arborescent.source_discovery import PRUNE as _PRUNE
 from arborescent.testing import FakeToolRunner
 
 TOML = 'sources = ["app"]\nrings = ["domain"]\n[ring.domain]\nexternal = []\n[classify]\n"app" = "domain"\n'

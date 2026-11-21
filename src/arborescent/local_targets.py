@@ -35,6 +35,7 @@ __all__ = [
     "locate_config",
     "missing_target_message",
     "read_dotenv_value",
+    "resolve_target",
 ]
 
 CONFIG_VARIABLE = "ARBORESCENT_LOCAL_CONFIG"
@@ -149,6 +150,17 @@ def choose_target(package_id: str, flag: Path | None, targets: LocalTargets | No
         where = targets.location
         return ChosenTarget(targets.directories[package_id], f"local config {where.path} (found via {where.via})")
     return None
+
+
+def resolve_target(
+    package_id: str, flag: Path | None, location: ConfigLocation, fs: FileSystem, known_ids: Sequence[str],
+) -> ChosenTarget | None:
+    """Where the new repository is checked out: the (already absolute) flag, else the local config at ``location``.
+
+    The config is not read at all when the flag already names the directory.
+    """
+    targets = None if flag is not None else load_local_targets(fs, location, known_ids)
+    return choose_target(package_id, flag, targets)
 
 
 def missing_target_message(package_id: str, location: ConfigLocation) -> str:
