@@ -10,7 +10,7 @@ from .cycles_report import render_cycles, rings
 from .domain import Policy
 from .engine import Services
 from .import_cycles import find_cycles, import_edges
-from .rules import RuleContext
+from .rule_context import RuleContext
 
 
 def run_cycles(policy: Policy, root: Path, svc: Services) -> int:

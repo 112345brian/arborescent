@@ -267,6 +267,8 @@ docs-sync = "docs/architecture.md"
 
 [tool.arborescent.ruff.per-file-ignores]
 "src/arborescent/tool_runner.py" = ["S404", "S603"]
+# Explicitly deferred CLI imports keep help free of runtime adapters and command implementations.
+"src/arborescent/cli.py" = ["PLC0415"]
 # The opt-in worker launcher runs an explicitly selected binary with fixed argv.
 "tools/incremental_analysis.py" = ["S404", "S603"]
 "src/arborescent/cli_install.py" = ["T20"]

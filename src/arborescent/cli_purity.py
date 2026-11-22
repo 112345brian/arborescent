@@ -19,7 +19,7 @@ from .purity import (
     is_allowed,
     summarize,
 )
-from .rules import RuleContext
+from .rule_context import RuleContext
 
 _HEADER = "mixed modules, most imported first (a module's importers are the ones that inherit its effects):"
 

@@ -11,8 +11,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 
 from . import policy_imports, policy_rings
+from .effect_categories import EFFECT_CATEGORIES
 from .policy_types import ALL, ArchitectureFields, PolicyError, RingRule
-from .presets import EFFECT_CATEGORIES
 
 __all__ = ["DISABLED_TOOL_NAMES", "ArchitecturePolicy", "ArchitectureScope", "architecture_of", "validate_architecture"]
 

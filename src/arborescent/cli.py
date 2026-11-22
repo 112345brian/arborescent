@@ -9,13 +9,6 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from . import baseline as ratchet_mod
-from .adapters import (
-    FsScanner,
-    LocalFileSystem,
-    ProcessPoolParallel,
-    SubprocessToolRunner,
-    SystemClock,
-)
 from .annotate import apply_annotations, new_since, plan_annotations
 from .bench import run_bench
 from .check_gates import admission_check, growth_check, stale_engine_findings
@@ -31,7 +24,6 @@ from .cli_arguments import (
 )
 from .cli_baseline_report import run_report
 from .cli_coupling import run_coupling
-from .cli_cycles import run_cycles
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, run_migrate
 from .cli_purity import run_explain, run_purity
@@ -55,17 +47,27 @@ from .engines import default_engines
 from .git_hook import HookOutcome, ensure_git_hook
 from .migration_export import migration_arguments_of
 from .migration_json import export_document, render_export, render_schema
-from .package_checks import AnnotationPackageChecks
 from .packages import PackageCatalog, load_extracted_package
 from .ports import FileSystem, ScanResult
-from .rules import RuleContext
-from .selftest import selftest
+from .rule_context import RuleContext
 from .typecheckers import all_checkers
 
 __all__ = ["default_services", "main"]
 
 
 def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> Services:
+    # deferred: construct concrete adapters only when a command needs default services
+    from .adapters import (
+        FsScanner,
+        LocalFileSystem,
+        ProcessPoolParallel,
+        SubprocessToolRunner,
+        SystemClock,
+    )
+
+    # deferred: default package checks are a service adapter
+    from .package_checks import AnnotationPackageChecks
+
     runner = SubprocessToolRunner(root)
     scanner = FsScanner(root / ".arborescent" if cache else None, runner)
     return Services(
@@ -102,6 +104,9 @@ def main(
     try:
         if args.command == "bench":
             return _run_bench(args)
+        # deferred: argument help needs no filesystem adapter
+        from .filesystem_adapter import LocalFileSystem
+
         fs = services.fs if services else LocalFileSystem()
         if args.command == "packages" and args.package_action == "schema":
             sys.stdout.write(render_schema())
@@ -139,6 +144,11 @@ def _dispatch(
         return _dispatch_packages(args, policy, root, svc, tools)
     if args.command == "coupling":
         return run_coupling(args, policy, root, svc)
+    if args.command == "cycles":
+        # deferred: load the cycles reporter for the cycles command
+        from .cli_cycles import run_cycles
+
+        return run_cycles(policy, root, svc)
     handlers: dict[str, Callable[[], int]] = {
         "generate": lambda: _generate(policy, root, svc),
         "install-tools": lambda: _install_tools(args, policy, root, svc),
@@ -147,7 +157,6 @@ def _dispatch(
         "annotate": lambda: _annotate(args, policy, root, svc),
         "admit": lambda: run_admit(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),
-        "cycles": lambda: run_cycles(policy, root, svc),
         "purity": lambda: run_explain(policy, root, svc, args.explain) if args.explain else run_purity(policy, root, svc, args.json, args.top),
         "ratchet": lambda: _ratchet(args, policy, root, svc),
     }
@@ -365,6 +374,9 @@ def _annotate(args: argparse.Namespace, policy: Policy, root: Path, svc: Service
 
 
 def _selftest(policy: Policy, root: Path, svc: Services) -> int:
+    # deferred: load mutation machinery only for selftest
+    from .selftest import selftest
+
     rep = selftest(policy, root, svc)
     for line in rep.killed:
         print(f"killed    {line}")

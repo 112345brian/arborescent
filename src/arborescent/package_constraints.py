@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
-from .presets import EFFECT_CATEGORIES
+from .effect_categories import EFFECT_CATEGORIES
 
 CONSTRAINT_KEYS = ("must_be_pure", "forbid_effects")
 

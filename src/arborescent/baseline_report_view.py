@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .baseline_history import Burndown, burndown
 from .baseline_report import DIMENSIONS, Analysis, Cluster, analyse, parse_entries
-from .domain import PolicyError
+from .policy_types import PolicyError
 from .ports import FileSystem, ToolRunner
 
 __all__ = ["FileReport", "ReportOptions", "as_json", "as_text", "file_report"]

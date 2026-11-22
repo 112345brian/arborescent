@@ -5,8 +5,17 @@ recognised consistently everywhere. Third-party network clients are matched by e
 
 from __future__ import annotations
 
-__all__ = ["INJECTABLE_EFFECTS", "OS_BRANCH_ATTRS", "effect_category_of"]
+__all__ = ["EFFECT_CATEGORIES", "INJECTABLE_EFFECTS", "OS_BRANCH_ATTRS", "effect_category_of"]
 
+
+# The categories a policy may name in `forbid`. Four were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`); they are valid
+# in every `forbid` list but in no default one (`DEFAULT_FORBID_CATEGORIES`), so a policy that forbids nothing new keeps its findings.
+EFFECT_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "network", "filesystem", "dynamic-import", "patch",
+        "console", "global", "state", "monotonic", "host", "fs-query",
+    }
+)
 
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})
 

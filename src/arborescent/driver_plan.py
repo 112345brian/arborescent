@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .domain import PolicyError
 from .driver_port import MigrationLibrary
 from .driver_request import (
     ImportRewrite,
@@ -25,6 +24,7 @@ from .migration_arguments import (
     PackageArguments,
 )
 from .package_model import ModuleRename
+from .policy_types import PolicyError
 
 __all__ = ["BLOCKED", "READY", "STAYS", "DriverPlan", "plan_supply", "supply"]
 

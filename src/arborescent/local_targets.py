@@ -20,7 +20,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .domain import PolicyError
+from .policy_types import PolicyError
 from .ports import FileSystem
 
 __all__ = [

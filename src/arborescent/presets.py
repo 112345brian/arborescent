@@ -8,16 +8,9 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
-__all__ = ["DEFAULT_FORBID_CATEGORIES", "DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "PRESETS", "TAINT_SEED_CATEGORIES", "Preset", "Scope"]
+from .effect_categories import EFFECT_CATEGORIES
 
-# The categories a policy may name in `forbid`. Four were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`); they are valid
-# in every `forbid` list but in no default one (`DEFAULT_FORBID_CATEGORIES`), so a policy that forbids nothing new keeps its findings.
-EFFECT_CATEGORIES: frozenset[str] = frozenset(
-    {
-        "clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "network", "filesystem", "dynamic-import", "patch",
-        "console", "global", "state", "monotonic", "host", "fs-query",
-    }
-)
+__all__ = ["DEFAULT_FORBID_CATEGORIES", "DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "PRESETS", "TAINT_SEED_CATEGORIES", "Preset", "Scope"]
 
 # What a ring forbids when the policy does not say (the strict preset's middle rings, and the innermost ring): the categories that
 # existed before 0.8.0. Opt in to the rest by listing them in a ring's `forbid`.
