@@ -267,6 +267,8 @@ docs-sync = "docs/architecture.md"
 
 [tool.arborescent.ruff.per-file-ignores]
 "src/arborescent/tool_runner.py" = ["S404", "S603"]
+# The opt-in worker launcher runs an explicitly selected binary with fixed argv.
+"tools/incremental_analysis.py" = ["S404", "S603"]
 "src/arborescent/cli_install.py" = ["T20"]
 "src/arborescent/cli_report.py" = ["T20"]
 "src/arborescent/cli_migrate.py" = ["T20"]
