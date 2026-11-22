@@ -17,7 +17,7 @@ def run_cycles(policy: Policy, root: Path, svc: Services) -> int:
     """Report only: the ``circular-import`` rule under ``check`` is what fails a run."""
     scan = svc.scanner.scan(policy, root)
     context = RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules))
-    rank = rings(context, scan)
+    rank = rings(context, scan.modules)
     classified = {name: info for name, info in scan.modules.items() if name in rank and name not in context.tool_modules}
     edges = import_edges(classified, scan.known, context.scope_name)
     for line in render_cycles(find_cycles(edges, rank), edges):

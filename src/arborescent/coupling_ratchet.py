@@ -7,12 +7,10 @@ at or above the policy's ``hub_fan_in`` (a module not listed must stay below it)
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from pathlib import Path
 from typing import cast
 
 from .coupling import Closure, FanIn
 from .coupling_policy import CouplingPolicy
-from .ports import FileSystem
 
 FAN_IN = "fan-in"
 CLOSURE = "closure"
@@ -61,17 +59,6 @@ def _table(document: Mapping[str, object], name: str) -> dict[str, int]:
             raise ValueError(f"coupling baseline `{name}` must map module names to counts")
         counts[key] = value
     return counts
-
-
-def load(fs: FileSystem, path: Path) -> tuple[Counts, list[object]] | None:
-    """The baseline's counts and growth log, or ``None`` when no baseline file exists yet. Raises ``ValueError`` when the
-    file is not shaped like a coupling baseline, same as ``parse``: the sole access path, matching ``baseline.load`` and
-    ``ratchets``'s own file access."""
-    return parse(fs.read_json(path)) if fs.exists(path) else None
-
-
-def save(fs: FileSystem, path: Path, document: dict[str, object]) -> None:
-    fs.write_json(path, document)
 
 
 def parse(document: object) -> tuple[dict[str, dict[str, int]], list[object]]:

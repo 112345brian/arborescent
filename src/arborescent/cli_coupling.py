@@ -14,8 +14,7 @@ from pathlib import Path
 from . import coupling_ratchet as ratchet
 from .coupling import NewModule, ambient_hubs, cost_of_new_modules
 from .coupling_measure import Measure, document, load_baseline
-from .domain import Policy, PolicyError
-from .engine import Services
+from .domain import PolicyError
 from .ports import FileSystem
 
 __all__ = ["add_coupling_parser", "run_coupling"]
@@ -45,17 +44,16 @@ def add_coupling_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     cost.add_argument("--modules", type=int, default=3, help="how many modules are added (default 3: port, service, adapter)")
 
 
-def run_coupling(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
-    measure = Measure(policy, svc.scanner.scan(policy, root))
-    path = root / policy.coupling.baseline
+def run_coupling(args: argparse.Namespace, measure: Measure, root: Path, fs: FileSystem) -> int:
+    path = root / measure.policy.coupling.baseline
     action = args.coupling_action
     if action == "report":
         return _report(measure, args.top, args.json)
     if action == "cost":
         return _cost(measure, NewModule(args.importer, tuple(args.imports), args.modules))
     if action == "baseline":
-        return _baseline(measure, svc.fs, path, args)
-    return _check(measure, svc.fs, path)
+        return _baseline(measure, fs, path, args)
+    return _check(measure, fs, path)
 
 
 def _report(measure: Measure, top: int, as_json: bool) -> int:
@@ -117,6 +115,6 @@ def _baseline(measure: Measure, fs: FileSystem, path: Path, args: argparse.Names
         recorded = ratchet.next_document(load_baseline(fs, path), counts, args.allow_growth, args.reason)
     except ValueError as exc:
         raise PolicyError(str(exc)) from exc
-    ratchet.save(fs, path, recorded)
+    fs.write_json(path, recorded)
     print(f"coupling baseline: recorded {sum(len(table) for table in counts.values())} count(s) in {path.name}")
     return 0

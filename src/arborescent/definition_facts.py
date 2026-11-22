@@ -10,7 +10,7 @@ import ast
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
-from .import_facts import dotted_name
+from .call_facts import dotted_name
 from .purity_facts import Helpers
 
 __all__ = ["TopLevelDef", "main_guard_line", "purity_helpers", "result_defs", "surface", "top_level_defs", "weak_port_returns"]

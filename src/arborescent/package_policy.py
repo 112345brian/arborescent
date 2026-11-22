@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .domain import Rule, Violation
+from .findings import Rule, Violation
 from .package_model import (
     HISTORY_KINDS,
     MERGE_KINDS,

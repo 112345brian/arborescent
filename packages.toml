@@ -81,6 +81,10 @@ path = "src/arborescent/domain.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/findings.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/policy_types.py"
 role = "source"
 
@@ -118,6 +122,10 @@ role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/import_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/import_syntax.py"
 role = "source"
 
 [[packages.paths]]

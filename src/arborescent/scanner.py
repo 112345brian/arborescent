@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .declaration_facts import DEV_TOOL_ROLE
 from .domain import Policy
 from .facts import ModuleInfo, extract
 from .path_exclusion import excluded_by_policy
@@ -179,8 +180,10 @@ class FsScanner:
             _excluded_modules(root, excluded_files, cache) if only is None and policy.mixed_purity.enabled and policy.mixed_purity.report_excluded else ({}, {}, 0)
         )
         _store_cache(cache_file, cache, {**fresh, **extra_fresh}, only, parsed + extra_parsed)
-        misplaced = misplaced_dev_tools(files, modules, dev_tool_modules) if annotations_enabled else ()
+        misplaced: tuple[tuple[str, str], ...] = ()
         if annotations_enabled:
+            tool_annotations = {name for name, info in modules.items() if info.facts.arbor_role == DEV_TOOL_ROLE}
+            misplaced = misplaced_dev_tools(files, tool_annotations, dev_tool_modules)
             # This pass covers every discovered file, including unchanged import
             # targets and modules outside both classify and sources.
             arbor_index = {

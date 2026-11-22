@@ -65,12 +65,14 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 |---|---|---|
 | `arborescent` | `single` | domain |
 | `arborescent.domain` | `single` | domain |
+| `arborescent.findings` | `single` | domain |
 | `arborescent.policy_types` | `single` | domain |
 | `arborescent.policy_rings` | `single` | domain |
 | `arborescent.policy_imports` | `single` | domain |
 | `arborescent.architecture_policy` | `single` | domain |
 | `arborescent.facts` | `single` | domain |
 | `arborescent.import_facts` | `single` | domain |
+| `arborescent.import_syntax` | `single` | domain |
 | `arborescent.effect_facts` | `single` | domain |
 | `arborescent.effect_categories` | `single` | domain |
 | `arborescent.declaration_facts` | `single` | domain |

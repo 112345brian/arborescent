@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-from .domain import Rule, Violation
+from .findings import Rule, Violation
 from .package_fields import glob_match
 from .package_model import CatalogDocument
 

@@ -10,8 +10,8 @@ import ast
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 
+from .call_facts import dotted_name
 from .effect_categories import INJECTABLE_EFFECTS, OS_BRANCH_ATTRS, effect_category_of
-from .import_facts import dotted_name
 
 __all__ = ["EffectUse", "effect_uses"]
 

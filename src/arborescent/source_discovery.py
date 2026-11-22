@@ -6,12 +6,10 @@ Pure rules over relative paths and the policy, split out of ``scanner`` so the a
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 
-from .declaration_facts import DEV_TOOL_ROLE
 from .domain import NOISE_DIRS, ArchitecturePolicy, Policy, PolicyError
-from .facts import ModuleInfo
 from .path_exclusion import excluded_by_policy, matches_exclusion
 
 __all__ = [
@@ -100,11 +98,11 @@ def is_unclassified(policy: Policy, module: str, rel: str) -> bool:
 
 
 def misplaced_dev_tools(
-    files: Sequence[tuple[str, bool, str]], modules: Mapping[str, ModuleInfo], dev_tool_modules: Collection[str],
+    files: Sequence[tuple[str, bool, str]], tool_annotations: Collection[str], dev_tool_modules: Collection[str],
 ) -> tuple[tuple[str, str], ...]:
     return tuple(sorted(
         (module, rel) for module, _, rel in files
-        if module in modules and modules[module].facts.arbor_role == DEV_TOOL_ROLE and module not in dev_tool_modules
+        if module in tool_annotations and module not in dev_tool_modules
     ))
 
 

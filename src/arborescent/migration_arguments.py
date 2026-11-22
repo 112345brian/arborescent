@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from .domain import INFORMATIONAL_RULES
+from .findings import INFORMATIONAL_RULES
 from .package_assignment import WorkspaceFacts, assignment_violations, owners_of
 from .package_fields import extraction_target, within
 from .package_model import (

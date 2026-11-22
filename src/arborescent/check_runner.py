@@ -61,7 +61,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         report.vendor_folders = tuple(scan.vendor_folders)
         report.dev_tools = dev_tool_counts(policy, scan)
         report.suggestions = file_size_suggestions(
-            services.fs,
+            services.fs.read_text,
             root,
             {module.name: module.path for module in scan.modules.values()},
             threshold=policy.suggestion_threshold,

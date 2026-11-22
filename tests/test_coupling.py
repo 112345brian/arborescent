@@ -23,6 +23,7 @@ from arborescent.coupling import (
 from arborescent.coupling_policy import CouplingPolicy
 from arborescent.domain import PolicyError
 from arborescent.facts import ModuleInfo, extract
+from arborescent.import_cycles import import_edges as cycle_edges
 
 
 def build(sources: Mapping[str, str]) -> dict[str, ModuleInfo]:
@@ -58,6 +59,16 @@ def test_fan_in_counts_distinct_importing_modules_by_kind() -> None:
     assert (rows["d"].direct, rows["d"].runtime) == (1, 0)  # only a function-level import
     assert (rows["e"].direct, rows["e"].runtime) == (1, 0)  # only a TYPE_CHECKING import
     assert rows["c"].transitive == 4  # a, b, d and app (through a and b); d is a module-level importer of c
+
+
+def test_coupling_keeps_known_targets_outside_the_scan() -> None:
+    modules = build({"app": "import unscanned\n"})
+    known = {"app", "unscanned"}
+
+    closure = entrypoint_closure(import_edges(modules, known), "app")
+
+    assert closure.modules == {"app", "unscanned"}
+    assert cycle_edges(modules, known, lambda _: None) == []
 
 
 def test_a_module_is_never_its_own_importer() -> None:

@@ -13,7 +13,7 @@ import fnmatch
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields
 
-from .domain import Rule, Violation
+from .findings import Rule, Violation
 from .package_assignment import OwnershipIndex, WorkspaceFacts, owners_of
 from .package_model import (
     CatalogDocument,

@@ -12,7 +12,7 @@ from .call_facts import FunctionCalls
 from .definition_facts import TopLevelDef
 from .effect_facts import EffectUse
 from .facts import Forwarder, PurityFacts, PurityUnit, SourceFacts
-from .import_facts import RawImport
+from .import_syntax import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 

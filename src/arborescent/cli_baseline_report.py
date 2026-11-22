@@ -5,13 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
+from collections.abc import Callable
 
 from .baseline_history import PERIODS
 from .baseline_report import DEFAULT_DEPTH, DEFAULT_THRESHOLD
-from .baseline_report_view import ReportOptions, as_json, as_text, file_report
-from .domain import Policy, PolicyError
-from .engine import Services
+from .baseline_report_view import FileReport, ReportOptions, as_json, as_text
+from .domain import PolicyError
 
 __all__ = ["add_report_parser", "run_report"]
 
@@ -31,11 +30,13 @@ def add_report_parser(baseline: argparse.ArgumentParser) -> None:
     r.add_argument("--json", action="store_true", help="machine-readable output")
 
 
-def run_report(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+def run_report(
+    args: argparse.Namespace, baseline: str, load: Callable[[str, ReportOptions], FileReport],
+) -> int:
     """The one effectful step: rendering lives in ``baseline_report_view``; this writes it out."""
     if args.depth < 1 or args.top < 1 or args.history_limit < 1 or not 0 <= args.threshold <= 100:
         raise PolicyError("baseline report: --depth, --top and --history-limit must be at least 1, and --threshold 0 to 100")
     options = ReportOptions(args.depth, args.top, args.threshold, args.period, args.history_limit, history=not args.no_history)
-    reports = [file_report(name, options, root, svc.fs, svc.runner) for name in (args.files or [policy.baseline])]
+    reports = [load(name, options) for name in (args.files or [baseline])]
     sys.stdout.write(json.dumps({"files": [as_json(r) for r in reports]}, indent=2) + "\n" if args.json else as_text(reports, options))
     return 0

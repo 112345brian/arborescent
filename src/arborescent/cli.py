@@ -10,9 +10,7 @@ from pathlib import Path
 
 from . import baseline as ratchet_mod
 from .annotate import apply_annotations, new_since, plan_annotations
-from .bench import run_bench
-from .check_gates import admission_check, growth_check, stale_engine_findings
-from .check_runner import run_check
+from .baseline_report_view import FileReport, ReportOptions, file_report
 from .classify_audit import suggest_ring
 from .cli_admit import run_admit
 from .cli_arguments import (
@@ -30,6 +28,7 @@ from .cli_purity import run_explain, run_purity
 from .cli_ratchet import growth_run, run_ratchet
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
+from .coupling_measure import Measure
 from .domain import Policy, PolicyError, path_under
 from .driver_filter_repo import FilterRepo
 from .driver_libcst import LibCstRename
@@ -83,6 +82,9 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
 
 
 def _run_bench(args: argparse.Namespace) -> int:
+    # deferred: only the benchmark command needs the full check harness
+    from .bench import run_bench
+
     def report_progress(line: str) -> None:
         print(line, file=sys.stderr, flush=True)
 
@@ -119,7 +121,7 @@ def main(
             root = (
                 args.config.parent
                 if args.config
-                else catalog_root(fs, Path.cwd(), args.catalog)
+                else catalog_root(fs.is_file, Path.cwd(), args.catalog)
             )
             return _packages(args, root, fs)
         policy, root = load_policy(fs, args.config or find_policy(fs, Path.cwd()))
@@ -143,7 +145,9 @@ def _dispatch(
     if args.command == "packages":
         return _dispatch_packages(args, policy, root, svc, tools)
     if args.command == "coupling":
-        return run_coupling(args, policy, root, svc)
+        return run_coupling(args, Measure(policy, svc.scanner.scan(policy, root)), root, svc.fs)
+    if args.command == "baseline" and args.baseline_action == "report":
+        return _report_baselines(args, policy, root, svc)
     if args.command == "cycles":
         # deferred: load the cycles reporter for the cycles command
         from .cli_cycles import run_cycles
@@ -152,7 +156,7 @@ def _dispatch(
     handlers: dict[str, Callable[[], int]] = {
         "generate": lambda: _generate(policy, root, svc),
         "install-tools": lambda: _install_tools(args, policy, root, svc),
-        "baseline": lambda: run_report(args, policy, root, svc) if args.baseline_action == "report" else _baseline(args, policy, root, svc),
+        "baseline": lambda: _baseline(args, policy, root, svc),
         "discover": lambda: _discover(policy, root, svc, args.suggest),
         "annotate": lambda: _annotate(args, policy, root, svc),
         "admit": lambda: run_admit(args, policy, root, svc),
@@ -218,6 +222,13 @@ def _report_git_hook(outcome: HookOutcome) -> None:
         )
 
 
+def _report_baselines(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
+    def load(name: str, options: ReportOptions) -> FileReport:
+        return file_report(name, options, root, svc.fs, svc.runner)
+
+    return run_report(args, policy.baseline, load)
+
+
 def _baseline(
     args: argparse.Namespace, policy: Policy, root: Path, svc: Services
 ) -> int:
@@ -242,6 +253,9 @@ def _baseline(
             f"unknown adoption family {args.adopt!r}; choose from {sorted(families)}"
         )
     if args.prune:
+        # deferred: only pruning needs to repeat engines whose findings may be stale
+        from .check_gates import stale_engine_findings
+
         found = [*found, *stale_engine_findings(svc, root, policy)]
         if args.adopt is not None or args.allow_growth or args.reason is not None or args.approved_by is not None:
             raise PolicyError("`--prune` cannot be combined with `--adopt`, `--allow-growth`, `--reason` or `--approved-by`")
@@ -405,7 +419,7 @@ def _list_dev_tools(policy: Policy, root: Path, svc: Services) -> int:
 
 
 def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) -> int:
-    validate_rule_selection(args.rule, svc)
+    validate_rule_selection(args.rule, {item.name for item in (*svc.engines, *svc.checkers)})
     conflict = core_mode_conflict(args)
     if conflict is not None:
         print(f"arborescent check: {conflict}", file=sys.stderr)
@@ -438,14 +452,23 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
         no_cache=args.no_cache,
         rules=tuple(args.rule),
     )
+    # deferred: only the check command needs the full check runner
+    from .check_runner import run_check
+
     report = run_check(policy, root, svc, opts)
     _print_rule_label(policy)
     _print_excluded(report)
     if args.growth_against:
+        # deferred: compare baseline growth only when a reference was requested
+        from .check_gates import growth_check
+
         report.engines.append(growth_check(args.growth_against, policy, root, svc))
         if policy.ratchets:
             report.engines.append(growth_run(args.growth_against, policy, root, svc))
     if args.admitted_against:
+        # deferred: compare admission only when a reference was requested
+        from .check_gates import admission_check
+
         report.engines.append(admission_check(args.admitted_against, policy, root, svc))
     setup_command = (
         None

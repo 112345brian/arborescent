@@ -21,6 +21,8 @@ else:
 
 deferred = {
     "arborescent.adapters",
+    "arborescent.check_gates",
+    "arborescent.check_runner",
     "arborescent.cli_cycles",
     "arborescent.package_checks",
     "arborescent.selftest",

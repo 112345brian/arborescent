@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import ast
 from collections.abc import Callable
 from pathlib import Path
 
 from .annotate import insert_annotation
 from .classify_audit import admission_warnings, admit_check, with_reason
+from .declaration_facts import arbor_annotation
 from .domain import Policy
 from .engine import Services, run_own
-from .facts import extract
 from .rules import RuleContext
 
 
@@ -57,7 +58,7 @@ def _write(args: argparse.Namespace, root: Path, svc: Services, rel: str, curren
         return 1
     path = root / rel
     updated = insert_annotation(svc.fs.read_text(path), args.ring, args.reason)
-    problem = extract(updated).arbor_error
+    _, problem, _, _ = arbor_annotation(ast.parse(updated))
     if problem is not None:
         print(f"refused: --reason is not a usable ring_reason: {problem}")
         return 1

@@ -1,100 +1,19 @@
-"""Import facts: every import statement a module holds (lazy and type-only ones included), the alias table
-that resolves a local name to its canonical dotted target, dynamic-import targets, and how one import resolves to
-first-party module edges (``resolve_targets`` for the ring question, ``resolve_runtime_targets`` for what runs)."""
+"""Resolve imported names to project modules for architecture and runtime checks.
+
+Syntax extraction lives in `import_syntax` and dynamic import recognition lives in `call_facts`. Their original
+import paths remain available here for callers, while the scanner and checks use the owning modules directly.
+"""
 
 from __future__ import annotations
 
-import ast
-from collections.abc import Collection, Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Collection, Iterable
+
+from .call_facts import dotted_name, dynamic_imports
+from .import_syntax import RawImport, import_aliases, raw_imports
 
 __all__ = [
     "RawImport", "dotted_name", "dynamic_imports", "import_aliases", "raw_imports", "resolve_runtime_targets", "resolve_targets",
 ]
-
-
-@dataclass(frozen=True)
-class RawImport:
-    """``import a.b`` -> (0, "a.b", ()); ``from ..x import y`` -> (2, "x", ("y",))."""
-
-    level: int
-    module: str
-    names: tuple[str, ...]
-    line: int
-    lazy: bool  # inside a function body
-    type_only: bool  # under ``if TYPE_CHECKING``
-
-
-def _is_type_checking(test: ast.expr) -> bool:
-    return (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
-        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
-    )
-
-
-def _walk(node: ast.AST, lazy: bool, type_only: bool, imports: list[RawImport]) -> None:
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, ast.Import):
-            imports += [RawImport(0, a.name, (), child.lineno, lazy, type_only) for a in child.names]
-        elif isinstance(child, ast.ImportFrom):
-            names = tuple(a.name for a in child.names)
-            imports.append(RawImport(child.level, child.module or "", names, child.lineno, lazy, type_only))
-        if isinstance(child, ast.If) and _is_type_checking(child.test):
-            _walk(child.test, lazy, type_only, imports)
-            for stmt in child.body:
-                _walk_stmt(stmt, lazy, True, imports)
-            for stmt in child.orelse:
-                _walk_stmt(stmt, lazy, type_only, imports)
-            continue
-        _walk(child, lazy or isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)), type_only, imports)
-
-
-def _walk_stmt(stmt: ast.stmt, lazy: bool, type_only: bool, imports: list[RawImport]) -> None:
-    holder = ast.Module(body=[stmt], type_ignores=[])
-    _walk(holder, lazy, type_only, imports)
-
-
-def raw_imports(tree: ast.AST) -> tuple[RawImport, ...]:
-    """Every import in ``tree``, in source order; one inside a function is ``lazy``, one under ``if TYPE_CHECKING`` is ``type_only``."""
-    imports: list[RawImport] = []
-    _walk(tree, False, False, imports)
-    return tuple(imports)
-
-
-def import_aliases(nodes: Sequence[ast.AST]) -> dict[str, str]:
-    aliases: dict[str, str] = {}
-    for node in nodes:
-        if isinstance(node, ast.Import):
-            for item in node.names:
-                aliases[item.asname if item.asname is not None else item.name.split(".")[0]] = item.name if item.asname is not None else item.name.split(".")[0]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None:
-            for item in node.names:
-                if item.name != "*":
-                    aliases[item.asname or item.name] = f"{node.module}.{item.name}"
-    return aliases
-
-
-def dotted_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
-    if isinstance(node, ast.Name):
-        return aliases.get(node.id, node.id)
-    if isinstance(node, ast.Attribute):
-        parent = dotted_name(node.value, aliases)
-        return f"{parent}.{node.attr}" if parent is not None else None
-    return None
-
-
-_DYNAMIC_IMPORT_CALLS = frozenset({"importlib.import_module", "importlib.__import__", "__import__", "builtins.__import__"})
-
-
-def dynamic_imports(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str], ...]:
-    """Every ``importlib.import_module(...)`` / ``__import__(...)`` call: its literal absolute target, or ``""`` when it cannot be read statically (#161)."""
-    out: set[tuple[int, str]] = set()
-    for node in nodes:
-        if not isinstance(node, ast.Call) or dotted_name(node.func, aliases) not in _DYNAMIC_IMPORT_CALLS:
-            continue
-        target = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
-        literal = target.value if isinstance(target, ast.Constant) and isinstance(target.value, str) else ""
-        out.add((node.lineno, literal if literal and not literal.startswith(".") and "\x00" not in literal else ""))
-    return tuple(sorted(out))
 
 
 def resolve_targets(

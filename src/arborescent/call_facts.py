@@ -10,9 +10,7 @@ import ast
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .import_facts import dotted_name
-
-__all__ = ["FunctionCalls", "absolute_callee", "bare_calls", "call_aliases", "call_sites", "discard_call_lines", "function_calls"]
+__all__ = ["FunctionCalls", "absolute_callee", "bare_calls", "call_aliases", "call_sites", "discard_call_lines", "dotted_name", "dynamic_imports", "function_calls"]
 
 
 @dataclass(frozen=True)
@@ -52,6 +50,30 @@ def call_aliases(nodes: Sequence[ast.AST], imported: dict[str, str]) -> dict[str
                 if item.name != "*":
                     aliases[item.asname or item.name] = f"{prefix}{'.' if node.module is not None else ''}{item.name}"
     return aliases
+
+
+def dotted_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id, node.id)
+    if isinstance(node, ast.Attribute):
+        parent = dotted_name(node.value, aliases)
+        return f"{parent}.{node.attr}" if parent is not None else None
+    return None
+
+
+_DYNAMIC_IMPORT_CALLS = frozenset({"importlib.import_module", "importlib.__import__", "__import__", "builtins.__import__"})
+
+
+def dynamic_imports(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str], ...]:
+    """Every ``importlib.import_module(...)`` / ``__import__(...)`` call: its literal absolute target, or ``""`` when it cannot be read statically (#161)."""
+    out: set[tuple[int, str]] = set()
+    for node in nodes:
+        if not isinstance(node, ast.Call) or dotted_name(node.func, aliases) not in _DYNAMIC_IMPORT_CALLS:
+            continue
+        target = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
+        literal = target.value if isinstance(target, ast.Constant) and isinstance(target.value, str) else ""
+        out.add((node.lineno, literal if literal and not literal.startswith(".") and "\x00" not in literal else ""))
+    return tuple(sorted(out))
 
 
 def call_sites(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str], ...]:

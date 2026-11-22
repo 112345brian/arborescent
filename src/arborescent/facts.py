@@ -1,7 +1,7 @@
 """One AST pass per file: every import (lazy and type-only ones included), effect uses, PEP 723 metadata.
 
 The result is plain data (``SourceFacts``) so it can be cached by content hash and reused by every check. Each family of
-facts is extracted by its own module (``import_facts``, ``effect_facts``, ``declaration_facts``, ``definition_facts``,
+facts is extracted by its own module (``import_syntax``, ``effect_facts``, ``declaration_facts``, ``definition_facts``,
 ``call_facts``, ``forwarder_facts``, ``purity_facts``); this one holds the result types and the one pass that fills them.
 """
 
@@ -18,6 +18,7 @@ from .call_facts import (
     call_aliases,
     call_sites,
     discard_call_lines,
+    dynamic_imports,
     function_calls,
 )
 from .declaration_facts import arbor_annotation, comment_facts, script_deps
@@ -32,7 +33,7 @@ from .definition_facts import (
 )
 from .effect_facts import EffectUse, effect_uses
 from .forwarder_facts import Forwarder, forwarders
-from .import_facts import RawImport, dynamic_imports, import_aliases, raw_imports
+from .import_syntax import RawImport, import_aliases, raw_imports
 from .purity_facts import PurityFacts, PurityUnit, purity_facts
 
 __all__ = ["Forwarder", "ModuleInfo", "PurityFacts", "PurityUnit", "SourceFacts", "extract"]

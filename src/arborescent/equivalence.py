@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Collection, Iterable, Sequence
 from typing import cast
 
-from .domain import Rule, Violation
+from .findings import Rule, Violation
 
 __all__ = ["equivalence_findings", "parse_groups"]
 

@@ -6,19 +6,18 @@ pure computation `cli_cycles.run_cycles` calls, matching how ``baseline_report``
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from .import_cycles import Cycle, EdgeKind, ImportEdge
-from .ports import ScanResult
 from .rules import RuleContext
 
 __all__ = ["render_cycles", "rings"]
 
 
-def rings(context: RuleContext, scan: ScanResult) -> dict[str, int]:
+def rings(context: RuleContext, modules: Iterable[str]) -> dict[str, int]:
     """Each classified module's ring, innermost first, as an index into its own scope's ring list."""
     rank: dict[str, int] = {}
-    for name in scan.modules:
+    for name in modules:
         ring = context.resolve_ring(name)
         local = context.policy_for(name)
         if ring is not None and local is not None:

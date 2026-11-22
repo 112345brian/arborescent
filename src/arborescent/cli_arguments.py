@@ -7,7 +7,7 @@ returns a value or raises ``PolicyError``, matching how ``cycles_report``/``cli_
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 
 from .cli_admit import add_admit_parser
@@ -16,8 +16,6 @@ from .cli_coupling import add_coupling_parser
 from .cli_migrate import add_migrate_parser
 from .cli_ratchet import add_ratchet_parser
 from .domain import PolicyError, Rule
-from .engine import Services
-from .ports import FileSystem
 from .typecheckers import all_checkers
 
 __all__ = ["build_parser", "catalog_root", "core_mode_conflict", "growth_approver", "validate_rule_selection"]
@@ -238,14 +236,14 @@ def _add_bench_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> Non
     )
 
 
-def catalog_root(fs: FileSystem, start: Path, catalog_path: str) -> Path:
+def catalog_root(is_file: Callable[[Path], bool], start: Path, catalog_path: str) -> Path:
     candidate = Path(catalog_path)
     if candidate.is_absolute():
-        if not fs.is_file(candidate):
+        if not is_file(candidate):
             raise PolicyError(f"package catalog does not exist: {candidate}")
         return candidate.parent
     for folder in (start, *start.parents):
-        if fs.is_file(folder / candidate):
+        if is_file(folder / candidate):
             return folder
     raise PolicyError(f"no {catalog_path!r} found from {start}")
 
@@ -260,9 +258,9 @@ def core_mode_conflict(args: argparse.Namespace) -> str | None:
     return f"{', '.join(demanded)} cannot be combined with core mode (--no-tools / --engines core): no external engine runs"
 
 
-def validate_rule_selection(rules: list[str], svc: Services) -> None:
+def validate_rule_selection(rules: list[str], engine_names: Collection[str]) -> None:
     """A typo in `--rule` must fail, not select nothing and report green."""
-    known = {rule.value for rule in Rule} | {item.name for item in (*svc.engines, *svc.checkers)} | {"coverage", "effects", "suppressions", "discard"}
+    known = {rule.value for rule in Rule} | set(engine_names) | {"coverage", "effects", "suppressions", "discard"}
     unknown = sorted(r for r in rules if r not in known and not r.startswith("ruff-") and not any(k.startswith(f"{r}-") for k in known))
     if unknown:
         raise PolicyError(f"unknown rule family {unknown[0]!r}; choose from {sorted(known)}")

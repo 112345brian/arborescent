@@ -68,7 +68,8 @@ def document(measure: Measure, hubs: list[Hub]) -> dict[str, object]:
 
 
 def load_baseline(fs: FileSystem, path: Path) -> tuple[ratchet.Counts, list[object]] | None:
+    """Read the ratchet's counts and growth log, or return None for an absent file."""
     try:
-        return ratchet.load(fs, path)
+        return ratchet.parse(fs.read_json(path)) if fs.exists(path) else None
     except ValueError as exc:
         raise PolicyError(f"{path.name}: {exc}") from exc

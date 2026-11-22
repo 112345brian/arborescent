@@ -14,7 +14,7 @@ from typing import NamedTuple
 from .domain import ArchitecturePolicy, Rule, Violation, in_unit
 from .effects_policy import EffectsPolicy
 from .facts import ModuleInfo
-from .import_facts import RawImport
+from .import_syntax import RawImport
 from .package_constraint_rules import is_exempt_path, reach_violations
 from .rule_context import RuleContext
 

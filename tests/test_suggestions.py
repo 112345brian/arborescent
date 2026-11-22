@@ -46,7 +46,7 @@ def test_file_size_is_a_suggestion_and_threshold_is_configurable(
     path.write_text(source, encoding="utf-8")
 
     suggestions = file_size_suggestions(
-        LocalFileSystem(), tmp_path, {"large": "large.py"}, threshold=10
+        LocalFileSystem().read_text, tmp_path, {"large": "large.py"}, threshold=10
     )
 
     assert len(suggestions) == 1
@@ -54,7 +54,7 @@ def test_file_size_is_a_suggestion_and_threshold_is_configurable(
     assert suggestions[0].logical_lines == 12
     assert (
         file_size_suggestions(
-            LocalFileSystem(), tmp_path, {"large": "large.py"}, threshold=20
+            LocalFileSystem().read_text, tmp_path, {"large": "large.py"}, threshold=20
         )
         == []
     )
