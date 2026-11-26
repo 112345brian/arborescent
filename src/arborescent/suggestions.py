@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["ClassSuggestion", "Suggestion", "class_size_suggestions", "file_size_suggestions", "logical_code_lines"]
+__all__ = ["ClassSuggestion", "Suggestion", "class_size_suggestions", "file_size_suggestions", "logical_code_lines", "size_suggestions"]
 
 _DATA_LITERAL_MIN_LINES = 10
 _ENUM_BASE_SUFFIXES = ("Enum", "Flag", "Choices")  # their class-level names are members, not fields
@@ -126,6 +126,17 @@ def class_size_suggestions(
             if _exceeds(fields, max_fields) or _exceeds(methods, max_methods):
                 out.append(ClassSuggestion(path, node.lineno, node.name, fields, methods, max_fields, max_methods))
     return out
+
+
+def size_suggestions(
+    read_text: Callable[[Path], str], root: Path, modules: Mapping[str, str], limits: tuple[int, int, int]
+) -> list[Suggestion | ClassSuggestion]:
+    """The report-only size hints, large files then large classes; ``limits`` is (logical lines, fields, methods)."""
+    lines, fields, methods = limits
+    return [
+        *file_size_suggestions(read_text, root, modules, threshold=lines),
+        *class_size_suggestions(read_text, root, modules, max_fields=fields, max_methods=methods),
+    ]
 
 
 def _exceeds(count: int, limit: int) -> bool:

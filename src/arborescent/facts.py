@@ -50,7 +50,13 @@ from .definition_facts import (
     top_level_defs,
     weak_port_returns,
 )
-from .effect_facts import EffectUse, effect_sites, merge_sites, rebound_names, running_ids
+from .effect_facts import (
+    EffectUse,
+    effect_sites,
+    merge_sites,
+    rebound_names,
+    running_ids,
+)
 from .forwarder_facts import Forwarder, forwarders
 from .import_syntax import RawImport, import_aliases, raw_imports
 from .import_time_facts import (

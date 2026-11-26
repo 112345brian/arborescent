@@ -12,11 +12,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from .command_imports import COMMAND_BODY_HINT
 from .facts import ModuleInfo
 from .findings import Rule, Violation
 from .import_syntax import RawImport
 
-__all__ = ["LazyImportCount", "lazy_import_adoption_hint", "lazy_import_counts", "lazy_import_in_scope", "lazy_import_lines", "lazy_import_violations", "lazy_imports_of"]
+__all__ = ["LazyImportCount", "finding_lines", "lazy_import_adoption_hint", "lazy_import_counts", "lazy_import_in_scope", "lazy_import_lines", "lazy_import_violations", "lazy_imports_of"]
 
 
 @dataclass(frozen=True)
@@ -68,7 +69,7 @@ def lazy_import_counts(info: ModuleInfo) -> LazyImportCount:
     return LazyImportCount(len(imports), sum(1 for imp in imports if _is_justified(imp, justified)))
 
 
-_FIX = " (put each at module level, or record why it stays with `# deferred: <reason>` on or above the line)"
+_FIX = " (put each at module level, or record why it stays with `# deferred: <reason>` on the statement or above it)"
 
 
 def lazy_import_lines(found: Sequence[Violation], counts: Mapping[str, LazyImportCount]) -> list[str]:
@@ -92,3 +93,27 @@ def lazy_import_adoption_hint(new: int, baselined: int) -> str | None:
     if not new or baselined:
         return None
     return f"{Rule.LAZY_IMPORT}: {new} new, 0 baselined; run 'arborescent baseline --adopt {Rule.LAZY_IMPORT}' to start a ratchet"
+
+
+def finding_lines(shown: Sequence[Violation], counts: Mapping[str, LazyImportCount]) -> list[str]:
+    """``check``'s findings as printed lines; the ``lazy-import`` ones are folded to one line per module (#199).
+
+    A module's several findings inside command bodies share a line of their own, with the command-module advice (#215)."""
+    others = [v.render() for v in shown if v.rule != Rule.LAZY_IMPORT]
+    lazy = [v for v in shown if v.rule == Rule.LAZY_IMPORT]
+    bodies = _command_body_groups(lazy)
+    rest = [v for v in lazy if not (v.hint == COMMAND_BODY_HINT and v.subject in bodies)]
+    commands = [
+        f"{module}: [{Rule.LAZY_IMPORT}] {len(details)} function-level imports in command bodies: {', '.join(details)}{COMMAND_BODY_HINT}"
+        for module, details in bodies.items()
+    ]
+    return others + lazy_import_lines(rest, counts) + commands
+
+
+def _command_body_groups(lazy: Sequence[Violation]) -> dict[str, list[str]]:
+    found: dict[str, list[str]] = {}
+    for v in lazy:
+        if v.hint == COMMAND_BODY_HINT:
+            found.setdefault(v.subject, []).append(v.detail)
+    return {module: details for module, details in found.items() if len(details) > 1}
+

@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 
 from . import baseline as ratchet_mod
-from .command_imports import COMMAND_BODY_HINT
 from .domain import Policy, Rule, Violation, root_cause_hint
 from .engine import CheckReport
-from .lazy_imports import lazy_import_adoption_hint, lazy_import_lines
+from .lazy_imports import finding_lines, lazy_import_adoption_hint
 
 
 def _print_rule_label(policy: Policy) -> None:
@@ -71,7 +69,7 @@ def _print_findings(args: argparse.Namespace, report: CheckReport) -> None:
     shown = report.ratchet.new if report.ratchet and not args.no_baseline else report.violations
     if getattr(args, "by_root_cause", False):
         shown = _print_root_causes(shown)
-    for line in _finding_lines(shown, report):
+    for line in finding_lines(shown, report.lazy_import_counts):
         print(f"FAIL   {line}")
     hint = _adoption_hint(args, report)
     if hint is not None:
@@ -94,28 +92,6 @@ def _print_root_causes(shown: list[Violation]) -> list[Violation]:
         if advice:
             print(f"         fix: {advice}")
     return [v for v in shown if not v.root_cause]
-
-
-def _finding_lines(shown: Sequence[Violation], report: CheckReport) -> list[str]:
-    """Findings as printed lines; the ``lazy-import`` ones are folded to one line per module (#199)."""
-    others = [v.render() for v in shown if v.rule != Rule.LAZY_IMPORT]
-    lazy = [v for v in shown if v.rule == Rule.LAZY_IMPORT]
-    bodies = _command_body_groups(lazy)
-    rest = [v for v in lazy if not (v.hint == COMMAND_BODY_HINT and v.subject in bodies)]
-    commands = [
-        f"{module}: [lazy-import] {len(details)} function-level imports in command bodies: {', '.join(details)}{COMMAND_BODY_HINT}"
-        for module, details in bodies.items()
-    ]
-    return others + lazy_import_lines(rest, report.lazy_import_counts) + commands
-
-
-def _command_body_groups(lazy: Sequence[Violation]) -> dict[str, list[str]]:
-    """Modules with several ``lazy-import`` findings inside command bodies, which share one line of their own (#215)."""
-    found: dict[str, list[str]] = {}
-    for v in lazy:
-        if v.hint == COMMAND_BODY_HINT:
-            found.setdefault(v.subject, []).append(v.detail)
-    return {module: details for module, details in found.items() if len(details) > 1}
 
 
 def _adoption_hint(args: argparse.Namespace, report: CheckReport) -> str | None:

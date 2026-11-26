@@ -212,13 +212,8 @@ def run_own(
             policy.coupling.eager_commands, found, lambda path: services.fs.read_text(root / path), scan, complete=only is None
         )
     found += excluded_findings(policy, scan.excluded_modules)
-    if only is None and policy.duplicate_logic.enabled:  # a copy and its original may be anywhere: a whole-repository fact
-        found += _duplicate_findings(policy, root, services, scan)
-    if only is None:  # these compare a module with its importers and peers: whole-repository facts
-        found += port_binding_findings(indexes, scan.modules, scan.known)
-        if policy.name_collisions is not None:  # re-reads every source: only when asked for
-            found += name_collision_findings(indexes, scan.modules, _module_sources(root, services, scan))
-        found += audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
+    if only is None:
+        found += _whole_repository_findings(indexes, root, services, scan)
     if "tach" not in policy.disabled_tools:
         found += invisible_import_violations(scan.modules.values())
     if practices and only is None:
@@ -229,6 +224,16 @@ def run_own(
             found += checks.gap_violations(policy, root, services.fs, scan, services.scanner)
         found += _unreachable_patch_findings(policy, scan)  # selftest runs without practices and still has to probe it
     return found, scan
+
+
+def _whole_repository_findings(indexes: RuleContext, root: Path, services: Services, scan: ScanResult) -> list[Violation]:
+    """The checks that compare a module with its importers and peers, so a ``--changed`` run skips them."""
+    policy = indexes.policy
+    found = _duplicate_findings(policy, root, services, scan) if policy.duplicate_logic.enabled else []
+    found += port_binding_findings(indexes, scan.modules, scan.known)
+    if policy.name_collisions is not None:  # re-reads every source: only when asked for
+        found += name_collision_findings(indexes, scan.modules, _module_sources(root, services, scan))
+    return found + audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
 
 
 def _unreachable_patch_findings(policy: Policy, scan: ScanResult) -> list[Violation]:

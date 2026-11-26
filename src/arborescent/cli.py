@@ -7,6 +7,7 @@ import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import baseline as ratchet_mod
 from .annotate import apply_annotations, new_since, plan_annotations
@@ -31,8 +32,6 @@ from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
 from .coupling_measure import Measure
 from .domain import Policy, PolicyError, path_under
-from .driver_filter_repo import FilterRepo
-from .driver_libcst import LibCstRename
 from .driver_port import ImportRewriter, MigrationLibrary
 from .engine import (
     Options,
@@ -44,13 +43,15 @@ from .engine import (
     write_generated,
 )
 from .engines import default_engines
-from .git_hook import HookOutcome, ensure_git_hook
 from .migration_export import migration_arguments_of
 from .migration_json import export_document, render_export, render_schema
 from .packages import PackageCatalog, load_extracted_package
 from .ports import FileSystem, ScanResult
 from .rule_context import RuleContext
 from .typecheckers import all_checkers
+
+if TYPE_CHECKING:
+    from .git_hook import HookOutcome
 
 __all__ = ["default_services", "main"]
 
@@ -129,9 +130,18 @@ def main(
             cache=not getattr(args, "no_cache", False),
             output_dir=policy.output_dir,
         )
-        tools = MigrationTools(
-            library or FilterRepo(svc.runner, svc.fs), rewriter or LibCstRename(svc.runner), os.environ if environ is None else environ
-        )
+
+        def tools() -> MigrationTools:
+            # deferred: only `packages migrate` and `packages extract` drive the migration libraries
+            from .driver_filter_repo import FilterRepo
+
+            # deferred: the import rewriter is the other half of the same command
+            from .driver_libcst import LibCstRename
+
+            return MigrationTools(
+                library or FilterRepo(svc.runner, svc.fs), rewriter or LibCstRename(svc.runner), os.environ if environ is None else environ
+            )
+
         return _dispatch(args, policy, root, svc, tools)
     except PolicyError as exc:
         print(f"arborescent: {exc}", file=sys.stderr)
@@ -139,7 +149,7 @@ def main(
 
 
 def _dispatch(
-    args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: MigrationTools
+    args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: Callable[[], MigrationTools]
 ) -> int:
     if args.command == "packages":
         return _dispatch_packages(args, policy, root, svc, tools)
@@ -169,10 +179,10 @@ def _dispatch(
 
 
 def _dispatch_packages(
-    args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: MigrationTools
+    args: argparse.Namespace, policy: Policy, root: Path, svc: Services, tools: Callable[[], MigrationTools]
 ) -> int:
     if args.package_action in ("migrate", "extract"):
-        return run_migrate(args, policy, root, svc, tools)
+        return run_migrate(args, policy, root, svc, tools())
     return _export(args, policy, root, svc)
 
 
@@ -205,8 +215,15 @@ def _generate(policy: Policy, root: Path, svc: Services) -> int:
     _ = pick_checker(policy, svc)
     for rel in write_generated(policy, root, svc):
         print(f"wrote {rel}")
-    _report_git_hook(ensure_git_hook(policy, root, svc.fs, svc.runner))
+    _ensure_hook(policy, root, svc)
     return 0
+
+
+def _ensure_hook(policy: Policy, root: Path, svc: Services) -> None:
+    # deferred: only `generate` and `check` install the pre-push hook
+    from .git_hook import ensure_git_hook
+
+    _report_git_hook(ensure_git_hook(policy, root, svc.fs, svc.runner))
 
 
 def _report_git_hook(outcome: HookOutcome) -> None:
@@ -424,7 +441,7 @@ def _check(args: argparse.Namespace, policy: Policy, root: Path, svc: Services) 
     if args.list_dev_tools:
         return _list_dev_tools(policy, root, svc)
     args.no_tools = args.no_tools or args.engines == "core"
-    _report_git_hook(ensure_git_hook(policy, root, svc.fs, svc.runner))
+    _ensure_hook(policy, root, svc)
     install_status = 0
     if args.install_tools:
         install_status = _install_tools(
