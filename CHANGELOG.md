@@ -14,6 +14,8 @@
   generated `tach.toml` files no longer carry `./` or doubled separators. Windows keeps normalising a temporary copy.
 - Generated code with a very long expression or `elif` ladder no longer stops `check` with `RecursionError` while its
   facts are extracted.
+- The taint pass no longer stops `check` with `RecursionError` on a very long `elif` ladder inside a function, or on a very
+  long chain of calls.
 - A memoised pure function is no longer a `memo` effect in `mixed-purity`: `functools.lru_cache`/`cache`/`cached_property` do not
   count (a written module-level cache still does). Fewer findings; stale baseline entries can be deleted (#195).
 - `selftest` no longer reports the `mixed-purity` mutations as surviving when the host module's ring is excluded by `exclude_rings`.
@@ -31,7 +33,7 @@
 - `check` no longer crashes with `SyntaxError` on a source file that starts with a UTF-8 byte order mark.
 
 ### Added
-- The scan cache layout changed (format version 29), so the first run after upgrading re-parses every file.
+- The scan cache layout changed (format version 30), so the first run after upgrading re-parses every file.
 - A finding can name a **root cause** beside its identity key. `lazy-import` (the imported module), `effect-via-import` (the
   last edge of the taint path) and `effect-unsanctioned-import` (the unlisted module) do. `check` prints
   `N violation(s) / M root cause(s)` and per-rule cause counts when findings share causes, `check --by-root-cause` lists each cause once with its fan-out, and

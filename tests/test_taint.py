@@ -171,3 +171,16 @@ def test_a_callback_only_ever_passed_is_not_tainted_by_that_alone() -> None:
     assert result.by_module["app"] == ("effectful",)
     assert "caller" not in result.by_module.get("app", ())
     assert "register" not in result.by_module.get("app", ())
+
+
+def test_a_2000_arm_elif_ladder_is_walked_to_its_last_arm() -> None:
+    arms = "".join(f"    elif x == {i}:\n        pass\n" for i in range(1, 2000))
+    result = run({"app": f"def f(x):\n    if x == 0:\n        pass\n{arms}    else:\n        print(x)\n"})
+    assert result.by_module == {"app": ("f",)}
+
+
+def test_a_2000_function_call_chain_is_followed_to_the_effect() -> None:
+    chain = "".join(f"def f{i:04}() -> None:\n    f{i + 1:04}()\n\n\n" for i in range(2000))
+    result = run({"app": chain + "def f2000() -> None:\n    print()\n"})
+    assert len(result.tainted) == 2001
+    assert len(result.tainted["app:f0000"].chain) == 2001

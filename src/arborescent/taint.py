@@ -63,18 +63,16 @@ def _io_category(target: str, seeds: frozenset[str]) -> str | None:
 
 
 def _body_nodes(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
-    """Every node in ``func``'s own scope, in source order, not descending into a nested def/class/lambda."""
+    """Every node in ``func``'s own scope, in source order, not descending into a nested def/class/lambda.
+
+    An explicit stack, so a long ``elif`` ladder cannot overflow it."""
     out: list[ast.AST] = []
-
-    def walk(node: ast.AST) -> None:
+    pending: list[ast.AST] = list(reversed(func.body))
+    while pending:
+        node = pending.pop()
         out.append(node)
-        if isinstance(node, _SCOPE_BOUNDARIES):
-            return
-        for child in ast.iter_child_nodes(node):
-            walk(child)
-
-    for stmt in func.body:
-        walk(stmt)
+        if not isinstance(node, _SCOPE_BOUNDARIES):
+            pending.extend(reversed(list(ast.iter_child_nodes(node))))
     return out
 
 
@@ -463,28 +461,32 @@ def _build_graph(
 
 
 def _propagate(graph: Mapping[str, frozenset[str]], direct: Mapping[str, tuple[tuple[str, str], ...]]) -> dict[str, tuple[str, ...]]:
+    """Each tainted function's chain: depth first over the targets in name order, stopping at the first that reaches an
+    effect. An explicit stack, so a long call chain cannot overflow it."""
     memo: dict[str, tuple[str, ...] | None] = {}
     visiting: set[str] = set()
+    stack: list[tuple[str, list[str]]] = []  # (function, its targets still to try, the next one last)
 
-    def compute(fid: str) -> tuple[str, ...] | None:
-        if fid in memo:
-            return memo[fid]
-        if fid in visiting:
-            return None
+    def enter(fid: str) -> None:
         visiting.add(fid)
-        result: tuple[str, ...] | None = (fid,) if direct.get(fid, ()) else None
-        if result is None:
-            for target in sorted(graph.get(fid, frozenset())):
-                sub = compute(target)
-                if sub is not None:
-                    result = (fid, *sub)
-                    break
+        stack.append((fid, [] if direct.get(fid, ()) else sorted(graph.get(fid, frozenset()), reverse=True)))
+
+    def leave(result: tuple[str, ...] | None) -> None:
+        fid = stack.pop()[0]
         visiting.discard(fid)
         memo[fid] = result
-        return result
 
-    for fid in sorted(graph):
-        compute(fid)
+    for root in sorted(graph):
+        if root not in memo:
+            enter(root)
+        while stack:
+            fid, targets = stack[-1]
+            if not targets:
+                leave((fid,) if direct.get(fid, ()) else None)
+            elif targets[-1] not in memo and targets[-1] not in visiting:
+                enter(targets[-1])  # tried again, from the memo, once it is done
+            elif (sub := memo.get(targets.pop())) is not None:
+                leave((fid, *sub))
     return {fid: chain for fid, chain in memo.items() if chain is not None}
 
 
