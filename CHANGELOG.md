@@ -92,7 +92,7 @@
 - Opt-in rule `unguarded-module-state` (`[unguarded_module_state]`): a function writes module-level mutable state (a
   `dict`/`list`/`set` or a `global` name) outside a `with <module lock>:` block. `rings` limits where it fails (a note elsewhere);
   `locks`, `guard_decorators` and reasoned `allow` entries cover what the scan cannot see; adopt with
-  `baseline --adopt unguarded-module-state`. Blind spots are listed in docs/configuration.md. The scan cache format is 26 (#232).
+  `baseline --adopt unguarded-module-state`. Blind spots are listed in docs/configuration.md (#232).
 
 ## 0.9.0 — 2026-11-12
 
