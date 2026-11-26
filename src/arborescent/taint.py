@@ -47,7 +47,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from .effect_categories import effect_category_of
+from .effect_categories import dotted_name, effect_category_of
 from .presets import DEFAULT_TAINT_SEEDS
 
 __all__ = ["DEFAULT_TAINT_SEEDS", "TaintCacheStore", "TaintResult", "TaintedFunction", "compute_taint"]
@@ -60,15 +60,6 @@ _SCOPE_BOUNDARIES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.Clas
 def _io_category(target: str, seeds: frozenset[str]) -> str | None:
     category = effect_category_of(target)
     return category if category is not None and category in seeds else None
-
-
-def _dotted(node: ast.expr, aliases: Mapping[str, str]) -> str | None:
-    if isinstance(node, ast.Name):
-        return aliases.get(node.id, node.id)
-    if isinstance(node, ast.Attribute):
-        parent = _dotted(node.value, aliases)
-        return f"{parent}.{node.attr}" if parent is not None else None
-    return None
 
 
 def _body_nodes(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
@@ -155,7 +146,7 @@ class _FileContext:
 
     @property
     def merged_aliases(self) -> dict[str, str]:
-        """Every bound name as one dotted-string alias table, the shape ``_dotted`` wants."""
+        """Every bound name as one dotted-string alias table, the shape ``dotted_name`` wants."""
         return {**self.module_aliases, **{n: f"{m}.{o}" for n, (m, o) in self.symbol_aliases.items()}}
 
 
@@ -212,7 +203,7 @@ def _attribute_call_target(obj: ast.expr, attr: str, owning_class: str | None, v
     if isinstance(obj, ast.Name) and ctx.module_aliases.get(obj.id) in ctx.known:
         return _CallCandidate(ctx.module_aliases[obj.id], attr)
     if isinstance(obj, ast.Attribute):
-        dotted = _dotted(obj, ctx.merged_aliases)
+        dotted = dotted_name(obj, ctx.merged_aliases)
         if dotted is not None and dotted in ctx.known:
             return _CallCandidate(dotted, attr)
     return None
@@ -259,7 +250,7 @@ def _track_constructor(node: ast.AST, ctx: _FileContext, var_classes: dict[str, 
 
 
 def _direct_hit(node: ast.Call, ctx: _FileContext, seeds: frozenset[str]) -> tuple[str, str] | None:
-    dotted = _dotted(node.func, ctx.merged_aliases)
+    dotted = dotted_name(node.func, ctx.merged_aliases)
     category = _io_category(dotted, seeds) if dotted is not None else None
     return None if category is None or dotted is None else (category, dotted)
 

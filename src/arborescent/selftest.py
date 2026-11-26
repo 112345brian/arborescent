@@ -298,7 +298,8 @@ def _seam_bypass_mutations(
 
 
 def _duplicate_mutations(policy: Policy, paths: Mapping[str, str]) -> tuple[list[Mutation], list[str]]:
-    """Probe ``duplicate-logic`` (#228): two copies of one function and, when asked for, one branch repeated across functions."""
+    """Probe ``duplicate-logic`` (#228): two copies of one function and, when asked for, a near copy, one branch repeated
+    across functions and one decision repeated with different calls."""
     rule = policy.duplicate_logic
     if not rule.enabled:
         return [], [f"{Rule.DUPLICATE_LOGIC}: disabled by policy"]
@@ -319,6 +320,21 @@ def _duplicate_mutations(policy: Policy, paths: Mapping[str, str]) -> tuple[list
             for n in range(rule.min_branch_repeats)
         )
         out.append(Mutation(Rule.DUPLICATE_LOGIC, "one branch repeated across functions", host, branches))
+    if rule.near_misses:
+        near = "".join(
+            f"def _arborescent_probe_near_{n}(x: int) -> int:\n"
+            + "".join(f"    w{i} = x * {i}\n" for i in range(rule.min_near_statements))
+            + f"    return w0 - {n}00000\n\n\n"
+            for n in (1, 2)
+        )
+        out.append(Mutation(Rule.DUPLICATE_LOGIC, "two functions one literal apart", host, near))
+    if rule.branch_conditions:
+        decisions = "".join(
+            f"def _arborescent_probe_decision_{n}() -> object:\n    if arborescent_probe_mode():\n"
+            f"        return arborescent_probe_here_{n}()\n    return arborescent_probe_there_{n}()\n\n\n"
+            for n in range(rule.min_branch_repeats)
+        )
+        out.append(Mutation(Rule.DUPLICATE_LOGIC, "one decision repeated with different calls", host, decisions))
     return out, []
 
 

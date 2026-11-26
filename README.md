@@ -189,7 +189,9 @@ no stdlib module counts as I/O).
 ## Duplicate logic (opt-in)
 
 `[tool.arborescent.duplicate_logic]` reports function bodies that repeat each other once local names are erased, and
-first-party copies of code under `reference_paths` such as `vendor/`. See
+first-party copies of code under `reference_paths` such as `vendor/`. Further switches find copies one literal or statement
+apart (`near_misses`), a repeated two-way branch (`branch_skeletons`) and one decision repeated with different calls on each
+side (`branch_conditions`). See
 [the configuration reference](docs/configuration.md#duplicate-logic-toolarborescentduplicate_logic).
 
 ## Ports

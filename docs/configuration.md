@@ -1059,7 +1059,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
 | `mixed-purity` | a module holds at least `min_pure_units` (default 2) substantial pure top-level functions or classes (a body of at least `min_body_lines`, default 4, lines) and at least one effectful one, or an effect that runs at import time. Enforced in every ring; see [Mixed purity](#mixed-purity-toolarborescentmixed_purity). The detail names only the ring, so the baseline key survives renaming functions; the hint lists the effect kinds, the effectful and pure definitions and the importer count. Also an `allow` entry that matches no module or no mixed module |
-| `duplicate-logic` | opt-in (`[tool.arborescent.duplicate_logic]`): a function body repeats another one, or a reference-path one, after local names are erased; with `branch_skeletons`, a function repeats the same two-way branch as others. See "Duplicate logic" below |
+| `duplicate-logic` | opt-in (`[tool.arborescent.duplicate_logic]`): a function body repeats another one, or a reference-path one, after local names are erased (with `near_misses`, up to one literal or statement apart); with `branch_skeletons`, a function repeats the same two-way branch as others, and with `branch_conditions`, branches on the same decision with different calls. See "Duplicate logic" below |
 | `untokenizable-source` | a file Python's `ast` accepts but `tokenize` rejects (a doubled carriage return `\r\r\n` is the usual cause, #181). Its `# noqa`, `# type: ignore` and `# deferred:` comments cannot be read, so the file gets no comment facts and this finding instead of aborting the run. A violation, so it can be baselined; the detail is fixed text (the tokenizer's line and message ride in the hint), and the fix is to remove the stray byte |
 | `unguarded-module-state` | with `[unguarded_module_state]` set, a function writes a module-level container or `global` name outside a module-level lock, in a ring the table covers; also an `allow` entry that matches nothing. See [Unguarded module state](#unguarded-module-state-toolarborescentunguarded_module_state-232) |
 | `unguarded-module-state-note` | informational: the same write in a ring that `unguarded_module_state.rings` does not list. Never fails a check and never enters the baseline |
@@ -1717,6 +1717,9 @@ min_statements = 5                      # smallest body compared (statements at 
 reference_paths = ["vendor", "libs/shared/helpers.py"]  # compared against, never flagged
 branch_skeletons = false                # also match a repeated two-way branch
 min_branch_repeats = 3                  # functions that make a branch a repeat (at least 2)
+near_misses = false                     # also match bodies one literal or one statement apart
+min_near_statements = 8                 # smallest body compared that way
+branch_conditions = false               # also match one decision repeated with different calls
 ```
 
 | key | default | meaning |
@@ -1725,14 +1728,17 @@ min_branch_repeats = 3                  # functions that make a branch a repeat 
 | `min_statements` | `5` | positive integer |
 | `reference_paths` | `[]` | repository-relative folders or `.py` files (no `..`, `.` or absolute path) |
 | `branch_skeletons` | `false` | see "Repeated branches" |
-| `min_branch_repeats` | `3` | integer of at least 2 |
+| `min_branch_repeats` | `3` | integer of at least 2; also the threshold of `branch_conditions` |
+| `near_misses` | `false` | see "Near copies" |
+| `min_near_statements` | `8` | integer of at least 2; both bodies must be this long |
+| `branch_conditions` | `false` | see "One decision, different calls" |
 
 The table is whole-run configuration: one per repository, not per scope, and copies are found across scopes.
 
 **What counts as the same body.** Parameter and local names, the function's own name where it calls itself, docstrings,
 comments and annotations are erased. Literals, operators, attribute and keyword-argument names and every name the function
 does not bind (so the called names) are kept; `async` differs from plain `def`. Parameter order, defaults and decorators are
-not compared. The match is exact after that: one changed literal or one extra statement is a different body.
+not compared. The match is exact after that, unless `near_misses` is on.
 
 Module-level functions and class methods are compared; a nested `def` is part of its parent. Stubs (`...`, `pass`, a
 docstring, `raise NotImplementedError`, `return NotImplemented`), such as `Protocol` and abstract members, are never compared.
@@ -1744,25 +1750,63 @@ function to use instead, even when it is the only copy. A scanned module below a
 reference file that cannot be parsed, are findings: a check that compares against nothing does not pass silently. A vendor
 folder that is not listed in `reference_paths` and not scanned is not compared.
 
+**Near copies** (`near_misses = true`). Two bodies of at least `min_near_statements` also match when they differ in exactly
+one of these ways, after the same erasure:
+
+- one literal value (of the same type: `"-"` for `"_"`, `0` for `1`, but not `1` for `1.0`);
+- one extra statement anywhere in the body, including inside a loop or `try`. A one-line guard (`if x: return None`, no
+  `else`) counts as one; a longer block does not.
+
+Both together, two literals, a changed called name, operator or attribute, or the same statements wired to different locals
+do not match. A near copy of a `reference_paths` function is reported against it. A near finding has the same key as an exact
+one, so a baselined copy that drifts by one literal stays one known entry; the hint says which kind it is.
+
 **Repeated branches** (`branch_skeletons = true`). Matches an `if`/`else`, a conditional expression, or a guard (`if c: return a`
 followed by the block's final `return b`) whose condition is the same (local names erased) and whose two sides call the same
 set of names, in at least `min_branch_repeats` functions. Both sides must call something. Branches of more than 200 syntax
-nodes are skipped. Sides that call differently named functions do not match. Copies already reported as whole duplicates
-count as one function.
+nodes are skipped. Sides that call differently named functions do not match here (see below). Copies already reported as
+whole duplicates count as one function.
+
+**One decision, different calls** (`branch_conditions = true`). Finds the dispatch copied around many functions, where each
+copy calls its own pair of functions:
+
+```python
+def load_users():
+    if backend.hosted_enabled():
+        return backend.client().get_users()
+    return filter_users(load_local())
+```
+
+A function is reported when at least `min_branch_repeats` functions branch on the same condition and:
+
+- the condition calls something other than a builtin and reads no parameter or local of the function (a leading `not` is
+  ignored). A method may call on `self`/`cls`; those are compared only within the same class of one module;
+- each side calls something the other does not, and neither side ends in `raise` (a precondition is not a choice);
+- the branch is an `if`/`else`, a conditional expression, or a guard that returns a value, followed by at most 20 statements
+  of the same block that end by returning a value.
+
+So `isinstance(value, str)`, `if flag:`, `sys.platform == "win32"` and `if value.ready():` are never reported. The key holds
+the condition text and a short digest of it. With `branch_skeletons` also on, a branch reported here is not reported twice.
 
 **Findings and the ratchet.** One finding per function, `duplicate-logic|module|function `Class.name` duplicates logic
 defined elsewhere`; the partners are in the rendered hint, not in the key. So the baseline only shrinks: removing one of three
 copies leaves one stale entry, removing one of two leaves two, editing all copies alike changes nothing, and only a function
 that was not a duplicate before is new. A function name repeated within a module is numbered `#2`. A repeated branch adds the
 condition and called names (and a short digest) to the key. Moving or renaming a duplicated function changes its key.
+Turning `near_misses` or `branch_conditions` on adds findings; `branch_conditions` also replaces the `branch_skeletons`
+entries of the branches it covers, so re-record the baseline after changing either.
 
 Adopt on an existing repository with `arborescent baseline --adopt duplicate-logic`. A named ratchet
 (`rule = "duplicate-logic"`) counts findings per module.
 
 **Limits.** This is a clone detector, not a proof of equivalence: two functions that call same-named functions imported from
-different modules match, and two that compute the same thing differently do not. `check --changed` does not evaluate it, since
+different modules match, and two that compute the same thing differently do not. Parameter order is not compared, so two
+bodies that use their arguments in swapped roles can match. Near matching reports deliberate families too (an `http` and an
+`https` variant of one method). `branch_conditions` compares condition text, so it does not see that two differently written
+conditions ask the same question. `check --changed` does not evaluate it, since
 the original may be in an unchanged file. Each file is parsed once more (cached by content in `.arborescent` beside the scan
-cache) and functions are grouped by digest, never compared pair by pair.
+cache) and functions are grouped by digest, never compared pair by pair; near copies are found through hashes of the body with
+one literal or one statement left out.
 
 ## Named ratchets: `[tool.arborescent.ratchet.<name>]`
 

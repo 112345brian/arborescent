@@ -23,6 +23,7 @@ ALL = "*"  # in `may_import` or `external`: no restriction
 
 _DEFAULT_MIN_STATEMENTS = 5
 _DEFAULT_MIN_BRANCH_REPEATS = 3
+_DEFAULT_MIN_NEAR_STATEMENTS = 8  # above the exact floor: less of a near copy has to agree
 _MIN_REPEATS = 2  # a repeat needs at least two
 
 
@@ -55,15 +56,22 @@ def normalized_source_path(value: str) -> str:
 class DuplicatePolicy:
     """The ``[duplicate_logic]`` table (#228), opt-in. ``reference_paths`` are repository-relative folders or files whose
     functions are comparison targets and never flagged. ``branch_skeletons`` adds the repeated-branch match;
-    ``min_branch_repeats`` is how many functions make a repeat."""
+    ``min_branch_repeats`` is how many functions make a repeat. ``near_misses`` also matches bodies one literal or one
+    statement apart, from ``min_near_statements``; ``branch_conditions`` matches one argument-free decision repeated with
+    different calls on each side."""
 
     enabled: bool = False
     min_statements: int = _DEFAULT_MIN_STATEMENTS
     reference_paths: tuple[str, ...] = ()
     branch_skeletons: bool = False
     min_branch_repeats: int = _DEFAULT_MIN_BRANCH_REPEATS
+    near_misses: bool = False
+    min_near_statements: int = _DEFAULT_MIN_NEAR_STATEMENTS
+    branch_conditions: bool = False
 
     def __post_init__(self) -> None:
+        if self.min_near_statements < _MIN_REPEATS:
+            raise PolicyError("`duplicate_logic.min_near_statements` must be an integer of at least 2")
         if self.min_statements < 1:
             raise PolicyError("`duplicate_logic.min_statements` must be a positive integer")
         if self.min_branch_repeats < _MIN_REPEATS:

@@ -552,16 +552,21 @@ def _duplicate_logic(raw: Mapping[str, Any]) -> DuplicatePolicy:
     if not isinstance(table, Mapping):
         raise PolicyError("`duplicate_logic` must be a table")
     table = cast("Mapping[str, Any]", table)
-    unknown = set(table) - {"enabled", "min_statements", "reference_paths", "branch_skeletons", "min_branch_repeats"}
+    unknown = set(table) - {
+        "enabled", "min_statements", "reference_paths", "branch_skeletons", "min_branch_repeats", "near_misses",
+        "min_near_statements", "branch_conditions",
+    }
     if unknown:
         raise PolicyError(f"unknown key in `duplicate_logic`: {sorted(unknown)}")
     defaults = DuplicatePolicy()
-    numbers = (table.get("min_statements", defaults.min_statements), table.get("min_branch_repeats", defaults.min_branch_repeats))
+    keys = ("min_statements", "min_branch_repeats", "min_near_statements")
+    numbers = [table.get(key, getattr(defaults, key)) for key in keys]
     if not all(type(number) is int for number in numbers):
-        raise PolicyError("`duplicate_logic.min_statements` and `min_branch_repeats` must be integers")
+        raise PolicyError("`duplicate_logic.min_statements`, `min_branch_repeats` and `min_near_statements` must be integers")
     return DuplicatePolicy(
         _boolean_option(table, "enabled", True), numbers[0], _repository_paths(table, "reference_paths"),
-        _boolean_option(table, "branch_skeletons", False), numbers[1],
+        _boolean_option(table, "branch_skeletons", False), numbers[1], _boolean_option(table, "near_misses", False), numbers[2],
+        _boolean_option(table, "branch_conditions", False),
     )
 
 

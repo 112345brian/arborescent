@@ -89,6 +89,9 @@
   modules; first-party copies of functions under `reference_paths` such as `vendor/`; and, with `branch_skeletons`, the same
   two-way branch repeated across functions. One baseline entry per function, so the ratchet only shrinks. `selftest` probes it
   when enabled. See *Duplicate logic* in the configuration reference.
+- `duplicate-logic` near matching (#228), both opt-in: `near_misses` reports bodies of `min_near_statements` (default 8) or
+  more that differ in one literal or one extra statement; `branch_conditions` reports functions that branch on the same
+  argument-free call and pick different functions on each side.
 - Opt-in rule `unguarded-module-state` (`[unguarded_module_state]`): a function writes module-level mutable state (a
   `dict`/`list`/`set` or a `global` name) outside a `with <module lock>:` block. `rings` limits where it fails (a note elsewhere);
   `locks`, `guard_decorators` and reasoned `allow` entries cover what the scan cannot see; adopt with
