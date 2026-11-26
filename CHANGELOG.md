@@ -11,8 +11,13 @@
   covered by `selftest` and the baseline. Resolution is syntactic: a method on a value (`Path.replace`), a re-bound or passed-on
   function, `getattr`, `*` imports and re-exports are not seen (see *Configuration reference*).
 
+- `[[companion]]` (#231): a function that calls an action (`when_calls`) must also call its record (`must_also_call`), itself or
+  in a function it calls (one hop), else `missing-companion-call`. `*.name` names a method on any receiver, `modules`/`rings`
+  scope it, and `# companion-exempt: <reason>` exempts a function. Off until declared. It is not path-sensitive: a record on
+  any branch satisfies the function.
+
 ### Changed
-- The scan cache layout changed (it now records function line spans), so the first run after upgrading re-parses every file.
+- The scan cache layout changed (it now records function line spans, method calls and exemption comments), so the first run after upgrading re-parses every file.
 
 ## 0.9.0 — 2026-11-12
 

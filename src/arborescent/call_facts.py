@@ -7,6 +7,7 @@ recorded call (relative imports keep their dots) back into an absolute dotted na
 from __future__ import annotations
 
 import ast
+from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -35,28 +36,59 @@ class FunctionSpan:
 
     ``name`` is ``f``, ``Class.method`` or ``Outer.Inner.method``. A nested function or ``lambda`` has no span of its own:
     its calls belong to the function around it. Decorators lie before ``line``: they run when the module defines the function.
+    ``method_calls`` are the calls the module's recorded call sites leave out, a method on a value, as ``(first line, receiver.name)``
+    with ``?`` for a receiver that is not a plain name (``make().send`` is ``?.send``): the companion rule matches them by name (#231).
     """
 
     name: str
     line: int  # the `def` line
     end_line: int
+    start: int  # the first decorator's line, else `line`: where a comment above the function lands
+    method_calls: tuple[tuple[int, str], ...] = ()
 
 
-def function_spans(tree: ast.Module) -> tuple[FunctionSpan, ...]:
+def _method_calls(
+    nodes: Sequence[ast.AST], heads: set[str], spans: Sequence[tuple[str, int, int, int]],
+) -> list[dict[str, int]]:
+    """For each span, ``receiver.name`` -> first line, for the attribute calls whose head ``call_sites`` does not record."""
+    starts = [span[1] for span in spans]
+    found: list[dict[str, int]] = [{} for _ in spans]
+    for node in nodes:
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        slot = bisect_right(starts, node.lineno) - 1
+        if slot < 0 or node.lineno > spans[slot][2] or _root_name(node.func) in heads:
+            continue
+        text = dotted_name(node.func, {}) or f"?.{node.func.attr}"
+        found[slot][text] = min(node.lineno, found[slot].get(text, node.lineno))
+    return found
+
+
+def function_spans(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[FunctionSpan, ...]:
     """Every function and method that is not inside another function, however the module or class body nests it."""
-    out: list[FunctionSpan] = []
+    out: list[tuple[str, int, int, int]] = []  # (name, def line, end line, first decorator line)
 
     def visit(node: ast.AST, prefix: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                out.append(FunctionSpan(prefix + child.name, child.lineno, child.end_lineno or child.lineno))
+                start = min([child.lineno, *(d.lineno for d in child.decorator_list)])
+                out.append((prefix + child.name, child.lineno, child.end_lineno or child.lineno, start))
             elif isinstance(child, ast.ClassDef):
                 visit(child, f"{prefix}{child.name}.")
             elif isinstance(child, ast.stmt | ast.excepthandler | ast.match_case):
                 visit(child, prefix)
 
     visit(tree, "")
-    return tuple(out)
+    methods = _method_calls(nodes, _heads(tree, aliases), out)
+    return tuple(
+        FunctionSpan(*span, tuple(sorted((line, text) for text, line in found.items())))
+        for span, found in zip(out, methods, strict=True)
+    )
+
+
+def _heads(tree: ast.Module, aliases: dict[str, str]) -> set[str]:
+    """The names a call can start with and be resolved: imported ones, and functions and classes defined at module level."""
+    return set(aliases) | {stmt.name for stmt in tree.body if isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
 
 
 def discard_call_lines(nodes: Sequence[ast.AST]) -> tuple[int, ...]:
@@ -111,7 +143,7 @@ def dynamic_imports(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[
 
 def call_sites(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str], ...]:
     """Calls whose head name is imported or defined at module level: what a construction rule can resolve; a method on a value is not."""
-    heads = set(aliases) | {stmt.name for stmt in tree.body if isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+    heads = _heads(tree, aliases)
     out: set[tuple[int, str]] = set()
     for node in nodes:
         if not isinstance(node, ast.Call):

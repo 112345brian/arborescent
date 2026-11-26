@@ -28,6 +28,7 @@ from .package_constraints import PackageConstraints
 from .policy_types import (
     ALL,
     CallAllowance,
+    CompanionCall,
     ConstructionSite,
     DocsPolicy,
     OwnedLiteral,
@@ -57,6 +58,7 @@ __all__ = [
     "ArchitectureScope",
     "CallAllowance",
     "ChildArbor",
+    "CompanionCall",
     "ConstructionSite",
     "Contract",
     "DocsPolicy",

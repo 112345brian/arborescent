@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from bisect import bisect_right
 from collections.abc import Collection, Mapping
 from typing import NamedTuple
 
@@ -19,6 +20,7 @@ from .domain import (
     ArchitecturePolicy,
     ArchitectureScope,
     CallAllowance,
+    CompanionCall,
     ConstructionSite,
     OwnedLiteral,
     Policy,
@@ -332,6 +334,18 @@ def _call_matches(callee: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(callee, pattern) for pattern in patterns)
 
 
+def _calls_inside(info: ModuleInfo, calls: list[tuple[int, str]]) -> list[list[tuple[int, str]]]:
+    """For each of the module's function spans (in source order, never overlapping), the call sites inside it."""
+    spans = info.facts.function_spans
+    starts = [span.line for span in spans]
+    inside: list[list[tuple[int, str]]] = [[] for _ in spans]
+    for line, callee in calls:
+        slot = bisect_right(starts, line) - 1
+        if slot >= 0 and line <= spans[slot].end_line:
+            inside[slot].append((line, callee))
+    return inside
+
+
 def _restricted_calls(name: str, item: CallAllowance, calls: list[tuple[int, str]], text: tuple[str, str]) -> list[Violation]:
     """One finding per call site, numbered per callee so a further call is a new baseline entry and a moved one is not."""
     seen: dict[str, int] = {}
@@ -350,8 +364,7 @@ def _idiom_findings(
     """One finding per function holding a call to one of ``calls`` and a different call to one of ``and_calls``."""
     seen: dict[str, int] = {}
     out: list[Violation] = []
-    for span in info.facts.function_spans:
-        inside = [call for call in calls if span.line <= call[0] <= span.end_line]
+    for span, inside in zip(info.facts.function_spans, _calls_inside(info, calls), strict=True):
         first = [call for call in inside if _call_matches(call[1], item.calls)]
         second = [call for call in inside if _call_matches(call[1], item.and_calls)]
         if not any(one != other for one in first for other in second):
@@ -376,11 +389,127 @@ def _stale_call_allowances(policy: ArchitecturePolicy, modules: Collection[str])
     ]
 
 
+class _FunctionCalls(NamedTuple):
+    """What one function calls: resolved ``(line, dotted callee)`` sites, and method calls on values by ``receiver.name``."""
+
+    resolved: list[tuple[int, str]]
+    methods: tuple[tuple[int, str], ...]
+
+    def matching(self, patterns: tuple[str, ...]) -> list[tuple[int, str]]:
+        """``*.name`` matches any call by its last part; a dotted pattern matches only a resolved callee."""
+        names = tuple(pattern[2:] for pattern in patterns if pattern.startswith("*."))
+        dotted = tuple(pattern for pattern in patterns if not pattern.startswith("*."))
+        return sorted(
+            {call for call in self.resolved if _call_matches(call[1], dotted)}
+            | {call for call in (*self.resolved, *self.methods) if call[1].rpartition(".")[2] in names}
+        )
+
+
+def _calls_by_function(name: str, info: ModuleInfo) -> list[tuple[str, _FunctionCalls]]:
+    local = {item.name for item in info.facts.top_level_defs}
+    sites: list[tuple[int, str]] = []
+    for line, target in info.facts.calls:
+        # `Class.method` on a class of this module is recorded as written: it is not a module called `Class`
+        qualified = f"{name}.{target}" if "." in target and target.split(".", 1)[0] in local else absolute_callee(name, info.is_package, target)
+        if qualified is not None:
+            sites.append((line, qualified))
+    return [
+        (span.name, _FunctionCalls(inside, span.method_calls))
+        for span, inside in zip(info.facts.function_spans, _calls_inside(info, sites), strict=True)
+    ]
+
+
+class _Hops:
+    """One call away: the functions of this repository a function calls, and what each of them calls (#231)."""
+
+    def __init__(self, modules: Mapping[str, ModuleInfo], known: Collection[str]) -> None:
+        self.modules = modules
+        self.known = known
+        self.cache: dict[str, list[tuple[str, _FunctionCalls]]] = {}
+
+    def functions(self, module: str) -> list[tuple[str, _FunctionCalls]]:
+        if module not in self.cache:
+            self.cache[module] = _calls_by_function(module, self.modules[module])
+        return self.cache[module]
+
+    def _targets(self, module: str, function: str, calls: _FunctionCalls, actions: tuple[str, ...]) -> list[tuple[str, str]]:
+        """``(module, function name)`` of each callee that can be named: a helper, an imported function, ``self.method``.
+
+        The action itself is not a place to look for its own record."""
+        owner = function.rpartition(".")[0]
+        action_calls = set(calls.matching(actions))
+        out = [
+            (module, f"{owner}.{text.partition('.')[2]}")
+            for line, text in calls.methods if owner and text.partition(".")[0] in ("self", "cls") and (line, text) not in action_calls
+        ]
+        for _, callee in (call for call in calls.resolved if call not in action_calls):
+            parts = callee.split(".")
+            for end in range(len(parts) - 1, 0, -1):
+                if ".".join(parts[:end]) in self.known:
+                    out.append((".".join(parts[:end]), ".".join(parts[end:])))
+                    break
+        return out
+
+    def reach(self, module: str, function: str, calls: _FunctionCalls, item: CompanionCall) -> bool:
+        """Whether the function, or a function it calls, calls one of ``item.must_also_call``.
+
+        A callee in a module this run did not parse (``--changed``) counts as reaching it: what was not read proves nothing."""
+        if calls.matching(item.must_also_call):
+            return True
+        return any(
+            target not in self.modules
+            or any(name == wanted and inner.matching(item.must_also_call) for name, inner in self.functions(target))
+            for target, wanted in self._targets(module, function, calls, item.when_calls)
+        )
+
+
+def _companion_findings(context: RuleContext, name: str, info: ModuleInfo, hops: _Hops) -> list[Violation]:
+    """A function that does an action and reaches no record of it (#231). Not path-sensitive: a record on any branch counts."""
+    local_policy = context.policy_for(name)
+    if local_policy is None or not local_policy.companion:
+        return []
+    ring = context.resolve_ring(name)
+    entries = [item for item in local_policy.companion if item.applies_to(name, ring)]
+    if not entries:
+        return []
+    exempt = [line for line, _ in info.facts.companion_exempt]
+    functions = [
+        (function, calls, any(span.start <= line <= span.end_line for line in exempt))
+        for span, (function, calls) in zip(info.facts.function_spans, hops.functions(name), strict=True)
+    ]
+    out: list[Violation] = []
+    for item in entries:
+        seen: dict[str, int] = {}
+        for function, calls, excused in functions:
+            actions = calls.matching(item.when_calls)
+            if not actions or excused or hops.reach(name, function, calls, item):
+                continue
+            seen[function] = seen.get(function, 0) + 1
+            again = f" (definition #{seen[function]})" if seen[function] > 1 else ""
+            detail = (
+                f"[{name}] (ring {ring or 'none'}) {function}(){again} calls {' or '.join(item.when_calls)} but neither it nor a function"
+                f" it calls calls {' or '.join(item.must_also_call)}" + (f": {item.reason}" if item.reason else "")
+            )
+            found = ", ".join(sorted({callee for _, callee in actions}))
+            hint = f" (found: {found}; record it, or exempt the function with `# companion-exempt: <reason>`)"
+            out.append(Violation(Rule.MISSING_COMPANION_CALL, name, detail, actions[0][0], hint=hint))
+    return out
+
+
+def _stale_companions(policy: ArchitecturePolicy, modules: Collection[str]) -> list[Violation]:
+    """A scope glob that matches no module: after a rename the rule would watch nothing."""
+    return [
+        Violation(Rule.MISSING_COMPANION_CALL, ", ".join(item.when_calls), f"`companion` {list(item.when_calls)}: modules glob {glob!r} matches no module")
+        for item in policy.companion for glob in item.modules
+        if not any(in_unit(module, glob) for module in modules)
+    ]
+
+
 def _stale_entries(policy: ArchitecturePolicy, modules: Collection[str]) -> list[Violation]:
     """Every per-module list of the policy that names something no longer there."""
     return (
         _stale_importable_by(policy, modules) + _stale_owned_literals(policy, modules)
-        + _stale_construction_sites(policy, modules) + _stale_call_allowances(policy, modules)
+        + _stale_construction_sites(policy, modules) + _stale_call_allowances(policy, modules) + _stale_companions(policy, modules)
     )
 
 
@@ -697,6 +826,7 @@ def check_modules(
     import_graph: dict[str, set[str]] = {name: set() for name in modules}
     effect_graph: dict[str, set[str]] = {name: set() for name in modules}
     pending_effect_edges: list[EffectEdge] = []
+    hops = _Hops(modules, known)
     for name, info in sorted(modules.items()):
         local_policy = context.policy_for(name)
         is_tool = name in context.tool_modules  # developer tooling: no ring, may import product code
@@ -705,6 +835,7 @@ def check_modules(
             _owned_literal_findings(context, name, info)
             + _construction_findings(context, name, info)
             + _call_allowlist_findings(context, name, info)
+            + _companion_findings(context, name, info, hops)
             + _result_discard_findings(context, name, info, modules)
         )
         if is_tool:

@@ -348,6 +348,46 @@ What it does not see:
   and a name imported twice resolves to one of the two;
 - a target is only text: a mistyped `os.repalce` restricts nothing, and `selftest` cannot tell, because it writes the same text.
 
+`companion` says that doing one thing obliges a function to do another: submit and record, delete and audit. Types and rings
+cannot see a skipped record, because each call is allowed on its own. It is off until an entry is declared:
+
+```toml
+[[tool.arborescent.companion]]
+when_calls = "app.forms.submit"                      # the action: a dotted target (`*` is a glob), `*.name`, or a list
+must_also_call = ["*.record_outcome", "app.audit.write"]  # any one of these will do
+rings = ["adapters", "composition"]                  # where it applies (and/or `modules` globs; leave both out for everywhere)
+reason = "an unrecorded submission is lost"
+```
+
+`missing-companion-call` reports a function or method that itself calls a `when_calls` target and neither calls a
+`must_also_call` target nor calls a function that does. "A function it calls" is one hop: a helper in the module, an imported
+function or static method of this repository, or `self.name()` / `cls.name()` in the same class. A dotted target is resolved as
+for `call_allowlist`; `*.name` matches a call of anything named `name` on any receiver (`self.recorder.record_outcome()`,
+`make().record_outcome()`, `record_outcome()` imported from anywhere), which is how an injected recorder is named.
+
+To exempt a function, say why in a comment: `# companion-exempt: <reason>`, anywhere in it or on the line above it (a blank line
+ends it, and a comment without a reason exempts nothing). It exempts the function from every `companion` entry.
+
+**This is not a path-sensitive check.** What it does not see:
+
+- a record on one branch satisfies the whole function: `if ok: record()` after `submit()`, a record only in an `except` handler,
+  or one before an early return that skips it are all accepted. It catches a function that never records, not a path that does not;
+- order, count and arguments: recording before the action, once for ten actions, or recording something else all pass;
+- a record two or more calls away, or behind a call that cannot be named: a method on an injected or built object
+  (`self.service.finish()`, `Helper().finish()`), an inherited method, `__init__`, a decorator, a context manager's exit, a
+  callback, `getattr`, `functools.partial` or a re-export. A record by one of these routes is reported although it happens;
+- an action that is not spelled as a call: a re-bound name (`send = submit; send()`), a function passed on
+  (`asyncio.to_thread(submit)`), or a dotted target called on a value (name it `*.submit` instead);
+- an action at module level, and callers of a wrapper: only the function that calls the action directly is checked, so a
+  wrapper that leaves recording to its callers is reported (exempt it, and add its name to `when_calls`);
+- a nested function or `lambda` counts as part of the function around it, whether or not it ever runs;
+- `*.name` matches every method of that name, so a common name (`*.save`, `*.write`) reports, or accepts, unrelated calls;
+- a mistyped or renamed `when_calls` target matches nothing, and `selftest` cannot tell, because it writes the same text.
+
+A `modules` glob that matches no module is reported. `selftest` adds, in a module each entry watches, a function that does the
+action and records nothing. `check --changed` reads only changed files, so there it does not report a function that calls anything
+else of this repository in a file it did not read (that callee might record); only a full run decides.
+
 `result_discard` is an opt-in check that a caller reads the outcome of a function it calls (a new "refused" or "skipped" outcome
 is otherwise silently ignored). It reports `result-discard` for a call written as a whole statement:
 
@@ -888,6 +928,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
 | `call-outside-allowlist` | a module or ring calls a `call_allowlist` target that only other modules or rings may call; also an owner glob that matches no module |
 | `hand-rolled-idiom` | a function makes both halves of a `call_allowlist` idiom (`calls` and `and_calls`) outside the sanctioned modules and rings; also an owner glob that matches no module |
+| `missing-companion-call` | a function calls a `companion` action and neither it nor a function it calls records it (`must_also_call`), with no `# companion-exempt:` reason; also a scope glob that matches no module |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |

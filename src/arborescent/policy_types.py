@@ -13,7 +13,7 @@ from pathlib import PurePosixPath
 from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
-    "ALL", "ArchitectureFields", "CallAllowance", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError", "ResultDiscard", "RingRule",
+    "ALL", "ArchitectureFields", "CallAllowance", "CompanionCall", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError", "ResultDiscard", "RingRule",
     "in_unit", "normalized_source_path", "path_under", "unit_permits",
 ]
 
@@ -106,6 +106,23 @@ class CallAllowance:
 
 
 @dataclass(frozen=True)
+class CompanionCall:
+    """One ``[[companion]]`` entry: a function calling one of ``when_calls`` must also reach one of ``must_also_call`` (#231).
+
+    A target is a dotted name (``*`` is a glob), or ``*.name``: a call of anything called ``name``, whatever it is called on.
+    """
+
+    when_calls: tuple[str, ...]
+    must_also_call: tuple[str, ...]
+    modules: tuple[str, ...] = ()  # module globs the rule applies to; empty means any module
+    rings: tuple[str, ...] = ()  # rings the rule applies to; empty means any ring
+    reason: str = ""
+
+    def applies_to(self, module: str, ring: str | None) -> bool:
+        return unit_permits(self.modules, self.rings, module, ring)
+
+
+@dataclass(frozen=True)
 class ResultDiscard:
     """Opt-in ``result_discard`` (#141): a bare call statement that drops the value of a result-bearing function."""
 
@@ -143,6 +160,7 @@ class ArchitectureFields:
     owned_literals: tuple[OwnedLiteral, ...] = ()
     construct_only: tuple[ConstructionSite, ...] = ()  # #85
     call_allowlist: tuple[CallAllowance, ...] = ()  # #229
+    companion: tuple[CompanionCall, ...] = ()  # #231
     result_discard: ResultDiscard | None = None
     docs: DocsPolicy = DocsPolicy()
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it

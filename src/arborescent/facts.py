@@ -23,7 +23,12 @@ from .call_facts import (
     function_calls,
     function_spans,
 )
-from .declaration_facts import arbor_annotation, comment_facts, script_deps
+from .declaration_facts import (
+    arbor_annotation,
+    comment_facts,
+    exemption_comments,
+    script_deps,
+)
 from .definition_facts import (
     TopLevelDef,
     main_guard_line,
@@ -71,6 +76,7 @@ class SourceFacts:
     purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
     untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
     function_spans: tuple[FunctionSpan, ...] = ()  # every function and method with its line span, to place `calls` inside them (#229)
+    companion_exempt: tuple[tuple[int, str], ...] = ()  # (code line, reason) of `# companion-exempt:` comments (#231)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -119,7 +125,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         dynamic_imports(nodes, aliases),
         purity_facts(tree, nodes, aliases, purity_helpers(aliases)),
         untokenizable,
-        function_spans(tree),
+        function_spans(tree, nodes, calls_aliases),
+        exemption_comments(source),
     )
 
 

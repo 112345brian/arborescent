@@ -13,7 +13,7 @@ import tokenize
 import tomllib
 from collections.abc import Sequence
 
-__all__ = ["DEV_TOOL_ROLE", "arbor_annotation", "comment_facts", "script_deps"]
+__all__ = ["DEV_TOOL_ROLE", "arbor_annotation", "comment_facts", "exemption_comments", "script_deps"]
 
 
 
@@ -21,6 +21,7 @@ _PEP723 = re.compile(r"^# /// script\n((?:#.*\n)+?)# ///$", re.MULTILINE)
 
 
 _DEFERRED = re.compile(r"(?:^|#)\s*deferred\s*:\s*(\S.*)", re.IGNORECASE)
+_COMPANION_EXEMPT = re.compile(r"(?:^|#)\s*companion-exempt\s*:\s*(\S.*)")
 _SKIPPED_TOKENS = frozenset({tokenize.COMMENT, tokenize.NL, tokenize.INDENT, tokenize.DEDENT})
 
 
@@ -66,28 +67,46 @@ def comment_facts(source: str) -> tuple[tuple[tuple[int, str], ...], tuple[tuple
 
 
 def _comments_in(tokens: Sequence[tokenize.TokenInfo]) -> tuple[tuple[tuple[int, str], ...], tuple[tuple[int, str], ...]]:
-    suppressions: list[tuple[int, str]] = []
-    deferred: list[tuple[int, str]] = []
+    suppressions = tuple(
+        (token.start[0], kind) for token in tokens
+        if token.type == tokenize.COMMENT and (kind := _suppression_kind(token.string[1:].strip())) is not None
+    )
+    return suppressions, _justified(tokens, _DEFERRED)
+
+
+def _justified(tokens: Sequence[tokenize.TokenInfo], pattern: re.Pattern[str]) -> tuple[tuple[int, str], ...]:
+    """``(code line, reason)`` for each comment matching ``pattern``: the line it trails, or the next one when it stands alone."""
+    found: list[tuple[int, str]] = []
     pending: str | None = None
     for token in tokens:
         if token.type == tokenize.COMMENT:
-            comment = token.string[1:].strip()
-            kind = _suppression_kind(comment)
-            if kind is not None:
-                suppressions.append((token.start[0], kind))
-            reason = _DEFERRED.search(comment)
+            reason = pattern.search(token.string[1:].strip())
             if reason is None:
                 continue
             if token.line.lstrip().startswith("#"):
                 pending = str(reason.group(1)).strip()
             else:
-                deferred.append((token.start[0], str(reason.group(1)).strip()))
+                found.append((token.start[0], str(reason.group(1)).strip()))
         elif token.type == tokenize.NL and not token.line.strip():
             pending = None
         elif pending is not None and token.type not in _SKIPPED_TOKENS:
-            deferred.append((token.start[0], pending))
+            found.append((token.start[0], pending))
             pending = None
-    return tuple(suppressions), tuple(deferred)
+    return tuple(found)
+
+
+def exemption_comments(source: str) -> tuple[tuple[int, str], ...]:
+    """``# companion-exempt: <reason>`` comments (#231), placed like ``# deferred:``; empty when the source does not tokenize.
+
+    Only a file that spells the marker is tokenized a second time, so the rest of a repository pays nothing for it.
+    """
+    if "companion-exempt" not in source:
+        return ()
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, SyntaxError):
+        return ()  # reported as `untokenizable-source`
+    return _justified(tokens, _COMPANION_EXEMPT)
 
 
 _ARBOR_LEGAL_KEYS = frozenset({"ring", "role", "ring_reason"})
