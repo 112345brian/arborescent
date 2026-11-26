@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### Added
+- `effect-unlisted-category`, an informational note (never fails, never baselined, whole-repository runs only): "N modules
+  in restricted rings use X; no ring forbids it" for `console`, `network`, `global`, `registry`, `cache`, `state`,
+  `monotonic`, `host` and `fs-query`. No category became default-on. Listing the category in any ring's `forbid` or
+  `forbid_at_import` ends the note; note that a ring's own `forbid` replaces its default list (#194).
+- The `entrypoint-eager-commands` note now names `arborescent coupling startup --measure` for the time cost (#215).
+
 ### Fixed
 - **Coupling closure baselines may grow.** The closure of an entrypoint did not count parent packages, so with
   `app/__init__.py` importing `app.heavy`, `app.cli` was reported as 1 module while importing it loads 3, and a
@@ -15,6 +22,8 @@
 - `coupling startup --measure` left modules loaded by `importlib.import_module` out of the loaded project module count.
   It now counts `sys.modules` after the import; those modules still have no per-module time. An import that ends the
   process before the list is written (`os._exit(0)`) is now a failed measurement (#216).
+- `urllib.request.Request` is no longer a `network` use: it only builds an object. `urlopen` and every other
+  `urllib.request` call still count. Fewer findings; stale baseline entries can be deleted.
 - With a nested `output_dir`, `generate` wrote a `tach.toml` there whose source roots tach never read, so running it
   checked nothing and passed. `tach.toml` is now written at the project root (never over an existing one, and not while
   `tach` is disabled or configured in `pyproject.toml`), and `check` notes a generated nested one so it can be deleted.

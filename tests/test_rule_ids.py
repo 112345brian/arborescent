@@ -70,6 +70,7 @@ def test_rule_id_strings_never_change() -> None:
             "effect-fs-query",
             "effect-unsanctioned-import",
             "effect-via-import",
+            "effect-unlisted-category",
             "effect-at-import",
             "effect-seam-bypassed",
             "internal-import",

@@ -52,7 +52,7 @@ from .presets import DEFAULT_TAINT_SEEDS
 
 __all__ = ["DEFAULT_TAINT_SEEDS", "TaintCacheStore", "TaintResult", "TaintedFunction", "compute_taint"]
 
-_CACHE_VERSION = 2
+_CACHE_VERSION = 3
 
 _SCOPE_BOUNDARIES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 

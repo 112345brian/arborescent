@@ -46,6 +46,7 @@ class Rule(StrEnum):
     EFFECT_FS_QUERY = "effect-fs-query"
     EFFECT_UNSANCTIONED_IMPORT = "effect-unsanctioned-import"
     EFFECT_VIA_IMPORT = "effect-via-import"
+    EFFECT_UNLISTED_CATEGORY = "effect-unlisted-category"
     EFFECT_AT_IMPORT = "effect-at-import"
     EFFECT_SEAM_BYPASSED = "effect-seam-bypassed"
     INTERNAL_IMPORT = "internal-import"
@@ -156,7 +157,7 @@ INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
     Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE, Rule.MIXED_PURITY_EXCLUDED, Rule.MIXED_PURITY_WEAK,
     Rule.ADAPTER_EQUIVALENCE_REPORT, Rule.ENTRYPOINT_EAGER_COMMANDS, Rule.NAME_COLLISION, Rule.PORT_SHADOW,
-    Rule.UNGUARDED_MODULE_STATE_NOTE,
+    Rule.UNGUARDED_MODULE_STATE_NOTE, Rule.EFFECT_UNLISTED_CATEGORY,
 })
 
 
@@ -217,8 +218,10 @@ _RENDER_HINTS = {
     Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on the statement or above it)",
     Rule.ENTRYPOINT_EAGER_COMMANDS: (
         "; split into one module per command with its imports at the top and mount each lazily from the composition root,"
-        " declared in `[coupling.lazy_mounts]`"
+        " declared in `[coupling.lazy_mounts]`."
+        " For the time cost, `arborescent coupling startup --measure` times each `[coupling] entrypoints` module (it runs import-time code)"
     ),
+    Rule.EFFECT_UNLISTED_CATEGORY: " (add it to a ring's `forbid`, which replaces that ring's default list; listing it in any ring ends this note)",
     Rule.UNGUARDED_MODULE_STATE: _STATE_HINT,
     Rule.UNGUARDED_MODULE_STATE_NOTE: _STATE_HINT,
     Rule.VENDOR_FOLDER: (

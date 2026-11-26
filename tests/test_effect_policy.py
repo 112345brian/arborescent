@@ -9,6 +9,8 @@ from arborescent_helpers import CLASSIFY, mini_policy, ring_with, write_files
 from arborescent.adapters import FsScanner
 from arborescent.config import policy_from_mapping
 from arborescent.domain import PolicyError
+from arborescent.effect_categories import effect_category_of
+from arborescent.facts import extract
 from arborescent.rules import check_modules
 
 
@@ -396,6 +398,29 @@ def test_network_calls_are_an_effect_a_ring_can_forbid_but_urllib_parse_is_not(r
     parse_only = "import urllib.parse\ndef f(u):\n    return urllib.parse.quote(u)\n"
     write_files(repo, {"app/ports.py": parse_only})
     assert effects(run(repo, ring=ports)) == set()
+
+
+@pytest.mark.parametrize("source", [
+    "import urllib.request\ndef f(u):\n    return urllib.request.Request(u)\n",
+    "from urllib.request import Request\nclass Signed(Request):\n    pass\ndef f(u):\n    return Request(u)\n",
+    "from urllib import request as r\ndef f(u):\n    return r.Request(u, method='POST')\n",
+])
+def test_constructing_a_urllib_request_object_is_not_network(source: str) -> None:
+    assert [u.target for u in extract(source, "m.py").effect_uses] == []
+
+
+@pytest.mark.parametrize("target", [
+    "urllib.request.urlopen", "urllib.request.urlretrieve", "urllib.request.build_opener", "urllib.request.install_opener",
+    "urllib.request.OpenerDirector", "urllib.request.HTTPSHandler", "urllib.request.FTPHandler", "http.client.HTTPConnection",
+    "http.server.HTTPServer", "socket.socket", "socket.create_connection", "requests.request", "requests.Session",
+])
+def test_every_other_network_call_is_still_network(target: str) -> None:
+    assert effect_category_of(target) == "network"
+
+
+def test_sending_a_constructed_request_is_still_network() -> None:
+    source = "from urllib.request import Request, urlopen\ndef f(u):\n    return urlopen(Request(u))\n"
+    assert [(u.category, u.target) for u in extract(source, "m.py").effect_uses] == [("network", "urllib.request.urlopen")]
 
 
 def test_a_ring_mismatched_internal_import_lists_the_whole_move_closure_and_keeps_its_baseline_key(repo: Path) -> None:
