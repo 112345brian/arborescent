@@ -1348,6 +1348,9 @@ The structure it asks for is one module per command, imports at the top, mounted
 the mounts in [`[coupling.lazy_mounts]`](#startup-budgets-and-lazy-mounts) so the one remaining deferral is a reviewed,
 countable list.
 
+The note counts modules, not seconds. For the time cost, `arborescent coupling startup --measure` times the startup of
+each `[coupling] entrypoints` module; it runs your import-time code (see "Measured startup" below).
+
 `arborescent cycles` reports the cycles themselves. For each strongly connected component of the first-party import
 graph it lists every edge with its kind (`import-time`, `function-level` or `type-checking`; an edge that several
 imports make takes the strongest kind) and the import lines, then:

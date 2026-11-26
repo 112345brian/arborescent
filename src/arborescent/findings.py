@@ -218,7 +218,8 @@ _RENDER_HINTS = {
     Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on the statement or above it)",
     Rule.ENTRYPOINT_EAGER_COMMANDS: (
         "; split into one module per command with its imports at the top and mount each lazily from the composition root,"
-        " declared in `[coupling.lazy_mounts]`"
+        " declared in `[coupling.lazy_mounts]`."
+        " For the time cost, `arborescent coupling startup --measure` times each `[coupling] entrypoints` module (it runs import-time code)"
     ),
     Rule.EFFECT_UNLISTED_CATEGORY: " (add it to a ring's `forbid`, which replaces that ring's default list; listing it in any ring ends this note)",
     Rule.UNGUARDED_MODULE_STATE: _STATE_HINT,

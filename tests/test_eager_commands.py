@@ -132,6 +132,8 @@ def test_new_command_imports_print_as_one_line_and_still_fail(repo: Path, capsys
     assert len(fails) == 2  # one for the three command-body imports, one for the helper's
     assert any("app.adapters: [lazy-import] 3 function-level imports in command bodies: json#1, re#1, app#1" in line for line in fails)
     assert "[entrypoint-eager-commands]" in out and "one module per command" in out
+    (note,) = [line for line in out.splitlines() if "[entrypoint-eager-commands]" in line]
+    assert "`arborescent coupling startup --measure` times each `[coupling] entrypoints` module (it runs import-time code)" in note
 
 
 @pytest.mark.parametrize(

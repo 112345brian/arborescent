@@ -9,6 +9,7 @@
   in restricted rings use X; no ring forbids it" for `console`, `network`, `global`, `registry`, `cache`, `state`,
   `monotonic`, `host` and `fs-query`. No category became default-on. Listing the category in any ring's `forbid` or
   `forbid_at_import` ends the note; note that a ring's own `forbid` replaces its default list (#194).
+- The `entrypoint-eager-commands` note now names `arborescent coupling startup --measure` for the time cost (#215).
 
 ### Fixed
 - `urllib.request.Request` is no longer a `network` use: it only builds an object. `urlopen` and every other
