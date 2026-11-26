@@ -958,6 +958,11 @@ let that happen:
 Not judged: absolute roots and roots outside the project (`../other/src`). Generated `tach.toml` files carry no `./` or
 doubled separators.
 
+Tach 0.35.3 does not walk the files under a root outside the folder that holds `tach.toml`. An import from a file inside
+that folder into such a root is checked; the files out there are not, and no failure says so. A `tach.toml` generated
+into an `output_dir` other than `"."` lists every root as `../...`, so running tach in that folder checks nothing and
+passes. `arborescent check` runs tach at the project root with the root's own config.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:
