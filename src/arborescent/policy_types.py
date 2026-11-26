@@ -6,6 +6,7 @@ names so every existing `from .domain import PolicyError` (etc.) caller is unaff
 from __future__ import annotations
 
 import fnmatch
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -13,8 +14,8 @@ from pathlib import PurePosixPath
 from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
-    "ALL", "ArchitectureFields", "CallAllowance", "CompanionCall", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError",
-    "PrivateAccess", "ResultDiscard", "RingRule", "SeamBypass",
+    "ALL", "ArchitectureFields", "CallAllowance", "CompanionCall", "ConstructionSite", "DocsPolicy", "NameCollisionPolicy", "OwnedLiteral",
+    "PolicyError", "PortBinding", "PrivateAccess", "ResultDiscard", "RingRule", "SeamBypass",
     "in_unit", "normalized_source_path", "path_under", "unit_permits",
 ]
 
@@ -129,6 +130,43 @@ class CompanionCall:
 
 
 @dataclass(frozen=True)
+class NameCollisionPolicy:
+    """Opt-in ``[name_collisions]`` (#221): note a field or local that reuses the name of an unrelated type."""
+
+    min_length: int = 5  # shorter names are too generic to mean one thing
+    words: tuple[str, ...] = ()  # words that already mean one concept: they match a type by its last word too
+    allow: tuple[tuple[str, str], ...] = ()  # (name, reason): never noted
+
+
+_DOUBLE_MODULES = frozenset({"tests", "testing", "conftest", "fakes"})
+_DOUBLE_CLASS = re.compile(r"_*(Fake|Stub|Mock)(?![a-z])")
+
+
+@dataclass(frozen=True)
+class PortBinding:
+    """A port that must have a production implementor, and no more than ``max_implementors`` of them (#219)."""
+
+    port: str  # dotted name of the Protocol or abstract class, e.g. "app.ports.Clock"
+    max_implementors: int = 1
+    exclude: tuple[str, ...] = ()  # module globs or `module.Class` names that are not production bindings
+    reason: str = ""
+
+    @property
+    def port_module(self) -> str:
+        return self.port.rpartition(".")[0]
+
+    def counts(self, module: str, class_name: str) -> bool:
+        """Whether a class is production code. Test doubles are not: a ``tests``/``testing``/``conftest``/``fakes`` or
+        ``test_*`` module, a ``Fake*``/``Stub*``/``Mock*`` class, and whatever ``exclude`` names."""
+        if any(part in _DOUBLE_MODULES or part.startswith("test_") for part in module.split(".")):
+            return False
+        if _DOUBLE_CLASS.match(class_name.rpartition(".")[2]):
+            return False
+        full = f"{module}.{class_name}"
+        return not any(in_unit(module, glob) or in_unit(full, glob) for glob in self.exclude)
+
+
+@dataclass(frozen=True)
 class ResultDiscard:
     """Opt-in ``result_discard`` (#141): a bare call statement that drops the value of a result-bearing function."""
 
@@ -208,6 +246,7 @@ class ArchitectureFields:
     result_discard: ResultDiscard | None = None
     effect_seam_bypassed: SeamBypass | None = None  # #233
     private_access: PrivateAccess | None = None  # #218
+    port_bindings: tuple[PortBinding, ...] = ()  # #219
     docs: DocsPolicy = DocsPolicy()
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts

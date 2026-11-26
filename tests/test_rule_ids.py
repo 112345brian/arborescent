@@ -82,6 +82,8 @@ def test_rule_id_strings_never_change() -> None:
             "missing-companion-call",
             "construction-forbidden-argument",
             "construction-missing-argument",
+            "port-binding",
+            "name-collision",
             "missing-module-docstring",
             "docstring-ring-mismatch",
             "non-abstract-port",

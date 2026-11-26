@@ -7,6 +7,7 @@ and OS-branching rules applies is the policy's preset; layering and classificati
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import re
 from bisect import bisect_right
@@ -14,7 +15,7 @@ from collections.abc import Collection, Iterator, Mapping
 from typing import NamedTuple
 
 from .call_facts import REPLACE_CALLS, CallShape, absolute_callee, is_private_name
-from .definition_facts import ClassIndex, Signature
+from .definition_facts import ClassIndex, NameDecl, Signature, name_declarations
 from .domain import (
     ALL,
     EFFECT_RULES,
@@ -23,8 +24,10 @@ from .domain import (
     CallAllowance,
     CompanionCall,
     ConstructionSite,
+    NameCollisionPolicy,
     OwnedLiteral,
     Policy,
+    PortBinding,
     RingRule,
     Rule,
     SeamBypass,
@@ -42,6 +45,7 @@ from .effect_import_rules import (
     unsanctioned_effect_imports,
 )
 from .facts import (
+    ClassMembers,
     Forwarder,
     ModuleInfo,
     SeamFrame,
@@ -58,7 +62,7 @@ from .package_constraints import PackageConstraints
 from .purity_rules import mixed_purity_findings, with_move_closures
 from .rule_context import RuleContext
 
-__all__ = ["RuleContext", "check_modules", "fits_ring", "unreachable_patches"]
+__all__ = ["RuleContext", "check_modules", "fits_ring", "name_collision_findings", "port_binding_findings", "unreachable_patches"]
 
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
 NO_CONSTRAINTS = PackageConstraints()  # a policy that declares none: the constraint rules cost nothing
@@ -745,6 +749,173 @@ def _stale_importable_by(policy: ArchitecturePolicy, modules: Collection[str]) -
             if not any(in_unit(module, glob) for module in modules)
         ]
     return out
+
+
+_ClassKey = tuple[str, str]  # (module, qualified class name)
+
+
+class _Classes:
+    """Every scanned class and its first-party ancestry. A base that is not a scanned class (third-party, builtin) ends a line."""
+
+    def __init__(self, modules: Mapping[str, ModuleInfo]) -> None:
+        self.modules = modules
+        self.shapes: dict[_ClassKey, list[ClassMembers]] = {}
+        for module, info in modules.items():
+            for shape in info.facts.classes:
+                self.shapes.setdefault((module, shape.name), []).append(shape)  # two under `if`/`else` are one class
+        self._lineages: dict[_ClassKey, tuple[_ClassKey, ...]] = {}
+
+    def find(self, dotted: str, seen: frozenset[str] = frozenset()) -> _ClassKey | None:
+        """The class a dotted name means, following re-exports."""
+        parts = dotted.split(".")
+        for end in range(len(parts) - 1, 0, -1):
+            module, rest = ".".join(parts[:end]), parts[end:]
+            info = self.modules.get(module)
+            if info is None:
+                continue
+            if (module, ".".join(rest)) in self.shapes:
+                return module, ".".join(rest)
+            for name, level, source, imported in info.facts.reexports:
+                if name != rest[0] or dotted in seen:
+                    continue
+                raw = "." * level + source + (("." if source else "") + imported if imported else "")
+                target = absolute_callee(module, info.is_package, raw)
+                if target is not None:
+                    return self.find(".".join([target, *rest[1:]]), seen | {dotted})
+        return None
+
+    def bases(self, key: _ClassKey) -> list[_ClassKey]:
+        module = key[0]
+        info = self.modules[module]
+        names = (absolute_callee(module, info.is_package, base) for shape in self.shapes[key] for base in shape.bases)
+        return [found for name in names if name is not None and (found := self.find(name)) is not None]
+
+    def lineage(self, key: _ClassKey) -> tuple[_ClassKey, ...]:
+        """The class and every scanned ancestor, each once (an inheritance cycle ends where it started)."""
+        if key not in self._lineages:
+            line, pending = [key], [key]
+            while pending:
+                new = [base for base in self.bases(pending.pop()) if base not in line]
+                line += new
+                pending += new
+            self._lineages[key] = tuple(line)
+        return self._lineages[key]
+
+    def members(self, keys: Collection[_ClassKey]) -> set[str]:
+        return {member for key in keys for shape in self.shapes[key] for member in shape.members}
+
+    def is_protocol(self, key: _ClassKey) -> bool:
+        return any(shape.protocol for shape in self.shapes[key])
+
+    def is_abstract(self, key: _ClassKey) -> bool:
+        return any(shape.abstract for shape in self.shapes[key])
+
+
+def _implementors(binding: PortBinding, port: _ClassKey, classes: _Classes, tool_modules: Collection[str]) -> list[str]:
+    """Concrete production classes that subclass the port or, for a Protocol, provide every member it names."""
+    wanted = classes.members([key for key in classes.lineage(port) if classes.is_protocol(key)])
+    found: list[str] = []
+    for key in classes.shapes:
+        module, name = key
+        if key == port or classes.is_abstract(key) or module in tool_modules or not binding.counts(module, name):
+            continue
+        lineage = classes.lineage(key)
+        if port in lineage or (wanted and wanted <= classes.members(lineage)):
+            found.append(f"{module}.{name}")
+    return sorted(found)
+
+
+def _binding_problem(binding: PortBinding, classes: _Classes, known: Collection[str], tool_modules: Collection[str]) -> str | None:
+    if binding.port_module not in known:
+        return f"`port_binding`: module {binding.port_module!r} does not exist"
+    port = classes.find(binding.port)
+    if port is None:
+        return f"`port_binding`: no class {binding.port!r} was found"
+    if not classes.is_abstract(port):
+        return f"`port_binding`: {binding.port!r} is not a Protocol or an abstract class"
+    found = _implementors(binding, port, classes, tool_modules)
+    if not found:
+        problem = "declared port has no production implementor"
+    elif len(found) > binding.max_implementors:
+        problem = f"declared port has {len(found)} production implementors, at most {binding.max_implementors} expected: {', '.join(found)}"
+    else:
+        return None
+    return problem + (f": {binding.reason}" if binding.reason else "")
+
+
+def port_binding_findings(context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str]) -> list[Violation]:
+    """``port_binding`` (#219). A whole-repository fact, so not part of ``check_modules``: ``modules`` must hold every scanned
+    module, never a ``--changed`` subset. Implementors are counted across scopes: a port is often bound outside its own."""
+    policies = [scope.policy for scope in context.policy.scopes] or [context.policy]
+    bindings = {item.port: item for local_policy in policies for item in local_policy.port_bindings}
+    if not bindings:
+        return []
+    classes = _Classes(modules)
+    return [
+        Violation(Rule.PORT_BINDING, port, problem)
+        for port, binding in sorted(bindings.items())
+        if (problem := _binding_problem(binding, classes, known, context.tool_modules)) is not None
+    ]
+
+
+def _folded(name: str) -> str:
+    """How two spellings of one word compare: ``_ratchet_spec`` and ``RatchetSpec`` are the same."""
+    return name.replace("_", "").lower()
+
+
+def _last_word(name: str) -> str:
+    """The head noun of a CamelCase name, lowercased: ``ArchitectureScope`` -> ``scope``."""
+    words = re.findall(r"[A-Z]+(?![a-z0-9])|[A-Z]?[a-z0-9]+", name)
+    return str(words[-1]).lower() if words else ""
+
+
+_Types = list[tuple[str, str]]  # (module, public module-level class name)
+
+
+def _named_types(setting: NameCollisionPolicy, types: _Types, decl: NameDecl) -> _Types:
+    """The types ``decl`` reuses the name of; none when its annotation says it holds that concept after all."""
+    key = _folded(decl.name)
+    if decl.name.strip("_").isupper() or key in {_folded(name) for name, _ in setting.allow}:
+        return []
+    if any(_folded(identifier).endswith(key) for identifier in decl.annotation):
+        return []
+    declared_word = key in {_folded(word) for word in setting.words}
+    return [
+        (module, name) for module, name in types
+        if (_folded(name) == key and (declared_word or len(key) >= setting.min_length)) or (declared_word and _last_word(name) == key)
+    ]
+
+
+def _module_collisions(setting: NameCollisionPolicy, types: _Types, module: str, source: str) -> list[Violation]:
+    out: dict[str, Violation] = {}  # one note per name and owner: the first declaration
+    for decl in name_declarations(ast.parse(source.removeprefix("\ufeff"))):
+        found = _named_types(setting, types, decl)
+        if not found or any(owner == module for owner, _ in found):
+            continue
+        names = ", ".join(sorted(f"{owner}.{name}" for owner, name in found))
+        detail = f"{decl.kind} '{decl.owner}.{decl.name}' shares its name with the type {names}"
+        hint = " (rename it, or give the name a reason in `name_collisions.allow`)"
+        _ = out.setdefault(detail, Violation(Rule.NAME_COLLISION, module, detail, decl.line, hint=hint))
+    return list(out.values())
+
+
+def name_collision_findings(context: RuleContext, modules: Mapping[str, ModuleInfo], sources: Mapping[str, str]) -> list[Violation]:
+    """``name-collision`` (#221), an observation. The vocabulary is every scanned public class of the same scope, so ``modules``
+    must be a whole-repository scan; ``sources`` holds the text of the modules to look at."""
+    setting = context.policy.name_collisions
+    if setting is None:
+        return []
+    vocabulary: dict[str | None, _Types] = {}
+    for module, info in sorted(modules.items()):
+        if module not in context.tool_modules:
+            vocabulary.setdefault(context.scope_name(module), []).extend(
+                (module, item.name) for item in info.facts.top_level_defs if item.is_class and not item.name.startswith("_")
+            )
+    return [
+        found
+        for module, source in sorted(sources.items())
+        for found in _module_collisions(setting, vocabulary.get(context.scope_name(module), []), module, source)
+    ]
 
 
 def _sibling_index(known: Collection[str]) -> dict[str, list[str]]:

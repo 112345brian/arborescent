@@ -24,10 +24,12 @@ from .domain import (
     CompanionCall,
     ConstructionSite,
     DocsPolicy,
+    NameCollisionPolicy,
     OwnedLiteral,
     Policy,
     PolicyError,
     PrivateAccess,
+    PortBinding,
     ResultDiscard,
     RingRule,
     SeamBypass,
@@ -276,6 +278,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         result_discard=_result_discard(raw),
         effect_seam_bypassed=_seam_bypass(raw),
         private_access=_private_access(raw),
+        port_bindings=_port_bindings(raw),
         docs=_docs(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
@@ -313,6 +316,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         mixed_purity=_mixed_purity(raw),
         lazy_import_rings=_lazy_import_rings(raw, {rule.name for rule in core.rings}),
         effects=_effects(raw),
+        name_collisions=_name_collisions(raw),
         package_constraints=_package_constraints(raw),
         ratchets=ratchet_specs(raw.get("ratchet", {})),
     )
@@ -499,6 +503,39 @@ def _lazy_import_rings(raw: Mapping[str, Any], known: Collection[str]) -> tuple[
     return rings
 
 
+def _name_collisions(raw: Mapping[str, Any]) -> NameCollisionPolicy | None:
+    if "name_collisions" not in raw:
+        return None
+    table = raw["name_collisions"]
+    if not isinstance(table, Mapping):
+        raise PolicyError("`name_collisions` must be a table: [tool.arborescent.name_collisions]")
+    table = cast("Mapping[str, Any]", table)
+    unknown = set(table) - {"min_length", "words", "allow"}
+    if unknown:
+        raise PolicyError(f"unknown key in `name_collisions`: {sorted(unknown)}")
+    min_length, words = table.get("min_length", NameCollisionPolicy.min_length), table.get("words", [])
+    if not isinstance(min_length, int) or isinstance(min_length, bool) or min_length < 1:
+        raise PolicyError("`name_collisions.min_length` must be a positive integer")
+    if not isinstance(words, list) or not all(isinstance(word, str) and word for word in cast("list[object]", words)):
+        raise PolicyError("`name_collisions.words` must be a list of non-empty strings")
+    return NameCollisionPolicy(min_length, tuple(cast("list[str]", words)), _allowed_names(table))
+
+
+def _allowed_names(table: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    entries = table.get("allow", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
+        raise PolicyError("`name_collisions.allow` must be an array of tables: [[tool.arborescent.name_collisions.allow]]")
+    out: list[tuple[str, str]] = []
+    for entry in cast("list[Mapping[str, Any]]", entries):
+        name, reason = entry.get("name"), entry.get("reason")
+        if set(entry) - {"name", "reason"} or not isinstance(name, str) or not name.strip():
+            raise PolicyError("`name_collisions.allow` takes a `name` and a `reason`")
+        if not isinstance(reason, str) or not reason.strip():
+            raise PolicyError(f"`name_collisions.allow` {name!r} needs a written `reason`; an exemption without one is not allowed")
+        out.append((name, reason.strip()))
+    return tuple(out)
+
+
 def _effects(raw: Mapping[str, Any]) -> EffectsPolicy:
     table = raw.get("effects", {})
     if not isinstance(table, Mapping):
@@ -530,11 +567,11 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
     "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling", "mixed_purity", "package", "effects",
-    "ratchet",
+    "ratchet", "name_collisions",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "call_allowlist", "companion", "construction", "result_discard", "private_access", "effect_seam_bypassed", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "call_allowlist", "companion", "construction", "result_discard", "port_binding", "private_access", "effect_seam_bypassed", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -904,6 +941,33 @@ def _construction_names(entry: Mapping[str, Any], target: str, key: str) -> tupl
         kind = "module globs" if key == "only_from" else "parameter names"
         raise PolicyError(f"`construction` {target!r}: `{key}` is a non-empty list of {kind}")
     return tuple(valid)
+
+
+def _port_bindings(raw: Mapping[str, Any]) -> tuple[PortBinding, ...]:
+    entries = raw.get("port_binding", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
+        raise PolicyError("`port_binding` must be an array of tables: [[tool.arborescent.port_binding]]")
+    bindings = tuple(_port_binding(entry) for entry in cast("list[Mapping[str, Any]]", entries))
+    if len({item.port for item in bindings}) != len(bindings):
+        raise PolicyError("`port_binding` must not list a port twice")
+    return bindings
+
+
+def _port_binding(entry: Mapping[str, Any]) -> PortBinding:
+    unknown = set(entry) - {"port", "max", "exclude", "reason"}
+    if unknown:
+        raise PolicyError(f"unknown key in `port_binding`: {sorted(unknown)}")
+    port, limit, reason = entry.get("port"), entry.get("max", 1), entry.get("reason", "")
+    exclude = entry.get("exclude", [])
+    if not isinstance(port, str) or not _DOTTED_NAME.fullmatch(port):
+        raise PolicyError("`port_binding` needs a `port` that is the dotted name of a Protocol or abstract class, e.g. \"app.ports.Clock\"")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise PolicyError(f"`port_binding` {port!r}: `max` must be a positive integer")
+    if not isinstance(reason, str) or not isinstance(exclude, list) or not all(
+        isinstance(item, str) and item for item in cast("list[object]", exclude)
+    ):
+        raise PolicyError(f"`port_binding` {port!r}: `exclude` is a list of non-empty strings, `reason` a string")
+    return PortBinding(port, limit, tuple(cast("list[str]", exclude)), reason)
 
 
 def _result_discard(raw: Mapping[str, Any]) -> ResultDiscard | None:

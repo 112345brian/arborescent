@@ -33,9 +33,11 @@ from .policy_types import (
     CompanionCall,
     ConstructionSite,
     DocsPolicy,
+    NameCollisionPolicy,
     OwnedLiteral,
     PolicyError,
     PrivateAccess,
+    PortBinding,
     ResultDiscard,
     RingRule,
     SeamBypass,
@@ -69,10 +71,12 @@ __all__ = [
     "DocsPolicy",
     "ModuleLayer",
     "Mutation",
+    "NameCollisionPolicy",
     "OwnedLiteral",
     "Policy",
     "PolicyError",
     "PrivateAccess",
+    "PortBinding",
     "RatchetSpec",
     "ResultDiscard",
     "RingRule",
@@ -167,6 +171,7 @@ class Policy(ArchitecturePolicy):
     coupling: CouplingPolicy = field(default_factory=CouplingPolicy)  # #148: entrypoints and hub threshold for `arborescent coupling`
     package_constraints: PackageConstraints = field(default_factory=PackageConstraints)  # #164: `[package.constraints]`, parsed only, not enforced
     ratchets: tuple[RatchetSpec, ...] = ()  # #147: `[ratchet.<name>]` counters compared with their baseline by `check`
+    name_collisions: NameCollisionPolicy | None = None  # #221: off unless `[name_collisions]` is set; observations only
     effects: EffectsPolicy = field(default_factory=EffectsPolicy)  # 0.8.0: sanctioned seam modules and the guard that goes with them
     taint_seeds: tuple[str, ...] = DEFAULT_TAINT_SEEDS  # #98: effect categories (plus "network") a function-level call can be seeded with
 

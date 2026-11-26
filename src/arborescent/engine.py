@@ -55,7 +55,13 @@ from .ports import (
 from .practices import run_practices
 from .purity import excluded_findings
 from .ratchet_measure import Subject
-from .rules import RuleContext, check_modules, unreachable_patches
+from .rules import (
+    RuleContext,
+    check_modules,
+    name_collision_findings,
+    port_binding_findings,
+    unreachable_patches,
+)
 from .suggestions import ClassSuggestion, Suggestion
 from .tach_visibility import invisible_import_violations
 from .taint import TaintResult, compute_taint
@@ -204,7 +210,10 @@ def run_own(
             policy.coupling.eager_commands, found, lambda path: services.fs.read_text(root / path), scan, complete=only is None
         )
     found += excluded_findings(policy, scan.excluded_modules)
-    if only is None:  # the signals compare a module with its importers and peers: a whole-repository fact
+    if only is None:  # these compare a module with its importers and peers: whole-repository facts
+        found += port_binding_findings(indexes, scan.modules, scan.known)
+        if policy.name_collisions is not None:  # re-reads every source: only when asked for
+            found += name_collision_findings(indexes, scan.modules, _module_sources(root, services, scan))
         found += audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
     if "tach" not in policy.disabled_tools:
         found += invisible_import_violations(scan.modules.values())
@@ -252,10 +261,8 @@ class _TaintCacheFile:
         self.fs.write_text(self._path, text)
 
 
-def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult) -> TaintResult:
-    """#98: re-reads each scanned module's source and runs the whole-repository call-graph pass, reusing the
-    scanner's cache directory (a sibling ``taint.json``) so an unchanged file skips re-parsing. A module whose
-    file cannot be read contributes no facts, same as one the taint pass itself failed to parse."""
+def _module_sources(root: Path, services: Services, scan: ScanResult) -> dict[str, str]:
+    """The text of each scanned module; one that cannot be read is left out."""
     sources: dict[str, str] = {}
     for name, path in scan.paths.items():
         if name not in scan.modules:
@@ -264,6 +271,14 @@ def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult)
             sources[name] = services.fs.read_text(root / path)
         except OSError:
             continue
+    return sources
+
+
+def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult) -> TaintResult:
+    """#98: re-reads each scanned module's source and runs the whole-repository call-graph pass, reusing the
+    scanner's cache directory (a sibling ``taint.json``) so an unchanged file skips re-parsing. A module whose
+    file cannot be read contributes no facts, same as one the taint pass itself failed to parse."""
+    sources = _module_sources(root, services, scan)
     cache_dir = services.scanner.cache_dir
     store = _TaintCacheFile(services.fs, cache_dir / "taint.json") if cache_dir else None
     return compute_taint(scan.modules, sources, scan.known, policy.taint_seeds, store)

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from .call_facts import CallShape, FunctionCalls, FunctionSpan
-from .definition_facts import ClassShape, Parameter, TopLevelDef
+from .definition_facts import ClassMembers, ClassShape, Parameter, TopLevelDef
 from .effect_facts import EffectUse
 from .facts import (
     Forwarder,
@@ -120,6 +120,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         _calls_to_json(f.call_shapes), _classes_to_json(f.class_shapes),
         [[line, target] for line, target in f.private_attrs],
         [[line, target] for line, target in f.patches], [list(item) for item in f.from_calls],
+        [[c.name, c.line, list(c.bases), list(c.members), c.protocol, c.abstract] for c in f.classes],
     ]
 
 
@@ -156,4 +157,5 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         _calls_from_json(raw[31]), _classes_from_json(raw[32]),
         tuple((item[0], item[1]) for item in raw[33]),
         tuple((item[0], item[1]) for item in raw[34]), tuple((item[0], item[1], item[2]) for item in raw[35]),
+        tuple(ClassMembers(c[0], c[1], tuple(c[2]), tuple(c[3]), c[4], c[5]) for c in raw[36]),
     )

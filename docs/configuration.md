@@ -451,6 +451,55 @@ What it does not see (a clean run is not proof):
 - A marker whose `metadata` is not a literal dict or whose `field` is not `dataclasses.field`.
 - In a check of selected paths, a class defined in a file that was not selected (keyword checks from policy entries still work).
 
+`port_binding` is an opt-in check on how many production classes bind a port. A port with one adapter (a clock, a file
+system) degrades silently when a second one appears; a port with none is dead, or the scan does not reach its adapter.
+Plugin points with many implementors are simply not listed, or given the `max` they are meant to have:
+
+```toml
+[[tool.arborescent.port_binding]]
+port = "app.ports.Clock"            # a Protocol or abstract class
+# max = 1                           # the default; at least one implementor is always required
+# exclude = ["app.simulation"]      # module globs or `module.Class` names that are not production bindings
+# reason = "one source of time"     # appended to the finding
+```
+
+A class implements the port when it subclasses it, or, for a Protocol, when it defines every member the Protocol (and the
+Protocols it extends) names: methods, class attributes and `self.x` assignments, its own or inherited from scanned bases.
+Only names are compared, not signatures (that is the type checker's job), so a Protocol with one common method name such
+as `run` can match an unrelated class: name it in `exclude`. A memberless Protocol and an abstract class count
+subclasses only. A class does not count when it is itself a Protocol, lists `ABC`/`ABCMeta` or declares an
+`@abstractmethod`; when it is a test double (in a `tests`, `testing`, `conftest`, `fakes` or `test_*` module, or named
+`Fake*`, `Stub*` or `Mock*`); or when it lies in a `dev_tools` path or an excluded file. A member or base the scan cannot
+see (a third-party base class, `setattr`, `__getattr__`) is not followed. The table is per scope; implementors are counted
+across all scopes. `check --changed` skips the rule. A function that reaches a port's resource by another route is not
+detected.
+
+`name_collisions` is an opt-in observation (a `NOTE` line; it never fails `check` and never enters the baseline) for one
+word used for two concepts: a field or local called `ratchet` that is not a `Ratchet`.
+
+```toml
+[tool.arborescent.name_collisions]  # the table alone turns it on
+# min_length = 5                    # shorter names are too generic
+# words = ["scope"]                 # words that mean one thing: `scope` also matches a type ending in `...Scope`
+
+[[tool.arborescent.name_collisions.allow]]
+name = "baseline"
+reason = "the file and the object are the same concept here"
+```
+
+The definition is deliberately narrow, to stay quiet:
+
+- Vocabulary: public module-level classes of the same scope. Names are compared ignoring case and underscores
+  (`architecture_scope` matches `ArchitectureScope`); `scope` matches `ArchitectureScope` only when listed in `words`.
+- Looked at: annotated class fields, `self.x` assignments and function locals. Not parameters, function names,
+  module-level variables, unannotated class attributes (enum members) or `UPPER_CASE` names.
+- Reported only with evidence that the value is something else: an annotation that does not name a type ending in that
+  word (`ratchet: tuple[str, ...]`, but not `ratchet: NamedRatchet` or `ratchet: Any`), or, unannotated, a literal or a
+  comprehension. `ratchet = load()` says nothing and is left alone.
+- A module that defines the type itself is left alone, and `check --changed` skips the observation.
+
+The table is a whole-run setting: with `scopes`, set it at the root.
+
 `result_discard` is an opt-in check that a caller reads the outcome of a function it calls (a new "refused" or "skipped" outcome
 is otherwise silently ignored). It reports `result-discard` for a call written as a whole statement:
 
@@ -1020,6 +1069,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `missing-companion-call` | a function calls a `companion` action and neither it nor a function it calls records it (`must_also_call`), with no `# companion-exempt:` reason; also a scope glob that matches no module |
 | `construction-forbidden-argument` | a call or `replace` supplies a field that a `construction` entry forbids or a `metadata={"arbor": "derived"}` marker marks; also an entry whose class or field does not exist |
 | `construction-missing-argument` | a call constructs a `construction` class without passing a `require_kwargs` name by keyword; also an entry whose class or field does not exist |
+| `port-binding` | a `port_binding` port has no production implementor, or more than its `max` (default 1); also a port that does not exist or is not a Protocol or abstract class. Whole-repository runs only |
+| `name-collision` | information only (never fails, never baselined): `name_collisions` is set and a field or local reuses the name of a type defined in another module. Whole-repository runs only |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |

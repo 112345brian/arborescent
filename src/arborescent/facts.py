@@ -38,10 +38,12 @@ from .declaration_facts import (
     script_deps,
 )
 from .definition_facts import (
+    ClassMembers,
     ClassShape,
     TopLevelDef,
     class_shapes,
     main_guard_line,
+    member_shapes,
     purity_helpers,
     result_defs,
     surface,
@@ -62,8 +64,8 @@ from .purity_facts import PurityFacts, PurityUnit, purity_facts
 from .seam_facts import SeamFacts, SeamFrame, SeamParam, SeamUse, seam_facts
 
 __all__ = [
-    "Forwarder", "ImportCall", "ImportTimeFacts", "ModuleInfo", "PurityFacts", "PurityUnit", "SeamFacts", "SeamFrame", "SeamParam",
-    "SeamUse", "SourceFacts", "extract", "file_module", "patched_targets", "unreached_bindings",
+    "ClassMembers", "ClassShape", "Forwarder", "ImportCall", "ImportTimeFacts", "ModuleInfo", "PurityFacts", "PurityUnit", "SeamFacts",
+    "SeamFrame", "SeamParam", "SeamUse", "SourceFacts", "extract", "file_module", "patched_targets", "unreached_bindings",
 ]
 
 
@@ -105,6 +107,7 @@ class SourceFacts:
     private_attrs: tuple[tuple[int, str], ...] = ()  # (line, dotted) of ``._name`` reached through an import; relative targets keep leading dots (#218)
     patches: tuple[tuple[int, str], ...] = ()  # (line, dotted "module.name") a test double replaces (#226)
     from_calls: tuple[tuple[int, str, str], ...] = ()  # (line, origin "X.name", local name) of ``from X import name`` called bare in a function (#226)
+    classes: tuple[ClassMembers, ...] = ()  # every class's bases and member names (#219)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -198,6 +201,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         private_attributes(nodes, calls_aliases, rebound),
         patch_targets(nodes, calls_aliases, rebound),
         unqualified_from_calls(tree, nodes, rebound),
+        member_shapes(tree, calls_aliases),
     )
 
 

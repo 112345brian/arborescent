@@ -1,6 +1,6 @@
 """Definition facts: the shape of what a module defines at its top level.
 
-Module-level classes and functions with whether each is abstract, ``typing.Protocol`` methods whose return type says
+Module-level classes and functions with whether each is abstract, every class's bases and member names, the fields and locals that show what they hold, ``typing.Protocol`` methods whose return type says
 nothing, the public surface (a static ``__all__`` or public bindings) and which of it is re-exported, functions
 annotated to return a ``*Result``/``*Outcome``, and the ``if __name__ == "__main__":`` guard.
 
@@ -10,7 +10,7 @@ modules (inheritance and re-exports), for the construction rule (#234)."""
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -18,8 +18,8 @@ from .call_facts import absolute_callee, annotation_types, dotted_name
 from .purity_facts import Helpers
 
 __all__ = [
-    "ClassIndex", "ClassShape", "IndexedModule", "Parameter", "Signature", "TopLevelDef", "class_shapes", "main_guard_line", "purity_helpers",
-    "result_defs", "surface", "top_level_defs", "weak_port_returns",
+    "ClassIndex", "ClassMembers", "ClassShape", "IndexedModule", "NameDecl", "Parameter", "Signature", "TopLevelDef", "class_shapes",
+    "main_guard_line", "member_shapes", "name_declarations", "purity_helpers", "result_defs", "surface", "top_level_defs", "weak_port_returns",
 ]
 
 _DATACLASS_NAMES = frozenset({"dataclasses.dataclass", "pydantic.dataclasses.dataclass"})
@@ -90,6 +90,93 @@ def top_level_defs(tree: ast.AST, aliases: dict[str, str]) -> tuple[TopLevelDef,
 
 
 _PROTOCOL_NAMES = frozenset({"Protocol", "typing.Protocol", "typing_extensions.Protocol"})
+# Names a class may define without them being part of an interface it offers.
+_NOT_MEMBERS = frozenset({
+    "__init__", "__new__", "__doc__", "__module__", "__slots__", "__annotations__", "__class_getitem__",
+    "__init_subclass__", "__post_init__", "__match_args__", "_",
+})
+
+
+@dataclass(frozen=True)
+class ClassMembers:
+    """What a class statement says about itself, for counting a port's implementors (#219)."""
+
+    name: str  # qualified by the enclosing classes and functions: "Outer.Inner"
+    line: int
+    bases: tuple[str, ...]  # dotted through import aliases; a relative import keeps its dots, a local name stays bare
+    members: tuple[str, ...]  # methods, class attributes and `self.x` assignments it defines itself, sorted
+    protocol: bool  # lists `typing.Protocol` directly
+    abstract: bool  # a Protocol, lists `ABC`/`ABCMeta` directly, or declares an `@abstractmethod`
+
+
+def _blocks(stmt: ast.stmt) -> Iterator[ast.stmt]:
+    """The statements directly inside a compound statement (`if`, `try`, `with`, `match`, loops)."""
+    for child in ast.iter_child_nodes(stmt):
+        if isinstance(child, ast.stmt):
+            yield child
+        elif isinstance(child, ast.ExceptHandler | ast.match_case):
+            yield from child.body
+
+
+def _self_attributes(method: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[str]:
+    params = [*method.args.posonlyargs, *method.args.args]
+    if not params:
+        return
+    for node in ast.walk(method):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store) and isinstance(node.value, ast.Name) and node.value.id == params[0].arg:
+            yield node.attr
+
+
+def _members(body: Iterable[ast.stmt]) -> Iterator[str]:
+    for stmt in body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+            yield stmt.name
+            yield from _self_attributes(stmt)
+        elif isinstance(stmt, ast.Assign | ast.AnnAssign):
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            yield from (t.id for t in targets if isinstance(t, ast.Name))
+        elif not isinstance(stmt, ast.ClassDef):
+            yield from _members(_blocks(stmt))
+
+
+def _declares_abstract_method(node: ast.ClassDef, aliases: dict[str, str]) -> bool:
+    return any(
+        (dotted_name(decorator, aliases) or "").rpartition(".")[2] == "abstractmethod"
+        for stmt in node.body if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+        for decorator in stmt.decorator_list
+    )
+
+
+def _class_members(node: ast.ClassDef, name: str, aliases: dict[str, str]) -> ClassMembers:
+    bases = tuple(
+        dotted for base in node.bases
+        if (dotted := dotted_name(base.value if isinstance(base, ast.Subscript) else base, aliases)) is not None
+    )
+    protocol = any(base in _PROTOCOL_NAMES for base in bases)
+    return ClassMembers(
+        name, node.lineno, bases, tuple(sorted(set(_members(node.body)) - _NOT_MEMBERS)), protocol,
+        protocol or _is_abstract_class(node, aliases) or _declares_abstract_method(node, aliases),
+    )
+
+
+def member_shapes(tree: ast.Module, aliases: dict[str, str]) -> tuple[ClassMembers, ...]:
+    """Every class in the module, nested and function-local ones included. Only statements are walked: a class is one."""
+    out: list[ClassMembers] = []
+
+    def visit(body: Iterable[ast.stmt], prefix: str) -> None:
+        for stmt in body:
+            if isinstance(stmt, ast.ClassDef):
+                out.append(_class_members(stmt, prefix + stmt.name, aliases))
+                visit(stmt.body, f"{prefix}{stmt.name}.")
+            elif isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+                visit(stmt.body, f"{prefix}{stmt.name}.")
+            else:
+                visit(_blocks(stmt), prefix)
+
+    visit(tree.body, "")
+    return tuple(out)
+
+
 _ANY_NAMES = frozenset({"Any", "typing.Any", "typing_extensions.Any", "object", "builtins.object"})
 _BARE_CONTAINERS = frozenset({"dict", "list", "tuple", "set", "frozenset"})
 _BARE_TYPING_CONTAINERS = frozenset({"Dict", "List", "Tuple", "Set", "FrozenSet"})
@@ -152,6 +239,88 @@ def weak_port_returns(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tupl
             if why is not None:
                 found.append((stmt.lineno, f"{cls.name}.{stmt.name}", why))
     return tuple(sorted(found))
+
+
+# An annotation made only of these says nothing about what the value is.
+_SILENT_ANNOTATIONS = frozenset({"Any", "object", "Self"})
+_WRAPPING_ANNOTATIONS = frozenset({"Optional", "Union", "Annotated", "ClassVar", "Final", "typing", "None"})
+_LITERAL_VALUES = (ast.JoinedStr, ast.List, ast.Dict, ast.Set, ast.Tuple, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+@dataclass(frozen=True)
+class NameDecl:
+    """A field or local that shows what it holds: by its annotation, or else by a literal value (#221)."""
+
+    line: int
+    kind: str  # "field" | "local"
+    owner: str  # the qualified class (field) or function (local)
+    name: str
+    annotation: tuple[str, ...]  # the identifiers its annotation names; empty when the evidence is a literal value
+
+
+def _identifiers(node: ast.expr) -> Iterator[str]:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name):
+            yield child.id
+        elif isinstance(child, ast.Attribute):
+            yield child.attr
+        elif isinstance(child, ast.Constant) and isinstance(child.value, str):
+            try:
+                yield from _identifiers(ast.parse(child.value.strip(), mode="eval").body)
+            except SyntaxError:
+                yield "Any"  # unreadable: no evidence
+
+
+def _evidence(stmt: ast.Assign | ast.AnnAssign) -> tuple[str, ...] | None:
+    """The annotation's identifiers, ``()`` for an unannotated literal value, None when nothing shows what is held."""
+    if isinstance(stmt, ast.AnnAssign):
+        named = tuple(sorted(set(_identifiers(stmt.annotation)) - _WRAPPING_ANNOTATIONS))
+        return named if set(named) - _SILENT_ANNOTATIONS else None
+    value = stmt.value
+    literal = isinstance(value, _LITERAL_VALUES) or (
+        isinstance(value, ast.Constant) and value.value is not None and value.value is not ...
+    )
+    return () if literal else None
+
+
+_Scope = tuple[str, str, str]  # (enclosing qualified name, "module" | "class" | "function", the method's `self` or "")
+
+
+def _declared(stmt: ast.Assign | ast.AnnAssign, scope: _Scope, class_name: str) -> Iterator[NameDecl]:
+    owner, kind, self_name = scope
+    evidence = _evidence(stmt)
+    if evidence is None:
+        return
+    for target in stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]:
+        if isinstance(target, ast.Name) and kind == "function":
+            yield NameDecl(stmt.lineno, "local", owner, target.id, evidence)
+        elif isinstance(target, ast.Name) and kind == "class" and isinstance(stmt, ast.AnnAssign):
+            yield NameDecl(stmt.lineno, "field", owner, target.id, evidence)  # unannotated: an enum member or a constant
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == self_name:
+            yield NameDecl(stmt.lineno, "field", class_name, target.attr, evidence)
+
+
+def name_declarations(tree: ast.Module) -> tuple[NameDecl, ...]:
+    """Class fields, ``self.x`` assignments and function locals that carry evidence of what they hold, in source order."""
+    out: list[NameDecl] = []
+
+    def visit(body: Iterable[ast.stmt], scope: _Scope, class_name: str) -> None:
+        owner, kind, _ = scope
+        prefix = f"{owner}." if owner else ""
+        for stmt in body:
+            if isinstance(stmt, ast.ClassDef):
+                visit(stmt.body, (prefix + stmt.name, "class", ""), prefix + stmt.name)
+            elif isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+                params = [*stmt.args.posonlyargs, *stmt.args.args]
+                self_name = params[0].arg if kind == "class" and params else ""
+                visit(stmt.body, (prefix + stmt.name, "function", self_name), class_name)
+            else:
+                if isinstance(stmt, ast.Assign | ast.AnnAssign):
+                    out.extend(_declared(stmt, scope, class_name))
+                visit(_blocks(stmt), scope, class_name)
+
+    visit(tree.body, ("", "module", ""), "")
+    return tuple(out)
 
 
 def purity_helpers(aliases: dict[str, str]) -> Helpers:
