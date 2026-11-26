@@ -4,20 +4,9 @@ use tree_sitter::{Node, Parser};
 
 #[derive(Default, Serialize)]
 pub struct ModuleFacts {
-    pub imports: Vec<Import>,
     pub syntax_error: bool,
     #[serde(skip)]
     pub functions: BTreeMap<String, Vec<Call>>,
-}
-
-#[derive(Serialize)]
-pub struct Import {
-    level: usize,
-    module: String,
-    names: Vec<String>,
-    line: usize,
-    lazy: bool,
-    type_only: bool,
 }
 
 pub struct Call {
@@ -58,74 +47,6 @@ fn canonical_import(name: &str) -> String {
     name.chars()
         .filter(|character| !character.is_whitespace() && *character != '\\')
         .collect()
-}
-
-/// The same test as the full scan: any `x.TYPE_CHECKING` or bare `TYPE_CHECKING`, parentheses aside.
-fn is_type_checking(condition: Node<'_>, source: &str) -> bool {
-    match condition.kind() {
-        "identifier" => text(condition, source) == "TYPE_CHECKING",
-        "attribute" => field_text(condition, "attribute", source) == Some("TYPE_CHECKING"),
-        "parenthesized_expression" => children(condition)
-            .into_iter()
-            .any(|child| child.kind() != "comment" && is_type_checking(child, source)),
-        _ => false,
-    }
-}
-
-fn imports(node: Node<'_>, source: &str, lazy: bool, type_only: bool, out: &mut Vec<Import>) {
-    let line = node.start_position().row + 1;
-    if node.kind() == "import_statement" {
-        for name in field_nodes(node, "name") {
-            out.push(Import {
-                level: 0,
-                module: canonical_import(import_name(name, source).0),
-                names: vec![],
-                line,
-                lazy,
-                type_only,
-            });
-        }
-        return;
-    }
-    // tree-sitter gives `from __future__` its own node, with no `module_name` field.
-    if matches!(
-        node.kind(),
-        "import_from_statement" | "future_import_statement"
-    ) {
-        let raw = canonical_import(field_text(node, "module_name", source).unwrap_or("__future__"));
-        let module = raw.trim_start_matches('.');
-        let mut names: Vec<_> = field_nodes(node, "name")
-            .into_iter()
-            .map(|name| canonical_import(import_name(name, source).0))
-            .collect();
-        if names.is_empty() {
-            names.push("*".to_owned());
-        }
-        out.push(Import {
-            level: raw.len() - module.len(),
-            module: module.to_owned(),
-            names,
-            line,
-            lazy,
-            type_only,
-        });
-        return;
-    }
-    // Each `elif` guards only its own block, as the nested `If` that Python's `ast` builds does.
-    let type_guard = matches!(node.kind(), "if_statement" | "elif_clause")
-        && node
-            .child_by_field_name("condition")
-            .is_some_and(|condition| is_type_checking(condition, source));
-    let consequence = node.child_by_field_name("consequence");
-    for child in children(node) {
-        imports(
-            child,
-            source,
-            lazy || node.kind() == "function_definition",
-            type_only || (type_guard && Some(child) == consequence),
-            out,
-        );
-    }
 }
 
 fn absolute_base(raw: &str, module: &str, is_package: bool) -> Option<String> {
@@ -313,7 +234,6 @@ pub fn extract(parser: &mut Parser, source: &str, module: &str, is_package: bool
         };
     }
     let mut result = ModuleFacts::default();
-    imports(root, source, false, false, &mut result.imports);
     let mut aliases = aliases(root, source, module, is_package);
     let mut rebound = BTreeSet::new();
     walk_body(root, &mut |node| binding_names(node, source, &mut rebound));

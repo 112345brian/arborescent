@@ -1,4 +1,4 @@
-"""Equivalence of the incremental worker with a fresh full scan: facts per file, then findings per project."""
+"""Equivalence of the incremental driver and worker with a fresh full scan."""
 
 from __future__ import annotations
 
@@ -18,9 +18,8 @@ from arborescent.config import load_policy, policy_from_mapping
 from arborescent.domain import Policy, Violation
 from arborescent.engine import run_own
 from arborescent.filesystem_adapter import LocalFileSystem
-from arborescent.import_syntax import raw_imports
 from tools import incremental_analysis
-from tools.incremental_analysis import PARITY_RULES, Analysis, Result, Worker, _imports
+from tools.incremental_analysis import PARITY_RULES, Analysis, Result, Worker
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,24 +52,8 @@ def _update(worker: Worker, text: str):
     return facts
 
 
-def _assert_imports_match(worker: Worker, text: str, label: str) -> None:
-    facts = _update(worker, text)
-    assert not facts["syntax_error"], label
-    expected = tuple(replace(imp, end_line=0) for imp in raw_imports(ast.parse(text)))
-    assert _imports(facts) == expected, label
-
-
-@pytest.mark.parametrize("label", SYNTAX)
-def test_imports_match_python_for_unusual_syntax(
-    worker_binary: Path, label: str
-) -> None:
-    with Worker(worker_binary) as worker:
-        _assert_imports_match(worker, SYNTAX[label], label)
-
-
-def test_imports_match_python_for_every_file_of_this_repository(
-    worker_binary: Path,
-) -> None:
+def test_the_worker_parses_every_file_of_this_repository(worker_binary: Path) -> None:
+    """A file the grammar rejects loses its call evidence."""
     files = sorted(
         path
         for folder in ("src", "tests", "tools")
@@ -80,9 +63,15 @@ def test_imports_match_python_for_every_file_of_this_repository(
     assert len(files) > 200
     with Worker(worker_binary) as worker:
         for path in files:
-            _assert_imports_match(
-                worker, path.read_text(encoding="utf-8-sig"), str(path)
-            )
+            text = path.read_text(encoding="utf-8-sig")
+            assert not _update(worker, text)["syntax_error"], path
+
+
+SMALL = {
+    "sources": ["."],
+    "rings": ["domain", "adapters"],
+    "classify": {"domain": "domain", "adapters": "adapters"},
+}
 
 
 def _comparable(violations: Iterator[Violation]) -> list[tuple[object, ...]]:
@@ -188,6 +177,19 @@ def _repository(root: Path) -> None:
 
 def _policy(root: Path) -> Policy:
     return load_policy(LocalFileSystem(), root / "arborescent.toml")[0]
+
+
+@pytest.mark.parametrize("label", SYNTAX)
+def test_unusual_syntax_matches_a_full_scan(
+    worker_binary: Path, tmp_path: Path, label: str
+) -> None:
+    (tmp_path / "domain.py").write_text(SYNTAX[label], encoding="utf-8", newline="\n")
+    policy = policy_from_mapping(
+        {**SMALL, "ring": {"domain": {"external": []}, "adapters": {}}}
+    )
+    with Worker(worker_binary) as worker:
+        result = _assert_parity(Analysis(worker, tmp_path), policy, tmp_path)
+    assert result.incomplete == result.syntax_errors == ()
 
 
 def test_findings_match_a_full_scan_across_edits(
@@ -321,13 +323,6 @@ def test_edits_to_a_copy_of_this_repository_match_a_full_scan(
         _assert_parity(analysis, policy, tmp_path)
 
 
-SMALL = {
-    "sources": ["."],
-    "rings": ["domain", "adapters"],
-    "classify": {"domain": "domain", "adapters": "adapters"},
-}
-
-
 @pytest.mark.parametrize(
     "source",
     [
@@ -401,7 +396,7 @@ def test_valid_python_the_worker_cannot_parse_keeps_imports_and_is_reported(
     ast.parse(source)
     _write(tmp_path, {"domain.py": source, "adapters.py": ""})
     with Worker(worker_binary) as worker:
-        # If a grammar update accepts this, pick another construct or drop the fallback.
+        # If a grammar update accepts this, pick another construct.
         assert _update(worker, source)["syntax_error"]
         result = _assert_parity(
             Analysis(worker, tmp_path), policy_from_mapping(SMALL), tmp_path
