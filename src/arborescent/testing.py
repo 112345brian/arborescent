@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
-from collections.abc import Generator, Sequence
+from collections.abc import Collection, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -199,6 +199,18 @@ class FakeFileSystem:
 
     def rglob(self, root: Path, pattern: str) -> list[Path]:
         return self.glob(root, "**/" + pattern)
+
+    def walk_files(self, root: Path, prune: Collection[str]) -> list[Path]:
+        base = self._key(root).rstrip("/")
+        under = list(self._under(base))
+        nested = {self._parent(k) for k in under if k.rsplit("/", 1)[-1] == ".git"} - {self._key(root)}
+        found: list[Path] = []
+        for k in under:
+            folders = k[len(base) + 1 :].split("/")[:-1]
+            inside = ("/".join([base, *folders[: index + 1]]) for index in range(len(folders)))
+            if k in self.files and not any(name in prune for name in folders) and not any(path in nested for path in inside):
+                found.append(Path(k))
+        return sorted(found)
 
     def mkdir(self, path: Path) -> None:
         key = self._key(path)

@@ -181,9 +181,15 @@ def _class_body(body: list[ast.stmt]) -> Iterator[ast.stmt]:
             yield stmt
 
 
+def _mentions_class_var(annotation: ast.expr) -> bool:
+    """A name, attribute or quoted annotation holding ``ClassVar``; walked, because ``ast.unparse`` recurses."""
+    texts = (getattr(node, field, None) for node in ast.walk(annotation) for field in ("id", "attr", "value"))
+    return any(isinstance(text, str) and "ClassVar" in text for text in texts)
+
+
 def _declared_names(stmt: ast.stmt) -> Iterator[str]:
     if isinstance(stmt, ast.AnnAssign):
-        if "ClassVar" in ast.unparse(stmt.annotation):
+        if _mentions_class_var(stmt.annotation):
             return
         targets = [stmt.target]
     elif isinstance(stmt, ast.Assign):
@@ -215,7 +221,9 @@ def _self_attributes(method: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator
 
 
 def _is_enum(node: ast.ClassDef) -> bool:
-    return any(ast.unparse(base).endswith(_ENUM_BASE_SUFFIXES) for base in node.bases)
+    # the base's own last name; a subscript or call base is not an enum, and ``ast.unparse`` would recurse on a long chain
+    names = (base.attr if isinstance(base, ast.Attribute) else base.id if isinstance(base, ast.Name) else "" for base in node.bases)
+    return any(name.endswith(_ENUM_BASE_SUFFIXES) for name in names)
 
 
 def _is_dunder(name: str) -> bool:

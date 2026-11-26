@@ -1424,7 +1424,7 @@ Each practice is off until it has a value.
 | `secrets-guard` | tests folder, e.g. `"tests"` | `conftest.py` has no autouse fixture that scrubs the environment |
 | `effect-patch` | tests folder, e.g. `"tests"` | not a check of its own: the tests folder the `effect-patch` ring rule reads a `mock.patch` test from (falls back to `secrets-guard`'s tests folder when unset) |
 | `docs-sync` | path of the architecture doc | the doc's `\| module \| ring \|` table equals the policy (see `docs/architecture.md`) |
-| `crlf` | list of file globs, e.g. `["*.sh"]` | a matching file has CRLF line endings |
+| `crlf` | list of file globs, e.g. `["*.sh"]` | a matching file has CRLF line endings; noise folders and nested checkouts (clones, linked worktrees, submodules) are not entered |
 | `undeclared-imports` | `true`, or a manifest path (default `pyproject.toml`) | a third-party import is absent from the manifest's dependencies |
 | `stale-config-path` | list of config file globs, e.g. `["Makefile", ".github/workflows/*.yml"]`; `stale-config-path-allow` lists path globs to ignore | a glob or `.py` path in the file matches nothing (a suite silently runs zero tests after a move), or a pyproject's hatch `packages` entry does not exist |
 | `source-root-drift` | `true`, or a list of files (default `["tach.toml", "pyproject.toml"]`) | a `sources` entry is below no `source_roots` entry, or the root list copied into `tach.toml` `source_roots`, hatch `sources`/`packages` or pytest `pythonpath` has drifted from the policy |

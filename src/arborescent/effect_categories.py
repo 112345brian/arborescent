@@ -177,9 +177,10 @@ INJECTABLE_EFFECTS = frozenset({"clock", "env", "identity", "randomness", "sleep
 
 def dotted_name(node: ast.expr, aliases: Mapping[str, str]) -> str | None:
     """``a.b.c`` for attributes on a plain name, the name resolved through ``aliases``; ``None`` for anything else."""
-    if isinstance(node, ast.Name):
-        return aliases.get(node.id, node.id)
-    if isinstance(node, ast.Attribute):
-        parent = dotted_name(node.value, aliases)
-        return f"{parent}.{node.attr}" if parent is not None else None
-    return None
+    attributes: list[str] = []
+    while isinstance(node, ast.Attribute):  # a loop: generated code chains thousands of attributes
+        attributes.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    return ".".join([aliases.get(node.id, node.id), *reversed(attributes)])

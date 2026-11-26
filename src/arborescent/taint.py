@@ -465,10 +465,12 @@ def _build_graph(
     return graph, direct
 
 
-def _propagate(graph: Mapping[str, frozenset[str]], direct: Mapping[str, tuple[tuple[str, str], ...]]) -> dict[str, tuple[str, ...]]:
-    """Each tainted function's chain: depth first over the targets in name order, stopping at the first that reaches an
-    effect. An explicit stack, so a long call chain cannot overflow it."""
-    memo: dict[str, tuple[str, ...] | None] = {}
+def _follow(
+    root: str, graph: Mapping[str, frozenset[str]], direct: Mapping[str, tuple[tuple[str, str], ...]],
+    memo: dict[str, tuple[str, ...] | None],
+) -> None:
+    """Fill ``memo`` for ``root`` and what it reaches: depth first over the targets in name order, stopping at the first
+    that reaches an effect. An explicit stack, so a long call chain cannot overflow it."""
     visiting: set[str] = set()
     stack: list[tuple[str, list[str]]] = []  # (function, its targets still to try, the next one last)
 
@@ -481,17 +483,23 @@ def _propagate(graph: Mapping[str, frozenset[str]], direct: Mapping[str, tuple[t
         visiting.discard(fid)
         memo[fid] = result
 
+    enter(root)
+    while stack:
+        fid, targets = stack[-1]
+        if not targets:
+            leave((fid,) if direct.get(fid, ()) else None)
+        elif targets[-1] not in memo and targets[-1] not in visiting:
+            enter(targets[-1])  # tried again, from the memo, once it is done
+        elif (sub := memo.get(targets.pop())) is not None:
+            leave((fid, *sub))
+
+
+def _propagate(graph: Mapping[str, frozenset[str]], direct: Mapping[str, tuple[tuple[str, str], ...]]) -> dict[str, tuple[str, ...]]:
+    """Each tainted function's chain down to the one with the direct hit."""
+    memo: dict[str, tuple[str, ...] | None] = {}
     for root in sorted(graph):
         if root not in memo:
-            enter(root)
-        while stack:
-            fid, targets = stack[-1]
-            if not targets:
-                leave((fid,) if direct.get(fid, ()) else None)
-            elif targets[-1] not in memo and targets[-1] not in visiting:
-                enter(targets[-1])  # tried again, from the memo, once it is done
-            elif (sub := memo.get(targets.pop())) is not None:
-                leave((fid, *sub))
+            _follow(root, graph, direct, memo)
     return {fid: chain for fid, chain in memo.items() if chain is not None}
 
 

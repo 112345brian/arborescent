@@ -14,10 +14,13 @@
   generated `tach.toml` files no longer carry `./` or doubled separators. Windows keeps normalising a temporary copy.
 - A cold run is faster: the fact passes share one cached tree traversal, module discovery is no longer quadratic in the
   number of files, and `scan.json` is written without padding. Findings are unchanged.
-- Generated code with a very long expression or `elif` ladder no longer stops `check` with `RecursionError` while its
-  facts are extracted.
 - The taint pass no longer stops `check` with `RecursionError` on a very long `elif` ladder inside a function, or on a very
   long chain of calls.
+- Generated code with a very long expression, attribute chain or `elif` ladder no longer stops `check` with
+  `RecursionError` while its facts are extracted.
+- The `crlf` practice no longer walks the whole folder tree before filtering it, which took tens of seconds in a
+  repository with virtual environments or many linked worktrees below it. Noise folders are not entered, and neither is a
+  nested checkout (a clone, linked worktree or submodule), so its scripts are no longer reported by the parent project.
 - A memoised pure function is no longer a `memo` effect in `mixed-purity`: `functools.lru_cache`/`cache`/`cached_property` do not
   count (a written module-level cache still does). Fewer findings; stale baseline entries can be deleted (#195).
 - `selftest` no longer reports the `mixed-purity` mutations as surviving when the host module's ring is excluded by `exclude_rings`.

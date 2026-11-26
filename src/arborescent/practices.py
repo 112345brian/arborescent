@@ -183,12 +183,12 @@ def _documented_module_ring(policy: Policy, scan: ScanResult, module: str) -> st
 
 def crlf(fs: FileSystem, root: Path, patterns: Sequence[str]) -> list[Violation]:
     out: list[Violation] = []
-    for path in fs.rglob(root, "*"):
-        rel = path.relative_to(root).as_posix()
-        if _NOISE & set(rel.split("/")) or ".git" in rel.split("/") or not fs.is_file(path):
+    # pruned while walking, not filtered after: environments and nested worktrees can hold far more files than the project
+    for path in fs.walk_files(root, _NOISE):
+        if path.name in _NOISE or not any(fnmatch.fnmatch(path.name, p) for p in patterns):
             continue
-        if any(fnmatch.fnmatch(path.name, p) for p in patterns) and b"\r\n" in fs.read_bytes(path):
-            out.append(Violation(Rule.CRLF, rel, "has CRLF line endings; the interpreter line becomes '/bin/sh\\r'"))
+        if fs.is_file(path) and b"\r\n" in fs.read_bytes(path):
+            out.append(Violation(Rule.CRLF, path.relative_to(root).as_posix(), "has CRLF line endings; the interpreter line becomes '/bin/sh\\r'"))
     return out
 
 
