@@ -19,6 +19,7 @@ from .domain import (
     OwnedLiteral,
     Policy,
     PolicyError,
+    PortBinding,
     ResultDiscard,
     RingRule,
 )
@@ -258,6 +259,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         owned_literals=_owned_literals(raw),
         construct_only=_construct_only(raw),
         result_discard=_result_discard(raw),
+        port_bindings=_port_bindings(raw),
         docs=_docs(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
@@ -412,7 +414,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "result_discard", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "result_discard", "port_binding", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -678,6 +680,33 @@ def _construct_only(raw: Mapping[str, Any]) -> tuple[ConstructionSite, ...]:
             raise PolicyError(f"`construct_only` {target!r} needs `modules` or `rings`, or it restricts nothing")
         sites.append(ConstructionSite(target, tuple(names["modules"]), tuple(names["rings"]), reason))
     return tuple(sites)
+
+
+def _port_bindings(raw: Mapping[str, Any]) -> tuple[PortBinding, ...]:
+    entries = raw.get("port_binding", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
+        raise PolicyError("`port_binding` must be an array of tables: [[tool.arborescent.port_binding]]")
+    bindings = tuple(_port_binding(entry) for entry in cast("list[Mapping[str, Any]]", entries))
+    if len({item.port for item in bindings}) != len(bindings):
+        raise PolicyError("`port_binding` must not list a port twice")
+    return bindings
+
+
+def _port_binding(entry: Mapping[str, Any]) -> PortBinding:
+    unknown = set(entry) - {"port", "max", "exclude", "reason"}
+    if unknown:
+        raise PolicyError(f"unknown key in `port_binding`: {sorted(unknown)}")
+    port, limit, reason = entry.get("port"), entry.get("max", 1), entry.get("reason", "")
+    exclude = entry.get("exclude", [])
+    if not isinstance(port, str) or not _DOTTED_NAME.fullmatch(port):
+        raise PolicyError("`port_binding` needs a `port` that is the dotted name of a Protocol or abstract class, e.g. \"app.ports.Clock\"")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise PolicyError(f"`port_binding` {port!r}: `max` must be a positive integer")
+    if not isinstance(reason, str) or not isinstance(exclude, list) or not all(
+        isinstance(item, str) and item for item in cast("list[object]", exclude)
+    ):
+        raise PolicyError(f"`port_binding` {port!r}: `exclude` is a list of non-empty strings, `reason` a string")
+    return PortBinding(port, limit, tuple(cast("list[str]", exclude)), reason)
 
 
 def _result_discard(raw: Mapping[str, Any]) -> ResultDiscard | None:

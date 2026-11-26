@@ -203,6 +203,7 @@ def _local_mutations(
     steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(mixed_purity_mutations(local_policy, purity, local_paths, arbor_index, scan.modules))
     steps.append(_docs_mutations(local_policy, local_paths, local_known, arbor_index))
+    steps.append(_port_binding_mutations(local_policy, scan.paths, scan.modules))
     for found, step_skipped in steps:
         out.extend(found)
         skipped.extend(step_skipped)
@@ -239,6 +240,36 @@ def _docs_mutations(
         return out, [*skipped, f"{Rule.DOCSTRING_RING_MISMATCH}: policy has only one ring, nothing else to name"]
     content = f'"""A probe module that says it lives in the {other} ring."""\n__arbor__ = {{"ring": {ring!r}}}\n'
     out.append(Mutation(Rule.DOCSTRING_RING_MISMATCH, f"a new {ring} module whose docstring names the {other} ring", new, "", new_file=True, content=content))
+    return out, skipped
+
+
+def _port_binding_mutations(
+    policy: ArchitecturePolicy, paths: Mapping[str, str], modules: Mapping[str, ModuleInfo],
+) -> tuple[list[Mutation], list[str]]:
+    """Probe ``port_binding`` (#219): a new module beside the port holding more subclasses of it than ``max`` allows."""
+    out: list[Mutation] = []
+    skipped: list[str] = []
+    for index, item in enumerate(policy.port_bindings):
+        name = item.port.rpartition(".")[2]
+        path = paths.get(item.port_module)
+        probe = f"arborescent_probe_port_{index}"
+        package = item.port_module if path is not None and path.endswith("__init__.py") else item.port_module.rpartition(".")[0]
+        module = f"{package}.{probe}" if package else probe
+        classes = [f"ArborescentProbeImpl{number}" for number in range(item.max_implementors + 1)]
+        info = modules.get(item.port_module)
+        defined = info is not None and (
+            any(shape.name == name for shape in info.facts.classes) or any(bound == name for bound, *_ in info.facts.reexports)
+        )
+        if path is None or not defined or not item.counts(module, classes[0]):
+            reason = "the port does not exist" if path is None or not defined else "a probe beside it would not count as production code"
+            skipped.append(f"port_binding {item.port}: {reason}")
+            continue
+        directory = path.rpartition("/")[0]
+        content = f"from {item.port_module} import {name}\n" + "".join(f"\n\nclass {each}({name}):\n    pass\n" for each in classes)
+        out.append(Mutation(
+            Rule.PORT_BINDING, f"port_binding {item.port}: {len(classes)} more implementors",
+            (directory + "/" if directory else "") + f"{probe}.py", "", new_file=True, content=content,
+        ))
     return out, skipped
 
 

@@ -297,6 +297,22 @@ target = "arborescent.adapters.ProcessPoolParallel"
 rings = ["composition"]
 reason = "only the composition root picks how work is parallelised"
 
+# Ports with exactly one production adapter (swapped only in tests); `Engine`, `TypeChecker` and `ContractRenderer` are plugin
+# points and are not listed. `selftest` adds more subclasses of each.
+[[tool.arborescent.port_binding]]
+port = "arborescent.ports.Clock"
+# `_BlockedDatetime` stands in for `datetime` while the plugin blocks I/O: it has a `now`, but is no clock adapter.
+exclude = ["arborescent.pytest_io_block"]
+
+[[tool.arborescent.port_binding]]
+port = "arborescent.ports.FileSystem"
+
+[[tool.arborescent.port_binding]]
+port = "arborescent.ports.ModuleScanner"
+
+[[tool.arborescent.port_binding]]
+port = "arborescent.ports.ToolRunner"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]

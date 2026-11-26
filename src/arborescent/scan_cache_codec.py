@@ -9,14 +9,14 @@ from __future__ import annotations
 from typing import Any
 
 from .call_facts import FunctionCalls
-from .definition_facts import TopLevelDef
+from .definition_facts import ClassShape, TopLevelDef
 from .effect_facts import EffectUse
 from .facts import Forwarder, PurityFacts, PurityUnit, SourceFacts
 from .import_syntax import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 
-CACHE_VERSION = 24
+CACHE_VERSION = 25
 
 
 def _purity_to_json(p: PurityFacts) -> list[Any]:
@@ -53,6 +53,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         f.module_doc,
         f.arbor_reason, [[line, target] for line, target in f.dynamic_imports],
         _purity_to_json(f.purity), f.untokenizable,
+        [[c.name, c.line, list(c.bases), list(c.members), c.protocol, c.abstract] for c in f.classes],
     ]
 
 
@@ -84,4 +85,5 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple(FunctionCalls(c[0], c[1], tuple(c[2])) for c in raw[21]),
         raw[22], raw[23], tuple((item[0], item[1]) for item in raw[24]),
         _purity_from_json(raw[25]), raw[26],
+        tuple(ClassShape(c[0], c[1], tuple(c[2]), tuple(c[3]), c[4], c[5]) for c in raw[27]),
     )

@@ -95,7 +95,7 @@ def test_architecture_fields_are_the_loaders_architecture_keys_plus_inherited_di
     """The dataclass split mirrors the TOML loader's own boundary: a field added to one side without the other fails here."""
     names = {f.name for f in fields(ArchitecturePolicy)}
     # raw TOML key -> field it becomes; parse-only keys (`ring`, `groups`, `middle_forbid`, `git_hook`) fold into others or into the root
-    renamed = {"owned_literal": "owned_literals"}
+    renamed = {"owned_literal": "owned_literals", "port_binding": "port_bindings"}
     folded = {"ring", "groups", "middle_forbid", "git_hook"}
     expected = {renamed.get(key, key) for key in config._LEGACY_ARCHITECTURE_KEYS - folded} | {"disabled_tools"}
     assert names == expected

@@ -71,6 +71,7 @@ def test_rule_id_strings_never_change() -> None:
             "restricted-import",
             "literal-outside-owner",
             "construction-outside-site",
+            "port-binding",
             "missing-module-docstring",
             "docstring-ring-mismatch",
             "non-abstract-port",

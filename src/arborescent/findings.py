@@ -49,6 +49,7 @@ class Rule(StrEnum):
     RESTRICTED_IMPORT = "restricted-import"
     LITERAL_OUTSIDE_OWNER = "literal-outside-owner"
     CONSTRUCTION_OUTSIDE_SITE = "construction-outside-site"
+    PORT_BINDING = "port-binding"
     MISSING_MODULE_DOCSTRING = "missing-module-docstring"
     DOCSTRING_RING_MISMATCH = "docstring-ring-mismatch"
     NON_ABSTRACT_PORT = "non-abstract-port"

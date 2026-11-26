@@ -45,7 +45,7 @@ from .ports import (
 from .practices import run_practices
 from .purity import excluded_findings
 from .ratchet_measure import Subject
-from .rules import RuleContext, check_modules
+from .rules import RuleContext, check_modules, port_binding_findings
 from .suggestions import Suggestion
 from .tach_visibility import invisible_import_violations
 from .taint import TaintResult, compute_taint
@@ -190,7 +190,8 @@ def run_own(
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
     found += _inventory_violations(scan.modules)
     found += excluded_findings(policy, scan.excluded_modules)
-    if only is None:  # the signals compare a module with its importers and peers: a whole-repository fact
+    if only is None:  # these compare a module with its importers and peers: whole-repository facts
+        found += port_binding_findings(indexes, scan.modules, scan.known)
         found += audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
     if "tach" not in policy.disabled_tools:
         found += invisible_import_violations(scan.modules.values())

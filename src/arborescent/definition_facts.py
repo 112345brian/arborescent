@@ -1,19 +1,19 @@
 """Definition facts: the shape of what a module defines at its top level.
 
-Module-level classes and functions with whether each is abstract, ``typing.Protocol`` methods whose return type says
+Module-level classes and functions with whether each is abstract, every class's bases and member names, ``typing.Protocol`` methods whose return type says
 nothing, the public surface (a static ``__all__`` or public bindings) and which of it is re-exported, functions
 annotated to return a ``*Result``/``*Outcome``, and the ``if __name__ == "__main__":`` guard."""
 
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 
 from .call_facts import dotted_name
 from .purity_facts import Helpers
 
-__all__ = ["TopLevelDef", "main_guard_line", "purity_helpers", "result_defs", "surface", "top_level_defs", "weak_port_returns"]
+__all__ = ["ClassShape", "TopLevelDef", "class_shapes", "main_guard_line", "purity_helpers", "result_defs", "surface", "top_level_defs", "weak_port_returns"]
 
 
 _ABSTRACT_BASE_NAMES = frozenset({"ABC", "abc.ABC", "Protocol", "typing.Protocol", "typing_extensions.Protocol"})
@@ -75,6 +75,91 @@ def top_level_defs(tree: ast.AST, aliases: dict[str, str]) -> tuple[TopLevelDef,
 
 
 _PROTOCOL_NAMES = frozenset({"Protocol", "typing.Protocol", "typing_extensions.Protocol"})
+# Names a class may define without them being part of an interface it offers.
+_NOT_MEMBERS = frozenset({
+    "__init__", "__new__", "__doc__", "__module__", "__slots__", "__annotations__", "__class_getitem__",
+    "__init_subclass__", "__post_init__", "__match_args__", "_",
+})
+
+
+@dataclass(frozen=True)
+class ClassShape:
+    """What a class statement says about itself, for counting a port's implementors (#219)."""
+
+    name: str  # qualified by the enclosing classes and functions: "Outer.Inner"
+    line: int
+    bases: tuple[str, ...]  # dotted through import aliases; a relative import keeps its dots, a local name stays bare
+    members: tuple[str, ...]  # methods, class attributes and `self.x` assignments it defines itself, sorted
+    protocol: bool  # lists `typing.Protocol` directly
+    abstract: bool  # a Protocol, lists `ABC`/`ABCMeta` directly, or declares an `@abstractmethod`
+
+
+def _blocks(stmt: ast.stmt) -> Iterator[ast.stmt]:
+    """The statements directly inside a compound statement (`if`, `try`, `with`, `match`, loops)."""
+    for child in ast.iter_child_nodes(stmt):
+        if isinstance(child, ast.stmt):
+            yield child
+        elif isinstance(child, ast.ExceptHandler | ast.match_case):
+            yield from child.body
+
+
+def _self_attributes(method: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[str]:
+    params = [*method.args.posonlyargs, *method.args.args]
+    if not params:
+        return
+    for node in ast.walk(method):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store) and isinstance(node.value, ast.Name) and node.value.id == params[0].arg:
+            yield node.attr
+
+
+def _members(body: Iterable[ast.stmt]) -> Iterator[str]:
+    for stmt in body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+            yield stmt.name
+            yield from _self_attributes(stmt)
+        elif isinstance(stmt, ast.Assign | ast.AnnAssign):
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            yield from (t.id for t in targets if isinstance(t, ast.Name))
+        elif not isinstance(stmt, ast.ClassDef):
+            yield from _members(_blocks(stmt))
+
+
+def _declares_abstract_method(node: ast.ClassDef, aliases: dict[str, str]) -> bool:
+    return any(
+        (dotted_name(decorator, aliases) or "").rpartition(".")[2] == "abstractmethod"
+        for stmt in node.body if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+        for decorator in stmt.decorator_list
+    )
+
+
+def _class_shape(node: ast.ClassDef, name: str, aliases: dict[str, str]) -> ClassShape:
+    bases = tuple(
+        dotted for base in node.bases
+        if (dotted := dotted_name(base.value if isinstance(base, ast.Subscript) else base, aliases)) is not None
+    )
+    protocol = any(base in _PROTOCOL_NAMES for base in bases)
+    return ClassShape(
+        name, node.lineno, bases, tuple(sorted(set(_members(node.body)) - _NOT_MEMBERS)), protocol,
+        protocol or _is_abstract_class(node, aliases) or _declares_abstract_method(node, aliases),
+    )
+
+
+def class_shapes(tree: ast.Module, aliases: dict[str, str]) -> tuple[ClassShape, ...]:
+    """Every class in the module, nested and function-local ones included. Only statements are walked: a class is one."""
+    out: list[ClassShape] = []
+
+    def visit(body: Iterable[ast.stmt], prefix: str) -> None:
+        for stmt in body:
+            if isinstance(stmt, ast.ClassDef):
+                out.append(_class_shape(stmt, prefix + stmt.name, aliases))
+                visit(stmt.body, f"{prefix}{stmt.name}.")
+            elif isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+                visit(stmt.body, f"{prefix}{stmt.name}.")
+            else:
+                visit(_blocks(stmt), prefix)
+
+    visit(tree.body, "")
+    return tuple(out)
 _ANY_NAMES = frozenset({"Any", "typing.Any", "typing_extensions.Any", "object", "builtins.object"})
 _BARE_CONTAINERS = frozenset({"dict", "list", "tuple", "set", "frozenset"})
 _BARE_TYPING_CONTAINERS = frozenset({"Dict", "List", "Tuple", "Set", "FrozenSet"})

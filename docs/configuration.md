@@ -308,6 +308,29 @@ and `selftest` calls each target from a module that may not. What it does not se
 path callers import, or one entry per spelling), `partial(X)` or `make = X; make()`, `getattr`, a subclass, and an argument passed to a
 constructor (it checks who builds, not what is passed in). A parameter named like an imported class would be mistaken for it.
 
+`port_binding` is an opt-in check on how many production classes bind a port. A port with one adapter (a clock, a file
+system) degrades silently when a second one appears; a port with none is dead, or the scan does not reach its adapter.
+Plugin points with many implementors are simply not listed, or given the `max` they are meant to have:
+
+```toml
+[[tool.arborescent.port_binding]]
+port = "app.ports.Clock"            # a Protocol or abstract class
+# max = 1                           # the default; at least one implementor is always required
+# exclude = ["app.simulation"]      # module globs or `module.Class` names that are not production bindings
+# reason = "one source of time"     # appended to the finding
+```
+
+A class implements the port when it subclasses it, or, for a Protocol, when it defines every member the Protocol (and the
+Protocols it extends) names: methods, class attributes and `self.x` assignments, its own or inherited from scanned bases.
+Only names are compared, not signatures (that is the type checker's job), so a Protocol with one common method name such
+as `run` can match an unrelated class: name it in `exclude`. A memberless Protocol and an abstract class count
+subclasses only. A class does not count when it is itself a Protocol, lists `ABC`/`ABCMeta` or declares an
+`@abstractmethod`; when it is a test double (in a `tests`, `testing`, `conftest`, `fakes` or `test_*` module, or named
+`Fake*`, `Stub*` or `Mock*`); or when it lies in a `dev_tools` path or an excluded file. A member or base the scan cannot
+see (a third-party base class, `setattr`, `__getattr__`) is not followed. The table is per scope; implementors are counted
+across all scopes. `check --changed` skips the rule. A function that reaches a port's resource by another route is not
+detected.
+
 `result_discard` is an opt-in check that a caller reads the outcome of a function it calls (a new "refused" or "skipped" outcome
 is otherwise silently ignored). It reports `result-discard` for a call written as a whole statement:
 
@@ -845,6 +868,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `untokenizable-source` | a file Python's `ast` accepts but `tokenize` rejects (a doubled carriage return `\r\r\n` is the usual cause, #181). Its `# noqa`, `# type: ignore` and `# deferred:` comments cannot be read, so the file gets no comment facts and this finding instead of aborting the run. A violation, so it can be baselined; the detail is fixed text (the tokenizer's line and message ride in the hint), and the fix is to remove the stray byte |
 | `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
+| `port-binding` | a `port_binding` port has no production implementor, or more than its `max` (default 1); also a port that does not exist or is not a Protocol or abstract class. Whole-repository runs only |
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |

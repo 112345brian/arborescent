@@ -21,6 +21,7 @@ from .domain import (
     ConstructionSite,
     OwnedLiteral,
     Policy,
+    PortBinding,
     RingRule,
     Rule,
     Violation,
@@ -35,7 +36,7 @@ from .effect_import_rules import (
     record_effect_edge,
     unsanctioned_effect_imports,
 )
-from .facts import Forwarder, ModuleInfo
+from .facts import ClassShape, Forwarder, ModuleInfo
 from .import_cycles import cyclic_components
 from .import_facts import RawImport, resolve_targets
 from .package_constraint_rules import placement_violations, use_violations
@@ -43,7 +44,7 @@ from .package_constraints import PackageConstraints
 from .purity_rules import mixed_purity_findings, with_move_closures
 from .rule_context import RuleContext
 
-__all__ = ["RuleContext", "check_modules", "fits_ring"]
+__all__ = ["RuleContext", "check_modules", "fits_ring", "port_binding_findings"]
 
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
 NO_CONSTRAINTS = PackageConstraints()  # a policy that declares none: the constraint rules cost nothing
@@ -313,6 +314,113 @@ def _stale_importable_by(policy: ArchitecturePolicy, modules: Collection[str]) -
             if not any(in_unit(module, glob) for module in modules)
         ]
     return out
+
+
+_ClassKey = tuple[str, str]  # (module, qualified class name)
+
+
+class _Classes:
+    """Every scanned class and its first-party ancestry. A base that is not a scanned class (third-party, builtin) ends a line."""
+
+    def __init__(self, modules: Mapping[str, ModuleInfo]) -> None:
+        self.modules = modules
+        self.shapes: dict[_ClassKey, list[ClassShape]] = {}
+        for module, info in modules.items():
+            for shape in info.facts.classes:
+                self.shapes.setdefault((module, shape.name), []).append(shape)  # two under `if`/`else` are one class
+        self._lineages: dict[_ClassKey, tuple[_ClassKey, ...]] = {}
+
+    def find(self, dotted: str, seen: frozenset[str] = frozenset()) -> _ClassKey | None:
+        """The class a dotted name means, following re-exports."""
+        parts = dotted.split(".")
+        for end in range(len(parts) - 1, 0, -1):
+            module, rest = ".".join(parts[:end]), parts[end:]
+            info = self.modules.get(module)
+            if info is None:
+                continue
+            if (module, ".".join(rest)) in self.shapes:
+                return module, ".".join(rest)
+            for name, level, source, imported in info.facts.reexports:
+                if name != rest[0] or dotted in seen:
+                    continue
+                raw = "." * level + source + (("." if source else "") + imported if imported else "")
+                target = absolute_callee(module, info.is_package, raw)
+                if target is not None:
+                    return self.find(".".join([target, *rest[1:]]), seen | {dotted})
+        return None
+
+    def bases(self, key: _ClassKey) -> list[_ClassKey]:
+        module = key[0]
+        info = self.modules[module]
+        names = (absolute_callee(module, info.is_package, base) for shape in self.shapes[key] for base in shape.bases)
+        return [found for name in names if name is not None and (found := self.find(name)) is not None]
+
+    def lineage(self, key: _ClassKey) -> tuple[_ClassKey, ...]:
+        """The class and every scanned ancestor, each once (an inheritance cycle ends where it started)."""
+        if key not in self._lineages:
+            line, pending = [key], [key]
+            while pending:
+                new = [base for base in self.bases(pending.pop()) if base not in line]
+                line += new
+                pending += new
+            self._lineages[key] = tuple(line)
+        return self._lineages[key]
+
+    def members(self, keys: Collection[_ClassKey]) -> set[str]:
+        return {member for key in keys for shape in self.shapes[key] for member in shape.members}
+
+    def is_protocol(self, key: _ClassKey) -> bool:
+        return any(shape.protocol for shape in self.shapes[key])
+
+    def is_abstract(self, key: _ClassKey) -> bool:
+        return any(shape.abstract for shape in self.shapes[key])
+
+
+def _implementors(binding: PortBinding, port: _ClassKey, classes: _Classes, tool_modules: Collection[str]) -> list[str]:
+    """Concrete production classes that subclass the port or, for a Protocol, provide every member it names."""
+    wanted = classes.members([key for key in classes.lineage(port) if classes.is_protocol(key)])
+    found: list[str] = []
+    for key in classes.shapes:
+        module, name = key
+        if key == port or classes.is_abstract(key) or module in tool_modules or not binding.counts(module, name):
+            continue
+        lineage = classes.lineage(key)
+        if port in lineage or (wanted and wanted <= classes.members(lineage)):
+            found.append(f"{module}.{name}")
+    return sorted(found)
+
+
+def _binding_problem(binding: PortBinding, classes: _Classes, known: Collection[str], tool_modules: Collection[str]) -> str | None:
+    if binding.port_module not in known:
+        return f"`port_binding`: module {binding.port_module!r} does not exist"
+    port = classes.find(binding.port)
+    if port is None:
+        return f"`port_binding`: no class {binding.port!r} was found"
+    if not classes.is_abstract(port):
+        return f"`port_binding`: {binding.port!r} is not a Protocol or an abstract class"
+    found = _implementors(binding, port, classes, tool_modules)
+    if not found:
+        problem = "declared port has no production implementor"
+    elif len(found) > binding.max_implementors:
+        problem = f"declared port has {len(found)} production implementors, at most {binding.max_implementors} expected: {', '.join(found)}"
+    else:
+        return None
+    return problem + (f": {binding.reason}" if binding.reason else "")
+
+
+def port_binding_findings(context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str]) -> list[Violation]:
+    """``port_binding`` (#219). A whole-repository fact, so not part of ``check_modules``: ``modules`` must hold every scanned
+    module, never a ``--changed`` subset. Implementors are counted across scopes: a port is often bound outside its own."""
+    policies = [scope.policy for scope in context.policy.scopes] or [context.policy]
+    bindings = {item.port: item for local_policy in policies for item in local_policy.port_bindings}
+    if not bindings:
+        return []
+    classes = _Classes(modules)
+    return [
+        Violation(Rule.PORT_BINDING, port, problem)
+        for port, binding in sorted(bindings.items())
+        if (problem := _binding_problem(binding, classes, known, context.tool_modules)) is not None
+    ]
 
 
 def _sibling_index(known: Collection[str]) -> dict[str, list[str]]:
