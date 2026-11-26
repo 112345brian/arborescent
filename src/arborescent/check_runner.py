@@ -30,7 +30,12 @@ from .engine import (
     run_own,
     run_tool,
 )
-from .suggestions import file_size_suggestions
+from .suggestions import (
+    ClassSuggestion,
+    Suggestion,
+    class_size_suggestions,
+    file_size_suggestions,
+)
 
 __all__ = ["run_check"]
 
@@ -41,6 +46,15 @@ def _recorded(policy: Policy, root: Path, services: Services, opts: Options) -> 
         return set(), {}
     path = root / policy.baseline
     return ratchet_mod.load(services.fs, path), ratchet_mod.load_root_causes(services.fs, path)
+
+
+def _size_suggestions(policy: Policy, root: Path, services: Services, sources: dict[str, str]) -> list[Suggestion | ClassSuggestion]:
+    """The report-only size hints: large files, then classes with many fields or methods."""
+    read = services.fs.read_text
+    return [
+        *file_size_suggestions(read, root, sources, threshold=policy.suggestion_threshold),
+        *class_size_suggestions(read, root, sources, max_fields=policy.class_field_threshold, max_methods=policy.class_method_threshold),
+    ]
 
 
 def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
@@ -68,12 +82,7 @@ def run_check(policy: Policy, root: Path, services: Services, opts: Options | No
         report.excluded, report.excluded_nested = dict(scan.excluded), nested_exclusions(scan.excluded, policy.exclude)
         report.vendor_folders = tuple(scan.vendor_folders)
         report.dev_tools = dev_tool_counts(policy, scan)
-        report.suggestions = file_size_suggestions(
-            services.fs.read_text,
-            root,
-            {module.name: module.path for module in scan.modules.values()},
-            threshold=policy.suggestion_threshold,
-        )
+        report.suggestions = _size_suggestions(policy, root, services, {module.name: module.path for module in scan.modules.values()})
         report.drift = drift_report(policy, root, services, scan, opts)
         engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
         report.engines += [*engine_runs, *ratchet_runs(policy, root, services, scan, found)]

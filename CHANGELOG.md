@@ -19,6 +19,7 @@
   findings it was skipping. A copy that cannot be made fails the engine. A `[tool.tach]` table in `pyproject.toml` is
   not rewritten.
 - A tach profile probe that timed out or did not start is no longer counted as tach rejecting the forbidden import.
+- `check` no longer crashes with `SyntaxError` on a source file that starts with a UTF-8 byte order mark.
 
 ### Added
 - A finding can name a **root cause** beside its identity key. `lazy-import` (the imported module), `effect-via-import` (the
@@ -38,6 +39,10 @@
   The forbid docs now list every detected category. Not covered: containers imported from another module, writes through `self`
   or an alias, and `global` slot loaders beyond the existing `global` category.
 - The scan cache is invalidated once (format version 25).
+- `arborescent purity --path PATH...` and `--module MODULE...` list only the mixed modules in a subset (a diff's changed files,
+  say); importer counts and ordering still come from the whole scan (#217).
+- `check` prints a report-only `SUGGEST` line for a class with more than `class_field_threshold` fields or
+  `class_method_threshold` methods (both default 20, `0` switches one off). It never fails a check and is never baselined (#220).
 
 ## 0.9.0 — 2026-11-12
 

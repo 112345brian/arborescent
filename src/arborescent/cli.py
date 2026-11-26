@@ -18,13 +18,14 @@ from .cli_arguments import (
     catalog_root,
     core_mode_conflict,
     growth_approver,
+    usage_error,
     validate_rule_selection,
 )
 from .cli_baseline_report import run_report
 from .cli_coupling import run_coupling
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, run_migrate
-from .cli_purity import run_explain, run_purity
+from .cli_purity import Listing, run_explain, run_purity
 from .cli_ratchet import growth_run, run_ratchet
 from .cli_report import _print_excluded, _print_report, _print_rule_label
 from .config import find_policy, load_policy
@@ -99,10 +100,8 @@ def main(
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command == "check" and args.yes and not args.install_tools:
-        parser.error("--yes requires --install-tools")
-    if getattr(args, "with_dependencies", False):
-        parser.error("--with-dependencies was removed: a dependency is a separate package, so extract each one on its own")
+    if (message := usage_error(args)) is not None:
+        parser.error(message)
     try:
         if args.command == "bench":
             return _run_bench(args)
@@ -161,7 +160,9 @@ def _dispatch(
         "annotate": lambda: _annotate(args, policy, root, svc),
         "admit": lambda: run_admit(args, policy, root, svc),
         "selftest": lambda: _selftest(policy, root, svc),
-        "purity": lambda: run_explain(policy, root, svc, args.explain) if args.explain else run_purity(policy, root, svc, args.json, args.top),
+        "purity": lambda: run_explain(policy, root, svc, args.explain) if args.explain else run_purity(
+            policy, root, svc, args.json, Listing(args.top, tuple(args.path), tuple(args.module), Path.cwd())
+        ),
         "ratchet": lambda: _ratchet(args, policy, root, svc),
     }
     return handlers.get(args.command, lambda: _check(args, policy, root, svc))()

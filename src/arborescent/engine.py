@@ -51,7 +51,7 @@ from .practices import run_practices
 from .purity import excluded_findings
 from .ratchet_measure import Subject
 from .rules import RuleContext, check_modules
-from .suggestions import Suggestion
+from .suggestions import ClassSuggestion, Suggestion
 from .tach_visibility import invisible_import_violations
 from .taint import TaintResult, compute_taint
 
@@ -115,7 +115,7 @@ class CheckReport:
     excluded_nested: dict[str, str] = field(default_factory=lambda: {})  # excluded folder -> the bare `exclude` name that reached it below the root
     vendor_folders: tuple[tuple[str, str], ...] = ()
     dev_tools: dict[str, int] = field(default_factory=lambda: {})  # `dev_tools` path -> modules below it
-    suggestions: list[Suggestion] = field(default_factory=list)
+    suggestions: list[Suggestion | ClassSuggestion] = field(default_factory=list)
     suppression_counts: dict[tuple[str, str], int] = field(default_factory=lambda: {})
     discard_counts: dict[str, int] = field(default_factory=lambda: {})
     lazy_import_counts: dict[str, LazyImportCount] = field(default_factory=lambda: {})

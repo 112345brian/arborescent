@@ -50,6 +50,8 @@ settings. The two forms cannot be mixed.
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
 | `ratchet_files` | `[]` | Extra numeric ratchet JSON files (`{"values": {"name": 3}, "growth": []}`) checked by `check --growth-against`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
+| `class_field_threshold` | `20` | Fields above which `check` prints a report-only suggestion for a class; `0` switches it off. |
+| `class_method_threshold` | `20` | Methods above which `check` prints a report-only suggestion for a class; `0` switches it off. |
 | `practices` | `{}` | Repository-hygiene checks (below). |
 | `modularity` | `"ready"` | Needs `package_catalog` for `"report"`. `"ready"`: every package gap fails `check`. `"report"`: gaps are shown as notes and never fail. Independent of `preset`; `--require-modularity` certifies it (see [Strict linting and strict modularity](#strict-linting-and-strict-modularity)). |
 | `package_catalog` | unset | Opt-in, any preset: path of a `packages.toml`. Every module and asset must belong to exactly one package (see [Package assignment](#package-assignment)). |
@@ -75,7 +77,7 @@ repository component. Each scope requires non-empty `sources`, `source_roots` an
 | `module_forbid_imports`, `importable_by`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbidden_modules`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
 
 Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
-`ruff`, `practices`, `exclude` and `children` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
+`class_field_threshold`, `class_method_threshold`, `ruff`, `practices`, `exclude` and `children` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
 `source_roots`, `classify`, `ring`, `preset`, `io_modules`, `groups` and the other architecture settings) are rejected
 when `scopes` is present. Scope names and dependencies must be unique and known, and the dependency graph must be
 acyclic.
@@ -257,6 +259,17 @@ a child; the child keeps governing itself.
 ignores blank lines, comments, module/class/function docstrings, and multi-line literal-only data tables. Suggestions
 appear during `check`; they are not violations, are never added to the baseline, and do not change the exit status.
 There is no per-file suppression. Function size and complexity remain Ruff rules.
+
+`class_field_threshold` and `class_method_threshold` control the same kind of hint for a single class (a "god class"), which a
+file's line count does not show: `SUGGEST app/model.py:12: class Settings has 34 fields (suggestion threshold: 20)`. A count must
+exceed its threshold. It applies to every scanned class in every ring, nested classes counted on their own; it is never a
+violation, never baselined and never changes the exit status. There is no per-class suppression: raise a threshold, or set it to
+`0`, where wide data holders are normal.
+
+- A field is a distinct name declared in the class body or assigned on `self` in a method. `ClassVar` annotations, dunders,
+  `ALL_CAPS` constants and enum members do not count (attributes set through `setattr` are not seen).
+- A method is a distinct non-dunder `def`, so a property and its setter count once.
+- Only what the class itself declares counts, not what it inherits.
 
 `module_forbid_imports` adds focused internal import restrictions without changing the module's ring. For example,
 `"bootstrap.adapters" = ["bootstrap.launcher"]` blocks that package and its descendants only in the named adapter
@@ -1415,6 +1428,23 @@ intentional baseline growth, its reason and its approver. `--by-root-cause` reco
 
 Lists every module `mixed-purity` finds (allowed ones marked), most imported first, with its effect kinds, effectful and pure
 definitions and importer count. `--json` prints the same as JSON. Report only: `check` is what fails.
+
+`--path PATH` and `--module MODULE` list only a subset, for reviewing a diff or checking changed files. Both take several values
+and can be repeated; everything named is one union. Only the listed rows change: importer counts, classification and ordering still
+come from the whole scan, and `--top` applies to what is left.
+
+- `--path` takes a file or a folder, relative to the working directory or absolute.
+- `--module` takes a dotted name (its submodules included) or a glob such as `app.*_service`.
+- A path that does not exist or lies outside the policy root, a blank value, or a `--module` that matches no scanned module
+  exits 2, so a typo never reads as a clean result. An existing path with no scanned module in it (a README, an excluded test) is
+  noted on stderr and skipped. A deleted file does not exist, so filter it out: `git diff --name-only --diff-filter=d main`.
+- Neither combines with `--explain`, which already names one module.
+
+```console
+arborescent purity --path $(git diff --name-only --relative --diff-filter=d main -- '*.py')
+```
+
+When that file list is empty, `--path` has no value and the command exits 2, so guard the call.
 
 ### `arborescent ratchet`
 
