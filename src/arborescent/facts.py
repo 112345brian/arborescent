@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from .call_facts import (
     FunctionCalls,
+    FunctionSpan,
     bare_calls,
     call_aliases,
     call_sites,
@@ -21,8 +22,14 @@ from .call_facts import (
     dotted_name,
     dynamic_imports,
     function_calls,
+    function_spans,
 )
-from .declaration_facts import arbor_annotation, comment_facts, script_deps
+from .declaration_facts import (
+    arbor_annotation,
+    comment_facts,
+    exemption_comments,
+    script_deps,
+)
 from .definition_facts import (
     TopLevelDef,
     main_guard_line,
@@ -82,6 +89,8 @@ class SourceFacts:
     untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
     import_time: ImportTimeFacts = field(default_factory=ImportTimeFacts)  # calls made at import and what each function runs (#230)
     seams: SeamFacts = field(default_factory=SeamFacts)  # real injectable effects inside functions, with the parameters around them (#233)
+    function_spans: tuple[FunctionSpan, ...] = ()  # every function and method with its line span, to place `calls` inside them (#229)
+    companion_exempt: tuple[tuple[int, str], ...] = ()  # (code line, reason) of `# companion-exempt:` comments (#231)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -135,6 +144,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         untokenizable,
         import_time_facts(Walked(tree, at_import, sites, running), calls_aliases, dotted_name),
         seam_facts(tree, sites, running, aliases, dotted_name),
+        function_spans(tree, nodes, calls_aliases),
+        exemption_comments(source),
     )
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .call_facts import FunctionCalls
+from .call_facts import FunctionCalls, FunctionSpan
 from .definition_facts import TopLevelDef
 from .effect_facts import EffectUse
 from .facts import (
@@ -81,6 +81,8 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         _purity_to_json(f.purity), f.untokenizable,
         [[[c.line, c.callee, c.local] for c in f.import_time.calls], [list(item) for item in f.import_time.function_effects]],
         _seams_to_json(f.seams),
+        [[s.name, s.line, s.end_line, s.start, [list(call) for call in s.method_calls]] for s in f.function_spans],
+        [list(item) for item in f.companion_exempt],
     ]
 
 
@@ -112,4 +114,6 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple(FunctionCalls(c[0], c[1], tuple(c[2])) for c in raw[21]),
         raw[22], raw[23], tuple((item[0], item[1]) for item in raw[24]),
         _purity_from_json(raw[25]), raw[26], _import_time_from_json(raw[27]), _seams_from_json(raw[28]),
+        tuple(FunctionSpan(s[0], s[1], s[2], s[3], tuple((c[0], c[1]) for c in s[4])) for s in raw[29]),
+        tuple((item[0], item[1]) for item in raw[30]),
     )

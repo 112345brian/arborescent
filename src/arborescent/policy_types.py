@@ -13,8 +13,8 @@ from pathlib import PurePosixPath
 from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
-    "ALL", "ArchitectureFields", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError", "ResultDiscard", "RingRule",
-    "SeamBypass",
+    "ALL", "ArchitectureFields", "CallAllowance", "CompanionCall", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError",
+    "ResultDiscard", "RingRule", "SeamBypass",
     "in_unit", "normalized_source_path", "path_under", "unit_permits",
 ]
 
@@ -38,7 +38,7 @@ def in_unit(module: str, pattern: str) -> bool:
 
 
 def unit_permits(modules: Sequence[str], rings: Sequence[str], module: str, ring: str | None) -> bool:
-    """The one rule behind ``owned_literal`` and ``construct_only``: an empty list allows anyone, else ``module``/``ring`` must match."""
+    """The one rule behind ``owned_literal``, ``construct_only`` and ``call_allowlist``: an empty list allows anyone, else ``module``/``ring`` must match."""
     return (not modules or any(in_unit(module, glob) for glob in modules)) and (not rings or ring in rings)
 
 
@@ -86,6 +86,41 @@ class ConstructionSite:
         return self.target.rpartition(".")[0]
 
     def permits(self, module: str, ring: str | None) -> bool:
+        return unit_permits(self.modules, self.rings, module, ring)
+
+
+@dataclass(frozen=True)
+class CallAllowance:
+    """One ``[[call_allowlist]]`` entry: calls only the sanctioned modules and rings may make (#229).
+
+    With ``and_calls`` it is an idiom: only a function calling one of ``calls`` *and* one of ``and_calls`` is restricted,
+    because either call alone is legitimate. Targets are dotted names; ``*`` is a glob that also crosses dots.
+    """
+
+    calls: tuple[str, ...]
+    and_calls: tuple[str, ...] = ()
+    modules: tuple[str, ...] = ()  # module globs; empty means any module
+    rings: tuple[str, ...] = ()  # ring names; empty means any ring
+    reason: str = ""
+
+    def permits(self, module: str, ring: str | None) -> bool:
+        return unit_permits(self.modules, self.rings, module, ring)
+
+
+@dataclass(frozen=True)
+class CompanionCall:
+    """One ``[[companion]]`` entry: a function calling one of ``when_calls`` must also reach one of ``must_also_call`` (#231).
+
+    A target is a dotted name (``*`` is a glob), or ``*.name``: a call of anything called ``name``, whatever it is called on.
+    """
+
+    when_calls: tuple[str, ...]
+    must_also_call: tuple[str, ...]
+    modules: tuple[str, ...] = ()  # module globs the rule applies to; empty means any module
+    rings: tuple[str, ...] = ()  # rings the rule applies to; empty means any ring
+    reason: str = ""
+
+    def applies_to(self, module: str, ring: str | None) -> bool:
         return unit_permits(self.modules, self.rings, module, ring)
 
 
@@ -150,6 +185,8 @@ class ArchitectureFields:
     module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
     owned_literals: tuple[OwnedLiteral, ...] = ()
     construct_only: tuple[ConstructionSite, ...] = ()  # #85
+    call_allowlist: tuple[CallAllowance, ...] = ()  # #229
+    companion: tuple[CompanionCall, ...] = ()  # #231
     result_discard: ResultDiscard | None = None
     effect_seam_bypassed: SeamBypass | None = None  # #233
     docs: DocsPolicy = DocsPolicy()

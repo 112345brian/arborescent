@@ -19,7 +19,9 @@ from .coupling_policy import (
 )
 from .domain import (
     ArchitectureScope,
+    CallAllowance,
     ChildArbor,
+    CompanionCall,
     ConstructionSite,
     DocsPolicy,
     OwnedLiteral,
@@ -59,6 +61,8 @@ from .ratchet_config import ratchet_specs
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")  # mirrors the scanner: only identifier-like strings are recorded
 
 _DOTTED_NAME = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)+")  # a module path and a name: `construct_only` targets
+_CALL_PATTERN = re.compile(r"[A-Za-z_]\w*(\.(?!\d)[\w*]+)+")  # a dotted callee, `*` allowed after the first part: `call_allowlist`
+_METHOD_PATTERN = re.compile(r"\*\.(?!\d)\w+")  # `*.record`: any receiver's method, `companion` only
 
 __all__ = ["find_child_policy", "find_policy", "load_policy", "policy_from_mapping"]
 
@@ -265,6 +269,8 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         importable_by=_importable_by(raw),
         owned_literals=_owned_literals(raw),
         construct_only=_construct_only(raw),
+        call_allowlist=_call_allowlist(raw),
+        companion=_companion(raw),
         result_discard=_result_discard(raw),
         effect_seam_bypassed=_seam_bypass(raw),
         docs=_docs(raw),
@@ -525,7 +531,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "result_discard", "effect_seam_bypassed", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "call_allowlist", "companion", "result_discard", "effect_seam_bypassed", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -792,6 +798,71 @@ def _construct_only(raw: Mapping[str, Any]) -> tuple[ConstructionSite, ...]:
             raise PolicyError(f"`construct_only` {target!r} needs `modules` or `rings`, or it restricts nothing")
         sites.append(ConstructionSite(target, tuple(names["modules"]), tuple(names["rings"]), reason))
     return tuple(sites)
+
+
+def _call_allowlist(raw: Mapping[str, Any]) -> tuple[CallAllowance, ...]:
+    entries = raw.get("call_allowlist", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
+        raise PolicyError("`call_allowlist` must be an array of tables: [[tool.arborescent.call_allowlist]]")
+    return tuple(_call_allowance(entry) for entry in cast("list[Mapping[str, Any]]", entries))
+
+
+def _call_allowance(entry: Mapping[str, Any]) -> CallAllowance:
+    unknown = set(entry) - {"calls", "and_calls", "modules", "rings", "reason"}
+    if unknown:  # a mistyped `and_calls` would otherwise turn an idiom into a ban on each call alone
+        raise PolicyError(f"unknown key in `call_allowlist`: {sorted(unknown)}")
+    calls = _call_targets(entry, "calls")
+    and_calls = _call_targets(entry, "and_calls") if "and_calls" in entry else ()
+    reason = entry.get("reason", "")
+    names = {key: entry.get(key, []) for key in ("modules", "rings")}
+    if not isinstance(reason, str) or any(
+        not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value))
+        for value in names.values()
+    ):
+        raise PolicyError(f"`call_allowlist` {list(calls)}: `modules` and `rings` are lists of non-empty strings, `reason` a string")
+    if not names["modules"] and not names["rings"]:
+        raise PolicyError(f"`call_allowlist` {list(calls)} needs `modules` or `rings`, or it sanctions nobody")
+    return CallAllowance(calls, and_calls, tuple(names["modules"]), tuple(names["rings"]), reason)
+
+
+def _call_targets(entry: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = entry.get(key)
+    if not isinstance(value, list) or not value or not all(
+        isinstance(item, str) and _CALL_PATTERN.fullmatch(item) for item in cast("list[object]", value)
+    ):
+        raise PolicyError(f"`call_allowlist` needs `{key}`: a non-empty list of dotted call targets, such as os.replace or subprocess.*")
+    return tuple(cast("list[str]", value))
+
+
+def _companion(raw: Mapping[str, Any]) -> tuple[CompanionCall, ...]:
+    entries = raw.get("companion", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
+        raise PolicyError("`companion` must be an array of tables: [[tool.arborescent.companion]]")
+    return tuple(_companion_call(entry) for entry in cast("list[Mapping[str, Any]]", entries))
+
+
+def _companion_call(entry: Mapping[str, Any]) -> CompanionCall:
+    unknown = set(entry) - {"when_calls", "must_also_call", "modules", "rings", "reason"}
+    if unknown:
+        raise PolicyError(f"unknown key in `companion`: {sorted(unknown)}")
+    when, must = _companion_targets(entry, "when_calls"), _companion_targets(entry, "must_also_call")
+    reason = entry.get("reason", "")
+    names = {key: entry.get(key, []) for key in ("modules", "rings")}
+    if not isinstance(reason, str) or any(
+        not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value))
+        for value in names.values()
+    ):
+        raise PolicyError(f"`companion` {list(when)}: `modules` and `rings` are lists of non-empty strings, `reason` a string")
+    return CompanionCall(when, must, tuple(names["modules"]), tuple(names["rings"]), reason)
+
+
+def _companion_targets(entry: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = entry.get(key)
+    items: list[object] = cast("list[object]", value) if isinstance(value, list) else [value]
+    names = [item for item in items if isinstance(item, str) and (_CALL_PATTERN.fullmatch(item) or _METHOD_PATTERN.fullmatch(item))]
+    if not names or len(names) != len(items):
+        raise PolicyError(f"`companion` needs `{key}`: a dotted call target or `*.method`, or a non-empty list of them")
+    return tuple(names)
 
 
 def _result_discard(raw: Mapping[str, Any]) -> ResultDiscard | None:
