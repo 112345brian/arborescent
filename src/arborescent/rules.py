@@ -853,11 +853,88 @@ def port_binding_findings(context: RuleContext, modules: Mapping[str, ModuleInfo
     if not bindings:
         return []
     classes = _Classes(modules)
-    return [
-        Violation(Rule.PORT_BINDING, port, problem)
-        for port, binding in sorted(bindings.items())
-        if (problem := _binding_problem(binding, classes, known, context.tool_modules)) is not None
+    out: list[Violation] = []
+    for port, binding in sorted(bindings.items()):
+        if (problem := _binding_problem(binding, classes, known, context.tool_modules)) is not None:
+            out.append(Violation(Rule.PORT_BINDING, port, problem))
+        elif binding.shadow:  # only with exactly one implementation: `max` is 1 and nothing is wrong with the binding
+            out += _shadow_notes(binding, classes, context.tool_modules)
+    return out
+
+
+def _reaches(target: str) -> bool:
+    """Whether naming ``target`` can touch anything: a constant or an exception class (``subprocess.DEVNULL``) cannot."""
+    last = target.rpartition(".")[2]
+    return not (last.isupper() or last.endswith(("Error", "Exception", "Expired", "Warning")))
+
+
+def _function_at(info: ModuleInfo, line: int) -> str:
+    """The function or method holding ``line``, or "" for module-level code."""
+    return next((span.name for span in info.facts.function_spans if span.start <= line <= span.end_line), "")
+
+
+def _own_functions(classes: _Classes, adapter: _ClassKey) -> set[tuple[str, str]]:
+    """``(module, function)`` of the implementation: the methods of the class and its scanned bases, what those call in
+    their own module (transitively; a class called there brings all its methods), and that module's top-level code."""
+    out: set[tuple[str, str]] = set()
+    for module in {key[0] for key in classes.lineage(adapter)}:
+        info = classes.modules[module]
+        calls = _calls_by_function(module, info)
+        local_classes = [name for owner, name in classes.lineage(adapter) if owner == module]
+        pending = [f"{name}." for name in local_classes]  # "X." means every method of X
+        # a class made inside a factory has no spans of its own: the factory holds its code
+        pending += [name.rsplit(".", up)[0] for name in local_classes for up in range(1, name.count(".") + 1)]
+        seen: set[str] = set()
+        while pending:
+            wanted = pending.pop()
+            for name, inside in calls:
+                if name in seen or not (name == wanted or (wanted.endswith(".") and name.startswith(wanted))):
+                    continue
+                seen.add(name)
+                for _, callee in inside.resolved:
+                    if callee.startswith(f"{module}."):
+                        local = callee.removeprefix(f"{module}.")
+                        pending += [local, f"{local}."]
+        out |= {(module, name) for name in seen | {""}}
+    return out
+
+
+def _shadow_notes(binding: PortBinding, classes: _Classes, tool_modules: Collection[str]) -> list[Violation]:
+    """``port-shadow`` (#219), an observation: a function that uses an effect category the one implementation owns."""
+    port = classes.find(binding.port)
+    found = _implementors(binding, port, classes, tool_modules) if port is not None else []
+    adapter = classes.find(found[0]) if found else None
+    if adapter is None:
+        return []
+    own = _own_functions(classes, adapter)
+    used = {
+        use.category for module in {module for module, _ in own} for use in classes.modules[module].facts.effect_uses
+        if (module, _function_at(classes.modules[module], use.line)) in own
+    }
+    out = [
+        Violation(Rule.PORT_SHADOW, binding.port, f"`shadow` lists {category}, but {found[0]} uses no {category} effect the scan can see: nothing to compare")
+        for category in binding.shadow if category not in used
     ]
+    watched = used.intersection(binding.shadow)
+    reached: dict[tuple[str, str, str], list[EffectUse]] = {}
+    for module, info in classes.modules.items():
+        if module in tool_modules:
+            continue
+        for use in info.facts.effect_uses:  # a seam (a parameter default) is injection, not a use
+            if use.category not in watched or use.seam or not _reaches(use.target):
+                continue
+            function = _function_at(info, use.line)
+            full = f"{module}.{function}" if function else module
+            if (module, function) in own or not binding.counts(module, function) or any(in_unit(full, glob) for glob in binding.shadow_allow):
+                continue
+            reached.setdefault((module, function, use.category), []).append(use)
+    for (module, function, category), uses in reached.items():
+        where = f"{function}()" if function else "module-level code"
+        targets = ", ".join(sorted({use.target for use in uses}))
+        detail = f"{where} uses {category} ({targets}) outside {found[0]}, the one implementation of {binding.port}"
+        hint = " (go through the port, or list the module or function in this `port_binding`'s `shadow_allow`)"
+        out.append(Violation(Rule.PORT_SHADOW, module, detail, min(use.line for use in uses), hint=hint))
+    return sorted(out, key=lambda item: (item.subject, item.detail))
 
 
 def _folded(name: str) -> str:
@@ -879,9 +956,15 @@ def _named_types(setting: NameCollisionPolicy, types: _Types, decl: NameDecl) ->
     key = _folded(decl.name)
     if decl.name.strip("_").isupper() or key in {_folded(name) for name, _ in setting.allow}:
         return []
+    words = {_folded(word) for word in setting.words}
+    last = decl.name.strip("_").rpartition("_")[2].lower()
+    if decl.kind == "function" and last in words:  # `_in_scope` speaks of a scope; only a declared word is read this way
+        key = last
     if any(_folded(identifier).endswith(key) for identifier in decl.annotation):
         return []
-    declared_word = key in {_folded(word) for word in setting.words}
+    declared_word = key in words
+    if decl.kind in ("function", "parameter") and not declared_word:  # a signature often repeats a type's name innocently
+        return []
     return [
         (module, name) for module, name in types
         if (_folded(name) == key and (declared_word or len(key) >= setting.min_length)) or (declared_word and _last_word(name) == key)
@@ -895,7 +978,8 @@ def _module_collisions(setting: NameCollisionPolicy, types: _Types, module: str,
         if not found or any(owner == module for owner, _ in found):
             continue
         names = ", ".join(sorted(f"{owner}.{name}" for owner, name in found))
-        detail = f"{decl.kind} '{decl.owner}.{decl.name}' shares its name with the type {names}"
+        spelled = f"{decl.owner}.{decl.name}" if decl.owner else decl.name
+        detail = f"{decl.kind} '{spelled}' shares its name with the type {names}"
         hint = " (rename it, or give the name a reason in `name_collisions.allow`)"
         _ = out.setdefault(detail, Violation(Rule.NAME_COLLISION, module, detail, decl.line, hint=hint))
     return list(out.values())

@@ -461,6 +461,8 @@ port = "app.ports.Clock"            # a Protocol or abstract class
 # max = 1                           # the default; at least one implementor is always required
 # exclude = ["app.simulation"]      # module globs or `module.Class` names that are not production bindings
 # reason = "one source of time"     # appended to the finding
+# shadow = ["monotonic"]            # effect categories this port owns (needs max = 1); see below
+# shadow_allow = ["app.bench"]      # module globs or `module.function` names that may use them directly
 ```
 
 A class implements the port when it subclasses it, or, for a Protocol, when it defines every member the Protocol (and the
@@ -471,16 +473,36 @@ subclasses only. A class does not count when it is itself a Protocol, lists `ABC
 `@abstractmethod`; when it is a test double (in a `tests`, `testing`, `conftest`, `fakes` or `test_*` module, or named
 `Fake*`, `Stub*` or `Mock*`); or when it lies in a `dev_tools` path or an excluded file. A member or base the scan cannot
 see (a third-party base class, `setattr`, `__getattr__`) is not followed. The table is per scope; implementors are counted
-across all scopes. `check --changed` skips the rule. A function that reaches a port's resource by another route is not
-detected.
+across all scopes. `check --changed` skips the rule.
+
+`shadow` (opt-in per port) looks for a function reaching the port's resource by another route. The resource is an effect
+category you name, as in a ring's `forbid` (`monotonic`, `clock`, `process`, `network`, `database`, `filesystem`, ...;
+not `state`, `registry`, `cache`, `global` or `patch`). Any function or module-level code that uses an effect of that
+category directly, outside the one implementation, gets a `port-shadow` note: a `NOTE` line that never fails `check` and
+never enters the baseline. `time.monotonic` is noted although the adapter calls `time.perf_counter`.
+
+The implementation is the class, its scanned base classes, the functions and classes of the same module that they call
+(transitively), and that module's top-level code; a function beside the adapter that none of them calls is noted. Not
+noted: a parameter default (`clock=time.monotonic`, the injection seam), a constant or exception class
+(`subprocess.DEVNULL`, `subprocess.TimeoutExpired`), test doubles, `exclude`, `dev_tools` and `shadow_allow`. If the
+implementation uses no effect of a listed category, a note says there is nothing to compare. The check waits for a clean
+binding (exactly one implementation).
+
+What it does not see: a resource with no effect category (a third-party SDK the scan does not know), a route through
+another module's helper or an injected object (only the direct user is noted), a method on a value whose type the scan
+cannot tell, and a same-module helper the adapter only passes as a callback (it is noted). Name those calls in a
+`call_allowlist`. A broad category such as `filesystem` notes every other adapter that touches files: list them in
+`shadow_allow`, or leave the port without `shadow`.
 
 `name_collisions` is an opt-in observation (a `NOTE` line; it never fails `check` and never enters the baseline) for one
-word used for two concepts: a field or local called `ratchet` that is not a `Ratchet`.
+word used for two concepts: a field or local called `ratchet` that is not a `Ratchet`, or, once `scope` is a declared word,
+a helper called `_in_scope` that has nothing to do with `ArchitectureScope`.
 
 ```toml
 [tool.arborescent.name_collisions]  # the table alone turns it on
 # min_length = 5                    # shorter names are too generic
-# words = ["scope"]                 # words that mean one thing: `scope` also matches a type ending in `...Scope`
+# words = ["scope"]                 # words that mean one thing: `scope` matches a type ending in `...Scope`; also turns on
+#                                   # parameters and function names for that word
 
 [[tool.arborescent.name_collisions.allow]]
 name = "baseline"
@@ -491,11 +513,17 @@ The definition is deliberately narrow, to stay quiet:
 
 - Vocabulary: public module-level classes of the same scope. Names are compared ignoring case and underscores
   (`architecture_scope` matches `ArchitectureScope`); `scope` matches `ArchitectureScope` only when listed in `words`.
-- Looked at: annotated class fields, `self.x` assignments and function locals. Not parameters, function names,
-  module-level variables, unannotated class attributes (enum members) or `UPPER_CASE` names.
+- Looked at: annotated class fields, `self.x` assignments and function locals. For declared `words` only: annotated
+  parameters (the name is the word) and function names (the name, or its last `_` part, is the word: `_in_scope`). Not
+  module-level variables, unannotated class attributes (enum members), `UPPER_CASE` names, dunder methods, docstrings or
+  comments.
 - Reported only with evidence that the value is something else: an annotation that does not name a type ending in that
   word (`ratchet: tuple[str, ...]`, but not `ratchet: NamedRatchet` or `ratchet: Any`), or, unannotated, a literal or a
-  comprehension. `ratchet = load()` says nothing and is left alone.
+  comprehension. A function is judged by all its annotations together. `ratchet = load()` says nothing and is left alone.
+- A `str` value (`ratchet: str`, `str | None`, a string literal, a function returning `str`) is taken to be a reference
+  to the thing by its name or path, and is not noted. A container of strings is.
+- Not automatic: `scope` is matched to `ArchitectureScope` only when you list it in `words`. Matching the last word of
+  every type by itself produced over a hundred notes on this project.
 - A module that defines the type itself is left alone, and `check --changed` skips the observation.
 
 The table is a whole-run setting: with `scopes`, set it at the root.
@@ -1073,7 +1101,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `construction-forbidden-argument` | a call or `replace` supplies a field that a `construction` entry forbids or a `metadata={"arbor": "derived"}` marker marks; also an entry whose class or field does not exist |
 | `construction-missing-argument` | a call constructs a `construction` class without passing a `require_kwargs` name by keyword; also an entry whose class or field does not exist |
 | `port-binding` | a `port_binding` port has no production implementor, or more than its `max` (default 1); also a port that does not exist or is not a Protocol or abstract class. Whole-repository runs only |
-| `name-collision` | information only (never fails, never baselined): `name_collisions` is set and a field or local reuses the name of a type defined in another module. Whole-repository runs only |
+| `port-shadow` | information only (never fails, never baselined): a `port_binding` lists `shadow` categories and code outside the one implementation uses one directly. Whole-repository runs only |
+| `name-collision` | information only (never fails, never baselined): `name_collisions` is set and a field or local (for declared `words`, also a parameter or function name) reuses the name of a type defined in another module. Whole-repository runs only |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
