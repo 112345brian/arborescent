@@ -813,6 +813,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `suppression` | a `# noqa`, `# ruff: noqa` or `# type: ignore` directive is inventoried by module and kind; each occurrence is ratcheted |
 | `discard` | a `discard(value, reason=...)` call is inventoried by module; each call is ratcheted without claiming type-aware `Result` detection |
 | `lazy-import` | a function-level `import` with no `# deferred: <reason>` on its line or alone on the line above it; keyed by what it imports and its ordinal in the module, so moving it does not change the key. See "Function-level imports and import cycles" below |
+| `entrypoint-eager-commands` | informational, opt-in (`[coupling.eager_commands]`): a module whose function-level imports mostly sit inside CLI command bodies; see "Eager command modules" below |
 | `effect-clock` | a ring that forbids `clock` reads the ambient clock (`time.time`, `datetime.now` and related calls) |
 | `effect-env` | a ring that forbids `env` reads environment variables through `os.environ` or `os.getenv` |
 | `effect-identity` | a ring that forbids `identity` generates UUID identities |
@@ -913,6 +914,31 @@ def load() -> None:
 The reason must not be empty. A justified import is counted but is not a finding. It still counts as an edge in the import
 graph, so `circular-import` and `arborescent cycles` see it. (Excluding these imports from a closure size is not done
 here; the closure used by `internal-import` move suggestions still follows them.)
+
+#### Eager command modules
+
+In a CLI, imports inside command bodies usually exist to keep `--help` and the other commands fast. `# deferred:` records
+that coupling and fixes nothing: the fix is structural. Opt in with a table (every key is optional):
+
+```toml
+[tool.arborescent.coupling.eager_commands]
+decorators = ["command", "callback", "group"]  # a plain name matches the last segment, "app.command" matches exactly
+min_imports = 3     # function-level imports that must sit in command bodies
+min_share = 0.5     # and the share of the module's function-level imports they must be
+min_commands = 2    # across at least this many commands
+```
+
+A command is a function with one of those decorators, one registered by calling it (`app.command("x")(run)`), or one
+passed to argparse as `set_defaults(func=run)` in the same module. A module over every threshold gets one
+`entrypoint-eager-commands` note with the number of imports and commands, and how many project modules importing it would
+load if those imports were hoisted (left out under `check --changed`). Imports with a `# deferred:` reason count toward
+the share. The note never fails a check and is never baselined. The `lazy-import` findings and their baseline keys do not
+change, so enabling this needs no new baseline and a new import still fails; the failing ones in command bodies print as
+one line per module that names each import.
+
+The structure it asks for is one module per command, imports at the top, mounted lazily by the composition root. Declare
+the mounts in [`[coupling.lazy_mounts]`](#startup-budgets-and-lazy-mounts) so the one remaining deferral is a reviewed,
+countable list.
 
 `arborescent cycles` reports the cycles themselves. For each strongly connected component of the first-party import
 graph it lists every edge with its kind (`import-time`, `function-level` or `type-checking`; an edge that several
@@ -1091,6 +1117,33 @@ below it, and every declared entrypoint needs a `closure` entry. A count above i
 `arborescent coupling baseline` writes the file the first time and afterwards only lowers counts (a smaller or gone entry prints as
 `STALE` in `check`); a rise or a new entry needs `--allow-growth --reason TEXT` and is logged in `growth`. The file is separate
 from the check baseline and is not read by `arborescent check`.
+
+### Startup budgets and lazy mounts
+
+```toml
+[tool.arborescent.coupling]
+entrypoints = ["app.cli"]
+[tool.arborescent.coupling.closure_max]   # hard cap on an entrypoint's closure; each key must be an entrypoint
+"app.cli" = 40
+[tool.arborescent.coupling.lazy_mounts]   # command name -> "module:attr", loaded only when the command runs
+backfill = "app.commands.backfill:app"
+"backfill conditions" = "app.commands.conditions:app"
+```
+
+Both are static: they count project modules reached by module-level imports, not seconds.
+
+- `arborescent coupling check` fails when a closure is over its `closure_max`, naming the imports to blame. The baseline
+  does not excuse it, unlike growth, which `check` already reports against the `closure` counts.
+- It also fails when an entrypoint loads a mounted module at import time, and prints the import chain. This check also
+  follows parent packages (`import a.b.c` runs `a` and `a.b`). A `TYPE_CHECKING` or function-level import passes.
+- `arborescent coupling startup [--top N]` is the report. Per entrypoint it prints the closure size and budget, the `N`
+  heaviest imports (`a -> b pulls 12 module(s)` is what removing that import saves; several importers means every one of
+  those edges must go), and per lazy mount the modules running it adds, or `EAGER`.
+
+A mount whose module does not exist is a policy error (exit 2); `attr` is checked for syntax only. How the mount loads the
+module (a string table with `importlib`) is the project's code. Add a mounted command module to `entrypoints` to ratchet
+or cap its own closure. Not measured: wall time, cold against warm starts, per-argv subprocess runs and the cost of
+third-party imports.
 
 ## Effect categories and the `[effects]` table
 
@@ -1333,8 +1386,8 @@ intentional baseline growth, its reason and its approver.
 
 ### `arborescent coupling`
 
-`report`, `check`, `baseline` and `cost`, described under [Coupling metrics](#coupling-metrics-toolarborescentcoupling).
-`check` exits 1 on a regression; a policy or baseline error exits 2.
+`report`, `check`, `baseline`, `startup` and `cost`, described under [Coupling metrics](#coupling-metrics-toolarborescentcoupling).
+`check` exits 1 on a regression, an exceeded `closure_max` or an eagerly loaded lazy mount; a policy or baseline error exits 2.
 
 ### `arborescent purity`
 

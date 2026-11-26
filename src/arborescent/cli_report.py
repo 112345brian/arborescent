@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 
 from . import baseline as ratchet_mod
-from .domain import Policy
+from .command_imports import COMMAND_BODY_HINT
+from .domain import Policy, Violation
 from .engine import CheckReport
 
 
@@ -65,12 +66,24 @@ def _print_report(args: argparse.Namespace, report: CheckReport, setup_command: 
 
 
 def _print_findings(args: argparse.Namespace, report: CheckReport) -> None:
-    shown = report.ratchet.new if report.ratchet and not args.no_baseline else report.violations
-    for v in shown:
-        print(f"FAIL   {v.render()}")
+    _print_failures(report.ratchet.new if report.ratchet and not args.no_baseline else report.violations)
     if report.ratchet:
         for key in report.ratchet.stale:
             print(f"STALE  baseline entry no longer occurs (delete it: `arborescent baseline --prune`): {key}")
+
+
+def _print_failures(shown: list[Violation]) -> None:
+    """One line per finding, except that the ``lazy-import`` findings in one module's command bodies share a line (#215)."""
+    in_commands: dict[str, list[str]] = {}
+    for v in shown:
+        if v.hint == COMMAND_BODY_HINT:
+            in_commands.setdefault(v.subject, []).append(v.detail)
+    for v in shown:
+        if v.hint != COMMAND_BODY_HINT or len(in_commands[v.subject]) < 2:
+            print(f"FAIL   {v.render()}")
+    for subject, details in in_commands.items():
+        if len(details) > 1:
+            print(f"FAIL   {subject}: [lazy-import] {len(details)} function-level imports in command bodies: {', '.join(details)}{COMMAND_BODY_HINT}")
 
 
 def _print_engines(report: CheckReport) -> None:

@@ -42,6 +42,7 @@ def test_rule_id_strings_never_change() -> None:
             "suppression",
             "discard",
             "lazy-import",
+            "entrypoint-eager-commands",
             "result-discard",
             "effect-clock",
             "effect-env",

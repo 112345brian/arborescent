@@ -168,6 +168,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.taint` | `single` | domain |
 | `arborescent.coupling` | `single` | domain |
 | `arborescent.coupling_policy` | `single` | domain |
+| `arborescent.command_imports` | `single` | domain |
 | `arborescent.coupling_ratchet` | `single` | application |
 | `arborescent.package_constraints` | `single` | domain |
 | `arborescent.package_constraint_rules` | `single` | domain |
