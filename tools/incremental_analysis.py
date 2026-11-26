@@ -1,25 +1,56 @@
-"""Opt-in save analysis for a Python source root with an Arborescent policy."""
+"""Opt-in save analysis for a project with an Arborescent policy.
+
+It reports only ``PARITY_RULES``, which match a fresh full scan, plus its own ``effect-via-call``. A clean result here
+does not mean ``arborescent check`` passes: no other rule is evaluated and no baseline is applied.
+"""
 
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import subprocess
 import sys
 import time
+import unicodedata
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TypedDict, cast
 
+from arborescent.adapters import FsScanner, LocalFileSystem, ScanData
 from arborescent.config import load_policy
+from arborescent.declaration_facts import arbor_annotation, script_deps
 from arborescent.domain import Policy, Rule, Violation
 from arborescent.effect_categories import effect_category_of
+from arborescent.engine import discovery_findings
 from arborescent.facts import ModuleInfo, SourceFacts
-from arborescent.filesystem_adapter import LocalFileSystem
-from arborescent.import_facts import RawImport
-from arborescent.path_exclusion import excluded_by_policy
+from arborescent.import_syntax import RawImport, raw_imports
 from arborescent.rules import RuleContext, check_modules
 
+# The rules decided by file discovery, module names, imports, `__arbor__` and PEP 723 metadata alone. Every other rule
+# needs facts the worker does not supply, so its findings are dropped rather than reported from partial facts.
+PARITY_RULES: frozenset[str] = frozenset(
+    {
+        Rule.ARBOR_RING_MISMATCH,
+        Rule.BAD_IMPORT,
+        Rule.CIRCULAR_IMPORT,
+        Rule.DEV_TOOL_IMPORT,
+        Rule.DEV_TOOL_MISPLACED,
+        Rule.DEV_TOOL_PRODUCT_IMPORT,
+        Rule.EXTERNAL_IMPORT,
+        Rule.FORBIDDEN_MODULE,
+        Rule.INTERNAL_IMPORT,
+        Rule.INVALID_ARBOR_ANNOTATION,
+        Rule.NOISE_DIR_CODE,
+        Rule.RESTRICTED_IMPORT,
+        Rule.SCOPE_IMPORT,
+        Rule.UNANNOTATED_MODULE,
+        Rule.UNCLASSIFIED,
+        Rule.UNDECLARED_ENTRY_DEPENDENCY,
+        Rule.VENDOR_FOLDER,
+        Rule.WILDCARD_RING,
+    }
+)
 EFFECT_TARGETS = ("os.getenv",)
 
 
@@ -94,56 +125,61 @@ class Result:
     parsed: int
     violations: tuple[Finding, ...]
     syntax_errors: tuple[str, ...]
+    # Valid Python the worker's grammar rejects: imports come from Python, call evidence from these files is missing.
+    incomplete: tuple[str, ...]
 
 
-def _evaluate(
-    evidence: Evidence,
-    policy: Policy,
-    paths: dict[str, str],
-    sources: dict[str, Source],
-    parsed: int,
-) -> Result:
-    modules: dict[str, ModuleInfo] = {}
-    scopes: dict[str, str] = {}
-    tool_modules: set[str] = set()
-    syntax_errors: list[str] = []
-    for name, facts in evidence["modules"].items():
-        path = paths[name]
-        scope = policy.scope_for_path(path)
-        if scope is not None:
-            scopes[name] = scope.name
-        if policy.is_dev_tool_path(path):
-            tool_modules.add(name)
-        if facts["syntax_error"]:
-            syntax_errors.append(path)
-        imports = tuple(
-            RawImport(
-                imp["level"],
-                imp["module"],
-                tuple(imp["names"]),
-                imp["line"],
-                imp["lazy"],
-                imp["type_only"],
-            )
-            for imp in facts["imports"]
+@dataclass(frozen=True)
+class _Headline:
+    """What CPython decides for a file: whether it parses, and the metadata that selects modules and rings."""
+
+    source: str
+    facts: SourceFacts
+    syntax_error: bool
+
+
+def _headline(source: str) -> _Headline:
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return _Headline(source, SourceFacts((), (), None), True)
+    ring, error, role, reason = arbor_annotation(tree)
+    facts = SourceFacts(
+        (),
+        (),
+        script_deps(source),
+        arbor_ring=ring,
+        arbor_error=error,
+        arbor_role=role,
+        arbor_reason=reason,
+    )
+    return _Headline(source, facts, False)
+
+
+def _identifier(name: str) -> str:
+    return unicodedata.normalize("NFKC", name)  # as CPython reads identifiers
+
+
+def _imports(evidence: ModuleEvidence) -> tuple[RawImport, ...]:
+    return tuple(
+        RawImport(
+            imp["level"],
+            _identifier(imp["module"]),
+            tuple(_identifier(name) for name in imp["names"]),
+            imp["line"],
+            imp["lazy"],
+            imp["type_only"],
         )
-        modules[name] = ModuleInfo(
-            name, path, sources[name]["is_package"], SourceFacts(imports, (), None)
-        )
+        for imp in evidence["imports"]
+    )
 
-    context = RuleContext(policy, {}, scopes, frozenset(tool_modules))
-    imports = check_modules(policy, modules, modules.keys(), {}, context)
-    findings = [
-        Finding(v.rule, v.subject, v.detail, line=v.line, target=v.target, hint=v.hint)
-        for v in imports
-        if v.rule
-        in {
-            Rule.INTERNAL_IMPORT,
-            Rule.SCOPE_IMPORT,
-        }  # Only the import rules exercised by the prototype.
-    ]
+
+def _effect_findings(evidence: Evidence, context: RuleContext) -> list[Finding]:
+    findings: list[Finding] = []
     for effect in evidence["effects"]:
         name = effect["module"]
+        if name in context.tool_modules:  # developer tooling has no ring
+            continue
         owner = context.policy_for(name)
         ring = context.resolve_ring(name)
         category = effect_category_of(effect["target"])
@@ -162,74 +198,158 @@ def _evaluate(
                     chain=tuple(effect["chain"]),
                 )
             )
-    return Result(
-        parsed,
-        tuple(
-            sorted(
-                findings, key=lambda finding: (finding.key, finding.line, finding.chain)
-            )
-        ),
-        tuple(sorted(syntax_errors)),
+    return findings
+
+
+def _module_facts(
+    evidence: Evidence, scan: ScanData, headlines: dict[str, _Headline]
+) -> tuple[dict[str, ModuleInfo], tuple[str, ...]]:
+    """The scanned modules with their imports filled in, and the paths the worker could not parse."""
+    modules: dict[str, ModuleInfo] = {}
+    incomplete: list[str] = []
+    for name, info in scan.modules.items():
+        headline = headlines[info.path]
+        facts = evidence["modules"][name]
+        imports: tuple[RawImport, ...] = ()
+        if not headline.syntax_error and facts["syntax_error"]:
+            imports = raw_imports(ast.parse(headline.source))
+            incomplete.append(info.path)
+        elif not headline.syntax_error:
+            imports = _imports(facts)
+        modules[name] = replace(info, facts=replace(info.facts, imports=imports))
+    return modules, tuple(sorted(incomplete))
+
+
+@dataclass(frozen=True)
+class _Checked:
+    """Everything the parity rules read, so a save that leaves it alone reuses their findings."""
+
+    policy: Policy
+    scan: ScanData
+    modules: dict[str, ModuleInfo]
+
+
+def _context(checked: _Checked) -> RuleContext:
+    scan = checked.scan
+    return RuleContext(
+        checked.policy,
+        scan.arbor_index,
+        scan.scope_by_module,
+        scan.dev_tool_modules,
     )
 
 
+def _parity_findings(checked: _Checked) -> list[Finding]:
+    context = _context(checked)
+    scan = checked.scan
+    found = check_modules(
+        checked.policy, checked.modules, scan.known, scan.entry_deps, context
+    )
+    found += discovery_findings(context, scan)
+    return [
+        Finding(
+            v.rule,
+            v.subject,
+            v.detail,
+            line=v.line,
+            target=v.target,
+            hint=v.hint,
+            root_cause=v.root_cause,
+        )
+        for v in found
+        if v.rule in PARITY_RULES
+    ]
+
+
 class Analysis:
-    def __init__(
-        self, worker: Worker, source_root: Path, policy_root: Path | None = None
-    ) -> None:
+    """Save-time analysis of the project whose policy file sits in ``root``."""
+
+    def __init__(self, worker: Worker, root: Path) -> None:
         self._worker = worker
-        self._source_root = source_root.resolve()
-        self._policy_root = policy_root.resolve() if policy_root else self._source_root
+        self._root = root.resolve()
+        # The full scan's own discovery and module selection. No fact cache, so every refresh reads every source.
+        self._scanner = FsScanner(extractor=self._extract)
+        self._parsed: dict[str, _Headline] = {}
+        self._seen: dict[str, _Headline] = {}  # the files this refresh's scan read
         self._sources: dict[str, Source] = {}
         self._evidence: Evidence | None = None
+        self._scan: ScanData | None = None
         self._policy: Policy | None = None
         self._result: Result | None = None
+        self._checked: _Checked | None = None
+        self._parity: list[Finding] = []
+
+    def _extract(self, source: str, path: str) -> SourceFacts:
+        headline = self._parsed.get(path)
+        if headline is None or headline.source != source:
+            headline = self._parsed[path] = _headline(source)
+        self._seen[path] = headline
+        return headline.facts
 
     def refresh(self, policy: Policy) -> Result:
-        paths: dict[str, str] = {}
+        self._seen = {}
+        scan = self._scanner.scan(policy, self._root)
         sources: dict[str, Source] = {}
-        for path in sorted(self._source_root.rglob("*.py")):
-            parts = path.relative_to(self._source_root).with_suffix("").parts
-            is_package = parts[-1] == "__init__"
-            segments = parts[:-1] if is_package else parts
-            if not segments or not all(segment.isidentifier() for segment in segments):
-                continue
-            relative = path.relative_to(self._policy_root).as_posix()
-            if excluded_by_policy(relative, policy.exclude):
-                continue
-            name = ".".join(segments)
-            if name in paths:
-                raise ValueError(f"multiple files provide module {name!r}")
-            try:
-                text = path.read_text(encoding="utf-8-sig")
-            except FileNotFoundError:
-                continue  # A rename between enumeration and read is picked up on the next refresh.
-            paths[name] = relative
-            sources[name] = {"text": text, "is_package": is_package}
+        for name, info in scan.modules.items():
+            headline = self._seen[info.path]
+            # The worker never sees what CPython rejects, so it keeps no calls from it. Python reads a lone carriage
+            # return as a line end and tree-sitter does not.
+            text = "" if headline.syntax_error else headline.source
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
+            sources[name] = {"text": text, "is_package": info.is_package}
         upsert = {
             name: source
             for name, source in sources.items()
             if self._sources.get(name) != source
         }
         remove = sorted(self._sources.keys() - sources.keys())
+        # Only discovered source files: a full scan skips an excluded or test file that does not parse. A broken file
+        # outside enforcement changes neither the scan nor the worker's sources, so the cache must compare this too.
+        broken = tuple(
+            sorted(
+                path
+                for path in scan.paths.values()
+                if path in self._seen and self._seen[path].syntax_error
+            )
+        )
         if self._evidence is None or upsert or remove:
             self._evidence = self._worker.update(upsert, remove)
             self._sources = sources
             parsed = self._evidence["parsed"]
-        elif self._result is not None and policy == self._policy:
+        elif self._result is not None and (policy, scan, broken) == (
+            self._policy,
+            self._scan,
+            self._result.syntax_errors,
+        ):
             return replace(self._result, parsed=0)
         else:
             parsed = 0
-        result = _evaluate(self._evidence, policy, paths, sources, parsed)
+        findings, incomplete = self._evaluate(self._evidence, policy, scan)
+        result = Result(parsed, findings, broken, incomplete)
         self._result = result
         self._policy = policy
+        self._scan = scan
         return result
+
+    def _evaluate(
+        self, evidence: Evidence, policy: Policy, scan: ScanData
+    ) -> tuple[tuple[Finding, ...], tuple[str, ...]]:
+        """The findings, and the paths whose calls are missing."""
+        modules, incomplete = _module_facts(evidence, scan, self._seen)
+        checked = _Checked(policy, scan, modules)
+        if checked != self._checked:
+            self._parity = _parity_findings(checked)
+            self._checked = checked
+        findings = self._parity + _effect_findings(evidence, _context(checked))
+        ordered = sorted(
+            findings, key=lambda found: (found.key, found.line, found.chain)
+        )
+        return tuple(ordered), incomplete
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worker", required=True, type=Path)
-    parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--policy", required=True, type=Path)
     parser.add_argument("--watch", action="store_true")
     args = parser.parse_args()
@@ -237,12 +357,18 @@ def main() -> int:
     policy_path = args.policy.resolve()
     previous = None
     with Worker(args.worker) as worker:
-        analysis = Analysis(worker, args.source_root, policy_path.parent)
+        analysis = Analysis(worker, policy_path.parent)
         try:
             while True:
                 policy, _ = load_policy(fs, policy_path)
-                result = analysis.refresh(policy)
-                current = (result.violations, result.syntax_errors)
+                try:
+                    result = analysis.refresh(policy)
+                except FileNotFoundError:
+                    if not args.watch:
+                        raise
+                    time.sleep(0.05)  # renamed between listing and reading
+                    continue
+                current = (result.violations, result.syntax_errors, result.incomplete)
                 if current != previous:
                     sys.stdout.write(json.dumps(asdict(result)) + "\n")
                     sys.stdout.flush()

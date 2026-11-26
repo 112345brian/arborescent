@@ -81,7 +81,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CheckReport", "EngineRun", "Options", "Services", "apply_modularity", "apply_ratchet", "blocking", "changed_files",
-    "child_arbor_runs", "contract_renderers", "dev_tool_counts", "drift", "drift_report", "enforced",
+    "child_arbor_runs", "contract_renderers", "dev_tool_counts", "discovery_findings", "drift", "drift_report", "enforced",
     "nested_exclusions", "package_checks", "plan_engines", "ratchet_runs", "record_inventories", "run_engine",
     "run_own", "run_tool", "tool_is_disabled", "write_generated",
 ]
@@ -192,13 +192,10 @@ def changed_files(runner: ToolRunner, root: Path, ref: str) -> frozenset[str] | 
     return frozenset(p for p in (diff.stdout + "\n" + other.stdout).split() if p.endswith(".py"))
 
 
-def run_own(
-    policy: Policy, root: Path, services: Services, only: frozenset[str] | None = None, practices: bool = True
-) -> tuple[list[Violation], ScanResult]:
-    scan = services.scanner.scan(policy, root, only)
-    indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules))
-    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, indexes)
-    found += [
+def discovery_findings(indexes: RuleContext, scan: ScanResult) -> list[Violation]:
+    """What discovery alone shows, with no module facts beyond ``__arbor__``: shared with the incremental worker."""
+    policy = indexes.policy
+    found = [
         Violation(Rule.INVALID_ARBOR_ANNOTATION, module, detail)
         for module, _ in scan.unclassified
         if module not in scan.modules
@@ -214,6 +211,16 @@ def run_own(
     ]
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
+    return found
+
+
+def run_own(
+    policy: Policy, root: Path, services: Services, only: frozenset[str] | None = None, practices: bool = True
+) -> tuple[list[Violation], ScanResult]:
+    scan = services.scanner.scan(policy, root, only)
+    indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules))
+    found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, indexes)
+    found += discovery_findings(indexes, scan)
     found += _inventory_violations(scan.modules, policy.lazy_import_rings, indexes)
     if policy.coupling.eager_commands is not None:
         found = _flag_eager_commands(

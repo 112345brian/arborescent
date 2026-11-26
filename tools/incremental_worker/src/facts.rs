@@ -60,6 +60,18 @@ fn canonical_import(name: &str) -> String {
         .collect()
 }
 
+/// The same test as the full scan: any `x.TYPE_CHECKING` or bare `TYPE_CHECKING`, parentheses aside.
+fn is_type_checking(condition: Node<'_>, source: &str) -> bool {
+    match condition.kind() {
+        "identifier" => text(condition, source) == "TYPE_CHECKING",
+        "attribute" => field_text(condition, "attribute", source) == Some("TYPE_CHECKING"),
+        "parenthesized_expression" => children(condition)
+            .into_iter()
+            .any(|child| child.kind() != "comment" && is_type_checking(child, source)),
+        _ => false,
+    }
+}
+
 fn imports(node: Node<'_>, source: &str, lazy: bool, type_only: bool, out: &mut Vec<Import>) {
     let line = node.start_position().row + 1;
     if node.kind() == "import_statement" {
@@ -75,9 +87,12 @@ fn imports(node: Node<'_>, source: &str, lazy: bool, type_only: bool, out: &mut 
         }
         return;
     }
-    if node.kind() == "import_from_statement" {
-        let raw =
-            canonical_import(field_text(node, "module_name", source).expect("valid from import"));
+    // tree-sitter gives `from __future__` its own node, with no `module_name` field.
+    if matches!(
+        node.kind(),
+        "import_from_statement" | "future_import_statement"
+    ) {
+        let raw = canonical_import(field_text(node, "module_name", source).unwrap_or("__future__"));
         let module = raw.trim_start_matches('.');
         let mut names: Vec<_> = field_nodes(node, "name")
             .into_iter()
@@ -96,11 +111,11 @@ fn imports(node: Node<'_>, source: &str, lazy: bool, type_only: bool, out: &mut 
         });
         return;
     }
-    let type_guard = node.kind() == "if_statement"
-        && matches!(
-            field_text(node, "condition", source),
-            Some("TYPE_CHECKING" | "typing.TYPE_CHECKING")
-        );
+    // Each `elif` guards only its own block, as the nested `If` that Python's `ast` builds does.
+    let type_guard = matches!(node.kind(), "if_statement" | "elif_clause")
+        && node
+            .child_by_field_name("condition")
+            .is_some_and(|condition| is_type_checking(condition, source));
     let consequence = node.child_by_field_name("consequence");
     for child in children(node) {
         imports(
