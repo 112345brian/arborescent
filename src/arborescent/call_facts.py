@@ -10,7 +10,7 @@ import ast
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-__all__ = ["FunctionCalls", "absolute_callee", "bare_calls", "call_aliases", "call_sites", "discard_call_lines", "dotted_name", "dynamic_imports", "function_calls", "is_private_name", "private_attributes"]
+__all__ = ["FunctionCalls", "absolute_callee", "bare_calls", "call_aliases", "call_sites", "discard_call_lines", "dotted_name", "dynamic_imports", "function_calls", "is_private_name", "patch_targets", "private_attributes", "unqualified_from_calls"]
 
 
 @dataclass(frozen=True)
@@ -124,6 +124,103 @@ def private_attributes(nodes: Sequence[ast.AST], aliases: dict[str, str], reboun
         if root in aliases and root not in rebound and (target := dotted_name(node, aliases)) is not None:
             found.add((node.lineno, target))
     return tuple(sorted(found))
+
+
+_MOCK_PATCH = frozenset({"unittest.mock.patch", "mock.patch", "mocker.patch"})
+
+
+def _argument(call: ast.Call, position: int, keyword: str) -> ast.expr | None:
+    if len(call.args) > position:
+        return call.args[position]
+    return next((item.value for item in call.keywords if item.arg == keyword), None)
+
+
+def _text(node: ast.expr | None) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _monkeypatch_names(nodes: Sequence[ast.AST]) -> set[str]:
+    """``monkeypatch`` and every name a ``with monkeypatch.context() as m`` binds."""
+    names = {"monkeypatch"}
+    for node in nodes:
+        if not isinstance(node, ast.withitem) or not isinstance(node.optional_vars, ast.Name) or not isinstance(node.context_expr, ast.Call):
+            continue
+        function = node.context_expr.func
+        if isinstance(function, ast.Attribute) and function.attr == "context" and _root_name(function) in {"monkeypatch", "pytest", "MonkeyPatch"}:
+            names.add(node.optional_vars.id)
+    return names
+
+
+def _patched_attribute(call: ast.Call, aliases: dict[str, str], rebound: set[str]) -> str | None:
+    """The dotted ``module.name`` of ``(module_object, "name")``, when the object is reached through an import."""
+    owner = _argument(call, 0, "target")
+    name = _text(_argument(call, 1, "attribute")) or _text(_argument(call, 1, "name"))  # `patch.object` / `setattr` spell it differently
+    if owner is None or name is None or _root_name(owner) not in aliases or _root_name(owner) in rebound:
+        return None
+    base = dotted_name(owner, aliases)
+    return None if base is None else f"{base}.{name}"
+
+
+def _patch_target(call: ast.Call, aliases: dict[str, str], rebound: set[str], monkeypatches: set[str]) -> str | None:
+    function = call.func
+    called = dotted_name(function, aliases)
+    if called in _MOCK_PATCH:
+        target = _text(_argument(call, 0, "target"))
+    elif called is not None and called.removesuffix(".object") in _MOCK_PATCH:
+        return _patched_attribute(call, aliases, rebound)
+    elif isinstance(function, ast.Attribute) and function.attr == "setattr" and isinstance(function.value, ast.Name) and function.value.id in monkeypatches:
+        target = _text(_argument(call, 0, "target"))
+        if target is None:
+            return _patched_attribute(call, aliases, rebound)
+    else:
+        return None
+    return target if target is not None and "." in target and not target.startswith(".") and "\x00" not in target else None
+
+
+def patch_targets(nodes: Sequence[ast.AST], aliases: dict[str, str], rebound: set[str]) -> tuple[tuple[int, str], ...]:
+    """``(line, dotted "module.name")`` of every attribute ``monkeypatch.setattr`` / ``mock.patch[.object]`` replaces (#226).
+
+    A string target is taken as written; an object target must be reached through an import the module does not rebind."""
+    monkeypatches = _monkeypatch_names(nodes)
+    found = {
+        (node.lineno, target) for node in nodes
+        if isinstance(node, ast.Call) and (target := _patch_target(node, aliases, rebound, monkeypatches)) is not None
+    }
+    return tuple(sorted(found))
+
+
+def _module_from_imports(tree: ast.Module) -> dict[str, str]:
+    """Local name -> origin for each ``from X import name`` that runs when the module is imported (relative ones keep their dots)."""
+    found: dict[str, str] = {}
+    pending: list[ast.AST] = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.ImportFrom):
+            prefix = "." * node.level + ("" if node.module is None else f"{node.module}.")
+            found.update({item.asname or item.name: prefix + item.name for item in node.names if item.name != "*"})
+        elif isinstance(node, ast.If) and "TYPE_CHECKING" in (getattr(node.test, "id", ""), getattr(node.test, "attr", "")):
+            pending.extend(node.orelse)
+        elif not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.expr):
+            pending.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def unqualified_from_calls(tree: ast.Module, nodes: Sequence[ast.AST], rebound: set[str]) -> tuple[tuple[int, str, str], ...]:
+    """``(first line, origin "X.name", local name)`` for each name bound by a module-level ``from X import name`` and called bare
+    inside a function (#226). A call that runs at import time, or a name the module rebinds or also imports lazily, is left out."""
+    bound = _module_from_imports(tree)
+    if not bound:
+        return ()
+    functions = [node for node in nodes if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda)]
+    bodies = [item for node in functions for item in (node.body if isinstance(node.body, list) else [node.body])]
+    inner = [child for body in bodies for child in ast.walk(body)]
+    lazy = {item.asname or item.name for node in inner if isinstance(node, ast.Import | ast.ImportFrom) for item in node.names}
+    usable = bound.keys() - rebound - lazy
+    first: dict[str, int] = {}
+    for node in inner:
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in usable:
+            first[node.func.id] = min(node.lineno, first.get(node.func.id, node.lineno))
+    return tuple(sorted((line, bound[local], local) for local, line in first.items()))
 
 
 def _imported_calls(func: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str]) -> tuple[str, ...]:

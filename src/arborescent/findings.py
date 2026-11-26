@@ -77,6 +77,7 @@ class Rule(StrEnum):
     TEST_REFERENCE = "test-reference"
     ADAPTER_EQUIVALENCE = "adapter-equivalence"
     ADAPTER_EQUIVALENCE_REPORT = "adapter-equivalence-report"
+    UNREACHABLE_PATCH = "unreachable-patch"
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
     UNANNOTATED_MODULE = "unannotated-module"

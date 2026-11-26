@@ -2,25 +2,29 @@
 
 The result is plain data (``SourceFacts``) so it can be cached by content hash and reused by every check. Each family of
 facts is extracted by its own module (``import_syntax``, ``effect_facts``, ``declaration_facts``, ``definition_facts``,
-``call_facts``, ``forwarder_facts``, ``purity_facts``); this one holds the result types and the one pass that fills them.
+``call_facts``, ``forwarder_facts``, ``purity_facts``); this one holds the result types, the one pass that fills them, and the
+two queries over them that both ``unreachable-patch`` and its selftest probe ask.
 """
 
 from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from .call_facts import (
     FunctionCalls,
+    absolute_callee,
     bare_calls,
     call_aliases,
     call_sites,
     discard_call_lines,
     dynamic_imports,
     function_calls,
+    patch_targets,
     private_attributes,
+    unqualified_from_calls,
 )
 from .declaration_facts import arbor_annotation, comment_facts, script_deps
 from .definition_facts import (
@@ -37,7 +41,9 @@ from .forwarder_facts import Forwarder, forwarders
 from .import_syntax import RawImport, import_aliases, raw_imports
 from .purity_facts import PurityFacts, PurityUnit, purity_facts
 
-__all__ = ["Forwarder", "ModuleInfo", "PurityFacts", "PurityUnit", "SourceFacts", "extract"]
+__all__ = [
+    "Forwarder", "ModuleInfo", "PurityFacts", "PurityUnit", "SourceFacts", "extract", "file_module", "patched_targets", "unreached_bindings",
+]
 
 
 @dataclass(frozen=True)
@@ -70,6 +76,8 @@ class SourceFacts:
     purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
     untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
     private_attrs: tuple[tuple[int, str], ...] = ()  # (line, dotted) of ``._name`` reached through an import; relative targets keep leading dots (#218)
+    patches: tuple[tuple[int, str], ...] = ()  # (line, dotted "module.name") a test double replaces (#226)
+    from_calls: tuple[tuple[int, str, str], ...] = ()  # (line, origin "X.name", local name) of ``from X import name`` called bare in a function (#226)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -85,6 +93,38 @@ class ModuleInfo:
     facts: SourceFacts
 
 
+def file_module(path: str) -> tuple[str, bool]:
+    """A test file's path as a dotted name, enough to resolve its relative imports."""
+    parts = path.removesuffix(".py").split("/")
+    is_package = parts[-1] == "__init__"
+    return ".".join(parts[:-1] if is_package else parts), is_package
+
+
+def patched_targets(tests: Mapping[str, SourceFacts]) -> dict[str, dict[str, int]]:
+    """Test file -> dotted ``module.name`` it patches -> the first line that does."""
+    out: dict[str, dict[str, int]] = {}
+    for path, facts in tests.items():
+        name, is_package = file_module(path)
+        found = out.setdefault(path, {})
+        for line, target in facts.patches:
+            if (dotted := absolute_callee(name, is_package, target)) is not None:
+                found.setdefault(dotted, line)
+    return out
+
+
+def unreached_bindings(modules: Mapping[str, ModuleInfo], known: Collection[str]) -> list[tuple[str, str, str, int]]:
+    """``(module, origin "X.name", local name, line)`` of each bare call through ``from X import name``, X first-party.
+
+    ``from package import submodule`` is a module, not a bound function, and is left out."""
+    return [
+        (name, origin, local, line)
+        for name, info in sorted(modules.items())
+        for line, target, local in info.facts.from_calls
+        if (origin := absolute_callee(name, info.is_package, target)) is not None
+        and origin not in known and (owner := origin.rpartition(".")[0]) in known and owner != name
+    ]
+
+
 def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     arbor_ring, arbor_error, arbor_role, arbor_reason = arbor_annotation(tree)
@@ -92,6 +132,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     nodes = list(ast.walk(tree))  # one walk, shared by every fact below
     aliases = import_aliases(nodes)  # computed once: each fact below reads it
     calls_aliases = call_aliases(nodes, aliases)
+    rebound = rebound_names(nodes)
     return SourceFacts(
         raw_imports(tree),
         effect_uses(tree, nodes, aliases),
@@ -118,7 +159,9 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         dynamic_imports(nodes, aliases),
         purity_facts(tree, nodes, aliases, purity_helpers(aliases)),
         untokenizable,
-        private_attributes(nodes, calls_aliases, rebound_names(nodes)),
+        private_attributes(nodes, calls_aliases, rebound),
+        patch_targets(nodes, calls_aliases, rebound),
+        unqualified_from_calls(tree, nodes, rebound),
     )
 
 

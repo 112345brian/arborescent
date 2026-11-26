@@ -13,7 +13,8 @@ RING_QUESTION = {
     "purity_rules.py", "rules.py",
 }
 # Package parts use ring resolution for external dependencies and runtime resolution for package closure.
-RUNTIME_QUESTION = {"package_parts.py"}
+# `rules.unreachable_patches` asks what a test run can load, which includes a package's `__init__`.
+RUNTIME_QUESTION = {"package_parts.py", "rules.py"}
 
 
 def _calls(name: str) -> dict[str, list[ast.Call]]:

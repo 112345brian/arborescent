@@ -1019,7 +1019,33 @@ Each practice is off until it has a value.
 | `source-root-drift` | `true`, or a list of files (default `["tach.toml", "pyproject.toml"]`) | a `sources` entry is below no `source_roots` entry, or the root list copied into `tach.toml` `source_roots`, hatch `sources`/`packages` or pytest `pythonpath` has drifted from the policy |
 | `test-reference` | tests folder, e.g. `"tests"`; `test-reference-exempt` lists `module.function` names or module globs to skip | information only: a public module-level function in an I/O-free ring (one that forbids `filesystem`, `network`, `database` and `process`; the innermost ring by default) that no function under the tests folder imports and calls. Resolved through import aliases and package re-exports; not through an object of unknown type, a fixture or a parametrized argument, and a function only a tested caller reaches is reported. Private, abstract and class members are skipped. A name that is only imported or mentioned does not count (#104) |
 | `adapter-equivalence` | list of groups of full module names, e.g. `[["pkg.fact_queries", "pkg.modes_store"]]`; `adapter-equivalence-tests` is the tests folder (default `"tests"`); `adapter-equivalence-report = true` makes the missing-test finding information only | fails when no single test function calls a function of every module in a group, so two adapters of one port cannot both ship without a differential test (#113). Group errors always fail, even with `adapter-equivalence-report`: an unknown module (not a scanned module; a unique suffix match is suggested), a group with fewer than two distinct modules, a module in two groups, a value that is not a list of lists of strings. See "Adapter equivalence" below |
+| `unreachable-patch` | tests folder, e.g. `"tests"`; `unreachable-patch-exempt` lists `module.name` bindings or module globs to skip | a test patches `X.name` while a module it reaches calls `name` through its own `from X import name`, which the patch never reaches. See "Unreachable patches" below (#226) |
 | `adapter-equivalence-report` | `true` | not a check of its own: makes `adapter-equivalence`'s missing-test finding information only (rule id `adapter-equivalence-report`, never fails, never baselined); group errors still fail |
+
+### Unreachable patches
+
+`from X import name` gives the importing module its own reference to the function. `monkeypatch.setattr(X, "name", fake)`
+replaces `X`'s attribute only, so that module keeps calling the real one, and the test passes or fails for the wrong reason.
+`unreachable-patch` joins the two halves and reports the production module and the line of the call. Importing the style alone
+is never reported; fix a finding with `import X` and `X.name()`, or patch the caller's name (`monkeypatch.setattr(caller, "name", fake)`).
+
+A finding needs all of the following:
+
+- a file under the tests folder patches `X.name` with `monkeypatch.setattr` (object and name, or a dotted string; also through
+  `monkeypatch.context()`), `mock.patch("X.name")`, `patch.object(X, "name")` or the same through pytest-mock's `mocker`;
+- a first-party module binds `name` with a `from X import` that runs at import time (aliases and relative forms count) and calls
+  it bare inside a function or lambda;
+- that test file reaches the module: it imports it directly or transitively (function-level imports count, `TYPE_CHECKING` ones
+  do not), itself, through a `conftest.py` above it or through a helper module in the tests folder;
+- the same test file does not also patch the module's own binding.
+
+Not seen, so never reported: a call at import time or in a default argument, passing the function on without calling it, a
+function-level `from X import name` (the patch does reach it), a name the module rebinds or takes as a parameter anywhere, a
+re-export chain (`from package import name` patched at `package.impl.name`), third-party and stdlib targets,
+`patch.multiple`, `delattr`, and a module reached only through a fixture from elsewhere, `importlib` or a subprocess. The test
+files are parsed once and cached like source files, whether or not they are in `sources`; the check is skipped under
+`--changed`. A configured folder with no Python files is itself reported. Findings join the baseline ratchet, and `selftest`
+adds a test that patches an unpatched binding.
 
 ### Adapter equivalence
 

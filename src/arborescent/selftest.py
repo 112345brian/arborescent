@@ -24,9 +24,10 @@ from .domain import (
     Mutation,
     Policy,
     Rule,
+    in_unit,
 )
 from .engine import Services, package_checks, run_own
-from .facts import ModuleInfo
+from .facts import ModuleInfo, SourceFacts, patched_targets, unreached_bindings
 from .importable_by_probes import (
     importable_by_mutations,
     private_access_mutations,
@@ -60,6 +61,9 @@ class ScanView(Protocol):
 
     @property
     def modules(self) -> Mapping[str, ModuleInfo]: ...
+
+    @property
+    def test_facts(self) -> Mapping[str, SourceFacts]: ...
 
 
 __all__ = ["NO_MUTATION", "Mutation", "SelfTestReport", "selftest"]
@@ -179,11 +183,35 @@ def plan(
     if policy.scopes:
         out.extend(_scope_boundary_mutations(policy, paths, known, owners))
         out.extend(_scope_effect_mutations(policy, scan))
+    patch_found, patch_skipped = _unreachable_patch_mutations(policy, scan)
+    out.extend(patch_found)
+    skipped.extend(patch_skipped)
     if packages is not None:
         package_found, package_skipped = packages.mutations(policy, scan.arbor_index, scan.scope_by_module)
         out.extend(package_found)
         skipped.extend(package_skipped)
     return out, sorted(set(skipped))
+
+
+def _unreachable_patch_mutations(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
+    """A new test file that imports a caller and patches the origin of one of its ``from X import name`` calls (#226).
+
+    The binding must be one no real test patches, or the probe would add no new finding."""
+    folder = policy.practices.get("unreachable-patch")
+    if not isinstance(folder, str) or not folder.strip("/"):
+        return [], []
+    already = {target for targets in patched_targets(scan.test_facts).values() for target in targets}
+    exempt = policy.practices.get("unreachable-patch-exempt", [])
+    production = {name: info for name, info in scan.modules.items() if info.path not in scan.test_facts}
+    for name, origin, local, _ in unreached_bindings(production, scan.known):
+        if origin in already or any(in_unit(f"{name}.{local}", str(glob)) or in_unit(name, str(glob)) for glob in exempt):
+            continue
+        owner, _, function = origin.rpartition(".")
+        content = f"import {name}\n\n\ndef test_probe(monkeypatch):\n    monkeypatch.setattr({origin!r}, None)\n"
+        new = f"{folder.strip('/')}/test_arborescent_probe_patch.py"
+        label = f"a new test patches {owner}.{function}, which {name} calls through its own binding"
+        return [Mutation(Rule.UNREACHABLE_PATCH, label, new, "", new_file=True, content=content)], []
+    return [], [f"{Rule.UNREACHABLE_PATCH}: no unpatched `from X import name` call to probe"]
 
 
 def _local_mutations(

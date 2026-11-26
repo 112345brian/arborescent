@@ -16,7 +16,7 @@ from .import_syntax import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 
-CACHE_VERSION = 25
+CACHE_VERSION = 26
 
 
 def _purity_to_json(p: PurityFacts) -> list[Any]:
@@ -54,6 +54,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         f.arbor_reason, [[line, target] for line, target in f.dynamic_imports],
         _purity_to_json(f.purity), f.untokenizable,
         [[line, target] for line, target in f.private_attrs],
+        [[line, target] for line, target in f.patches], [list(item) for item in f.from_calls],
     ]
 
 
@@ -86,4 +87,5 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         raw[22], raw[23], tuple((item[0], item[1]) for item in raw[24]),
         _purity_from_json(raw[25]), raw[26],
         tuple((item[0], item[1]) for item in raw[27]),
+        tuple((item[0], item[1]) for item in raw[28]), tuple((item[0], item[1], item[2]) for item in raw[29]),
     )

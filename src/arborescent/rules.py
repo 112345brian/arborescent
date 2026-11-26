@@ -35,15 +35,22 @@ from .effect_import_rules import (
     record_effect_edge,
     unsanctioned_effect_imports,
 )
-from .facts import Forwarder, ModuleInfo
+from .facts import (
+    Forwarder,
+    ModuleInfo,
+    SourceFacts,
+    file_module,
+    patched_targets,
+    unreached_bindings,
+)
 from .import_cycles import cyclic_components
-from .import_facts import RawImport, resolve_targets
+from .import_facts import RawImport, resolve_runtime_targets, resolve_targets
 from .package_constraint_rules import placement_violations, use_violations
 from .package_constraints import PackageConstraints
 from .purity_rules import mixed_purity_findings, with_move_closures
 from .rule_context import RuleContext
 
-__all__ = ["RuleContext", "check_modules", "fits_ring"]
+__all__ = ["RuleContext", "check_modules", "fits_ring", "unreachable_patches"]
 
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
 NO_CONSTRAINTS = PackageConstraints()  # a policy that declares none: the constraint rules cost nothing
@@ -768,3 +775,74 @@ def _circular_imports(graph: Mapping[str, Collection[str]]) -> list[Violation]:
         Violation(Rule.CIRCULAR_IMPORT, ", ".join(sorted(component)), "modules form a circular import dependency")
         for component in cyclic_components(graph)
     ]
+
+
+def _imported_by_test(path: str, tests: Mapping[str, SourceFacts], project: tuple[Collection[str], Collection[str]]) -> set[str]:
+    """The first-party modules a test file imports itself, through its folders' ``conftest.py``, or through a helper beside the tests."""
+    helpers = {item.rpartition("/")[2].removesuffix(".py"): item for item in tests}
+    beside = {file_module(item)[0] for item in tests} | {""}
+    folders = path.split("/")[:-1]
+    pending = [path, *(conftest for end in range(len(folders) + 1) if (conftest := "/".join([*folders[:end], "conftest.py"])) in tests)]
+    seen: set[str] = set()
+    found: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        name, is_package = file_module(current)
+        for imp in tests[current].imports:
+            internal, external, _ = resolve_runtime_targets(name, is_package, imp, *project)
+            found.update(internal)
+            if beside.issuperset(internal):  # not a production module, so it may be a helper beside the tests
+                pending += [helpers[part] for part in [*external, *imp.module.split("."), *imp.names] if part in helpers]
+    return found
+
+
+def _import_closure(roots: set[str], modules: Mapping[str, ModuleInfo], project: tuple[Collection[str], Collection[str]]) -> set[str]:
+    """Every module that importing or running ``roots`` can load (function-level imports too, ``TYPE_CHECKING`` ones not)."""
+    seen: set[str] = set()
+    pending = list(roots)
+    while pending:
+        current = pending.pop()
+        info = modules.get(current)
+        if current in seen or info is None:
+            continue
+        seen.add(current)
+        for imp in info.facts.imports:
+            if not imp.type_only:
+                pending += resolve_runtime_targets(current, info.is_package, imp, *project)[0]
+    return seen
+
+
+def unreachable_patches(
+    modules: Mapping[str, ModuleInfo], known: Collection[str], tests: Mapping[str, SourceFacts], exempt: Collection[str] = (),
+) -> list[Violation]:
+    """``unreachable-patch`` (#226): a test patches ``X.name`` and reaches a module that calls its own ``from X import name`` binding.
+
+    A test that also patches the caller's binding, or never imports the caller (directly or transitively), is not reported."""
+    project = (known, {module.split(".")[0] for module in known})
+    production = {name: info for name, info in modules.items() if info.path not in tests}
+    patches = patched_targets(tests)
+    reached: dict[str, set[str]] = {}
+    out: list[Violation] = []
+    for name, origin, local, line in unreached_bindings(production, known):
+        if any(in_unit(f"{name}.{local}", glob) or in_unit(name, glob) for glob in exempt):
+            continue
+        where: list[str] = []
+        for path, targets in sorted(patches.items()):
+            if origin not in targets or f"{name}.{local}" in targets:
+                continue
+            if path not in reached:
+                reached[path] = _import_closure(_imported_by_test(path, tests, project), production, project)
+            if name in reached[path]:
+                where.append(f"{path}:{targets[origin]}")
+        if where:
+            owner = origin.rpartition(".")[0]
+            detail = (
+                f"[{name}] calls {origin} through its own `from {owner} import` binding {local!r}, which a test's patch of {origin} "
+                f"never reaches; import {owner} and call it qualified, or patch {name}.{local}"
+            )
+            more = f" and {len(where) - 3} more" if len(where) > 3 else ""
+            out.append(Violation(Rule.UNREACHABLE_PATCH, name, detail, line, hint=f" (patched at {', '.join(where[:3])}{more})"))
+    return out
