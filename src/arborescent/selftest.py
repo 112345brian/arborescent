@@ -10,7 +10,7 @@ import ast
 import fnmatch
 import io
 import tokenize
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
@@ -39,6 +39,7 @@ from .importable_by_probes import (
     importable_by_mutations,
     private_access_mutations,
 )
+from .lazy_imports import lazy_import_in_scope
 from .module_forbid_probes import module_forbid_mutations
 from .owned_literal_probes import owned_literal_mutations
 from .package_constraint_probes import constraint_mutations
@@ -153,20 +154,11 @@ def plan(
     ``packages`` (the catalog and its facts) adds the package-assignment probes; without it there are none.
     """
     paths, known, arbor_index, owners = scan.paths, scan.known, scan.arbor_index, scan.scope_by_module
-    out: list[Mutation] = []
-    skipped: list[str] = []
     local_policies = (
         tuple((scope.name, scope.policy, frozenset(name for name in known if owners.get(name) == scope.name)) for scope in policy.scopes)
         if policy.scopes else (("", policy, known),)
     )
-    for _, local_policy, local_known in local_policies:
-        local_paths = {name: paths[name] for name in local_known if name in paths}
-        found, local_skipped = _local_mutations(local_policy, policy.mixed_purity, local_paths, local_known, scan)
-        out.extend(found)
-        skipped.extend(local_skipped)
-        found, local_skipped = _module_state_mutations(policy.module_state, local_policy, local_paths, arbor_index)
-        out.extend(found)
-        skipped.extend(local_skipped)
+    out, skipped = _per_policy_mutations(policy, scan, local_policies)
     anchor = next(iter(sorted(known)), None)
     circular_anchor = next((
         name
@@ -177,9 +169,12 @@ def plan(
     ), None)
     if circular_anchor is None:
         skipped.append("circular-import: disabled by policy")
-    duplicate_found, duplicate_skipped = _duplicate_mutations(policy, {name: paths[name] for name in scan.modules if name in paths})
-    out.extend(duplicate_found)
-    skipped.extend(duplicate_skipped)
+    for found, local_skipped in (
+        _duplicate_mutations(policy, {name: paths[name] for name in scan.modules if name in paths}),
+        _lazy_import_mutations(policy.lazy_import_rings, local_policies, paths, arbor_index),
+    ):
+        out.extend(found)
+        skipped.extend(local_skipped)
     if anchor is not None:
         out.extend(_anchor_mutations(anchor, paths[anchor]))
         if _rejects_doubled_cr():
@@ -209,6 +204,23 @@ def plan(
         out.extend(package_found)
         skipped.extend(package_skipped)
     return out, sorted(set(skipped))
+
+
+def _per_policy_mutations(
+    policy: Policy, scan: ScanView, local_policies: Sequence[tuple[str, ArchitecturePolicy, frozenset[str]]],
+) -> tuple[list[Mutation], list[str]]:
+    """The mutations of the whole policy, or of each of its scopes."""
+    out: list[Mutation] = []
+    skipped: list[str] = []
+    for _, local_policy, local_known in local_policies:
+        local_paths = {name: scan.paths[name] for name in local_known if name in scan.paths}
+        for found, local_skipped in (
+            _local_mutations(local_policy, policy.mixed_purity, local_paths, local_known, scan),
+            _module_state_mutations(policy.module_state, local_policy, local_paths, scan.arbor_index),
+        ):
+            out.extend(found)
+            skipped.extend(local_skipped)
+    return out, skipped
 
 
 def _unreachable_patch_mutations(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
@@ -672,6 +684,20 @@ def _rejects_doubled_cr() -> bool:
     return False
 
 
+def _lazy_import_mutations(
+    rings: tuple[str, ...], local_policies: Sequence[tuple[str, ArchitecturePolicy, frozenset[str]]], paths: Mapping[str, str],
+    arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[list[Mutation], list[str]]:
+    """Probe ``lazy-import`` in a module ``[lazy_import] rings`` covers (#199): elsewhere the probe could never be reported."""
+    host = next((
+        paths[name] for _, local_policy, known in local_policies for name in sorted(known)
+        if name in paths and lazy_import_in_scope(rings, local_policy.resolve_ring(arbor_index, name))
+    ), None)
+    if host is None:
+        return [], [f"{Rule.LAZY_IMPORT}: no module in a ring `lazy_import.rings` covers"]
+    return [Mutation(Rule.LAZY_IMPORT, "a new function-level import without a reason", host, "def _arborescent_probe_lazy() -> None:\n    import json")], []
+
+
 def _anchor_mutations(anchor: str, host: str) -> list[Mutation]:
     base = host.rsplit("/", 1)[0] if "/" in host else ""
     new = (base + "/" if base else "") + "arborescent_probe_unclassified.py"
@@ -679,7 +705,6 @@ def _anchor_mutations(anchor: str, host: str) -> list[Mutation]:
     out.extend((
         Mutation(Rule.SUPPRESSION, "a new noqa suppression directive", host, "# noqa"),
         Mutation(Rule.DISCARD, "a new reasoned discard call", host, 'discard(None, reason="selftest")'),
-        Mutation(Rule.LAZY_IMPORT, "a new function-level import without a reason", host, "def _arborescent_probe_lazy() -> None:\n    import json"),
     ))
     return out
 

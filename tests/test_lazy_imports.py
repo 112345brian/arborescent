@@ -22,6 +22,7 @@ from arborescent.lazy_imports import (
     lazy_import_counts,
     lazy_import_violations,
 )
+from arborescent.selftest import selftest
 from arborescent.testing import FakeToolRunner
 from arborescent.typecheckers import all_checkers
 
@@ -332,3 +333,12 @@ def test_an_unknown_adoption_family_is_still_refused(repo: Path, capsys: pytest.
     config = write_policy(repo)
     assert main(["--config", str(config), "baseline", "--adopt", "lazy-imports"], _svc()) == 2
     assert "unknown adoption family 'lazy-imports'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("ring", ["domain", "adapters", "composition"])
+def test_selftest_puts_the_lazy_import_probe_in_a_covered_ring(repo: Path, ring: str) -> None:
+    """The probe used to go into the first module whatever its ring, so limiting ``rings`` made it survive."""
+    report = selftest(mini_policy(lazy_import={"rings": [ring]}), repo, services())
+    assert [item for item in report.killed if item.startswith("[lazy-import]")]
+    assert not [item for item in report.survived if "lazy-import" in item]
+
