@@ -11,6 +11,7 @@ from arborescent_helpers import CLASSIFY, MINI, mini_policy, write_files
 
 from arborescent.config import policy_from_mapping
 from arborescent.domain import Policy, PolicyError
+from arborescent.facts import SourceFacts, extract
 from arborescent.scanner import FsScanner
 
 
@@ -273,3 +274,24 @@ def test_vendor_scan_is_configurable(tmp_path: Path) -> None:
 
     assert "vendor.shared.core" not in default.known
     assert "vendor.shared.core" in inclusive.modules
+
+
+def test_a_custom_extractor_keeps_discovery_and_selection(tmp_path: Path) -> None:
+    write_files(tmp_path, {"app/domain.py": "import os\n", "other.py": '__arbor__ = {"ring": "domain"}\n'})
+    seen: list[str] = []
+
+    def extractor(source: str, path: str) -> SourceFacts:
+        seen.append(path)
+        return extract(source, path)
+
+    scanner = FsScanner(extractor=extractor)
+
+    assert scanner.scan(mini_policy(), tmp_path) == FsScanner().scan(mini_policy(), tmp_path)
+    assert sorted(seen) == ["app/domain.py", "other.py"]
+    assert scanner.uncached().scan(mini_policy(), tmp_path).parsed == 2
+    assert len(seen) == 4
+
+
+def test_a_custom_extractor_cannot_write_the_shared_fact_cache(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="fact cache"):
+        FsScanner(tmp_path, extractor=extract)

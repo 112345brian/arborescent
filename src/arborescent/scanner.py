@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,8 @@ from .source_discovery import (
     still_unclassified,
 )
 from .tool_runner import SubprocessToolRunner
+
+Extractor = Callable[[str, str], SourceFacts]  # (source, repository-relative path) -> that file's facts
 
 
 def _listed_paths(root: Path, runner: ToolRunner) -> tuple[list[str], bool]:
@@ -105,6 +108,7 @@ def _parse_files(
     files: list[tuple[str, bool, str]],
     cache: dict[str, list[Any]],
     only_wanted: set[str] | None,
+    extractor: Extractor,
 ) -> tuple[dict[str, ModuleInfo], dict[str, str], dict[str, list[Any]], int]:
     """Parse (or load from the cache) every discovered file, or only the wanted ones when `only_wanted` is given."""
     modules: dict[str, ModuleInfo] = {}
@@ -123,7 +127,7 @@ def _parse_files(
             facts = cached
             fresh[rel] = hit
         else:
-            facts = extract(data.decode("utf-8-sig"), rel)
+            facts = extractor(data.decode("utf-8-sig"), rel)
             fresh[rel] = [digest, facts_to_json(facts)]
             parsed += 1
         modules[module] = ModuleInfo(module, rel, is_pkg, facts)
@@ -140,11 +144,17 @@ def _store_cache(
 
 
 class FsScanner:
-    """Walk the policy's sources, parse each file once, reuse facts for unchanged content."""
+    """Walk the policy's sources, parse each file once, reuse facts for unchanged content.
 
-    def __init__(self, cache_dir: Path | None = None, runner: ToolRunner | None = None) -> None:
+    ``extractor`` replaces ``facts.extract`` for a caller that gets facts another way (the incremental worker) and must
+    keep the same discovery and module selection. Its facts may be partial, so it cannot share the on-disk cache."""
+
+    def __init__(self, cache_dir: Path | None = None, runner: ToolRunner | None = None, extractor: Extractor | None = None) -> None:
+        if cache_dir is not None and extractor is not None:
+            raise ValueError("a custom extractor cannot write to the fact cache that full scans read")
         self._cache_dir = cache_dir
         self._runner = runner or SubprocessToolRunner()
+        self._extractor = extractor
 
     @property
     def cache_dir(self) -> Path | None:
@@ -152,7 +162,7 @@ class FsScanner:
         return self._cache_dir
 
     def uncached(self) -> FsScanner:
-        return FsScanner(None, self._runner)
+        return FsScanner(None, self._runner, self._extractor)
 
     def scan(self, policy: Policy, root: Path, only: frozenset[str] | None = None) -> ScanData:
         cache_file = self._cache_dir / "scan.json" if self._cache_dir else None
@@ -177,9 +187,10 @@ class FsScanner:
         }
         dev_tool_modules = frozenset(m for m, _, rel in files if policy.is_dev_tool_path(rel))
         wanted |= {m for m, _, rel in files if m in dev_tool_modules and (only is None or rel in only)}
-        modules, paths, fresh, parsed = _parse_files(root, files, cache, None if annotations_enabled else wanted)
+        extractor = self._extractor or extract
+        modules, paths, fresh, parsed = _parse_files(root, files, cache, None if annotations_enabled else wanted, extractor)
         excluded_modules, extra_fresh, extra_parsed = (
-            _excluded_modules(root, excluded_files, cache) if only is None and policy.mixed_purity.enabled and policy.mixed_purity.report_excluded else ({}, {}, 0)
+            _excluded_modules(root, excluded_files, cache, extractor) if only is None and policy.mixed_purity.enabled and policy.mixed_purity.report_excluded else ({}, {}, 0)
         )
         test_facts, test_fresh, test_parsed = (
             self._test_facts(policy, root, modules, {**cache, **fresh, **extra_fresh}) if only is None else ({}, {}, 0)
@@ -215,7 +226,7 @@ class FsScanner:
             return {}, {}, 0
         wanted = patch_test_files(policy, _listed_paths(root, self._runner)[0])
         scanned = {info.path: info.facts for info in modules.values()}
-        others, fresh, parsed = _excluded_modules(root, tuple(rel for rel in wanted if rel not in scanned), cache)
+        others, fresh, parsed = _excluded_modules(root, tuple(rel for rel in wanted if rel not in scanned), cache, self._extractor or extract)
         facts = {info.path: info.facts for info in others.values()}
         facts.update({rel: scanned[rel] for rel in wanted if rel in scanned})
         return facts, fresh, parsed
@@ -264,7 +275,7 @@ class FsScanner:
 
 
 def _excluded_modules(
-    root: Path, rels: tuple[str, ...], cache: dict[str, list[Any]],
+    root: Path, rels: tuple[str, ...], cache: dict[str, list[Any]], extractor: Extractor,
 ) -> tuple[dict[str, ModuleInfo], dict[str, list[Any]], int]:
     """Facts for files outside the scan: what the policy excludes, so ``mixed-purity`` can say what the exclusion hides (#173),
     and the tests ``unreachable-patch`` reads (#226).
@@ -287,7 +298,7 @@ def _excluded_modules(
             fresh[rel] = hit
         else:
             try:
-                facts = extract(data.decode("utf-8-sig"), rel)
+                facts = extractor(data.decode("utf-8-sig"), rel)
             except (SyntaxError, ValueError, RecursionError):
                 continue
             fresh[rel] = [digest, facts_to_json(facts)]

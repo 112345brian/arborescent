@@ -2,40 +2,12 @@
 
 from __future__ import annotations
 
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from arborescent.config import policy_from_mapping
 from tools.incremental_analysis import Analysis, Worker
-
-ROOT = Path(__file__).resolve().parents[2]
-
-
-@pytest.fixture(scope="module")
-def worker_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    cargo = shutil.which("cargo")
-    if cargo is None:
-        pytest.skip("the optional Rust prototype needs Cargo")
-    target = tmp_path_factory.mktemp("incremental-worker")
-    subprocess.run(
-        [
-            cargo,
-            "build",
-            "--locked",
-            "--quiet",
-            "--manifest-path",
-            str(ROOT / "tools/incremental_worker/Cargo.toml"),
-            "--target-dir",
-            str(target),
-        ],
-        check=True,
-    )
-    suffix = ".exe" if sys.platform == "win32" else ""
-    return target / "debug" / f"arborescent-incremental-worker{suffix}"
 
 
 def test_saved_helper_changes_untouched_caller_and_matches_full_scan(
@@ -48,7 +20,7 @@ def test_saved_helper_changes_untouched_caller_and_matches_full_scan(
             "sources": ["."],
             "rings": ["helpers", "domain", "adapters"],
             "ring": {
-                "helpers": {"forbid": []},
+                "helpers": {"forbid": [], "external": ["os"]},
                 "domain": {"may_import": ["helpers"], "forbid": ["env"]},
             },
             "classify": {
@@ -63,7 +35,7 @@ def test_saved_helper_changes_untouched_caller_and_matches_full_scan(
             "sources": ["."],
             "rings": ["helpers", "domain", "adapters"],
             "ring": {
-                "helpers": {"forbid": []},
+                "helpers": {"forbid": [], "external": ["os"]},
                 "domain": {"may_import": ["helpers"], "forbid": []},
             },
             "classify": {
@@ -127,7 +99,7 @@ def test_deleted_functions_and_syntax_errors_remove_stale_recursive_paths(
             "sources": ["."],
             "rings": ["helpers", "domain", "adapters"],
             "ring": {
-                "helpers": {"forbid": []},
+                "helpers": {"forbid": [], "external": ["os"]},
                 "domain": {"may_import": ["helpers"], "forbid": ["env"]},
             },
             "classify": {"domain": "domain", "helper": "helpers"},
@@ -185,7 +157,11 @@ def test_deleted_functions_and_syntax_errors_remove_stale_recursive_paths(
         helper.rename(tmp_path / "relocated.py")
         renamed = assert_full(analysis)
         assert renamed.parsed == 1
-        assert renamed.violations == ()
+        # The effect path is gone. The old name is now an unknown external and the new file is unclassified.
+        assert sorted((v.rule, v.subject) for v in renamed.violations) == [
+            ("external-import", "domain"),
+            ("unclassified", "relocated"),
+        ]
 
 
 @pytest.mark.parametrize(
@@ -205,7 +181,7 @@ def test_shadowed_import_does_not_create_effect_path(
             "sources": ["."],
             "rings": ["helpers", "domain", "adapters"],
             "ring": {
-                "helpers": {"forbid": []},
+                "helpers": {"forbid": [], "external": ["os"]},
                 "domain": {"may_import": ["helpers"], "forbid": ["env"]},
             },
             "classify": {"domain": "domain", "helper": "helpers"},
