@@ -148,12 +148,15 @@ def effect_category_of(target: str) -> str | None:
     return _effect_category(target)
 
 
+_PROCESS_APIS = _PROCESS_OS_APIS | _PROCESS_POOL_APIS
+
+
 def _concurrency_category(target: str) -> str | None:
     if target.startswith("threading."):
         return "state" if target.removeprefix("threading.") in _STATE_PRIMITIVES else "threads"
     if target in _THREAD_POOL_APIS:
         return "threads"
-    if target.startswith(("multiprocessing.", "subprocess.", "asyncio.create_subprocess_")) or target in _PROCESS_OS_APIS | _PROCESS_POOL_APIS:
+    if target.startswith(("multiprocessing.", "subprocess.", "asyncio.create_subprocess_")) or target in _PROCESS_APIS:
         return "process"
     return None
 

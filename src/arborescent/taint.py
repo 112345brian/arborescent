@@ -152,11 +152,11 @@ class _FileContext:
     local_funcs: Collection[str]
     local_classes: Collection[str]
     known: Collection[str]
+    merged_aliases: Mapping[str, str]  # every bound name as one dotted-string alias table, the shape ``_dotted`` wants
 
-    @property
-    def merged_aliases(self) -> dict[str, str]:
-        """Every bound name as one dotted-string alias table, the shape ``_dotted`` wants."""
-        return {**self.module_aliases, **{n: f"{m}.{o}" for n, (m, o) in self.symbol_aliases.items()}}
+
+def _merged_aliases(symbol_aliases: Mapping[str, tuple[str, str]], module_aliases: Mapping[str, str]) -> dict[str, str]:
+    return {**module_aliases, **{n: f"{m}.{o}" for n, (m, o) in symbol_aliases.items()}}
 
 
 def _import_bindings(node: ast.Import, module_aliases: dict[str, str]) -> None:
@@ -228,6 +228,9 @@ def _call_target(call: ast.Call, owning_class: str | None, var_classes: Mapping[
     return None
 
 
+_REBINDING = (ast.Assign, ast.AugAssign, ast.For, ast.With)  # the statements ``_bound_names`` answers for
+
+
 def _bound_names(node: ast.AST) -> list[str]:
     """Plain ``Name`` targets a statement rebinds, for invalidating stale constructor tracking."""
     if isinstance(node, ast.Assign):
@@ -269,7 +272,8 @@ def _analyze_function(func: ast.FunctionDef | ast.AsyncFunctionDef, owning_class
     hits: list[tuple[str, str]] = []
     candidates: list[_CallCandidate] = []
     for node in _body_nodes(func):
-        _track_constructor(node, ctx, var_classes)
+        if isinstance(node, _REBINDING):
+            _track_constructor(node, ctx, var_classes)
         if not isinstance(node, ast.Call):
             continue
         hit = _direct_hit(node, ctx, seeds)
@@ -289,7 +293,8 @@ def _extract_file(module: str, is_package: bool, text: str, known: Collection[st
     symbol_aliases, module_aliases = _module_bindings(module, is_package, tree, known)
     local_funcs = {n.name for n in tree.body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)}
     local_classes = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
-    ctx = _FileContext(module, symbol_aliases, module_aliases, local_funcs, local_classes, known)
+    merged = _merged_aliases(symbol_aliases, module_aliases)
+    ctx = _FileContext(module, symbol_aliases, module_aliases, local_funcs, local_classes, known, merged)
     funcs = {
         n.name: _analyze_function(n, None, ctx, seeds)
         for n in tree.body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)

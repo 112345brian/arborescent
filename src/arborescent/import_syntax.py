@@ -1,12 +1,50 @@
-"""AST facts for import statements and their alias bindings."""
+"""AST facts for import statements and their alias bindings, and the cached tree traversal the other fact passes share."""
 
 from __future__ import annotations
 
 import ast
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import cast
 
-__all__ = ["RawImport", "import_aliases", "raw_imports"]
+__all__ = ["RawImport", "child_nodes", "import_aliases", "raw_imports", "walk_nodes"]
+
+_LEAVES: frozenset[type[ast.AST]] = frozenset({ast.Name, ast.Constant, ast.alias})
+_LEAF_FIELDS = frozenset({"ctx", "op", "ops"})  # contexts and operators: shared singletons that no fact looks for
+_CHILDREN = "_arbor_children"
+
+
+def child_nodes(node: ast.AST) -> Sequence[ast.AST]:
+    """``ast.iter_child_nodes(node)`` without the context and operator nodes, worked out once and kept on the node.
+
+    Several fact passes read the same tree; the tree must not be rewritten once this has been asked."""
+    if node.__class__ in _LEAVES:
+        return ()
+    attributes = node.__dict__
+    found = cast("list[ast.AST] | None", attributes.get(_CHILDREN))
+    if found is not None:
+        return found
+    children: list[ast.AST] = []
+    for name in node._fields:
+        if name in _LEAF_FIELDS:
+            continue
+        value: object = attributes.get(name)
+        if value.__class__ is list:
+            children += [item for item in cast("list[object]", value) if isinstance(item, ast.AST)]
+        elif isinstance(value, ast.AST):
+            children.append(value)
+    attributes[_CHILDREN] = children
+    return children
+
+
+def walk_nodes(root: ast.AST) -> list[ast.AST]:
+    """``list(ast.walk(root))`` over ``child_nodes``: breadth first, in the same order."""
+    nodes: list[ast.AST] = [root]
+    done = 0
+    while done < len(nodes):  # the list is its own queue
+        nodes += child_nodes(nodes[done])
+        done += 1
+    return nodes
 
 
 @dataclass(frozen=True)
@@ -56,7 +94,7 @@ def _inner(node: ast.AST, lazy: bool, type_only: bool) -> list[_Pending]:
     if isinstance(node, ast.If) and _is_type_checking(node.test):
         return [*((stmt, lazy, True) for stmt in node.body), *((stmt, lazy, type_only) for stmt in node.orelse)]
     lazy = lazy or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    return [(child, lazy, type_only) for child in ast.iter_child_nodes(node) if isinstance(child, _BLOCKS)]
+    return [(child, lazy, type_only) for child in child_nodes(node) if isinstance(child, _BLOCKS)]
 
 
 def raw_imports(tree: ast.AST) -> tuple[RawImport, ...]:

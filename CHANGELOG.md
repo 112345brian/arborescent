@@ -5,6 +5,8 @@
 ## Unreleased
 
 ### Fixed
+- A cold run is faster: the fact passes share one cached tree traversal, module discovery is no longer quadratic in the
+  number of files, and `scan.json` is written without padding. Findings are unchanged.
 - Generated code with a very long expression or `elif` ladder no longer stops `check` with `RecursionError` while its
   facts are extracted.
 - A memoised pure function is no longer a `memo` effect in `mixed-purity`: `functools.lru_cache`/`cache`/`cached_property` do not

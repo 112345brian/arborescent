@@ -12,6 +12,8 @@ from bisect import bisect_right
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
+from .import_syntax import child_nodes, walk_nodes
+
 __all__ = [
     "REPLACE_CALLS", "CallShape", "FunctionCalls", "FunctionSpan", "absolute_callee", "annotation_types", "bare_calls", "call_aliases",
     "call_shapes", "call_sites", "discard_call_lines", "dotted_name", "dynamic_imports", "function_calls", "function_spans",
@@ -90,7 +92,7 @@ def function_spans(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str
     """Every function and method that is not inside another function, however the module or class body nests it."""
     out: list[tuple[str, int, int, int]] = []  # (name, def line, end line, first decorator line)
 
-    pending: list[tuple[ast.AST, str]] = [(child, "") for child in ast.iter_child_nodes(tree)][::-1]
+    pending: list[tuple[ast.AST, str]] = [(child, "") for child in child_nodes(tree)][::-1]
     while pending:  # a stack in source order, so a long ``elif`` ladder cannot overflow it
         child, prefix = pending.pop()
         if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -98,7 +100,7 @@ def function_spans(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str
             out.append((prefix + child.name, child.lineno, child.end_lineno or child.lineno, start))
         elif isinstance(child, ast.stmt | ast.excepthandler | ast.match_case):
             inner = f"{prefix}{child.name}." if isinstance(child, ast.ClassDef) else prefix
-            pending += [(item, inner) for item in ast.iter_child_nodes(child)][::-1]
+            pending += [(item, inner) for item in child_nodes(child)][::-1]
     methods = _method_calls(nodes, _heads(tree, aliases), out)
     return tuple(
         FunctionSpan(*span, tuple(sorted((line, text) for text, line in found.items())))
@@ -241,7 +243,7 @@ class _ReplaceTypes:
             self._class(node, scope)
             return
         self._record(node, scope)
-        self.pending.extend((child, scope) for child in ast.iter_child_nodes(node))
+        self.pending.extend((child, scope) for child in child_nodes(node))
 
     def _record(self, node: ast.AST, scope: _Scope) -> None:
         if isinstance(node, ast.Call) and dotted_name(node.func, self.aliases) in REPLACE_CALLS:
@@ -484,7 +486,7 @@ def _module_from_imports(tree: ast.Module) -> dict[str, str]:
         elif isinstance(node, ast.If) and "TYPE_CHECKING" in (getattr(node.test, "id", ""), getattr(node.test, "attr", "")):
             pending.extend(node.orelse)
         elif not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.expr):
-            pending.extend(ast.iter_child_nodes(node))
+            pending.extend(child_nodes(node))
     return found
 
 
@@ -541,7 +543,7 @@ def _inside_function_bodies(nodes: Sequence[ast.AST]) -> Callable[[ast.stmt | as
 
 def _imported_calls(func: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str]) -> tuple[str, ...]:
     calls: set[str] = set()
-    for node in ast.walk(func):
+    for node in walk_nodes(func):
         if isinstance(node, ast.Call) and _root_name(node.func) in aliases and (target := dotted_name(node.func, aliases)) is not None:
             calls.add(target)
     return tuple(sorted(calls))
