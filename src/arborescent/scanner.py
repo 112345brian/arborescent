@@ -14,7 +14,7 @@ from typing import Any
 
 from .declaration_facts import DEV_TOOL_ROLE
 from .domain import Policy
-from .facts import ModuleInfo, SourceFacts, extract
+from .facts import ModuleInfo, SourceFacts, extract, link_shared_state
 from .path_exclusion import excluded_by_policy
 from .ports import ToolRunner
 from .scan_cache_codec import CACHE_VERSION, cached_facts, facts_to_json
@@ -178,6 +178,7 @@ class FsScanner:
         dev_tool_modules = frozenset(m for m, _, rel in files if policy.is_dev_tool_path(rel))
         wanted |= {m for m, _, rel in files if m in dev_tool_modules and (only is None or rel in only)}
         modules, paths, fresh, parsed = _parse_files(root, files, cache, None if annotations_enabled else wanted)
+        modules = link_shared_state(modules)  # before `--changed` narrows the set: the container's module may be unchanged (#194)
         excluded_modules, extra_fresh, extra_parsed = (
             _excluded_modules(root, excluded_files, cache) if only is None and policy.mixed_purity.enabled and policy.mixed_purity.report_excluded else ({}, {}, 0)
         )

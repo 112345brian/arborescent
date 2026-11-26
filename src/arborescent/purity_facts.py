@@ -29,7 +29,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple
 
-__all__ = ["LOGGING", "MEMO", "STATE", "Helpers", "PurityFacts", "PurityUnit", "local_names", "module_containers", "mutated_container", "purity_facts"]
+__all__ = [
+    "LOGGING", "MEMO", "STATE", "Helpers", "PurityFacts", "PurityUnit", "is_container", "local_names", "module_containers",
+    "module_level_defs", "mutated_container", "purity_facts", "write_receiver",
+]
 
 LOGGING = "logging"
 MEMO = "memo"
@@ -120,12 +123,17 @@ def _module_names(tree: ast.Module, aliases: dict[str, str], dotted: Dotted) -> 
             continue
         if isinstance(value, ast.Call) and dotted(value.func, aliases) in _LOGGER_FACTORIES:
             loggers.update(names)
-        elif isinstance(value, _CONTAINER_LITERALS) or (
-            isinstance(value, ast.Call) and isinstance(value.func, ast.Name | ast.Attribute)
-            and (value.func.id if isinstance(value.func, ast.Name) else value.func.attr) in _CONTAINER_CALLS
-        ):
+        elif is_container(value):
             containers.update(names)
     return loggers, containers
+
+
+def is_container(value: ast.expr) -> bool:
+    """A ``dict``/``list``/``set`` literal, comprehension or constructor call."""
+    return isinstance(value, _CONTAINER_LITERALS) or (
+        isinstance(value, ast.Call) and isinstance(value.func, ast.Name | ast.Attribute)
+        and (value.func.id if isinstance(value.func, ast.Name) else value.func.attr) in _CONTAINER_CALLS
+    )
 
 
 def _local_names(unit: ast.AST) -> set[str]:
@@ -194,12 +202,18 @@ def _is_logging_call(node: ast.Call, loggers: set[str], aliases: dict[str, str],
     return (isinstance(func.value, ast.Name) and func.value.id in loggers) or dotted(func.value, aliases) in _LOGGER_OBJECTS
 
 
-def _mutated_container(node: ast.AST, containers: set[str]) -> str | None:
-    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store | ast.Del) and isinstance(node.value, ast.Name):
-        return node.value.id if node.value.id in containers else None
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _MUTATORS and isinstance(node.func.value, ast.Name):
-        return node.func.value.id if node.func.value.id in containers else None
+def write_receiver(node: ast.AST) -> ast.expr | None:
+    """What ``node`` writes into by item assignment, ``del`` or a mutating method call, whatever the expression is."""
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store | ast.Del):
+        return node.value
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _MUTATORS:
+        return node.func.value
     return None
+
+
+def _mutated_container(node: ast.AST, containers: set[str]) -> str | None:
+    receiver = write_receiver(node)
+    return receiver.id if isinstance(receiver, ast.Name) and receiver.id in containers else None
 
 
 class Helpers(NamedTuple):
@@ -308,6 +322,11 @@ def purity_facts(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, 
     return PurityFacts(
         tuple(collector.unit(i) for i in range(len(collector.defs))), tuple(sorted(collector.import_time)), tuple(sorted(collector.port_calls)),
     )
+
+
+def module_level_defs(body: Sequence[ast.stmt]) -> list[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
+    """Module-level functions and classes, ``if``/``try``/``with`` blocks included."""
+    return _module_level_defs(body)
 
 
 def module_containers(tree: ast.Module, aliases: dict[str, str], dotted: Dotted) -> set[str]:

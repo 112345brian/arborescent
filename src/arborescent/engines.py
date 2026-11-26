@@ -6,7 +6,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .domain import TACH_EXCLUDED_FOLDERS, ArchitectureContracts, ToolResult, Violation
 from .generated_config import (
@@ -75,7 +75,8 @@ class Tach:
         """Layers plus, when the boundaries are listed per module, each module's ``depends_on``. Paths are relative to this file."""
         depth = len([part for part in contracts.config_dir.split("/") if part and part != "."])
         relative = "../" * depth
-        source_roots = [f"{relative}{root}" for root in contracts.source_roots]
+        # without `./` and doubled separators: tach reads no files under some such spellings, and says nothing
+        source_roots = [f"{relative}{PurePosixPath(root).as_posix()}" for root in contracts.source_roots]
         excludes = [
             f"{relative}**/{name}" if name == "__pycache__" else f"{relative}{name}" for name in TACH_EXCLUDED_FOLDERS
         ]

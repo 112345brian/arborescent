@@ -13,7 +13,7 @@ import ast
 import re
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 from .call_facts import dotted_name
 from .effect_categories import (
@@ -22,10 +22,18 @@ from .effect_categories import (
     OS_BRANCH_ATTRS,
     effect_category_of,
 )
-from .purity_facts import local_names, module_containers, mutated_container
+from .purity_facts import (
+    is_container,
+    local_names,
+    module_containers,
+    module_level_defs,
+    mutated_container,
+    write_receiver,
+)
 
 __all__ = [
-    "EffectSite", "EffectUse", "ModuleEffects", "StateWrite", "merge_sites", "module_effects", "rebound_names", "running_ids", "runs",
+    "EffectSite", "EffectUse", "ModuleEffects", "SharedState", "SharedWrite", "StateWrite", "merge_sites", "module_effects",
+    "rebound_names", "running_ids", "runs", "state_category",
 ]
 
 
@@ -75,10 +83,31 @@ class StateWrite:
     decorators: tuple[str, ...] = ()  # dotted names of the decorators of the functions around it; relative imports keep their dots
 
 
+@dataclass(frozen=True, order=True)
+class SharedWrite:
+    """A write inside a function to something an import binds (#194): whether that is a container is known only once the
+    other module has been read (``facts.link_shared_state``). ``target`` is dotted through the aliases; relative imports keep their dots."""
+
+    line: int
+    function: str  # the innermost function around the write
+    target: str
+
+
+@dataclass(frozen=True)
+class SharedState:
+    containers: tuple[str, ...] = ()  # "REG" or "Class.attr": the containers another module can write (#194)
+    writes: tuple[SharedWrite, ...] = ()
+
+
 class ModuleEffects(NamedTuple):
     sites: list[EffectSite]  # every effect use with its node; ``merge_sites`` turns them into the distinct uses
     state_writes: tuple[StateWrite, ...]
     locks: tuple[str, ...]  # module-level names bound to a thread or process lock
+    shared: SharedState
+    # What a function does when it is called that no call expression performs (#194): (node inside it, or the function itself
+    # for a cache loader; category; target), and the same for writes to imported names (node; dotted target).
+    state_runs: tuple[tuple[ast.AST, str, str], ...]
+    foreign_runs: tuple[tuple[ast.AST, str], ...]
 
 _SEAM_ANNOTATIONS = frozenset({"Callable", "Mapping", "MutableMapping"})
 
@@ -329,6 +358,10 @@ def _global_writes(
     return found
 
 
+def _global_runs(writes: Sequence[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str, ast.Name]]) -> list[tuple[ast.AST, str, str]]:
+    return [(node, "global", f"{func.name}.{name}") for func, name, node in writes if isinstance(node.ctx, ast.Store)]
+
+
 def _global_effect_uses(writes: Sequence[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str, ast.Name]]) -> list[EffectUse]:
     """A function that both declares ``global x`` and assigns ``x`` (plain, augmented or in a ``for``/``with``
     target) mutates module state from inside a call; one that only reads a global is not a use."""
@@ -366,9 +399,14 @@ def _around(spans: Sequence[_Span], node: ast.AST) -> list[_Function]:
     return [f for start, end, indent, f in spans if start <= line <= end and (line > start or column >= indent)]
 
 
-def _cache_loader_uses(functions: Sequence[_Function], aliases: dict[str, str]) -> list[EffectUse]:
+def state_category(name: str) -> str:
+    """A written container is a ``cache`` when its name says so, else a ``registry``."""
+    return "cache" if _CACHE_NAME.search(name) else "registry"
+
+
+def _cache_loaders(functions: Sequence[_Function], aliases: dict[str, str]) -> list[tuple[_Function, int, str]]:
     return [
-        EffectUse(decorator.lineno, "cache", target)
+        (func, decorator.lineno, target)
         for func in functions
         for decorator in func.decorator_list
         if (target := dotted_name(decorator.func if isinstance(decorator, ast.Call) else decorator, aliases)) in _CACHE_DECORATORS
@@ -376,13 +414,13 @@ def _cache_loader_uses(functions: Sequence[_Function], aliases: dict[str, str]) 
 
 
 def _container_writes(
-    nodes: Sequence[ast.AST], spans: Sequence[_Span], containers: set[str],
+    writers: Sequence[ast.AST], spans: Sequence[_Span], containers: set[str],
 ) -> list[tuple[str, ast.AST, list[_Function]]]:
     """(name, node, functions around it) for the function-level writes to ``containers``. A name one of those functions binds
     itself is a local, not the module's container; local names are computed only when a write is found inside a function."""
     bound: dict[ast.AST, set[str]] = {}
     found: list[tuple[str, ast.AST, list[_Function]]] = []
-    for node in [n for n in nodes if n.__class__ in _WRITE_NODES]:  # nearly every module has `__all__`, so this runs over most: filter first
+    for node in writers:
         if (name := mutated_container(node, containers)) is None:
             continue
         scopes = _around(spans, node)
@@ -448,39 +486,273 @@ def _unguarded_writes(
     return tuple(sorted(found))
 
 
+_IMPLICIT_CLASS_METHODS = frozenset({"__init_subclass__", "__new__", "__class_getitem__"})
+_Resolved = tuple[bool, str]  # (imported, "REG" / "Class.attr" here, or the dotted target of an import)
+_Bindings = dict[str, tuple[int, ast.expr | None]]
+
+
+def _decorator_tails(node: _Function) -> set[str]:
+    names = (d.func if isinstance(d, ast.Call) else d for d in node.decorator_list)
+    return {n.attr if isinstance(n, ast.Attribute) else n.id for n in names if isinstance(n, ast.Name | ast.Attribute)}
+
+
+def _first_parameter(function: _Function) -> str:
+    positional = [*function.args.posonlyargs, *function.args.args]
+    return positional[0].arg if positional and "staticmethod" not in _decorator_tails(function) else ""
+
+
+def _is_class_var(annotation: ast.expr) -> bool:
+    if isinstance(annotation, ast.Constant):
+        return str(annotation.value).rpartition(".")[2].startswith("ClassVar") or str(annotation.value).startswith("ClassVar")
+    base = annotation.value if isinstance(annotation, ast.Subscript) else annotation
+    name = base.attr if isinstance(base, ast.Attribute) else base.id if isinstance(base, ast.Name) else ""
+    return name == "ClassVar"
+
+
+def _class_containers(node: ast.ClassDef) -> dict[str, bool]:
+    """Class-body container attributes -> whether the framework behind the class may copy it per instance (an annotated field
+    of a class with a base or a decorator, as in a pydantic or attrs model)."""
+    found: dict[str, bool] = {}
+    for stmt in node.body:
+        if isinstance(stmt, ast.Assign) and is_container(stmt.value):
+            found.update({t.id: False for t in stmt.targets if isinstance(t, ast.Name)})
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None and is_container(stmt.value):
+            found[stmt.target.id] = bool(node.bases or node.decorator_list) and not _is_class_var(stmt.annotation)
+    return found
+
+
+def _rebound_on_instances(node: ast.ClassDef) -> set[str]:
+    """Attributes a method assigns on its instance, which then hides the class's container."""
+    found: set[str] = set()
+    for method in (s for s in node.body if isinstance(s, _DEFS)):
+        first = _first_parameter(method)
+        found.update(
+            n.attr for n in ast.walk(method)
+            if first and isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store) and isinstance(n.value, ast.Name) and n.value.id == first
+        )
+    return found
+
+
+def _assigned_reference(node: ast.AST) -> tuple[str, ast.expr] | None:
+    """``(name, source)`` of ``name = other`` or ``name = a.b``: the one form of binding that makes an alias."""
+    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+        target, value = node.targets[0], node.value
+    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+        target, value = node.target, node.value
+    else:
+        return None
+    return (target.id, value) if isinstance(target, ast.Name) and isinstance(value, ast.Name | ast.Attribute) else None
+
+
+def _bindings(nodes: Iterable[ast.AST]) -> _Bindings:
+    """Name -> (how often ``nodes`` bind it, what it stands for when its one binding made it an alias)."""
+    counts: dict[str, int] = {}
+    sources: dict[str, ast.expr] = {}
+    for node in nodes:
+        if isinstance(node, ast.arg):
+            counts[node.arg] = counts.get(node.arg, 0) + 1
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            counts[node.id] = counts.get(node.id, 0) + 1
+        elif (found := _assigned_reference(node)) is not None:
+            sources[found[0]] = found[1]
+    return {name: (count, sources.get(name) if count == 1 else None) for name, count in counts.items()}
+
+
+def _module_statements(body: Sequence[ast.stmt]) -> Iterable[ast.AST]:
+    """The nodes of the module's own statements: function, class and comprehension bodies are not entered."""
+    pending: list[ast.AST] = list(body)
+    while pending:
+        node = pending.pop()
+        if not isinstance(node, _SCOPE_BOUNDARIES):
+            yield node
+            pending.extend(ast.iter_child_nodes(node))
+
+
+def _type_argument(node: ast.expr) -> ast.expr | None:
+    """``x`` in ``type(x)``."""
+    return node.args[0] if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "type" and len(node.args) == 1 else None
+
+
+def _head(node: ast.expr) -> str:
+    """The name a receiver chain starts from, looking into ``type(x)``."""
+    while True:
+        inner = node.value if isinstance(node, ast.Attribute) else _type_argument(node)
+        if inner is None:
+            return node.id if isinstance(node, ast.Name) else ""
+        node = inner
+
+
+class _Receivers:
+    """What the receiver of a write stands for (#194): a class's container, an alias of a container, or something imported."""
+
+    def __init__(self, tree: ast.Module, containers: set[str], call_names: dict[str, str]) -> None:
+        self.containers = containers
+        self.call_names = call_names
+        defs = module_level_defs(tree.body)
+        self.classes = {d.name: d for d in defs if isinstance(d, ast.ClassDef)}
+        self.class_containers = {name: _class_containers(node) for name, node in self.classes.items()}
+        self.methods: dict[ast.AST, str] = {s: name for name, node in self.classes.items() for s in node.body if isinstance(s, _DEFS)}
+        self.module = _bindings(_module_statements(tree.body))
+        self.own = {*self.module, *(d.name for d in defs)}
+        self.locals: dict[ast.AST, set[str]] = {}
+        self.bound: dict[ast.AST, _Bindings] = {}
+        self.rebound: dict[str, set[str]] = {}  # class -> attributes its methods assign on the instance
+        self.stored: dict[ast.AST, set[str]] = {}  # method -> names it assigns anywhere inside
+
+    def _is_local(self, scope: _Function, name: str) -> bool:
+        if scope not in self.locals:
+            self.locals[scope] = local_names(scope)
+        return name in self.locals[scope]
+
+    def resolve(self, receiver: ast.expr, scopes: Sequence[_Function], follow: bool = True) -> _Resolved | None:
+        """``scopes``: the functions around the write, outermost first. ``follow``: whether an alias may still be followed."""
+        if isinstance(receiver, ast.Name):
+            return self._name(receiver.id, scopes, follow)
+        if not isinstance(receiver, ast.Attribute):
+            return None
+        if (found := self._class_access(receiver.value, scopes)) is not None:
+            return self._class_attribute(found[0], receiver.attr, found[1])
+        head = _head(receiver)
+        if head in self.own or head not in self.call_names or any(self._is_local(s, head) for s in scopes):
+            return None
+        target = dotted_name(receiver, self.call_names)
+        return None if target is None else (True, target)
+
+    def _name(self, name: str, scopes: Sequence[_Function], follow: bool) -> _Resolved | None:
+        for depth in range(len(scopes), 0, -1):
+            scope = scopes[depth - 1]
+            if not self._is_local(scope, name):
+                continue
+            if scope not in self.bound:
+                self.bound[scope] = _bindings(ast.walk(scope))
+            source = self.bound[scope].get(name, (0, None))[1]
+            return self.resolve(source, scopes[:depth], False) if follow and source is not None else None
+        if name in self.containers:
+            return False, name
+        source = self.module.get(name, (0, None))[1]
+        if follow and source is not None:
+            return self.resolve(source, (), False)
+        return (True, self.call_names[name]) if name in self.call_names and name not in self.own else None
+
+    def _class_access(self, base: ast.expr, scopes: Sequence[_Function]) -> tuple[str, bool] | None:
+        """``(class, through an instance)`` for ``Class``, ``cls``, ``self``, ``type(self)`` and ``self.__class__`` of a module-level class."""
+        if isinstance(base, ast.Name) and base.id in self.classes and not any(self._is_local(s, base.id) for s in scopes):
+            return base.id, False
+        of_class = _type_argument(base)
+        if of_class is None and isinstance(base, ast.Attribute) and base.attr == "__class__":
+            of_class = base.value
+        name = of_class if of_class is not None else base
+        at = next((index for index, scope in enumerate(scopes) if scope in self.methods), None)
+        if at is None or not isinstance(name, ast.Name) or name.id != _first_parameter(scopes[at]):
+            return None
+        method = scopes[at]
+        if method not in self.stored:
+            self.stored[method] = {n.id for n in ast.walk(method) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+        if name.id in self.stored[method] or any(self._is_local(s, name.id) for s in scopes[at + 1:]):
+            return None
+        takes_class = method.name in _IMPLICIT_CLASS_METHODS or "classmethod" in _decorator_tails(method)
+        return self.methods[method], of_class is None and not takes_class
+
+    def _chain(self, name: str) -> list[str]:
+        """The class and its bases defined in this module, nearest first."""
+        found: list[str] = []
+        pending = [name]
+        while pending:
+            current = pending.pop(0)
+            if current not in found:
+                found.append(current)
+                pending += [b.id for b in self.classes[current].bases if isinstance(b, ast.Name) and b.id in self.classes]
+        return found
+
+    def _rebinds(self, name: str, attr: str) -> bool:
+        if name not in self.rebound:
+            self.rebound[name] = _rebound_on_instances(self.classes[name])
+        return attr in self.rebound[name]
+
+    def _class_attribute(self, name: str, attr: str, through_instance: bool) -> _Resolved | None:
+        chain = self._chain(name)
+        owner = next((c for c in chain if attr in self.class_containers[c]), None)
+        if owner is None:
+            return None
+        if through_instance and (self.class_containers[owner][attr] or any(self._rebinds(c, attr) for c in chain)):
+            return None
+        return False, f"{owner}.{attr}"
+
+    def exported(self) -> tuple[str, ...]:
+        """The containers another module can name: module-level ones, aliases of this module's own, and class attributes."""
+        aliases = [
+            name for name, (_, source) in self.module.items()
+            if source is not None and (found := self.resolve(source, (), False)) is not None and not found[0]
+        ]
+        return tuple(sorted({*self.containers, *aliases, *(f"{c}.{a}" for c, attrs in self.class_containers.items() for a in attrs)}))
+
+
+def _indirect_writes(
+    nodes: Sequence[ast.AST], writers: Sequence[ast.AST], spans: Sequence[_Span], receivers: _Receivers,
+) -> list[tuple[_Resolved, ast.AST, _Function]]:
+    """The writes ``_container_writes`` does not see: to class containers, through aliases and to imported names."""
+    heads = {  # the names a receiver can start from and still resolve: anything else is skipped without looking further
+        *receivers.call_names, *receivers.classes,
+        *(found[0] for node in nodes if (found := _assigned_reference(node)) is not None),
+        *(_first_parameter(cast("_Function", method)) for method in receivers.methods),
+    }
+    found_writes: list[tuple[_Resolved, ast.AST, _Function]] = []
+    for node in writers:
+        receiver = write_receiver(node)
+        if receiver is None or _head(receiver) not in heads or (isinstance(receiver, ast.Name) and receiver.id in receivers.containers):
+            continue
+        scopes = _around(spans, node)
+        if scopes and (resolved := receivers.resolve(receiver, scopes)) is not None:
+            found_writes.append((resolved, node, scopes[-1]))
+    return found_writes
+
+
 class _State(NamedTuple):
     uses: tuple[EffectUse, ...]
     writes: tuple[StateWrite, ...]
     locks: tuple[str, ...]
+    shared: SharedState
+    runs: tuple[tuple[ast.AST, str, str], ...]
+    foreign: tuple[tuple[ast.AST, str], ...]
 
 
 def _module_state(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str], call_names: dict[str, str]) -> _State:
     """Module state written from functions.
 
     As effect uses (#194): a ``global`` rebinding is ``global``; a function that writes a module-level ``dict``/``list``/``set``
-    (item assignment, ``del`` or a mutating method call) is a ``registry`` use, or a ``cache`` use when the container's name says
-    cache or memo; a ``functools.cache``/``lru_cache`` decorator is a ``cache`` use. Import-time fills and reads are not uses.
+    (item assignment, ``del`` or a mutating method call), directly or through an alias, or a class's container, is a ``registry``
+    use, or a ``cache`` use when the container's name says cache or memo; a ``functools.cache``/``lru_cache`` decorator is a
+    ``cache`` use. Import-time fills and reads are not uses. A write to an imported name is only noted (``SharedWrite``).
     Recorded in every module, failing only where a ring lists the category in ``forbid`` (see ``MODULE_STATE_CATEGORIES``).
 
-    As ``StateWrite``s (#232): the same container and ``global`` writes, minus those inside a ``with <module lock>``."""
+    As ``StateWrite``s (#232): the module's own container and ``global`` writes, minus those inside a ``with <module lock>``."""
     functions = [node for node in nodes if isinstance(node, _DEFS)]
     # most modules have no `global`: do not walk every function's scope for one
     rebinds = _global_writes(functions) if any(node.__class__ is ast.Global for node in nodes) else []
-    uses = _global_effect_uses(rebinds) + _cache_loader_uses(functions, aliases)
+    loaders = _cache_loaders(functions, aliases)
+    uses = _global_effect_uses(rebinds) + [EffectUse(line, "cache", target) for _, line, target in loaders]
+    runs = _global_runs(rebinds) + [(func, "cache", target) for func, _, target in loaders]
     if not isinstance(tree, ast.Module):
-        return _State(tuple(uses), (), ())
+        return _State(tuple(uses), (), (), SharedState(), tuple(runs), ())
     locks = _module_level_locks(tree.body, aliases)
     containers = module_containers(tree, aliases, dotted_name)
-    if not (containers or rebinds):
-        return _State(tuple(uses), (), tuple(sorted(locks)))
-    spans = _spans(functions)
-    contained = _container_writes(nodes, spans, containers) if containers else []
-    uses += [
-        EffectUse(getattr(node, "lineno", 0), "cache" if _CACHE_NAME.search(name) else "registry", f"{scopes[-1].name}.{name}")
-        for name, node, scopes in contained
-    ]
+    receivers = _Receivers(tree, containers, call_names)
+    writers = [n for n in nodes if n.__class__ in _WRITE_NODES]  # nearly every module has `__all__`, so this runs over most: filter first
+    spans = _spans(functions) if writers or rebinds else []
+    contained = _container_writes(writers, spans, containers) if containers else []
+    indirect = _indirect_writes(nodes, writers, spans, receivers) if spans else []
+    local = [(node, state_category(name), f"{scopes[-1].name}.{name}") for name, node, scopes in contained]
+    local += [(node, state_category(name.rpartition(".")[2]), f"{func.name}.{name}") for (imported, name), node, func in indirect if not imported]
+    uses += [EffectUse(getattr(node, "lineno", 0), category, target) for node, category, target in local]
+    foreign = [(node, func.name, name) for (imported, name), node, func in indirect if imported]
+    shared = SharedState(
+        receivers.exported(), tuple(sorted({SharedWrite(getattr(node, "lineno", 0), func, name) for node, func, name in foreign}))
+    )
     writes = contained + [(name, node, _around(spans, node)) for _, name, node in rebinds]
-    return _State(tuple(uses), _unguarded_writes(nodes, writes, locks, call_names), tuple(sorted(locks)))
+    return _State(
+        tuple(uses), _unguarded_writes(nodes, writes, locks, call_names), tuple(sorted(locks)), shared, (*runs, *local),
+        tuple((node, name) for node, _, name in foreign),
+    )
 
 
 def _annotation_node_ids(nodes: Sequence[ast.AST]) -> set[int]:
@@ -533,7 +805,7 @@ def module_effects(
         if isinstance(node, ast.Attribute | ast.Name) and id(node) not in hints and not _is_shadowed(node, imported_os_names, rebound):
             found.append(None if id(node) in seeded else _reference_use(node, aliases, seams))
         sites += [(node, use) for use in found if use is not None]
-    return ModuleEffects(sites, state.writes, state.locks)
+    return ModuleEffects(sites, state.writes, state.locks, state.shared, state.runs, state.foreign)
 
 
 # Data rather than callables: reading the name is the effect. Every other reference runs nothing until it is called.

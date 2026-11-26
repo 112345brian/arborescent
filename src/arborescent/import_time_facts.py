@@ -36,6 +36,7 @@ class ImportCall:
 class ImportTimeFacts:
     calls: tuple[ImportCall, ...] = ()
     function_effects: tuple[tuple[str, str, str], ...] = ()  # ("f" or "Class.method", category, target)
+    function_writes: tuple[tuple[str, str], ...] = ()  # (function, dotted target) of its writes to imported names (#194)
 
 
 def _never_runs_on_import(test: ast.expr) -> bool:
@@ -124,19 +125,16 @@ def _import_calls(nodes: Sequence[ast.AST], tree: ast.Module, aliases: dict[str,
     return tuple(sorted(calls))
 
 
-def _function_effects(tree: ast.Module, sites: Sequence[EffectSite], running: set[int]) -> tuple[tuple[str, str, str], ...]:
-    by_node: dict[int, list[tuple[str, str]]] = {}
-    for site in sites:
-        if runs(site, running):
-            by_node.setdefault(id(site[0]), []).append((site[1].category, site[1].target))
+def _in_functions(tree: ast.Module, by_node: dict[int, list[tuple[str, str]]]) -> set[tuple[str, str, str]]:
+    """``(function, *entry)`` for each entry whose node a module-level function or method evaluates when called, or is that function."""
     if not by_node:
-        return ()
-    return tuple(sorted({
-        (name, category, target)
+        return set()
+    return {
+        (name, *entry)
         for name, function in _functions(tree.body)
-        for node in evaluated(function.body)
-        for category, target in by_node.get(id(node), ())
-    }))
+        for node in (function, *evaluated(function.body))
+        for entry in by_node.get(id(node), ())
+    }
 
 
 class Walked(NamedTuple):
@@ -146,10 +144,24 @@ class Walked(NamedTuple):
     at_import: Sequence[ast.AST]  # ``evaluated(tree.body)``
     sites: Sequence[EffectSite]
     running: set[int]
+    state_runs: Sequence[tuple[ast.AST, str, str]]  # (node, category, target) of module state a call performs (#194)
+    foreign_runs: Sequence[tuple[ast.AST, str]]  # (node, dotted target) of writes to imported names
 
 
 def import_time_facts(walked: Walked, aliases: dict[str, str], dotted: Dotted) -> ImportTimeFacts:
     """``aliases`` keeps a relative import's leading dots (``call_facts.call_aliases``)."""
+    effects: dict[int, list[tuple[str, str]]] = {}
+    for site in walked.sites:
+        if runs(site, walked.running):
+            effects.setdefault(id(site[0]), []).append((site[1].category, site[1].target))
+    for node, category, target in walked.state_runs:
+        effects.setdefault(id(node), []).append((category, target))
+    # a write to an imported name is carried as (target, "") so one walk serves both
+    writes: dict[int, list[tuple[str, str]]] = {}
+    for node, target in walked.foreign_runs:
+        writes.setdefault(id(node), []).append((target, ""))
     return ImportTimeFacts(
-        _import_calls(walked.at_import, walked.tree, aliases, dotted), _function_effects(walked.tree, walked.sites, walked.running)
+        _import_calls(walked.at_import, walked.tree, aliases, dotted),
+        tuple(sorted(_in_functions(walked.tree, effects))),
+        tuple(sorted((name, target) for name, target, _ in _in_functions(walked.tree, writes))),
     )

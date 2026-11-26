@@ -21,13 +21,15 @@ from .facts import (
     SeamFrame,
     SeamParam,
     SeamUse,
+    SharedState,
+    SharedWrite,
     SourceFacts,
 )
 from .import_syntax import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 
-CACHE_VERSION = 28  # above every number the merged branches used (25-27)
+CACHE_VERSION = 29
 
 
 def _purity_to_json(p: PurityFacts) -> list[Any]:
@@ -47,7 +49,7 @@ def _purity_from_json(raw: list[Any]) -> PurityFacts:
 
 def _import_time_from_json(raw: list[Any]) -> ImportTimeFacts:
     calls = tuple(ImportCall(c[0], c[1], c[2]) for c in raw[0])
-    return ImportTimeFacts(calls, tuple((item[0], item[1], item[2]) for item in raw[1]))
+    return ImportTimeFacts(calls, tuple((item[0], item[1], item[2]) for item in raw[1]), tuple((item[0], item[1]) for item in raw[2]))
 
 
 def _seams_to_json(seams: SeamFacts) -> list[Any]:
@@ -113,7 +115,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         f.module_doc,
         f.arbor_reason, [[line, target] for line, target in f.dynamic_imports],
         _purity_to_json(f.purity), f.untokenizable,
-        [[[c.line, c.callee, c.local] for c in f.import_time.calls], [list(item) for item in f.import_time.function_effects]],
+        [[[c.line, c.callee, c.local] for c in f.import_time.calls], [list(item) for item in f.import_time.function_effects], [list(item) for item in f.import_time.function_writes]],
         _seams_to_json(f.seams),
         [[s.name, s.line, s.end_line, s.start, [list(call) for call in s.method_calls]] for s in f.function_spans],
         [list(item) for item in f.companion_exempt],
@@ -122,6 +124,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         [[line, target] for line, target in f.patches], [list(item) for item in f.from_calls],
         [[c.name, c.line, list(c.bases), list(c.members), c.protocol, c.abstract] for c in f.classes],
         [[w.line, w.name, w.function, list(w.held), list(w.decorators)] for w in f.state_writes], list(f.module_locks),
+        [list(f.shared_state.containers), [[w.line, w.function, w.target] for w in f.shared_state.writes]],
     ]
 
 
@@ -160,4 +163,5 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple((item[0], item[1]) for item in raw[34]), tuple((item[0], item[1], item[2]) for item in raw[35]),
         tuple(ClassMembers(c[0], c[1], tuple(c[2]), tuple(c[3]), c[4], c[5]) for c in raw[36]),
         tuple(StateWrite(w[0], w[1], w[2], tuple(w[3]), tuple(w[4])) for w in raw[37]), tuple(raw[38]),
+        SharedState(tuple(raw[39][0]), tuple(SharedWrite(w[0], w[1], w[2]) for w in raw[39][1])),
     )

@@ -4,15 +4,17 @@
 follows the same rule: a project's own configuration is intentional and always wins; a generated file is used only when it
 is recognisably Arborescent's. A hand-written file that happens to share a generated name is never adopted.
 ``windows_tach_config`` is the one rewrite of a project's ``tach.toml``, and only ever of a temporary copy (#214).
+``unread_tach_roots`` names the spellings tach does not read where nothing rewrites them.
 """
 
 from __future__ import annotations
 
+import posixpath
 import re
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path, PureWindowsPath
-from typing import Protocol
+from typing import Protocol, cast
 
 __all__ = [
     "GENERATED_MARKER",
@@ -24,6 +26,7 @@ __all__ = [
     "is_generated",
     "toml_list",
     "toml_quote",
+    "unread_tach_roots",
     "windows_tach_config",
 ]
 
@@ -73,6 +76,44 @@ def windows_tach_config(text: str) -> str | None:
         return rewritten if tomllib.loads(rewritten).get("source_roots") == changed else None
     except tomllib.TOMLDecodeError:
         return None
+
+
+def _tach_reads(root: str) -> bool:
+    """Whether tach 0.35.x reads the files under ``root`` as it is written (measured; tests/test_tach_windows.py).
+
+    It compares folders with the root as spelled, so a ``.`` or empty component loses the walk when two or more names
+    follow it (anywhere, for a glob), and so does a ``..`` after a name. Absolute and ``../`` roots are not judged."""
+    if root.startswith(("/", "../")):
+        return True
+    parts = root.split("/")
+    glob = bool(set("*?[{") & set(root))
+    while not glob and len(parts) > 1 and parts[-1] in ("", "."):
+        _ = parts.pop()
+    named = 0
+    for index, part in enumerate(parts):
+        if part == "..":
+            if named:
+                return False
+        elif part not in ("", "."):
+            named += 1
+        elif len(parts) > 1 and (glob or sum(later not in ("", ".") for later in parts[index + 1 :]) >= 2):
+            return False
+    return True
+
+
+def unread_tach_roots(text: str, table: Sequence[str] = ()) -> list[tuple[str, str]]:
+    """``(as written, as to write it)`` for each of a tach config's ``source_roots`` that tach would leave unchecked.
+
+    ``table`` leads to the table that holds them (``("tool", "tach")`` in a ``pyproject.toml``). A config that cannot be
+    read reports nothing: tach says what is wrong with it."""
+    try:
+        data: object = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return []
+    for key in (*table, "source_roots"):
+        data = cast("dict[str, object]", data).get(key) if isinstance(data, dict) else None
+    roots = [root for root in cast("list[object]", data) if isinstance(root, str)] if isinstance(data, list) else []
+    return [(root, posixpath.normpath(root)) for root in roots if root and not _tach_reads(root)]
 
 
 class TextFiles(Protocol):

@@ -5,6 +5,13 @@
 ## Unreleased
 
 ### Fixed
+- `forbid_at_import` accepted `global`, `registry` and `cache` but could never report them. They now fire for a call made
+  at import into a function that rebinds a global, writes a registry or cache, or is itself `functools.cache`d (one hop, as
+  for every other category). A ring that already lists one can gain `effect-at-import` findings.
+- On macOS and Linux tach passed without reading a `source_roots` entry spelled like `./a/b`, `a//b/c`, `a/c/../b` or
+  `./libs/*/src`. The `tach` and `tach-external` engines now fail instead of running, and name the spelling to write (from
+  `tach.toml`, else `[tool.tach]` in `pyproject.toml`). Spellings tach does read (`./src`, `src/`) are left alone, and
+  generated `tach.toml` files no longer carry `./` or doubled separators. Windows keeps normalising a temporary copy.
 - Generated code with a very long expression or `elif` ladder no longer stops `check` with `RecursionError` while its
   facts are extracted.
 - A memoised pure function is no longer a `memo` effect in `mixed-purity`: `functools.lru_cache`/`cache`/`cached_property` do not
@@ -24,7 +31,7 @@
 - `check` no longer crashes with `SyntaxError` on a source file that starts with a UTF-8 byte order mark.
 
 ### Added
-- The scan cache layout changed (format version 28), so the first run after upgrading re-parses every file.
+- The scan cache layout changed (format version 29), so the first run after upgrading re-parses every file.
 - A finding can name a **root cause** beside its identity key. `lazy-import` (the imported module), `effect-via-import` (the
   last edge of the taint path) and `effect-unsanctioned-import` (the unlisted module) do. `check` prints
   `N violation(s) / M root cause(s)` and per-rule cause counts when findings share causes, `check --by-root-cause` lists each cause once with its fan-out, and
@@ -39,8 +46,9 @@
   a cache- or memo-named module container), both reported as `effect-state` (refs #194). They are detected in every module but are in
   no default `forbid`, no taint seed and no `must_be_pure`, and `coupling` and `discover --suggest` ignore them, so check and taint
   output and baselines are unchanged until a ring lists them in `forbid` (or a package in `forbid_effects`). `mixed-purity` is unchanged.
-  The forbid docs now list every detected category. Not covered: containers imported from another module, writes through `self`
-  or an alias, and `global` slot loaders beyond the existing `global` category.
+  The forbid docs now list every detected category. Containers count wherever they are written from: the module's own, one
+  imported from another scanned module (re-exports followed), a class-attribute container (through `cls`, the class name or a
+  `self` that never rebinds it) and an alias of any of these. `global` slot loaders stay in the existing `global` category.
 - `arborescent purity --path PATH...` and `--module MODULE...` list only the mixed modules in a subset (a diff's changed files,
   say); importer counts and ordering still come from the whole scan (#217).
 - `check` prints a report-only `SUGGEST` line for a class with more than `class_field_threshold` fields or
