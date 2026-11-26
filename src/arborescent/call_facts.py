@@ -14,6 +14,8 @@ from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Collection, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 
+from .effect_categories import dotted_name
+
 __all__ = [
     "REPLACE_CALLS",
     "CallShape",
@@ -224,15 +226,6 @@ def call_aliases(nodes: Sequence[ast.AST], imported: dict[str, str]) -> dict[str
                 if item.name != "*":
                     aliases[item.asname or item.name] = f"{prefix}{'.' if node.module is not None else ''}{item.name}"
     return aliases
-
-
-def dotted_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
-    if isinstance(node, ast.Name):
-        return aliases.get(node.id, node.id)
-    if isinstance(node, ast.Attribute):
-        parent = dotted_name(node.value, aliases)
-        return f"{parent}.{node.attr}" if parent is not None else None
-    return None
 
 
 _DYNAMIC_IMPORT_CALLS = frozenset({"importlib.import_module", "importlib.__import__", "__import__", "builtins.__import__"})

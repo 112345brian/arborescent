@@ -1,11 +1,16 @@
 """Effect categories: which canonical dotted API names are effectful, and in which category.
 
 The one table ``effect-*``, ``effect-via-import`` and ``taint`` all read, so a call to ``print`` or ``open`` is
-recognised consistently everywhere. Third-party network clients are matched by explicit call name, never by prefix."""
+recognised consistently everywhere. Third-party network clients are matched by explicit call name, never by prefix.
+
+``dotted_name`` is how a syntax node becomes such a canonical name."""
 
 from __future__ import annotations
 
-__all__ = ["EFFECT_CATEGORIES", "INJECTABLE_EFFECTS", "MODULE_STATE_CATEGORIES", "OS_BRANCH_ATTRS", "effect_category_of"]
+import ast
+from collections.abc import Mapping
+
+__all__ = ["EFFECT_CATEGORIES", "INJECTABLE_EFFECTS", "MODULE_STATE_CATEGORIES", "OS_BRANCH_ATTRS", "dotted_name", "effect_category_of"]
 
 
 # The categories a policy may name in `forbid`. Four were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`); they are valid
@@ -165,3 +170,13 @@ def _import_category(target: str) -> str | None:
 
 
 INJECTABLE_EFFECTS = frozenset({"clock", "env", "identity", "randomness", "sleep", "threads", "process", "monotonic", "host"})
+
+
+def dotted_name(node: ast.expr, aliases: Mapping[str, str]) -> str | None:
+    """``a.b.c`` for attributes on a plain name, the name resolved through ``aliases``; ``None`` for anything else."""
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id, node.id)
+    if isinstance(node, ast.Attribute):
+        parent = dotted_name(node.value, aliases)
+        return f"{parent}.{node.attr}" if parent is not None else None
+    return None
