@@ -10,7 +10,12 @@ from test_baseline_ratchet import write_policy
 
 from arborescent.check_runner import run_check
 from arborescent.cli import main
-from arborescent.command_imports import COMMAND_BODY_HINT, command_bodies, eager_share
+from arborescent.command_imports import (
+    COMMAND_BODY_HINT,
+    command_bodies,
+    eager_share,
+    registered_targets,
+)
 from arborescent.coupling_policy import DEFAULT_COMMAND_DECORATORS, EagerCommands
 from arborescent.domain import PolicyError, Rule
 from arborescent.engine import Options, run_own
@@ -161,3 +166,38 @@ def test_many_commands_stay_fast() -> None:
     source = "".join(f"@app.command()\ndef c{n}():\n    import m{n}\n" for n in range(2000))
     found = eager_share(source, [3 * n + 3 for n in range(2000)], EagerCommands())
     assert found is not None and found.inside == 2000
+
+
+HANDLERS = "def one(args) -> None:\n    import json\n    import re\n\n\ndef two(args) -> None:\n    from app import domain\n"
+
+
+@pytest.mark.parametrize(
+    "registrar",
+    [
+        "from app import adapters\nsub.add_parser('a').set_defaults(func=adapters.one)\np.set_defaults(func=adapters.two)\n",
+        "from app.adapters import one, two as other\np.set_defaults(func=one)\nq.set_defaults(func=other)\n",
+        "from .adapters import one, two\np.set_defaults(func=one)\nq.set_defaults(func=two)\n",
+        "from . import adapters\np.set_defaults(func=adapters.one)\nq.set_defaults(func=adapters.two)\n",
+        "import app.adapters\np.set_defaults(func=app.adapters.one)\nq.set_defaults(func=app.adapters.two)\n",
+        "def build(p, q):\n    from app.adapters import one, two\n    p.set_defaults(func=one)\n    q.set_defaults(func=two)\n",
+        "from app import adapters\napp.command('a')(adapters.one)\napp.command('b')(adapters.two)\n",
+    ],
+)
+def test_handlers_registered_from_another_module_are_commands(repo: Path, registrar: str) -> None:
+    assert registered_targets(registrar, "app.main", False, DEFAULT_COMMAND_DECORATORS) == {"app.adapters.one", "app.adapters.two"}
+    write_files(repo, {"app/adapters.py": HANDLERS, "app/main.py": registrar})
+    found, _ = run_own(mini_policy(coupling=ON), repo, services(), practices=False)
+    assert [v.subject for v in found if v.rule == Rule.ENTRYPOINT_EAGER_COMMANDS] == ["app.adapters"]
+
+
+@pytest.mark.parametrize(
+    "registrar",
+    ["p.set_defaults(func=one)\n", "p.set_defaults(func=args.one, verbose=True)\n", "def f(:\n", "", "x\x00 = 'set_defaults'\n"],
+)
+def test_names_that_are_not_imported_register_nothing_elsewhere(registrar: str) -> None:
+    assert registered_targets(registrar, "app.main", False, DEFAULT_COMMAND_DECORATORS) == frozenset()
+
+
+def test_an_external_registration_names_only_a_module_level_function() -> None:
+    source = "class K:\n    def one(self):\n        import a\ndef outer():\n    def two():\n        import b\n"
+    assert command_bodies(source, DEFAULT_COMMAND_DECORATORS, frozenset({"one", "two"})) == ()

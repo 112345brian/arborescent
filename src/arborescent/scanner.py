@@ -19,6 +19,7 @@ from .path_exclusion import excluded_by_policy
 from .ports import ToolRunner
 from .scan_cache_codec import CACHE_VERSION, cached_facts, facts_to_json
 from .source_discovery import (
+    PATCH_PRACTICES,
     PRUNE,
     add_discovered,
     annotated_modules,
@@ -87,7 +88,7 @@ class ScanData:
     dev_tool_modules: frozenset[str] = frozenset()  # modules below a `dev_tools` path
     misplaced_dev_tools: tuple[tuple[str, str], ...] = ()  # (module, path): annotated as dev tooling, outside every `dev_tools` path
     excluded_modules: dict[str, ModuleInfo] = field(default_factory=lambda: {})  # files under `exclude`, parsed only for `mixed-purity` (#173)
-    test_facts: dict[str, SourceFacts] = field(default_factory=lambda: {})  # path -> facts of the `unreachable-patch` tests folder (#226)
+    test_facts: dict[str, SourceFacts] = field(default_factory=lambda: {})  # path -> facts of the patch practices' tests folders (#226, #215)
 
 
 def _load_cache(cache_file: Path | None) -> dict[str, list[Any]]:
@@ -211,8 +212,8 @@ class FsScanner:
     def _test_facts(
         self, policy: Policy, root: Path, modules: dict[str, ModuleInfo], cache: dict[str, list[Any]],
     ) -> tuple[dict[str, SourceFacts], dict[str, list[Any]], int]:
-        """Facts of every file under the `unreachable-patch` tests folder: reused when scanned, else parsed once and cached."""
-        if not policy.practices.get("unreachable-patch"):
+        """Facts of every file under a patch practice's tests folder: reused when scanned, else parsed once and cached."""
+        if not any(policy.practices.get(practice) for practice in PATCH_PRACTICES):
             return {}, {}, 0
         wanted = patch_test_files(policy, _listed_paths(root, self._runner)[0])
         scanned = {info.path: info.facts for info in modules.values()}

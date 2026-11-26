@@ -196,9 +196,9 @@ def plan(
     if policy.scopes:
         out.extend(_scope_boundary_mutations(policy, paths, known, owners))
         out.extend(_scope_effect_mutations(policy, scan))
-    patch_found, patch_skipped = _unreachable_patch_mutations(policy, scan)
-    out.extend(patch_found)
-    skipped.extend(patch_skipped)
+    practice_found, practice_skipped = _practice_mutations(policy, scan, None if anchor is None else paths[anchor])
+    out.extend(practice_found)
+    skipped.extend(practice_skipped)
     if packages is not None:
         package_found, package_skipped = packages.mutations(policy, scan.arbor_index, scan.scope_by_module)
         out.extend(package_found)
@@ -223,6 +223,46 @@ def _per_policy_mutations(
     return out, skipped
 
 
+def _practice_mutations(policy: Policy, scan: ScanView, host: str | None) -> tuple[list[Mutation], list[str]]:
+    """The probes of the opt-in checks `run_own` runs for itself (#226, #215); ``host`` is a module file to append to."""
+    unreachable, unreachable_skipped = _unreachable_patch_mutations(policy, scan)
+    unresolved, unresolved_skipped = _unresolved_patch_mutations(policy, scan)
+    shadow = (
+        [Mutation(Rule.SHADOWED_CALLEE, "a local assigned from a call to its own name", host, _SHADOW_SNIPPET)]
+        if host is not None and policy.practices.get(Rule.SHADOWED_CALLEE) else []
+    )
+    return [*unreachable, *unresolved, *shadow], [*unreachable_skipped, *unresolved_skipped]
+
+
+_SHADOW_SNIPPET = (
+    "def _arborescent_probe_shadow():\n    pass\n\n\n"
+    "def _arborescent_probe_shadowing():\n    _arborescent_probe_shadow = _arborescent_probe_shadow()\n"
+)
+
+
+def _unresolved_patch_mutations(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
+    """A new test file that patches a name no module has (#215), in a module whose namespace its facts show to be static."""
+    folder = policy.practices.get(Rule.UNRESOLVED_PATCH_TARGET)
+    if not isinstance(folder, str) or not folder.strip("/"):
+        return [], []
+    exempt = [str(glob) for glob in policy.practices.get(f"{Rule.UNRESOLVED_PATCH_TARGET}-exempt", [])]
+    for name, info in sorted(scan.modules.items(), key=lambda item: (len(item[1].facts.imports), item[0])):
+        target = f"{name}._arborescent_probe_missing"
+        dynamic = any(item.name == "__getattr__" for item in info.facts.top_level_defs)
+        if dynamic or info.path in scan.test_facts or any("*" in imp.names for imp in info.facts.imports):
+            continue
+        if any(in_unit(target, glob) for glob in exempt):
+            continue
+        content = f"def test_probe(monkeypatch):\n    monkeypatch.setattr({target!r}, None)\n"
+        new = f"{folder.strip('/')}/test_arborescent_probe_target.py"
+        return [Mutation(Rule.UNRESOLVED_PATCH_TARGET, f"a new test patches {target}", new, "", new_file=True, content=content)], []
+    return [], [f"{Rule.UNRESOLVED_PATCH_TARGET}: no module with a static namespace to probe"]
+
+
+def _under(scan: ScanView, folder: str) -> dict[str, SourceFacts]:
+    return {path: facts for path, facts in scan.test_facts.items() if path_under(path, folder.replace("\\", "/").strip("/").removeprefix("./"))}
+
+
 def _unreachable_patch_mutations(policy: Policy, scan: ScanView) -> tuple[list[Mutation], list[str]]:
     """A new test file that imports a caller and patches the origin of one of its ``from X import name`` calls (#226).
 
@@ -230,7 +270,7 @@ def _unreachable_patch_mutations(policy: Policy, scan: ScanView) -> tuple[list[M
     folder = policy.practices.get("unreachable-patch")
     if not isinstance(folder, str) or not folder.strip("/"):
         return [], []
-    already = {target for targets in patched_targets(scan.test_facts).values() for target in targets}
+    already = {target for targets in patched_targets(_under(scan, folder)).values() for target in targets}
     exempt = policy.practices.get("unreachable-patch-exempt", [])
     production = {name: info for name, info in scan.modules.items() if info.path not in scan.test_facts}
     for name, origin, local, _ in unreached_bindings(production, scan.known):

@@ -13,7 +13,12 @@ from . import baseline as ratchet_mod
 from . import ratchets as named_ratchets
 from .certification import tach_multi_root_note
 from .classify_audit import audit_classification
-from .command_imports import COMMAND_BODY_HINT, EagerShare, eager_share
+from .command_imports import (
+    COMMAND_BODY_HINT,
+    EagerShare,
+    eager_share,
+    registrations_by_module,
+)
 from .config import find_child_policy
 from .coupling import import_edges, reach
 from .coupling_policy import EagerCommands
@@ -58,18 +63,21 @@ from .practices import run_practices
 from .purity import excluded_findings
 from .ratchet_measure import Subject
 from .rules import (
+    PatchSources,
     RuleContext,
     check_modules,
     name_collision_findings,
     port_binding_findings,
+    shadowed_callee_findings,
     unreachable_patches,
+    unresolved_patch_targets,
 )
 from .suggestions import ClassSuggestion, Suggestion
 from .tach_visibility import invisible_import_violations
 from .taint import TaintResult, compute_taint
 
 if TYPE_CHECKING:
-    from .facts import ModuleInfo
+    from .facts import ModuleInfo, SourceFacts
 
 __all__ = [
     "CheckReport", "EngineRun", "Options", "Services", "apply_modularity", "apply_ratchet", "blocking", "changed_files",
@@ -222,7 +230,11 @@ def run_own(
         checks = package_checks(policy, services)
         if checks is not None:
             found += checks.gap_violations(policy, root, services.fs, scan, services.scanner)
-        found += _unreachable_patch_findings(policy, scan)  # selftest runs without practices and still has to probe it
+        # selftest runs without practices and still has to probe these two
+        found += _unreachable_patch_findings(policy, scan)
+        found += _unresolved_patch_findings(policy, root, services.fs, scan)
+    if policy.practices.get("shadowed-callee"):  # per module, so a `--changed` run reports it too
+        found += shadowed_callee_findings(_module_sources(root, services, scan))
     return found, scan
 
 
@@ -236,15 +248,39 @@ def _whole_repository_findings(indexes: RuleContext, root: Path, services: Servi
     return found + audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
 
 
+def _patch_practice(policy: Policy, scan: ScanResult, rule: Rule) -> tuple[dict[str, SourceFacts], list[str], list[Violation]]:
+    """A patch practice's test files and exemptions, or why there is nothing to check (all empty when it is off).
+
+    The scan reads the tests folders of every patch practice, so each one keeps only the files under its own."""
+    folder = policy.practices.get(rule)
+    if not folder:
+        return {}, [], []
+    name = str(folder).replace("\\", "/").strip("/").removeprefix("./")
+    tests = {path: facts for path, facts in scan.test_facts.items() if path_under(path, name)}
+    if not tests:
+        return {}, [], [Violation(rule, str(folder), "no Python files under the configured tests folder, so no patch is checked")]
+    exempt = policy.practices.get(f"{rule}-exempt", [])
+    return tests, [str(item) for item in cast("list[object]", exempt)], []
+
+
 def _unreachable_patch_findings(policy: Policy, scan: ScanResult) -> list[Violation]:
     """#226, configured as ``practices.unreachable-patch = "<tests folder>"``; a folder with no tests would check nothing silently."""
-    folder = policy.practices.get("unreachable-patch")
-    if not folder:
-        return []
-    if not scan.test_facts:
-        return [Violation(Rule.UNREACHABLE_PATCH, str(folder), "no Python files under the configured tests folder, so no patch is checked")]
-    exempt = policy.practices.get("unreachable-patch-exempt", [])
-    return unreachable_patches(scan.modules, scan.known, scan.test_facts, [str(item) for item in cast("list[object]", exempt)])
+    tests, exempt, problems = _patch_practice(policy, scan, Rule.UNREACHABLE_PATCH)
+    return unreachable_patches(scan.modules, scan.known, tests, exempt) if tests else problems
+
+
+def _unresolved_patch_findings(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> list[Violation]:
+    """#215, configured as ``practices.unresolved-patch-target = "<tests folder>"``."""
+    tests, exempt, problems = _patch_practice(policy, scan, Rule.UNRESOLVED_PATCH_TARGET)
+    if not tests:
+        return problems
+
+    def on_disk(init: str, name: str) -> bool:
+        folder = (root / init).parent
+        return name.isidentifier() and (fs.is_dir(folder / name) or bool(fs.glob(folder, f"{name}.*")))
+
+    sources = PatchSources(lambda path: _source_text(fs, root / path), on_disk)
+    return unresolved_patch_targets(scan.modules, scan.known, tests, sources, exempt)
 
 
 def nested_exclusions(excluded: Mapping[str, int], patterns: Sequence[str]) -> dict[str, str]:
@@ -402,16 +438,23 @@ def _inventory_violations(modules: Mapping[str, ModuleInfo], lazy_rings: tuple[s
 
 
 def _eager_shares(commands: EagerCommands, read: Callable[[str], str], scan: ScanResult) -> dict[str, EagerShare]:
-    shares: dict[str, EagerShare] = {}
-    for name, module in sorted(scan.modules.items()):
-        lines = [imp.line for imp in lazy_imports_of(module)]
-        if len(lines) < commands.min_imports:  # nothing to report: do not re-read the file
-            continue
+    lazy = {name: [imp.line for imp in lazy_imports_of(module)] for name, module in sorted(scan.modules.items())}
+    candidates = {name: lines for name, lines in lazy.items() if len(lines) >= commands.min_imports}
+    if not candidates:  # nothing to report: do not re-read any file
+        return {}
+
+    def text(path: str) -> str | None:
         try:
-            source = read(module.path)
+            return read(path)
         except (OSError, UnicodeDecodeError):
-            continue
-        if (share := eager_share(source, lines, commands)) is not None:
+            return None
+
+    modules = {name: (module.path, module.is_package) for name, module in scan.modules.items()}
+    registered = registrations_by_module(modules, text, commands.decorators)  # a handler another module registers
+    shares: dict[str, EagerShare] = {}
+    for name, lines in candidates.items():
+        source = text(scan.modules[name].path)
+        if source is not None and (share := eager_share(source, lines, commands, registered.get(name, frozenset()))) is not None:
             shares[name] = share
     return shares
 

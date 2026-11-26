@@ -59,7 +59,16 @@
 - `[coupling.closure_max]` caps an entrypoint's module-level import closure and `[coupling.lazy_mounts]` declares command
   modules that no entrypoint may load at import time; `arborescent coupling check` fails on either, naming the imports or the
   chain. `arborescent coupling startup` reports closure, budget, heaviest imports and what each mount adds (#216). Static
-  only: no wall-time, cold-start or third-party import measurement.
+  unless `--measure` is given (below).
+- `arborescent coupling startup --measure` (opt-in, #216) imports each entrypoint under `python -X importtime` and reports
+  the time, the project modules loaded and the third-party imports over `--threshold-ms` (default 50) on the startup path,
+  with the commands that use each. It runs the project's import-time code; `check` and `coupling check` never do. No
+  `argv` probes, time budgets or cold-start measurement.
+- `practices.shadowed-callee = true` (opt-in, #215): reports `rows = rows(...)` in a function where `rows` is an import or
+  a module-level definition, which raises `UnboundLocalError`.
+- `practices.unresolved-patch-target = "<tests folder>"` (opt-in, #215): reports each test whose `mock.patch` or
+  `monkeypatch.setattr` target names something its first-party module no longer has.
+- `entrypoint-eager-commands` now finds argparse handlers (and call-registered commands) that another module registers.
 - `effect-at-import` (#230), opt-in per ring with `forbid_at_import = [...]`: an effect that runs while a module is imported
   (module-level statement, class body, parameter default, decorator) fails, including one call into a first-party function
   (`X = load_thing()` where `load_thing` reads a file).

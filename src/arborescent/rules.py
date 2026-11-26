@@ -11,7 +11,7 @@ import ast
 import fnmatch
 import re
 from bisect import bisect_right
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from typing import NamedTuple
 
 from .call_facts import (
@@ -20,9 +20,17 @@ from .call_facts import (
     FlowNode,
     absolute_callee,
     is_private_name,
+    optional_patch_lines,
     unrecorded_path,
 )
-from .definition_facts import ClassIndex, NameDecl, Signature, name_declarations
+from .definition_facts import (
+    ClassIndex,
+    NameDecl,
+    Signature,
+    module_attributes,
+    name_declarations,
+    shadowed_callees,
+)
 from .domain import (
     ALL,
     EFFECT_RULES,
@@ -71,7 +79,10 @@ from .package_constraints import PackageConstraints
 from .purity_rules import mixed_purity_findings, with_move_closures
 from .rule_context import RuleContext
 
-__all__ = ["RuleContext", "check_modules", "fits_ring", "name_collision_findings", "port_binding_findings", "unreachable_patches"]
+__all__ = [
+    "PatchSources", "RuleContext", "check_modules", "fits_ring", "name_collision_findings", "port_binding_findings",
+    "shadowed_callee_findings", "unreachable_patches", "unresolved_patch_targets",
+]
 
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
 NO_CONSTRAINTS = PackageConstraints()  # a policy that declares none: the constraint rules cost nothing
@@ -1511,4 +1522,104 @@ def unreachable_patches(
             )
             more = f" and {len(where) - 3} more" if len(where) > 3 else ""
             out.append(Violation(Rule.UNREACHABLE_PATCH, name, detail, line, hint=f" (patched at {', '.join(where[:3])}{more})"))
+    return out
+
+
+def shadowed_callee_findings(sources: Mapping[str, str]) -> list[Violation]:
+    """``shadowed-callee`` (#215), from each module's source text."""
+    return [
+        Violation(
+            Rule.SHADOWED_CALLEE, module,
+            f"[{function}] assigns {name!r} from a call to {name!r}: the assignment makes the name local to the whole function, "
+            "so the call raises UnboundLocalError; rename the local",
+            line,
+        )
+        for module, source in sorted(sources.items())
+        for line, function, name in shadowed_callees(source)
+    ]
+
+
+# `mock.patch` creates a builtin's name on a module by itself, so patching one a module does not define is on purpose.
+_BUILTIN_NAMES = frozenset({
+    "abs", "aiter", "all", "anext", "any", "ascii", "bin", "bool", "breakpoint", "bytearray", "bytes", "callable", "chr",
+    "classmethod", "compile", "complex", "copyright", "credits", "delattr", "dict", "dir", "divmod", "enumerate", "eval",
+    "exec", "exit", "filter", "float", "format", "frozenset", "getattr", "globals", "hasattr", "hash", "help", "hex", "id",
+    "input", "int", "isinstance", "issubclass", "iter", "len", "license", "list", "locals", "map", "max", "memoryview",
+    "min", "next", "object", "oct", "open", "ord", "pow", "print", "property", "quit", "range", "repr", "reversed", "round",
+    "set", "setattr", "slice", "sorted", "staticmethod", "str", "sum", "super", "tuple", "type", "vars", "zip",
+})
+
+
+class PatchSources(NamedTuple):
+    """What ``unresolved_patch_targets`` reads besides facts: texts and the file tree, supplied by the caller."""
+
+    read: Callable[[str], str | None]  # the text of a file by its path relative to the root, None when unreadable
+    on_disk: Callable[[str, str], bool]  # whether a package's ``__init__`` path has a submodule of this name beside it
+
+
+def _missing_attribute(dotted: str, modules: Mapping[str, ModuleInfo], known: Collection[str]) -> tuple[ModuleInfo, str] | None:
+    """The first-party module a patch target goes through and the next name of the target, when it is worth looking up."""
+    parts = dotted.split(".")
+    owner = next((name for end in range(len(parts) - 1, 0, -1) if (name := ".".join(parts[:end])) in known), None)
+    if owner is None or owner not in modules or dotted in known:
+        return None
+    attribute = parts[owner.count(".") + 1]
+    dunder = attribute.startswith("__") and attribute.endswith("__")
+    return None if dunder or attribute in _BUILTIN_NAMES else (modules[owner], attribute)
+
+
+class _Attributes:
+    """Each patched module's attribute names, read once."""
+
+    def __init__(self, sources: PatchSources) -> None:
+        self._sources = sources
+        self._found: dict[str, frozenset[str] | None] = {}
+
+    def lacks(self, info: ModuleInfo, attribute: str) -> bool:
+        """Certainly absent: not bound by the module's code, not a submodule beside it, and the module is not dynamic."""
+        if info.path not in self._found:
+            text = self._sources.read(info.path)
+            self._found[info.path] = None if text is None else module_attributes(text)
+        names = self._found[info.path]
+        if names is None or attribute in names:
+            return False
+        return not (info.is_package and self._sources.on_disk(info.path, attribute))
+
+
+def _strict_patches(path: str, facts: SourceFacts, sources: PatchSources) -> dict[str, int]:
+    """Dotted target -> first line of a patch of it that needs the attribute to exist."""
+    name, is_package = file_module(path)
+    text = sources.read(path)
+    optional = optional_patch_lines(text) if text is not None else frozenset()
+    found: dict[str, int] = {}
+    for line, target in facts.patches:
+        if line not in optional and (dotted := absolute_callee(name, is_package, target)) is not None:
+            found.setdefault(dotted, line)
+    return found
+
+
+def unresolved_patch_targets(
+    modules: Mapping[str, ModuleInfo], known: Collection[str], tests: Mapping[str, SourceFacts], sources: PatchSources,
+    exempt: Collection[str] = (),
+) -> list[Violation]:
+    """``unresolved-patch-target`` (#215): a test patches ``module.name`` and the first-party ``module`` has no ``name``.
+
+    One finding per test file and target, so the list is every test to retarget. Only the first name after the longest known
+    module is looked up (``module.Class.method`` checks ``Class``); builtins, dunders and patches that may create the name
+    (``create=True``, ``raising=False``) are left out."""
+    attributes = _Attributes(sources)
+    out: list[Violation] = []
+    for path, facts in sorted(tests.items()):
+        if not facts.patches:
+            continue
+        for dotted, line in sorted(_strict_patches(path, facts, sources).items()):
+            found = _missing_attribute(dotted, modules, known)
+            if found is None or any(in_unit(dotted, glob) for glob in exempt) or not attributes.lacks(*found):
+                continue
+            info, attribute = found
+            detail = (
+                f"patches {dotted}, but module {info.name} has no attribute or submodule {attribute!r}; "
+                "retarget the patch to where the name lives now"
+            )
+            out.append(Violation(Rule.UNRESOLVED_PATCH_TARGET, path, detail, line))
     return out

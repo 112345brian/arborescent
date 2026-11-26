@@ -14,6 +14,8 @@ directory. Enable them under ``[tool.arborescent.practices]``.
 ``test-reference``      a function in an I/O-free ring that no function under the tests folder imports and calls (information, #104)
 ``adapter-equivalence`` modules declared to implement one port that no single test function calls into (#113)
 ``unreachable-patch``   a test patched ``X.name`` while the code under test had bound ``from X import name`` (#226)
+``unresolved-patch-target``  a test patches ``module.name`` and ``module`` no longer has ``name`` (#215)
+``shadowed-callee``     a "make it public" rename left ``rows = rows(...)``, which raises ``UnboundLocalError`` (#215)
 """
 
 from __future__ import annotations
@@ -334,7 +336,8 @@ def _config_copies(
 PRACTICES = (
     Rule.GITIGNORE_SHADOW, Rule.SIBLING_VERSIONS, Rule.SECRETS_GUARD, Rule.DOCS_SYNC, Rule.CRLF, Rule.UNDECLARED_IMPORTS,
     Rule.STALE_CONFIG_PATH, Rule.SOURCE_ROOT_DRIFT, Rule.TEST_REFERENCE,
-    Rule.ADAPTER_EQUIVALENCE, Rule.UNREACHABLE_PATCH,  # the last runs in `engine.run_own`, so `selftest` can probe it
+    Rule.ADAPTER_EQUIVALENCE,
+    Rule.UNREACHABLE_PATCH, Rule.UNRESOLVED_PATCH_TARGET, Rule.SHADOWED_CALLEE,  # these run in `engine.run_own`, so `selftest` can probe them
 )  # fmt: skip
 
 

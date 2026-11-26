@@ -2,7 +2,8 @@
 
 ``report``, ``startup`` and ``cost`` read only; ``check`` fails when a hub's importer count or an entrypoint's closure grew
 past the baseline, a ``closure_max`` budget is exceeded or a lazy mount loads eagerly (#216); ``baseline`` lowers it and
-records any growth with a reason.
+records any growth with a reason. Only ``startup --measure`` runs project code: it imports each entrypoint in a subprocess
+under ``-X importtime`` and reports the time and the heavy third-party imports.
 """
 
 from __future__ import annotations
@@ -10,27 +11,35 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import coupling_ratchet as ratchet
 from .coupling import NewModule, ambient_hubs, cost_of_new_modules, mount_cost
 from .coupling_measure import (
+    HEAVY_MS,
+    TIMEOUT_SECONDS,
     Measure,
+    MeasureSettings,
+    Measuring,
     blame_lines,
     document,
     eager_mounts,
     load_baseline,
+    measure_settings,
+    measured_lines,
+    run_importtime,
     startup_failures,
 )
 from .domain import PolicyError
-from .ports import FileSystem
+from .ports import FileSystem, ToolRunner
 
-__all__ = ["add_coupling_parser", "run_coupling"]
+__all__ = ["Interpreter", "add_coupling_parser", "run_coupling"]
 
 _ACTIONS = {
     "report": "fan-in, entrypoint closure sizes and ambient-hub candidates",
     "check": "fail on growth past the baseline, an exceeded closure budget or an eagerly loaded lazy mount",
-    "startup": "per entrypoint: closure size and budget, the heaviest imports, and what each lazy mount adds",
+    "startup": "per entrypoint: closure size and budget, the heaviest imports, and what each lazy mount adds (--measure times them)",
     "baseline": "record or lower the coupling baseline; growth needs --allow-growth and --reason",
     "cost": "modules a new port, service and adapter would add to each entrypoint's closure",
 }
@@ -47,14 +56,30 @@ def add_coupling_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     base = actions.choices["baseline"]
     base.add_argument("--allow-growth", action="store_true", help="allow counts to rise or new entries, with a --reason")
     base.add_argument("--reason", help="why the baseline grows")
-    actions.choices["startup"].add_argument("--top", type=int, default=5, help="how many imports to blame (default 5)")
+    startup = actions.choices["startup"]
+    startup.add_argument("--top", type=int, default=5, help="how many imports to blame (default 5)")
+    startup.add_argument(
+        "--measure", action="store_true",
+        help="RUNS the project: import each entrypoint under `python -X importtime` and report time and heavy third-party imports",
+    )
+    startup.add_argument("--threshold-ms", type=float, help=f"with --measure: how slow a third-party package is heavy (default {HEAVY_MS:g})")
+    startup.add_argument("--python", help="with --measure: the interpreter that has the project's dependencies (default: this one)")
+    startup.add_argument("--timeout", type=float, help=f"with --measure: seconds per entrypoint (default {TIMEOUT_SECONDS:g})")
     cost = actions.choices["cost"]
     cost.add_argument("importer", help="the module that will import the new modules")
     cost.add_argument("--imports", nargs="*", default=[], metavar="MODULE", help="modules the new modules import")
     cost.add_argument("--modules", type=int, default=3, help="how many modules are added (default 3: port, service, adapter)")
 
 
-def run_coupling(args: argparse.Namespace, measure: Measure, root: Path, fs: FileSystem) -> int:
+@dataclass(frozen=True)
+class Interpreter:
+    """What ``startup --measure`` runs with: the process runner and the Python used unless ``--python`` names another."""
+
+    runner: ToolRunner
+    default: str
+
+
+def run_coupling(args: argparse.Namespace, measure: Measure, root: Path, fs: FileSystem, interpreter: Interpreter) -> int:
     path = root / measure.policy.coupling.baseline
     action = args.coupling_action
     if action == "report":
@@ -64,11 +89,18 @@ def run_coupling(args: argparse.Namespace, measure: Measure, root: Path, fs: Fil
     if action == "baseline":
         return _baseline(measure, fs, path, args)
     if action == "startup":
-        return _startup(measure, max(args.top, 0))
+        return _startup(measure, args, root, fs, interpreter)
     return _check(measure, fs, path)
 
 
-def _startup(measure: Measure, top: int) -> int:
+def _startup(measure: Measure, args: argparse.Namespace, root: Path, fs: FileSystem, interpreter: Interpreter) -> int:
+    python = args.python
+    if python is not None and len(Path(python).parts) > 1:  # relative to where the command was typed, not to the project
+        python = str(Path(python).absolute())
+    settings = measure_settings(args.measure, MeasureSettings(interpreter.default), python, args.timeout, args.threshold_ms)
+    run = None if settings is None else Measuring(settings, interpreter.runner, root, fs)
+    top = max(args.top, 0)
+    failed = False
     if not measure.closures:
         print("no entrypoints declared (`[coupling] entrypoints = [...]`)")
         return 0
@@ -79,10 +111,18 @@ def _startup(measure: Measure, top: int) -> int:
         cap = budgets.get(closure.entrypoint)
         budget = "no budget" if cap is None else f"budget {cap}, {'OVER' if size > cap else 'ok'}"
         print(f"{closure.entrypoint}: {size} project modules ({budget})")
-        for line in blame_lines(measure, closure.entrypoint, top):
+        records = None if run is None else run_importtime(measure, run.runner, run.root, run.settings, closure.entrypoint)
+        times = {record.name: record.cumulative_us for record in records} if isinstance(records, list) else {}
+        for line in blame_lines(measure, closure.entrypoint, top, times):
             print(f"  {line}")
         _print_mounts(measure, closure.entrypoint, eager)
-    return 0
+        if isinstance(records, str):
+            print(f"{closure.entrypoint}: measurement failed: {records}")
+            failed = True
+        elif records is not None and run is not None:
+            for line in measured_lines(measure, run.read, closure.entrypoint, records, run.settings.threshold_ms):
+                print(line)
+    return 1 if failed else 0
 
 
 def _print_mounts(measure: Measure, entrypoint: str, eager: set[tuple[str, str]]) -> None:

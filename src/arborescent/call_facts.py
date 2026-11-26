@@ -34,6 +34,7 @@ __all__ = [
     "function_calls",
     "function_spans",
     "is_private_name",
+    "optional_patch_lines",
     "patch_targets",
     "path_calls",
     "private_attributes",
@@ -1075,6 +1076,30 @@ def patch_targets(nodes: Sequence[ast.AST], aliases: dict[str, str], rebound: se
         if isinstance(node, ast.Call) and (target := _patch_target(node, aliases, rebound, monkeypatches)) is not None
     }
     return tuple(sorted(found))
+
+
+def _may_create(call: ast.Call) -> bool:
+    """``create=`` (mock) or ``raising=`` (monkeypatch) that is not literally strict, or ``setattr``'s positional ``raising``."""
+    for keyword in call.keywords:
+        strict = {"create": False, "raising": True}.get(keyword.arg or "")
+        if strict is not None and not (isinstance(keyword.value, ast.Constant) and keyword.value.value is strict):
+            return True
+    if not (isinstance(call.func, ast.Attribute) and call.func.attr == "setattr" and call.args):
+        return False
+    position = 2 if _text(call.args[0]) is not None else 3  # ("a.b", value, raising) or (obj, "name", value, raising)
+    if len(call.args) <= position:
+        return False
+    flag = call.args[position]
+    return not (isinstance(flag, ast.Constant) and flag.value is True)
+
+
+def optional_patch_lines(source: str) -> frozenset[int]:
+    """Lines of patch calls that succeed when the attribute is absent, so a missing target is on purpose (#215)."""
+    try:
+        tree = ast.parse(source.removeprefix("\ufeff"))
+    except (SyntaxError, ValueError, RecursionError):
+        return frozenset[int]()
+    return frozenset(node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call) and _may_create(node))
 
 
 def _module_from_imports(tree: ast.Module) -> dict[str, str]:

@@ -5,7 +5,10 @@ nothing, the public surface (a static ``__all__`` or public bindings) and which 
 annotated to return a ``*Result``/``*Outcome``, and the ``if __name__ == "__main__":`` guard.
 
 ``class_shapes`` records what each module-level class's constructor accepts, and ``ClassIndex`` resolves that across
-modules (inheritance and re-exports), for the construction rule (#234)."""
+modules (inheritance and re-exports), for the construction rule (#234).
+
+Two queries read a module's source again, only when their opt-in rule is on (#215): ``module_attributes`` (what a patch of the
+module can replace) and ``shadowed_callees`` (a local assigned from a call to the same-named module-level name)."""
 
 from __future__ import annotations
 
@@ -19,7 +22,8 @@ from .purity_facts import Helpers
 
 __all__ = [
     "ClassIndex", "ClassMembers", "ClassShape", "IndexedModule", "NameDecl", "Parameter", "Signature", "TopLevelDef", "class_shapes",
-    "main_guard_line", "member_shapes", "name_declarations", "purity_helpers", "result_defs", "surface", "top_level_defs", "weak_port_returns",
+    "main_guard_line", "member_shapes", "module_attributes", "name_declarations", "purity_helpers", "result_defs",
+    "shadowed_callees", "surface", "top_level_defs", "weak_port_returns",
 ]
 
 _DATACLASS_NAMES = frozenset({"dataclasses.dataclass", "pydantic.dataclasses.dataclass"})
@@ -652,3 +656,180 @@ class ClassIndex:
         if shape.is_dataclass:
             merged.update({p.name: p for p in shape.fields})
         return merged
+
+
+_Function = ast.FunctionDef | ast.AsyncFunctionDef
+# A new scope, whose own names are not the enclosing one's. (A comprehension is one too, but ``:=`` in it binds outside.)
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+
+
+def _parsed(source: str) -> ast.Module | None:
+    try:
+        return ast.parse(source.removeprefix("\ufeff"))
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+
+
+def _scope_nodes(statements: Iterable[ast.AST]) -> Iterator[ast.AST]:
+    """Every node of one scope: a nested function or class is yielded (it binds a name) but not entered.
+
+    An explicit stack, so a long ``elif`` ladder cannot overflow it. The ``if TYPE_CHECKING:`` body never runs: skipped."""
+    pending = list(statements)
+    while pending:
+        node = pending.pop()
+        yield node
+        if isinstance(node, _SCOPES):
+            continue
+        if isinstance(node, ast.If) and _is_type_checking(node.test):
+            pending += node.orelse
+        else:
+            pending += ast.iter_child_nodes(node)
+
+
+def _is_type_checking(test: ast.expr) -> bool:
+    name = test.id if isinstance(test, ast.Name) else test.attr if isinstance(test, ast.Attribute) else ""
+    return name == "TYPE_CHECKING"
+
+
+def _bound_by(node: ast.AST) -> Iterator[str]:
+    """The names one node binds in its scope."""
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+        yield node.id
+    elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        yield node.name
+    elif isinstance(node, ast.Import | ast.ImportFrom):
+        yield from (item.asname or item.name.split(".")[0] for item in node.names)
+    elif isinstance(node, ast.MatchAs | ast.MatchStar) and node.name is not None:
+        yield node.name
+    elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+        yield node.rest
+
+
+def _is_dynamic(node: ast.AST) -> bool:
+    """Code that can give a module attributes no statement names."""
+    if isinstance(node, ast.Name):
+        return node.id in {"globals", "__getattr__"}
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        # `vars(obj)` and `exec(code, names)` work on another namespace; bare, they reach the module's
+        return (node.func.id == "vars" and not node.args) or (node.func.id == "exec" and len(node.args) < 2 and not node.keywords)
+    if isinstance(node, ast.ImportFrom):
+        return any(item.name == "*" for item in node.names)
+    if isinstance(node, ast.Subscript):  # ``sys.modules[__name__]``
+        return isinstance(node.slice, ast.Name) and node.slice.id == "__name__"
+    return False
+
+
+def module_attributes(source: str) -> frozenset[str] | None:
+    """Every name the module's own code can bind on the module, or None when that cannot be known from its source.
+
+    Unknown: it does not parse, it has a ``*`` import or a module ``__getattr__``, or it reaches its own namespace through
+    ``globals``, ``vars``, ``exec`` or ``sys.modules[__name__]``. An annotation without a value binds nothing."""
+    tree = _parsed(source)
+    if tree is None:
+        return None
+    nodes = list(ast.walk(tree))
+    if any(_is_dynamic(node) for node in nodes) or any(isinstance(node, _Function) and node.name == "__getattr__" for node in tree.body):
+        return None
+    declared = {name for node in nodes if isinstance(node, ast.Global) for name in node.names}
+    scope = list(_scope_nodes(tree.body))
+    unvalued = {id(node.target) for node in scope if isinstance(node, ast.AnnAssign) and node.value is None}
+    return frozenset(declared | {name for node in scope if id(node) not in unvalued for name in _bound_by(node)})
+
+
+def _global_callables(tree: ast.Module) -> frozenset[str]:
+    """Names the module imports or defines at its top level."""
+    return frozenset(
+        name
+        for node in _scope_nodes(tree.body)
+        if isinstance(node, ast.Import | ast.ImportFrom | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        for name in _bound_by(node)
+        if name != "*"
+    )
+
+
+def _called_names(value: ast.expr) -> Iterator[str]:
+    """Names called while ``value`` is evaluated: not in a lambda or generator, nor where a comprehension rebinds the name."""
+    pending: list[tuple[ast.AST, frozenset[str]]] = [(value, frozenset())]
+    while pending:
+        node, hidden = pending.pop()
+        if isinstance(node, ast.Lambda | ast.GeneratorExp):
+            continue
+        if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp):
+            hidden = hidden | {name.id for clause in node.generators for name in ast.walk(clause.target) if isinstance(name, ast.Name)}
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id not in hidden:
+            yield node.func.id
+        pending += [(child, hidden) for child in ast.iter_child_nodes(node)]
+
+
+def _assignment(node: ast.AST) -> tuple[list[ast.expr], ast.expr] | None:
+    if isinstance(node, ast.Assign):
+        return node.targets, node.value
+    if isinstance(node, ast.AnnAssign | ast.NamedExpr) and node.value is not None:
+        return [node.target], node.value
+    return None
+
+
+def _position(node: ast.AST) -> tuple[int, int]:
+    """Where a statement, expression or import alias starts; (0, 0) for a node with no position."""
+    if isinstance(node, ast.stmt | ast.expr | ast.pattern):
+        return node.lineno, node.col_offset
+    return 0, 0
+
+
+def _outer_names(function: ast.FunctionDef | ast.AsyncFunctionDef, nodes: Sequence[ast.AST]) -> set[str]:
+    """Parameters, ``global`` and ``nonlocal`` names: assigning one of these does not leave it unbound before the call."""
+    arguments = function.args
+    names = {arg.arg for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)}
+    names |= {arg.arg for arg in (arguments.vararg, arguments.kwarg) if arg is not None}
+    return names | {name for node in nodes if isinstance(node, ast.Global | ast.Nonlocal) for name in node.names}
+
+
+def _first_bindings(nodes: Sequence[ast.AST]) -> dict[str, tuple[int, int]]:
+    first: dict[str, tuple[int, int]] = {}
+    for node in nodes:
+        for name in _bound_by(node):
+            first[name] = min(first.get(name, _position(node)), _position(node))
+    return first
+
+
+def _shadows_in(function: ast.FunctionDef | ast.AsyncFunctionDef, callables: frozenset[str]) -> Iterator[tuple[int, str]]:
+    """``(line, name)`` of each assignment that calls the local it is about to bind for the first time."""
+    nodes = list(_scope_nodes(function.body))
+    candidates = callables - _outer_names(function, nodes)
+    first = _first_bindings(nodes)
+    for node in nodes:
+        found = _assignment(node)
+        if found is None:
+            continue
+        targets = {
+            item.id for target in found[0] for item in ast.walk(target)
+            if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Store)
+        }
+        for name in sorted(targets & candidates):
+            # nothing binds it before this statement, so the call reads a local that has no value yet
+            if first[name] >= _position(node) and name in set(_called_names(found[1])):
+                yield _position(node)[0], name
+
+
+def shadowed_callees(source: str) -> tuple[tuple[int, str, str], ...]:
+    """``(line, function, name)``: a function assigns a local from a call to the module-level name it shadows (#215).
+
+    Python makes ``name`` local to the whole function, so the call raises ``UnboundLocalError``. Reported once per function
+    and name; empty when the source does not parse. Module and class bodies are left out: there the call finds the global."""
+    tree = _parsed(source)
+    if tree is None:
+        return ()
+    callables = _global_callables(tree)
+    found: dict[tuple[str, str], int] = {}
+    pending: list[tuple[ast.AST, str]] = [(tree, "")]
+    while pending:
+        node, path = pending.pop()
+        if isinstance(node, _Function):
+            for line, name in _shadows_in(node, callables):
+                found[path, name] = min(line, found.get((path, name), line))
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                pending.append((child, f"{path}.{child.name}" if path else child.name))
+            else:
+                pending.append((child, path))
+    return tuple(sorted((line, function, name) for (function, name), line in found.items()))
