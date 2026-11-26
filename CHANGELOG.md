@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Added
+- `effect-unlisted-category`, an informational note (never fails, never baselined, whole-repository runs only): "N modules
+  in restricted rings use X; no ring forbids it" for `console`, `network`, `global`, `registry`, `cache`, `state`,
+  `monotonic`, `host` and `fs-query`. No category became default-on. Listing the category in any ring's `forbid` or
+  `forbid_at_import` ends the note; note that a ring's own `forbid` replaces its default list (#194).
+
 ### Fixed
 - With a nested `output_dir`, `generate` wrote a `tach.toml` there whose source roots tach never read, so running it
   checked nothing and passed. `tach.toml` is now written at the project root (never over an existing one, and not while

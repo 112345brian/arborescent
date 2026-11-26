@@ -1,6 +1,6 @@
-"""The ``effect-unsanctioned-import``, ``effect-via-import`` and ``effect-at-import`` rules: whether a forbidden effect
+"""The ``effect-unsanctioned-import``, ``effect-via-import``, ``effect-at-import`` and ``effect-unlisted-category`` rules: whether a forbidden effect
 reaches a module through what it imports, directly or transitively, whether an import of a provider-ring module is through
-a listed seam, and whether importing a module runs an effect its ring bans at import.
+a listed seam, whether importing a module runs an effect its ring bans at import, and which categories no ring forbids.
 
 Split out of ``rules`` as its own cohesive concern. ``effect-at-import`` (#230) takes its direct uses from the effect facts
 (``EffectUse.at_import``) and follows a call made at import one hop, to what that function runs itself, never what it calls
@@ -21,10 +21,12 @@ from .rule_context import RuleContext
 
 __all__ = [
     "EffectEdge", "EffectImport", "direct_propagating_effects", "effect_at_import_findings", "effect_via_import_violations", "is_sanctioned",
-    "record_effect_edge", "unsanctioned_effect_imports",
+    "record_effect_edge", "unlisted_category_findings", "unsanctioned_effect_imports",
 ]
 
 _NON_PROPAGATING_EFFECTS = frozenset({"os-branching", "patch"})  # not a ring effect, or meaningless once removed from its own module
+# #194: detected, but a policy may well forbid none of them (several are in no default ``forbid``): a note says so, in this order
+_NOTED_WHEN_UNLISTED = ("console", "network", "global", "registry", "cache", "state", "monotonic", "host", "fs-query")
 
 
 class EffectEdge(NamedTuple):
@@ -242,3 +244,27 @@ def _own_effects(info: ModuleInfo, qualname: str) -> list[tuple[str, str]]:
     if "." not in qualname:
         names.update(f"{qualname}.{method}" for method in _CONSTRUCTORS)
     return [(category, target) for function, category, target in info.facts.import_time.function_effects if function in names]
+
+
+def unlisted_category_findings(context: RuleContext, modules: Mapping[str, ModuleInfo]) -> list[Violation]:
+    """``effect-unlisted-category`` (#194, a note): per policy or scope, each category no ring forbids (``forbid`` or
+    ``forbid_at_import``) that modules of restricted rings (those that forbid anything) use directly."""
+    policy = context.policy
+    local_policies = [(scope.name, scope.policy) for scope in policy.scopes] if policy.scopes else [(None, policy)]
+    out: list[Violation] = []
+    for scope_name, local_policy in local_policies:
+        forbidden = {ring.name: local_policy.forbidden_effects(ring.name) for ring in local_policy.rings}
+        listed = frozenset[str]().union(*forbidden.values(), *(ring.forbid_at_import for ring in local_policy.rings))
+        unlisted = [category for category in _NOTED_WHEN_UNLISTED if category not in listed]
+        users = [
+            {use.category for use in info.facts.effect_uses if local_policy.counts_effect_seam(use.seam)}
+            for name, info in modules.items()
+            if context.scope_name(name) == scope_name and name not in context.tool_modules
+            and (ring := context.resolve_ring(name)) is not None and forbidden[ring]
+        ]
+        for category in unlisted:
+            if count := sum(category in used for used in users):
+                uses = "module in restricted rings uses" if count == 1 else "modules in restricted rings use"
+                subject = f"{scope_name}:{category}" if scope_name is not None else category
+                out.append(Violation(Rule.EFFECT_UNLISTED_CATEGORY, subject, f"{count} {uses} {category}; no ring forbids it"))
+    return out

@@ -98,6 +98,7 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.NOISE_DIR_CODE: "requires a Git-tracked Python file under a noise directory; selftest works on a temporary non-Git copy",
     Rule.WEAKLY_TYPED_PORT: "needs `require_typed_ports` on a ring and a Protocol with an untyped return; covered by focused rule tests",
     Rule.TACH_INVISIBLE_IMPORT: "informational and never baselined; focused tests cover it",
+    Rule.EFFECT_UNLISTED_CATEGORY: "informational and never baselined; covered by tests/test_unlisted_category.py",
     Rule.ENTRYPOINT_EAGER_COMMANDS: "informational, opt-in and never baselined; covered by tests/test_eager_commands.py",
     Rule.RESULT_DISCARD: "opt-in and resolved through imports; focused tests cover each call form, the convention and ring scoping",
     Rule.PORT_SHADOW: "informational, opt-in and never baselined; covered by tests/test_port_shadow.py",

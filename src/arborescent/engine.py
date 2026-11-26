@@ -34,6 +34,7 @@ from .domain import (
     path_under,
 )
 from .duplicate_logic import find_duplicates
+from .effect_import_rules import unlisted_category_findings
 from .generate import generate_for_scan, moved_to_root
 from .generated_config import GENERATED_MARKER
 from .import_cycles import EdgeKind, resolved_internal_imports
@@ -250,6 +251,7 @@ def _whole_repository_findings(indexes: RuleContext, root: Path, services: Servi
     policy = indexes.policy
     found = _duplicate_findings(policy, root, services, scan) if policy.duplicate_logic.enabled else []
     found += port_binding_findings(indexes, scan.modules, scan.known)
+    found += unlisted_category_findings(indexes, scan.modules)
     if policy.name_collisions is not None:  # re-reads every source: only when asked for
         found += name_collision_findings(indexes, scan.modules, _module_sources(root, services, scan))
     return found + audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
