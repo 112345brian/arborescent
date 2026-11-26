@@ -751,14 +751,59 @@ def _core_policy(raw: Mapping[str, Any]) -> tuple[Policy, Mapping[str, Mapping[s
         return frozenset(out)
 
     names = list(raw.get("rings", []))  # distinct and non-empty: checked by Policy
-    ring_tables: Mapping[str, Mapping[str, Any]] = raw.get("ring", {})
-    for unknown in set(ring_tables) - set(names):
-        raise PolicyError(f"[ring.{unknown}] is not in `rings`")
+    ring_tables = _ring_tables(raw, names)
     ring_rules = [_ring_from_mapping(name, ring_tables.get(name, {}), expand) for name in names]
     rings = tuple(ring_rules)
     classify = tuple((str(k), str(v)) for k, v in raw.get("classify", {}).items())
     # The ring invariants (onion rule, classify targets) are checked by Policy itself, before the options below.
     return Policy(rings=rings, classify=classify), ring_tables
+
+
+# Every key `_ring_from_mapping` and its helpers read. Any other is an error: a misspelt `forbid` would enforce less.
+_RING_KEYS = (
+    "may_import", "external", "os_branching", "forbid", "forbid_at_import", "require_abstract", "require_typed_ports",
+    "max_reexport_ratio",
+)
+
+
+def _ring_tables(raw: Mapping[str, Any], names: Sequence[str]) -> Mapping[str, Mapping[str, Any]]:
+    """The ``[ring.<name>]`` tables, checked for shape: each names a declared ring, is a table and holds only ring keys."""
+    value: object = raw.get("ring", {})
+    if not isinstance(value, Mapping):
+        raise PolicyError("`ring` must hold one table per ring: [ring.<name>]")
+    tables = cast("Mapping[str, object]", value)
+    for unknown in set(tables) - set(names):
+        raise PolicyError(f"[ring.{unknown}] is not in `rings`")
+    for name, table in tables.items():
+        if not isinstance(table, Mapping):
+            raise PolicyError(f"[ring.{name}] must be a table")
+        _reject_unknown_ring_keys(name, cast("Mapping[object, object]", table))
+    return cast("Mapping[str, Mapping[str, Any]]", tables)
+
+
+def _reject_unknown_ring_keys(name: str, table: Mapping[object, object]) -> None:
+    unknown = sorted((key for key in table if key not in _RING_KEYS), key=repr)
+    if not unknown:
+        return
+    described = ", ".join(f"{key!r}{_closest_ring_key(str(key))}" for key in unknown)
+    raise PolicyError(f"unknown key in [ring.{name}]: {described}; known keys: {', '.join(_RING_KEYS)}")
+
+
+def _closest_ring_key(key: str) -> str:
+    """A "did you mean" for a near miss: at most two characters, or a third of the known key, may differ."""
+    spelled = key.lower().replace("-", "_")
+    distance, closest = min((_edit_distance(spelled, known), known) for known in _RING_KEYS)
+    return f" (did you mean {closest!r}?)" if distance <= max(2, len(closest) // 3) else ""
+
+
+def _edit_distance(left: str, right: str) -> int:
+    """Levenshtein distance; `difflib` is not among this ring's allowed imports."""
+    row = list(range(len(right) + 1))
+    for i, a in enumerate(left, 1):
+        previous, row[0] = row[0], i
+        for j, b in enumerate(right, 1):
+            previous, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, previous + (a != b))
+    return row[-1]
 
 
 def _tool_options(raw: Mapping[str, Any]) -> tuple[str, str, object, list[str], tuple[str, ...], int]:
