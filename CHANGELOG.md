@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+### Added
+- `[[call_allowlist]]` (#229): name the modules and rings that may make a specific call (`os.replace`, `subprocess.*`,
+  `app.queries.build`); every other call is `call-outside-allowlist`. With `and_calls` it is an idiom: a function making both
+  (a temporary file *and* `os.replace`) is `hand-rolled-idiom`, while either call alone stays legitimate. Off until declared,
+  covered by `selftest` and the baseline. Resolution is syntactic: a method on a value (`Path.replace`), a re-bound or passed-on
+  function, `getattr`, `*` imports and re-exports are not seen (see *Configuration reference*).
+
+### Changed
+- The scan cache layout changed (it now records function line spans), so the first run after upgrading re-parses every file.
+
 ## 0.9.0 — 2026-11-12
 
 ### Fixed

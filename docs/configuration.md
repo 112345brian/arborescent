@@ -308,6 +308,46 @@ and `selftest` calls each target from a module that may not. What it does not se
 path callers import, or one entry per spelling), `partial(X)` or `make = X; make()`, `getattr`, a subclass, and an argument passed to a
 constructor (it checks who builds, not what is passed in). A parameter named like an imported class would be mistaken for it.
 
+`call_allowlist` says which modules may make a particular call, where an import rule cannot: `os`, `tempfile` and `subprocess` are
+imported everywhere for good reasons, but only the wrapper that carries the timeout or the atomic-write discipline should call
+`os.replace` or `subprocess.run`. It is off until an entry is declared:
+
+```toml
+[[tool.arborescent.call_allowlist]]
+calls = ["subprocess.*"]                   # dotted call targets; `*` is a glob and also matches dots
+modules = ["app.command_port"]             # module globs that may call them (and/or `rings`; not both empty)
+reason = "the command port sets the timeout and kills the whole process tree"
+
+[[tool.arborescent.call_allowlist]]        # an idiom: either call alone is fine, both in one function is not
+calls = ["tempfile.mkstemp", "tempfile.NamedTemporaryFile"]
+and_calls = ["os.replace", "os.rename"]
+modules = ["app.fsutil"]
+reason = "use save_text_atomic"
+```
+
+Without `and_calls`, every other call of a listed target is `call-outside-allowlist`, one finding per call site, numbered per
+callee so that a further call in a baselined module is new and a moved one is not. With `and_calls`, a function or method that
+makes one call matching `calls` and another matching `and_calls` is `hand-rolled-idiom`, and neither call is restricted by itself.
+Either message names the module, its ring, who may do it and the `reason`. A `modules` glob that matches no module is reported,
+and `selftest` makes each entry's call (or pair) in a module that may not. `dev_tools` modules are checked too: list them in
+`modules` if scripts may make the call. A first-party function can be a target as well (`app.queries.build`).
+
+Targets are resolved by syntax, through `import os as o`, `from os import replace as swap`, function-level and relative imports.
+What it does not see:
+
+- a call on a value: `Path(tmp).replace(dest)`, `tmp_path.rename(dest)` and `proc.communicate()` are not `os.replace` or
+  `subprocess.*`, so an atomic write spelled with `pathlib` passes;
+- a call that is never spelled: `swap = os.replace; swap(a, b)`, `getattr(os, "replace")(a, b)`, `functools.partial(os.replace, a)`,
+  `asyncio.to_thread(subprocess.run, argv)`, `map(os.remove, paths)`;
+- `from os import *`, a re-export through another module (`from app.compat import replace`: list that name too), and a builtin
+  such as `open` or `eval` (a target must be dotted);
+- a first-party `Class.method` called inside the module that defines the class;
+- an idiom split across functions (one makes the temporary file, a helper renames it), or written at module level. A nested
+  function or `lambda` counts as part of the function around it;
+- names are resolved per module, not per scope, so a local variable or parameter named like an imported module is taken for it,
+  and a name imported twice resolves to one of the two;
+- a target is only text: a mistyped `os.repalce` restricts nothing, and `selftest` cannot tell, because it writes the same text.
+
 `result_discard` is an opt-in check that a caller reads the outcome of a function it calls (a new "refused" or "skipped" outcome
 is otherwise silently ignored). It reports `result-discard` for a call written as a whole statement:
 
@@ -846,6 +886,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
+| `call-outside-allowlist` | a module or ring calls a `call_allowlist` target that only other modules or rings may call; also an owner glob that matches no module |
+| `hand-rolled-idiom` | a function makes both halves of a `call_allowlist` idiom (`calls` and `and_calls`) outside the sanctioned modules and rings; also an owner glob that matches no module |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |

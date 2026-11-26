@@ -18,6 +18,7 @@ from .domain import (
     EFFECT_RULES,
     ArchitecturePolicy,
     ArchitectureScope,
+    CallAllowance,
     ConstructionSite,
     OwnedLiteral,
     Policy,
@@ -283,7 +284,7 @@ def _construction_findings(context: RuleContext, name: str, info: ModuleInfo) ->
     ]
 
 
-def _site_text(item: ConstructionSite) -> str:
+def _site_text(item: CallAllowance | ConstructionSite) -> str:
     parts = [f"modules {list(item.modules)}"] if item.modules else []
     return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
 
@@ -299,6 +300,88 @@ def _stale_construction_sites(policy: ArchitecturePolicy, modules: Collection[st
             for glob in item.modules if not any(in_unit(module, glob) for module in modules)
         ]
     return out
+
+
+def _call_allowlist_findings(context: RuleContext, name: str, info: ModuleInfo) -> list[Violation]:
+    """A module making a call, or hand-rolling an idiom, that the policy sanctions only elsewhere (#229).
+
+    Only calls spelled on an imported or module-level name are recorded (``docs/configuration.md`` says what is not seen).
+    """
+    local_policy = context.policy_for(name)
+    if local_policy is None or not local_policy.call_allowlist:
+        return []
+    ring = context.resolve_ring(name)
+    entries = [item for item in local_policy.call_allowlist if not item.permits(name, ring)]
+    if not entries:
+        return []
+    calls = _absolute_calls(name, info)
+    who = f"[{name}] (ring {ring or 'none'})"
+    out: list[Violation] = []
+    for item in entries:
+        why = f"which only {_site_text(item)} may do" + (f": {item.reason}" if item.reason else "")
+        out += _idiom_findings(name, info, item, calls, (who, why)) if item.and_calls else _restricted_calls(name, item, calls, (who, why))
+    return out
+
+
+def _absolute_calls(name: str, info: ModuleInfo) -> list[tuple[int, str]]:
+    """The module's recorded call sites as ``(line, absolute dotted callee)``, in line order."""
+    return [(line, callee) for line, target in info.facts.calls if (callee := absolute_callee(name, info.is_package, target)) is not None]
+
+
+def _call_matches(callee: str, patterns: tuple[str, ...]) -> bool:
+    return any(fnmatch.fnmatchcase(callee, pattern) for pattern in patterns)
+
+
+def _restricted_calls(name: str, item: CallAllowance, calls: list[tuple[int, str]], text: tuple[str, str]) -> list[Violation]:
+    """One finding per call site, numbered per callee so a further call is a new baseline entry and a moved one is not."""
+    seen: dict[str, int] = {}
+    out: list[Violation] = []
+    for line, callee in calls:
+        if _call_matches(callee, item.calls):
+            seen[callee] = seen.get(callee, 0) + 1
+            detail = f"{text[0]} calls {callee}() (call #{seen[callee]}), {text[1]}"
+            out.append(Violation(Rule.CALL_OUTSIDE_ALLOWLIST, name, detail, line))
+    return out
+
+
+def _idiom_findings(
+    name: str, info: ModuleInfo, item: CallAllowance, calls: list[tuple[int, str]], text: tuple[str, str],
+) -> list[Violation]:
+    """One finding per function holding a call to one of ``calls`` and a different call to one of ``and_calls``."""
+    seen: dict[str, int] = {}
+    out: list[Violation] = []
+    for span in info.facts.function_spans:
+        inside = [call for call in calls if span.line <= call[0] <= span.end_line]
+        first = [call for call in inside if _call_matches(call[1], item.calls)]
+        second = [call for call in inside if _call_matches(call[1], item.and_calls)]
+        if not any(one != other for one in first for other in second):
+            continue
+        seen[span.name] = seen.get(span.name, 0) + 1
+        again = f" (definition #{seen[span.name]})" if seen[span.name] > 1 else ""
+        detail = f"{text[0]} {span.name}(){again} calls both {' or '.join(item.calls)} and {' or '.join(item.and_calls)}, {text[1]}"
+        found = ", ".join(sorted({callee for _, callee in first + second}))
+        out.append(Violation(Rule.HAND_ROLLED_IDIOM, name, detail, span.line, hint=f" (found: {found})"))
+    return out
+
+
+def _stale_call_allowances(policy: ArchitecturePolicy, modules: Collection[str]) -> list[Violation]:
+    """An owner glob that matches no module: a rename would leave the sanctioned wrapper unsanctioned, unnoticed until it is."""
+    return [
+        Violation(
+            Rule.HAND_ROLLED_IDIOM if item.and_calls else Rule.CALL_OUTSIDE_ALLOWLIST, ", ".join(item.calls),
+            f"`call_allowlist` {list(item.calls)}: modules glob {glob!r} matches no module",
+        )
+        for item in policy.call_allowlist for glob in item.modules
+        if not any(in_unit(module, glob) for module in modules)
+    ]
+
+
+def _stale_entries(policy: ArchitecturePolicy, modules: Collection[str]) -> list[Violation]:
+    """Every per-module list of the policy that names something no longer there."""
+    return (
+        _stale_importable_by(policy, modules) + _stale_owned_literals(policy, modules)
+        + _stale_construction_sites(policy, modules) + _stale_call_allowances(policy, modules)
+    )
 
 
 def _stale_importable_by(policy: ArchitecturePolicy, modules: Collection[str]) -> list[Violation]:
@@ -621,6 +704,7 @@ def check_modules(
         out += (
             _owned_literal_findings(context, name, info)
             + _construction_findings(context, name, info)
+            + _call_allowlist_findings(context, name, info)
             + _result_discard_findings(context, name, info, modules)
         )
         if is_tool:
@@ -695,7 +779,7 @@ def _finalize_checks(
     policy = context.policy
     if not policy.scopes:
         circular = _circular_imports(import_graph) if policy.forbid_circular_imports else []
-        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {})) + _stale_importable_by(policy, known) + _stale_owned_literals(policy, known) + _stale_construction_sites(policy, known)
+        return circular + _entry_dependencies(policy, known, entry_deps, third_party_by_scope.get(None, {})) + _stale_entries(policy, known)
     out: list[Violation] = []
     for scope in policy.scopes:
         local_graph = {
@@ -706,9 +790,7 @@ def _finalize_checks(
             out.extend(_circular_imports(local_graph))
         out.extend(_entry_dependencies(scope.policy, known, entry_deps, third_party_by_scope.get(scope.name, {})))
         scope_modules = [name for name in known if context.scope_name(name) == scope.name]
-        out.extend(_stale_importable_by(scope.policy, scope_modules))
-        out.extend(_stale_owned_literals(scope.policy, scope_modules))
-        out.extend(_stale_construction_sites(scope.policy, scope_modules))
+        out.extend(_stale_entries(scope.policy, scope_modules))
     return out
 
 

@@ -297,6 +297,12 @@ target = "arborescent.adapters.ProcessPoolParallel"
 rings = ["composition"]
 reason = "only the composition root picks how work is parallelised"
 
+# One place starts processes (a timeout, no shell); `selftest` calls it from another module.
+[[tool.arborescent.call_allowlist]]
+calls = ["subprocess.run", "subprocess.Popen"]
+modules = ["arborescent.tool_runner"]
+reason = "the tool runner is the one process boundary"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]

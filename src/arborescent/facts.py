@@ -14,12 +14,14 @@ from dataclasses import dataclass, field
 
 from .call_facts import (
     FunctionCalls,
+    FunctionSpan,
     bare_calls,
     call_aliases,
     call_sites,
     discard_call_lines,
     dynamic_imports,
     function_calls,
+    function_spans,
 )
 from .declaration_facts import arbor_annotation, comment_facts, script_deps
 from .definition_facts import (
@@ -68,6 +70,7 @@ class SourceFacts:
     dynamic_imports: tuple[tuple[int, str], ...] = ()  # (line, literal module name, or "" when the target is not a plain absolute string literal) (#161)
     purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
     untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
+    function_spans: tuple[FunctionSpan, ...] = ()  # every function and method with its line span, to place `calls` inside them (#229)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -116,6 +119,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         dynamic_imports(nodes, aliases),
         purity_facts(tree, nodes, aliases, purity_helpers(aliases)),
         untokenizable,
+        function_spans(tree),
     )
 
 

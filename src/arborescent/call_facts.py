@@ -10,7 +10,10 @@ import ast
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-__all__ = ["FunctionCalls", "absolute_callee", "bare_calls", "call_aliases", "call_sites", "discard_call_lines", "dotted_name", "dynamic_imports", "function_calls"]
+__all__ = [
+    "FunctionCalls", "FunctionSpan", "absolute_callee", "bare_calls", "call_aliases", "call_sites", "discard_call_lines", "dotted_name",
+    "dynamic_imports", "function_calls", "function_spans",
+]
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,36 @@ class FunctionCalls:
     name: str
     line: int
     calls: tuple[str, ...]  # sorted, unique
+
+
+@dataclass(frozen=True)
+class FunctionSpan:
+    """Where one function or method is, so a rule can say which of the module's recorded call sites are inside it (#229).
+
+    ``name`` is ``f``, ``Class.method`` or ``Outer.Inner.method``. A nested function or ``lambda`` has no span of its own:
+    its calls belong to the function around it. Decorators lie before ``line``: they run when the module defines the function.
+    """
+
+    name: str
+    line: int  # the `def` line
+    end_line: int
+
+
+def function_spans(tree: ast.Module) -> tuple[FunctionSpan, ...]:
+    """Every function and method that is not inside another function, however the module or class body nests it."""
+    out: list[FunctionSpan] = []
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                out.append(FunctionSpan(prefix + child.name, child.lineno, child.end_lineno or child.lineno))
+            elif isinstance(child, ast.ClassDef):
+                visit(child, f"{prefix}{child.name}.")
+            elif isinstance(child, ast.stmt | ast.excepthandler | ast.match_case):
+                visit(child, prefix)
+
+    visit(tree, "")
+    return tuple(out)
 
 
 def discard_call_lines(nodes: Sequence[ast.AST]) -> tuple[int, ...]:
