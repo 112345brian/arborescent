@@ -15,6 +15,7 @@ from arborescent.config import policy_from_mapping
 from arborescent.domain import PolicyError, Rule
 from arborescent.engine import run_own
 from arborescent.facts import extract
+from arborescent.presets import EFFECT_CATEGORIES
 from arborescent.rules import RuleContext, check_modules, fits_ring
 from arborescent.scan_cache_codec import CACHE_VERSION, facts_from_json, facts_to_json
 from arborescent.selftest import plan, selftest
@@ -249,6 +250,83 @@ def test_fits_ring_counts_import_time_effects(repo: Path) -> None:
     info = scan.modules["app.domain"]
     assert fits_ring(context, "app.domain", info, "domain", scan.known)
     assert not fits_ring(context, "app.domain", info, "ports", scan.known)
+
+
+# --- every category the setting accepts can fire: one reproducer each, so a new category cannot be accepted and never fire ----
+
+# `global`, `registry` and a written cache happen only inside a function, so they run at import through a call (one hop).
+RUNS_AT_IMPORT = {
+    "clock": "import time\nX = time.time()\n",
+    "env": "import os\nX = os.getenv('A')\n",
+    "identity": "import uuid\nX = uuid.uuid4()\n",
+    "randomness": "import random\nX = random.random()\n",
+    "sleep": "import time\ntime.sleep(1)\n",
+    "threads": "import threading\nX = threading.Thread()\n",
+    "process": "import subprocess\nX = subprocess.run(['a'])\n",
+    "database": "import sqlite3\nX = sqlite3.connect('a')\n",
+    "network": "import urllib.request\nX = urllib.request.urlopen('u')\n",
+    "filesystem": "X = open('a')\n",
+    "dynamic-import": "import importlib\nX = importlib.import_module('a')\n",
+    "patch": "from unittest.mock import patch\npatch('app.ports.X').start()\n",
+    "console": "print('a')\n",
+    "global": "X = 0\ndef setup():\n    global X\n    X = 1\nsetup()\n",
+    "state": "import threading\nLOCK = threading.Lock()\n",
+    "monotonic": "import time\nX = time.monotonic()\n",
+    "host": "import os\nX = os.getpid()\n",
+    "fs-query": "import os\nX = os.path.exists('a')\n",
+    "registry": "REG = {}\ndef register(k):\n    REG[k] = 1\nregister('a')\n",
+    "cache": "import functools\n@functools.cache\ndef load():\n    return 1\nX = load()\n",
+}
+
+
+def test_every_accepted_category_has_a_reproducer() -> None:
+    assert set(RUNS_AT_IMPORT) == EFFECT_CATEGORIES
+
+
+@pytest.mark.parametrize("category", sorted(RUNS_AT_IMPORT))
+def test_every_accepted_category_fires_at_import(repo: Path, category: str) -> None:
+    assert [v.subject for v in findings(repo, RUNS_AT_IMPORT[category], category)] == ["app.ports"]
+
+
+@pytest.mark.parametrize(("category", "source"), [
+    ("global", "X = 0\ndef setup():\n    global X\n    X += 1\nsetup()\n"),
+    ("global", "X = 0\ndef setup():\n    global X\n    for X in (1,):\n        pass\nsetup()\n"),
+    ("registry", "REG = []\ndef register(fn):\n    REG.append(fn)\n    return fn\n@register\ndef f():\n    pass\n"),
+    ("registry", "REG = {}\nclass Plugin:\n    def __init__(self):\n        REG['p'] = self\nP = Plugin()\n"),
+    ("registry", "class R:\n    items = []\n    @classmethod\n    def add(cls):\n        cls.items.append(1)\nR.add()\n"),
+    ("cache", "_cache = {}\ndef load():\n    _cache['a'] = 1\nload()\n"),
+    ("cache", "from functools import lru_cache\nclass A:\n    @staticmethod\n    @lru_cache(maxsize=1)\n    def load():\n        return 1\nX = A.load()\n"),
+])
+def test_module_state_written_by_a_call_at_import_fires(repo: Path, category: str, source: str) -> None:
+    assert [v.subject for v in findings(repo, source, category)] == ["app.ports"], source
+
+
+@pytest.mark.parametrize(("category", "source"), [
+    ("global", "X = 0\ndef setup():\n    global X\n    X = 1\n"),  # never called
+    ("global", "X = 0\ndef read():\n    global X\n    return X\nread()\n"),  # a read
+    ("global", "global X\nX = 1\n"),  # at module level `global` says nothing
+    ("registry", "REG = {}\nREG['a'] = 1\nfor k in 'ab':\n    REG[k] = 1\n"),  # building a table at import is deterministic
+    ("registry", "REG = {}\ndef register(k):\n    REG[k] = 1\n"),
+    ("registry", "REG = {}\ndef make():\n    return lambda k: REG.pop(k)\nX = make()\n"),  # a deferred write
+    ("registry", "REG = {}\ndef make():\n    def later(k):\n        REG[k] = 1\n    return later\nX = make()\n"),
+    ("cache", "import functools\n@functools.cache\ndef load():\n    return 1\n"),  # defining a cached loader fills nothing
+    ("cache", "import functools\n@functools.cache\ndef load():\n    return 1\nF = load\n"),
+])
+def test_module_state_that_no_import_runs_does_not_fire(repo: Path, category: str, source: str) -> None:
+    assert findings(repo, source, category) == [], source
+
+
+@pytest.mark.parametrize(("category", "loader"), [
+    ("global", "X = 0\ndef setup():\n    global X\n    X = 1\n"),
+    ("registry", "REG = {}\ndef setup():\n    REG['a'] = 1\n"),
+    ("cache", "import functools\n@functools.cache\ndef setup():\n    return 1\n"),
+])
+def test_module_state_fires_through_a_call_into_another_module(repo: Path, category: str, loader: str) -> None:
+    source = "from .loader import setup\nsetup()\n"
+    found = findings(repo, source, category, **{"app/loader.py": loader, "app/ports.py": source})
+    assert [v.detail for v in found if v.subject == "app.ports"] == [
+        f"[ports] import-time call of app.loader.setup runs effect {category}; move it into a function",
+    ]
 
 
 def test_selftest_probes_the_rule_when_a_ring_enables_it(repo: Path) -> None:

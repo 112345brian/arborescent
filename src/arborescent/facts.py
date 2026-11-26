@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 import re
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .call_facts import (
     CallShape,
@@ -52,11 +52,14 @@ from .definition_facts import (
 )
 from .effect_facts import (
     EffectUse,
+    SharedState,
+    SharedWrite,
     StateWrite,
     merge_sites,
     module_effects,
     rebound_names,
     running_ids,
+    state_category,
 )
 from .forwarder_facts import Forwarder, forwarders
 from .import_syntax import RawImport, import_aliases, raw_imports
@@ -72,7 +75,8 @@ from .seam_facts import SeamFacts, SeamFrame, SeamParam, SeamUse, seam_facts
 
 __all__ = [
     "ClassMembers", "ClassShape", "Forwarder", "ImportCall", "ImportTimeFacts", "ModuleInfo", "PurityFacts", "PurityUnit", "SeamFacts",
-    "SeamFrame", "SeamParam", "SeamUse", "SourceFacts", "extract", "file_module", "patched_targets", "unreached_bindings",
+    "SeamFrame", "SeamParam", "SeamUse", "SharedState", "SharedWrite", "SourceFacts", "extract", "file_module", "link_shared_state",
+    "patched_targets", "unreached_bindings",
 ]
 
 
@@ -117,6 +121,7 @@ class SourceFacts:
     classes: tuple[ClassMembers, ...] = ()  # every class's bases and member names (#219)
     state_writes: tuple[StateWrite, ...] = ()  # writes to module-level mutable state outside the module's own locks (#232)
     module_locks: tuple[str, ...] = ()  # module-level names bound to a lock, so another module's `with locks.L:` can be believed (#232)
+    shared_state: SharedState = field(default_factory=SharedState)  # containers others can write, and writes to imported names (#194)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -164,6 +169,57 @@ def unreached_bindings(modules: Mapping[str, ModuleInfo], known: Collection[str]
     ]
 
 
+_REEXPORT_DEPTH = 5  # a chain of package re-exports has to end
+
+
+def _imported_container(modules: Mapping[str, ModuleInfo], dotted: str, depth: int = _REEXPORT_DEPTH) -> str | None:
+    """``module.REG`` or ``module.Class.attr`` when ``dotted`` names a container of a scanned module, re-exports followed."""
+    parts = dotted.split(".")
+    cut = next((end for end in range(len(parts) - 1, 0, -1) if ".".join(parts[:end]) in modules), None)
+    if cut is None:
+        return None
+    module, rest = modules[".".join(parts[:cut])], parts[cut:]
+    if ".".join(rest) in module.facts.shared_state.containers:
+        return dotted
+    for exported, level, source, imported in module.facts.reexports if depth else ():
+        if exported == rest[0]:
+            origin = "." * level + ".".join(part for part in (source, imported, *rest[1:]) if part)
+            target = absolute_callee(module.name, module.is_package, origin)
+            return None if target is None else _imported_container(modules, target, depth - 1)
+    return None
+
+
+def _linked(modules: Mapping[str, ModuleInfo], info: ModuleInfo) -> ModuleInfo:
+    facts = info.facts
+    if not (facts.shared_state.writes or facts.import_time.function_writes):
+        return info
+
+    def container(target: str) -> str | None:
+        dotted = absolute_callee(info.name, info.is_package, target)
+        return None if dotted is None else _imported_container(modules, dotted)
+
+    uses = {
+        EffectUse(write.line, state_category(found.rpartition(".")[2]), f"{write.function}.{found}")
+        for write in facts.shared_state.writes
+        if (found := container(write.target)) is not None
+    }
+    effects = {
+        (function, state_category(found.rpartition(".")[2]), f"{function.rpartition('.')[2]}.{found}")
+        for function, target in facts.import_time.function_writes
+        if (found := container(target)) is not None
+    }
+    if uses <= set(facts.effect_uses) and effects <= set(facts.import_time.function_effects):
+        return info
+    import_time = replace(facts.import_time, function_effects=tuple(sorted({*facts.import_time.function_effects, *effects})))
+    return replace(info, facts=replace(facts, effect_uses=tuple(sorted({*facts.effect_uses, *uses})), import_time=import_time))
+
+
+def link_shared_state(modules: Mapping[str, ModuleInfo]) -> dict[str, ModuleInfo]:
+    """Each module with its writes to another module's containers added as ``registry``/``cache`` uses (#194): only the whole
+    set of modules says whether an imported name is a container. A write to anything not scanned stays unseen."""
+    return {name: _linked(modules, info) for name, info in modules.items()}
+
+
 def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     arbor_ring, arbor_error, arbor_role, arbor_reason = arbor_annotation(tree)
@@ -202,7 +258,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         dynamic_imports(nodes, aliases),
         purity_facts(tree, nodes, aliases, purity_helpers(aliases), calls_aliases),
         untokenizable,
-        import_time_facts(Walked(tree, at_import, sites, running), calls_aliases, dotted_name),
+        import_time_facts(Walked(tree, at_import, sites, running, effects.state_runs, effects.foreign_runs), calls_aliases, dotted_name),
         seam_facts(tree, sites, running, aliases, dotted_name),
         function_spans(tree, nodes, calls_aliases),
         exemption_comments(source),
@@ -214,6 +270,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         member_shapes(tree, calls_aliases),
         effects.state_writes,
         effects.locks,
+        effects.shared,
     )
 
 

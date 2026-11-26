@@ -16,7 +16,7 @@ settings. The two forms cannot be mixed.
 | `rings` | required | Distinct ring names, **innermost first**. |
 | `classify` | `{}` | Table of glob -> ring, used when a module has no valid `__arbor__` annotation. Globs match the dotted module name and `*` crosses dots. The first match wins. Every module needs a ring from an annotation or a matching glob (`unclassified`). |
 | `sources` | `["."]` | Folders or single files to scan. A single `.py` file is an entry script, not a package. |
-| `source_roots` | `["."]` | Folders that module names are relative to (`src` for a `src/app` layout). Also handed to tach. |
+| `source_roots` | `["."]` | Folders that module names are relative to (`src` for a `src/app` layout). Also handed to tach (see [How tach reads `source_roots`](#how-tach-reads-source_roots)). |
 | `exclude` | `[]` | Globs to skip while scanning. A bare entry (`client`, `*.gen`, `dir/sub`) is unanchored, like a `.gitignore` line: it matches the path, a file or folder name, or any ancestor folder at **any depth**, so `client` also hides `src/pkg/client/`. A leading `/` anchors the entry to the repository root and matches by full relative path only: `/client` hides the top-level `client/` and nothing deeper, `/src/*/generated` hides one level of generated folders. Excluded Python files are counted by folder on every `check`; a folder hidden only by a bare name below the root is flagged there with the anchored spelling. |
 | `children` | `[]` | Explicit nested package roots to inspect for a direct Arborescent policy. In `certify` mode, roots with their own policy are checked recursively; roots without one remain in the parent scan. |
 | `child_policy_mode` | `"certify"` | `"certify"` respects direct child policies and includes their results in parent certification. `"parent"` overrides child policies: listed roots stay in the parent scan and are not checked separately. |
@@ -875,6 +875,22 @@ below a `tests`, `test` or `docs` folder, `conftest.py` and `dev_tools` modules 
 `modularity` says. `selftest` probes each with a new module (a clock call; an `__arbor__` annotation into a ring that permits
 the effect) and lists a probe it cannot build, with the reason, as skipped.
 
+## How tach reads `source_roots`
+
+Tach 0.35.x silently reads **no files** under some spellings of a `source_roots` entry and passes. Arborescent does not
+let that happen:
+
+- **macOS and Linux:** the `tach` and `tach-external` engines (and the tach probes of `--require-profile`) fail without
+  running tach, naming the spelling to write instead. Refused: a `.` or doubled `/` with two or more folder names after it
+  (`./a/b`, `a//b/c`; anywhere in a glob such as `./libs/*/src` or `libs/*/src/`), and `..` after a folder name
+  (`a/c/../b`). `./src`, `src/` and `a//b` are read by tach and accepted. The roots come from `tach.toml`, else from
+  `[tool.tach]` in `pyproject.toml`.
+- **Windows:** forward-slash roots are not read either, so a `tach.toml` that has one runs on a temporary copy of the
+  project with normalised backslash roots (#214). The project is not written to.
+
+Not judged: absolute roots and roots outside the project (`../other/src`). Generated `tach.toml` files carry no `./` or
+doubled separators.
+
 ## Module ring annotations: `__arbor__`
 
 A module can declare its own ring with a module-level assignment to a literal dictionary:
@@ -1146,7 +1162,11 @@ without calling it (`NOW = time.time`, `now=time.time`, `field(default_factory=t
 package, or defined in the same module; a class call runs `__new__`, `__init__` and `__post_init__`; a decorator is a call)
 is reported when that function itself runs a forbidden effect. The fix is to move the call into a function.
 
-**Not seen:** a second hop; a method on a value (`loader.read()` where `loader = Loader()`); a function passed as an argument
+**Module state at import.** `global`, `registry` and `cache` writes happen inside functions, so they are reported only
+through such a call (`register("a")`, `@register`, `Plugin()`), as is calling a `functools.cache`d loader (defining one
+runs nothing). Filling a container at module level is not reported: it is the same on every import.
+
+**Not seen:** an `__init_subclass__` hook run by a `class` statement; a second hop; a method on a value (`loader.read()` where `loader = Loader()`); a function passed as an argument
 and called by the receiver (`map(os.getenv, names)`); the function a decorator factory returns; an inherited constructor.
 Calling an `async` or generator function counts as running its body. `arborescent admit` and the `classify-facts` signals
 judge only direct and same-module effects. `check --changed` follows calls only into the files it checks.
@@ -1551,8 +1571,20 @@ them. A policy that does not list them in a `forbid` keeps every finding and bas
   (`dict()`, `defaultdict(...)`, `OrderedDict`, `Counter`, `deque`) is a registry when a function or method writes it: `REG[k] = v`, `REG[k] += 1`,
   `del REG[k]`, or a mutating call (`append`, `extend`, `insert`, `add`, `update`, `pop`, `popitem`, `remove`, `discard`, `clear`, `setdefault`,
   `appendleft`, `popleft`). A name the function, or a function around it, binds itself (a parameter or an assignment) is a local, not
-  the module's container. Not seen: reads, a fill at import time (deterministic), a container imported from another module, a write through
-  `self.attr` or an alias, and `REG = REG | {...}` style rebinding (that is `global` when declared).
+  the module's container. The same writes count on:
+  - a container of **another scanned module**, however it is imported (`from m import REG`, `m.REG`, `m.Plugins.items`, a package
+    re-export). The finding is on the writing module, under the writing module's ring.
+  - a **class-attribute container** of a class defined at module level: through `cls`, the class name, `type(self)` or
+    `self.__class__`, and through `self` when no method of the class (or of its bases in the same module) assigns `self.<name>`,
+    which would make it per instance. An annotated attribute of a class that has a base or a decorator may be a per-instance
+    field (pydantic, attrs), so through `self` it needs `ClassVar` to count.
+  - an **alias** bound once to any of these (`r = REG`, `items = self.items`, a module-level `ALIAS = REG`).
+
+  Not seen: reads, a fill at import time (deterministic), an attribute inherited from a class of another module, an object's
+  attributes (`SINGLETON.items[k] = v`), an alias of an alias, a name bound more than once, a container passed as an argument or
+  returned by a call, a container built by anything but the forms above, and `REG = REG | {...}` style rebinding (that is
+  `global` when declared). With `disabled_tools = ["arbor-annotations"]`, `check --changed` reads only the changed files and
+  does not see a write to a container of an unchanged one.
 - **Cache.** `@functools.cache` and `@functools.lru_cache` (aliases and `from functools import ...` resolved, on functions and methods) make a
   loader whose result depends on call order, so they are a `cache` use at the decorator. A write to a module-level container whose name contains
   `cache` or `memo` is also `cache`, not `registry`. A hand-rolled `global _x; if _x is None: _x = load()` slot is the `global` category.
@@ -1590,7 +1622,8 @@ assignment, augmented assignment or `del` of a name the function declares `globa
 `arborescent baseline --adopt unguarded-module-state` records the current findings once. A stale `allow` entry is reported under the same rule.
 `--changed` reads only the changed files, so it trusts a `with` on a name from a module it did not read.
 
-**Blind spots (a clean run is not proof of thread safety).** Not reported although they may race: containers imported from another module, writes
+**Blind spots (a clean run is not proof of thread safety).** This rule looks only at the module's own containers and `global` names
+(narrower than `registry`/`cache`). Not reported although they may race: containers imported from another module, writes
 through an alias, `self.attr` or a class attribute, nested containers (`REG[k].append(v)`), object attributes (`STATE.x = 1`), functions that
 mutate an argument (`heapq.heappush(REG, v)`, `|=` on an alias), containers bound inside `if`/`try`, and containers built by anything other than
 the listed literals and constructors. Reads are never checked, so check-then-act outside the lock passes, and so do two writers that hold

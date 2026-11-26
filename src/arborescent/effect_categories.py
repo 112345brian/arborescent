@@ -17,8 +17,8 @@ EFFECT_CATEGORIES: frozenset[str] = frozenset(
     }
 )
 
-# #194: shared module state that is not I/O. `registry` is a module-level dict/list/set written from inside a function; `cache` is a
-# `functools.cache`/`lru_cache` loader or a cache-named module container written from inside a function. Both report as `effect-state`,
+# #194: shared module state that is not I/O. `registry` is a dict/list/set of a module or class written from inside a function; `cache` is
+# a `functools.cache`/`lru_cache` loader or such a container with a cache-like name. Both report as `effect-state`,
 # are in no default `forbid`, taint seed or `must_be_pure`, and are skipped by the readers that describe a module's I/O.
 MODULE_STATE_CATEGORIES: frozenset[str] = frozenset({"registry", "cache"})
 

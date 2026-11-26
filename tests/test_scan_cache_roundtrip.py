@@ -117,6 +117,7 @@ def run_result() -> RunResult:
 
 def register(key: str, clock=time.time) -> None:
     CACHE[key] = 1
+    sibling.REGISTRY[key] = 1
     global counter
     counter = 1
     value = time.time()

@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .domain import ToolResult
-from .generated_config import windows_tach_config
+from .generated_config import unread_tach_roots, windows_tach_config
 
 # Besides Python files, what `tach check` and `tach check-external` read from the tree.
 _TACH_INPUTS = frozenset(
@@ -96,6 +96,25 @@ def _copy_for_tach(project: Path, target: Path) -> None:
             _ = shutil.copyfile(exclude, target / ".git" / "info" / "exclude")
 
 
+def _unread_roots_message(cwd: Path) -> str:
+    """Why tach must not run in ``cwd``: it would pass with a source root unchecked. Empty when it may run.
+
+    ``tach.toml`` wins over a ``[tool.tach]`` table. On Windows ``windows_tach_config`` normalises the same spellings in a copy instead."""
+    for name, table in (("tach.toml", ()), ("pyproject.toml", ("tool", "tach"))):
+        config = cwd / name
+        if not config.is_file():
+            continue
+        try:
+            unread = unread_tach_roots(config.read_text(encoding="utf-8-sig"), table)
+        except (OSError, UnicodeDecodeError):
+            return ""  # tach reports a config it cannot read
+        if not unread:
+            return ""
+        spelled = "; ".join(f"write {written!r} as {canonical!r}" for written, canonical in unread)
+        return f"tach: not run, it would leave source_roots in {name} unchecked as spelled: {spelled}"
+    return ""
+
+
 class SubprocessToolRunner:
     """``ToolRunner`` over ``subprocess.run``; a missing executable is a result, not an exception."""
 
@@ -122,8 +141,11 @@ class SubprocessToolRunner:
         if resolved is None:
             return ToolResult(None, "", f"{argv[0]}: not installed", time.perf_counter() - started)
         command = [resolved, *argv[1:]]
-        if self._windows and argv[0] == "tach" and list(argv[1:2]) in (["check"], ["check-external"]):
-            return self._run_tach(command, cwd, timeout, started)
+        if argv[0] == "tach" and list(argv[1:2]) in (["check"], ["check-external"]):
+            if self._windows:
+                return self._run_tach(command, cwd, timeout, started)
+            if refusal := _unread_roots_message(cwd):
+                return ToolResult(-1, "", refusal, time.perf_counter() - started)
         return self._execute(command, argv[0], cwd, timeout, started)
 
     def _run_tach(self, command: list[str], cwd: Path, timeout: float, started: float) -> ToolResult:
