@@ -204,12 +204,33 @@ def _local_mutations(
     steps.append(owned_literal_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(mixed_purity_mutations(local_policy, purity, local_paths, arbor_index, scan.modules))
+    steps.append(_seam_bypass_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(_docs_mutations(local_policy, local_paths, local_known, arbor_index))
     for found, step_skipped in steps:
         out.extend(found)
         skipped.extend(step_skipped)
     out.extend(_entry_dependency_mutations(local_policy, local_paths, local_known, arbor_index))
     return out, skipped
+
+
+def _seam_bypass_mutations(
+    policy: ArchitecturePolicy, paths: Mapping[str, str], known: Collection[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[list[Mutation], list[str]]:
+    """Probe ``effect-seam-bypassed`` (#233): a new function that takes a configured seam parameter and uses the real effect."""
+    setting = policy.effect_seam_bypassed
+    if setting is None:
+        return [], []
+    host = next((
+        module for module in sorted(known)
+        if module in paths and not paths[module].endswith("__init__.py")
+        and (ring := policy.resolve_ring(arbor_index, module)) is not None and (not setting.rings or ring in setting.rings)
+    ), None)
+    seam = next(((name, category) for name, category in setting.parameters if category in _AT_IMPORT_SNIPPETS and name.isidentifier()), None)
+    if host is None or seam is None:
+        return [], [f"effect-seam-bypassed: no {'module in a checked ring' if host is None else 'seam parameter name'} to mutate"]
+    imported, expression = _AT_IMPORT_SNIPPETS[seam[1]]
+    append = f"{imported}\ndef _arborescent_probe_seam({seam[0]}=None):\n    return {expression}"
+    return [Mutation(Rule.EFFECT_SEAM_BYPASSED, f"a function given {seam[0]!r} that uses the real {seam[1]}", paths[host], append)], []
 
 
 def _docs_mutations(
@@ -555,7 +576,38 @@ def _effect_mutations(policy: ArchitecturePolicy, ring: str, host: str) -> list[
             "_arborescent_probe_value = None\n\n\ndef _arborescent_probe_global() -> None:\n    "
             "global _arborescent_probe_value\n    _arborescent_probe_value = 1",
         ))
-    return out
+    return out + _at_import_mutations(policy, ring, host)
+
+
+# category -> (import line, an expression that runs an effect of it), for the `effect-at-import` probe
+_AT_IMPORT_SNIPPETS: Mapping[str, tuple[str, str]] = {
+    "clock": ("import time", "time.time()"),
+    "console": ("", "print()"),
+    "database": ("import sqlite3", "sqlite3.connect(':memory:')"),
+    "dynamic-import": ("import importlib", "importlib.import_module('json')"),
+    "env": ("import os", "os.getenv('ARBORESCENT_PROBE')"),
+    "filesystem": ("", "open('arborescent_probe')"),
+    "fs-query": ("import os", "os.getcwd()"),
+    "host": ("import os", "os.getpid()"),
+    "identity": ("import uuid", "uuid.uuid4()"),
+    "monotonic": ("import time", "time.monotonic()"),
+    "network": ("import urllib.request", "urllib.request.urlopen('http://localhost')"),
+    "process": ("import subprocess", "subprocess.run(['true'])"),
+    "randomness": ("import random", "random.random()"),
+    "sleep": ("import time", "time.sleep(0)"),
+    "state": ("import threading", "threading.Lock()"),
+    "threads": ("import threading", "threading.Thread()"),
+}
+
+
+def _at_import_mutations(policy: ArchitecturePolicy, ring: str, host: str) -> list[Mutation]:
+    """Probe ``effect-at-import`` through its one-hop path: a new function no module has, called at import."""
+    category = next(iter(sorted(policy.ring(ring).forbid_at_import & _AT_IMPORT_SNIPPETS.keys())), None)
+    if category is None:
+        return []  # nothing listed, or only `global`/`patch`, which an import-time call cannot stand for
+    imported, expression = _AT_IMPORT_SNIPPETS[category]
+    append = f"{imported}\ndef _arborescent_probe_load():\n    return {expression}\n\n\n_arborescent_probe_loaded = _arborescent_probe_load()"
+    return [Mutation(Rule.EFFECT_AT_IMPORT, f"{ring}: {category} effect through an import-time call", host, append)]
 
 
 def _abstraction_mutations(policy: ArchitecturePolicy, ring: str, host: str) -> list[Mutation]:

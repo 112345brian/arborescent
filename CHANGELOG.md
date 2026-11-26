@@ -50,6 +50,12 @@
   modules that no entrypoint may load at import time; `arborescent coupling check` fails on either, naming the imports or the
   chain. `arborescent coupling startup` reports closure, budget, heaviest imports and what each mount adds (#216). Static
   only: no wall-time, cold-start or third-party import measurement.
+- `effect-at-import` (#230), opt-in per ring with `forbid_at_import = [...]`: an effect that runs while a module is imported
+  (module-level statement, class body, parameter default, decorator) fails, including one call into a first-party function
+  (`X = load_thing()` where `load_thing` reads a file). The scan cache is re-built once after upgrading.
+- `effect-seam-bypassed` (#233), opt-in with `[tool.arborescent.effect_seam_bypassed]`: a function or class given an
+  injected clock, environment or generator (by parameter name, annotation or effect-function default) that also uses the
+  real one. Falling back to the real effect only when nothing was injected is not reported.
 
 ## 0.9.0 — 2026-11-12
 

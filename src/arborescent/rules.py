@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from typing import NamedTuple
 
 from .call_facts import absolute_callee
@@ -23,6 +23,7 @@ from .domain import (
     Policy,
     RingRule,
     Rule,
+    SeamBypass,
     Violation,
     dist_name,
     in_unit,
@@ -31,11 +32,12 @@ from .effect_facts import EffectUse
 from .effect_import_rules import (
     EffectEdge,
     EffectImport,
+    effect_at_import_findings,
     effect_via_import_violations,
     record_effect_edge,
     unsanctioned_effect_imports,
 )
-from .facts import Forwarder, ModuleInfo
+from .facts import Forwarder, ModuleInfo, SeamFrame, SeamUse
 from .import_cycles import cyclic_components
 from .import_facts import RawImport, resolve_targets
 from .package_constraint_rules import placement_violations, use_violations
@@ -225,6 +227,54 @@ def _result_discard_findings(context: RuleContext, name: str, info: ModuleInfo, 
             f"or discard it on purpose with `_ = {callee.rpartition('.')[2]}(...)`",
             line,
         ))
+    return out
+
+
+class _Seam(NamedTuple):
+    function: str  # the function to report
+    owner: str  # the class that was given the seam, or "" when the function takes it
+    names: tuple[str, ...]
+
+
+def _enclosing(frames: tuple[SeamFrame, ...], frame: SeamFrame, below: SeamFrame) -> Iterator[tuple[SeamFrame, SeamFrame]]:
+    """``(frame, the one just inside it)`` from ``frame`` outwards; the innermost pair is that frame twice."""
+    yield frame, below
+    if frame.parent >= 0:
+        yield from _enclosing(frames, frames[frame.parent], frame)
+
+
+def _seam_of(setting: SeamBypass, frames: tuple[SeamFrame, ...], use: SeamUse) -> _Seam | None:
+    """The nearest seam of the use's category around it, or ``None``."""
+    for frame, below in _enclosing(frames, frames[use.frame], frames[use.frame]):
+        seams = sorted(p.name for p in frame.params if setting.category_of(p.name, p.annotation, p.default) == use.category)
+        if not seams:
+            continue
+        if set(seams) & set(use.guards):
+            return None  # the real one is the fallback for a seam that was not injected
+        return _Seam(below.name if frame.is_class else frame.name, frame.name if frame.is_class else "", tuple(seams))
+    return None
+
+
+def _seam_bypass_findings(context: RuleContext, name: str, ring: str, info: ModuleInfo) -> list[Violation]:
+    """A function (or a method of a class) given an injected effect that also uses the real one (#233): one per function and category."""
+    local_policy = context.policy_for(name)
+    setting = local_policy.effect_seam_bypassed if local_policy is not None else None
+    if setting is None or (setting.rings and ring not in setting.rings):
+        return []
+    found: dict[tuple[str, str, str, tuple[str, ...]], list[SeamUse]] = {}
+    for use in info.facts.seams.uses:
+        seam = _seam_of(setting, info.facts.seams.frames, use)
+        if seam is not None:
+            function, owner, seams = seam
+            found.setdefault((function, use.category, owner, seams), []).append(use)
+    out: list[Violation] = []
+    for (function, category, owner, seams), uses in found.items():
+        quoted = [f"'{seam}'" for seam in seams]
+        noun = f"effect seam{'s' if len(seams) > 1 else ''} {', '.join(quoted)}"
+        has = f"has the {noun} injected into {owner}" if owner else f"takes the {noun}"
+        detail = f"[{ring}] {function}() {has} but also uses the real {category}; use {' or '.join(quoted)} instead"
+        hint = f" (it uses {', '.join(sorted({use.target for use in uses}))})"
+        out.append(Violation(Rule.EFFECT_SEAM_BYPASSED, name, detail, min(use.line for use in uses), hint=hint))
     return out
 
 
@@ -653,7 +703,8 @@ def check_modules(
             out += _internal_imports(context, name, ring, imp.line, internal) + _forwarded_imports(context, name, imp, _ImportEnv(modules, known, tops, import_graph))
             out += _external_imports(context, name, ring, imp.line, external, third_party, siblings)
         out += _os_branching(local_policy, name, ring, rule, info)
-        out += _effect_uses(context, name, ring, info, known)
+        out += _effect_uses(context, name, ring, info, known) + effect_at_import_findings(context, ring, info, (modules, absolute_callee))
+        out += _seam_bypass_findings(context, name, ring, info)
         out += (
             _abstraction_violations(name, ring, rule, info)
             + _typed_port_violations(name, ring, rule, info)
@@ -682,6 +733,8 @@ def fits_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, know
         found += _external_imports(context, name, ring, imp.line, external, {}, {})
     found += _os_branching(policy, name, ring, policy.ring(ring), info)
     found += _effect_uses(context, name, ring, info, known)
+    found += effect_at_import_findings(context, ring, info, ({name: info}, absolute_callee))  # direct and same-module only: other modules are not at hand
+    found += _seam_bypass_findings(context, name, ring, info)
     found += _abstraction_violations(name, ring, policy.ring(ring), info)
     found += _typed_port_violations(name, ring, policy.ring(ring), info)
     return not found

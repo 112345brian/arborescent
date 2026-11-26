@@ -2,14 +2,15 @@
 
 A use is a name or attribute chain that resolves (through the import alias table) to an effectful target, a method
 called on a path-valued name, a ``global`` mutation, or a static ``patch(...)`` target. A reference held in a parameter
-default is recorded as an injection seam, a type annotation is not a use, and ``random.Random(<seed>)`` is deterministic."""
+default is recorded as an injection seam, a type annotation is not a use, and ``random.Random(<seed>)`` is deterministic.
+A use that runs while the module is imported is flagged ``at_import`` (#230)."""
 
 from __future__ import annotations
 
 import ast
 import re
 from collections.abc import Collection, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .call_facts import dotted_name
 from .effect_categories import (
@@ -20,7 +21,7 @@ from .effect_categories import (
 )
 from .purity_facts import local_names, module_containers, mutated_container
 
-__all__ = ["EffectUse", "effect_uses"]
+__all__ = ["EffectSite", "EffectUse", "effect_sites", "merge_sites", "running_ids", "runs"]
 
 
 _PATH_IO_METHODS = frozenset({
@@ -45,12 +46,15 @@ class EffectUse:
     category: str
     target: str
     seam: int = 0  # 0: a use; 1: a parameter default whose annotation is a Callable/Mapping; 2: a parameter default otherwise
+    at_import: bool = False  # the effect runs while the module is imported (#230); set by ``merge_sites``
 
     @property
     def is_module_state(self) -> bool:
         """A `registry`/`cache` use (#194): shared state, not I/O, so the readers that describe a module's I/O skip it."""
         return self.category in MODULE_STATE_CATEGORIES
 
+
+EffectSite = tuple[ast.AST | None, EffectUse]  # the node that is the use; None when no one expression is (a ``global`` mutation)
 
 _SEAM_ANNOTATIONS = frozenset({"Callable", "Mapping", "MutableMapping"})
 
@@ -206,14 +210,14 @@ def _scope_path_names(scope: ast.AST, aliases: dict[str, str], inherited: Collec
     return bound
 
 
-def _path_receiver_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> list[EffectUse]:
+def _path_receiver_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> list[EffectSite]:
     """``p.read_text()``, ``p.exists()`` on a name this scope bound to a path (a ``Path(...)`` value or a ``Path`` annotation).
 
     Scope by scope, so a ``str`` named ``path`` in another function is not mistaken for one. A module that never
     imports ``pathlib`` has no path to find and is skipped without a second walk."""
     if not any(target == "pathlib" or target.startswith("pathlib.") for target in aliases.values()):
         return []
-    uses: list[EffectUse] = []
+    uses: list[EffectSite] = []
     scopes = [tree, *(n for n in nodes if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef))]
     module_paths = _scope_path_names(tree, aliases)
     for scope in scopes:
@@ -225,7 +229,7 @@ def _path_receiver_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[s
             if isinstance(node, ast.Attribute) and (node.attr in _PATH_IO_METHODS or node.attr in _PATH_QUERY_METHODS) and _is_pathish(node.value, bound, aliases):
                 use = _path_method_use(node, f"pathlib.Path.{node.attr}")
                 if use is not None:
-                    uses.append(use)
+                    uses.append((node, use))
     return uses
 
 
@@ -377,25 +381,56 @@ def _seeded_random_ids(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> set
     return seeded
 
 
-def effect_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[EffectUse, ...]:
+def effect_sites(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> list[EffectSite]:
+    """Every effect use with its node, so a pass can ask where it sits (import time, a function body)."""
     seams = _injection_defaults(nodes)
     rebound = _rebound_names(nodes)
     hints = _annotation_node_ids(nodes)
     seeded = _seeded_random_ids(nodes, aliases)
-    uses: set[EffectUse] = set(_global_effect_uses(nodes))
-    uses.update(_path_receiver_uses(tree, nodes, aliases))
-    uses.update(_module_state_uses(tree, nodes, aliases))
+    sites: list[EffectSite] = [(None, use) for use in _global_effect_uses(nodes)]
+    sites += _path_receiver_uses(tree, nodes, aliases)
+    sites += [(None, use) for use in _module_state_uses(tree, nodes, aliases)]
     imported_os_names: set[str] = set()
     for node in nodes:
         if isinstance(node, ast.ImportFrom):
             for use, bound_name in _os_branch_imports(node):
-                uses.add(use)
+                sites.append((node, use))
                 imported_os_names.add(bound_name)
         found = [_path_io_use(node, aliases), _patch_use(node, aliases)]
         if isinstance(node, ast.Attribute | ast.Name) and id(node) not in hints and not _is_shadowed(node, imported_os_names, rebound):
             found.append(None if id(node) in seeded else _reference_use(node, aliases, seams))
-        uses.update(use for use in found if use is not None)
-    return tuple(sorted(uses))
+        sites += [(node, use) for use in found if use is not None]
+    return sites
+
+
+# Data rather than callables: reading the name is the effect. Every other reference runs nothing until it is called.
+_DATA_READS = frozenset({"os.environ", "sys.argv", "sys.stdin"})
+
+
+def running_ids(nodes: Sequence[ast.AST]) -> set[int]:
+    """Ids of the nodes that execute something when evaluated: a callee, a decorator, and a call itself (``patch(...)``)."""
+    ids: set[int] = set()
+    for node in nodes:
+        if isinstance(node, ast.Call):
+            ids.update((id(node), id(node.func)))
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            ids.update(id(decorator) for decorator in node.decorator_list)
+    return ids
+
+
+def runs(site: EffectSite, running: set[int]) -> bool:
+    """Whether evaluating the site performs the effect, as opposed to naming it (``NOW = time.time``, an injection default)."""
+    node, use = site
+    return node is not None and use.seam == 0 and (id(node) in running or use.target in _DATA_READS)
+
+
+def merge_sites(sites: Sequence[EffectSite], import_ids: set[int], running: set[int]) -> tuple[EffectUse, ...]:
+    """The distinct uses; one that runs at import anywhere on its line is flagged, without becoming a second use."""
+    merged: dict[EffectUse, bool] = {}
+    for site in sites:
+        node, use = site
+        merged[use] = merged.get(use, False) or (id(node) in import_ids and runs(site, running))
+    return tuple(sorted(replace(use, at_import=at_import) for use, at_import in merged.items()))
 
 
 _SHADOWABLE_BUILTINS = frozenset({"open", "print", "input"})

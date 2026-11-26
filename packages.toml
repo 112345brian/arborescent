@@ -133,6 +133,14 @@ path = "src/arborescent/effect_facts.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/import_time_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/seam_facts.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/effect_categories.py"
 role = "source"
 
