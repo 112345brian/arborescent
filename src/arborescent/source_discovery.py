@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 
-from .domain import NOISE_DIRS, ArchitecturePolicy, Policy, PolicyError
+from .domain import NOISE_DIRS, ArchitecturePolicy, Policy, PolicyError, path_under
 from .path_exclusion import excluded_by_policy, matches_exclusion
 
 __all__ = [
@@ -22,6 +22,8 @@ __all__ = [
     "is_skipped",
     "is_unclassified",
     "misplaced_dev_tools",
+    "patch_test_files",
+    "patch_tests_folder",
     "policies",
     "sift_paths",
     "still_unclassified",
@@ -37,6 +39,26 @@ def _under_sources(rel: str, sources: Sequence[str]) -> bool:
         if source in ("", ".") or rel == source or rel.startswith(source + "/"):
             return True
     return False
+
+
+def patch_tests_folder(policy: Policy) -> str | None:
+    """The tests folder ``practices.unreachable-patch`` names (#226), or None when the check is off."""
+    value = policy.practices.get("unreachable-patch")
+    if value in (None, False, ""):
+        return None
+    if isinstance(value, str):
+        folder = str(value).replace("\\", "/").strip("/").removeprefix("./")
+        if folder:
+            return folder
+    raise PolicyError('`practices.unreachable-patch` names the tests folder, e.g. unreachable-patch = "tests"')
+
+
+def patch_test_files(policy: Policy, paths: Sequence[str]) -> tuple[str, ...]:
+    """The Python files whose patches ``unreachable-patch`` reads: under its tests folder, outside noise folders."""
+    folder = patch_tests_folder(policy)
+    if folder is None:
+        return ()
+    return tuple(rel for rel in paths if rel.endswith(".py") and path_under(rel, folder) and not PRUNE.intersection(rel.split("/")))
 
 
 def policies(policy: Policy) -> tuple[ArchitecturePolicy, ...]:

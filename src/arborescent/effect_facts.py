@@ -21,7 +21,7 @@ from .effect_categories import (
 )
 from .purity_facts import local_names, module_containers, mutated_container
 
-__all__ = ["EffectSite", "EffectUse", "effect_sites", "merge_sites", "running_ids", "runs"]
+__all__ = ["EffectSite", "EffectUse", "effect_sites", "merge_sites", "rebound_names", "running_ids", "runs"]
 
 
 _PATH_IO_METHODS = frozenset({
@@ -121,7 +121,7 @@ def _seam_expression(default: ast.expr | None) -> ast.expr | None:
     return None
 
 
-def _rebound_names(nodes: Sequence[ast.AST]) -> set[str]:
+def rebound_names(nodes: Sequence[ast.AST]) -> set[str]:
     """Names the module assigns, defines or takes as parameters (imports are resolved by `import_aliases`): a bare builtin name among them is not the builtin."""
     bound: set[str] = set()
     for node in nodes:
@@ -384,7 +384,7 @@ def _seeded_random_ids(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> set
 def effect_sites(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> list[EffectSite]:
     """Every effect use with its node, so a pass can ask where it sits (import time, a function body)."""
     seams = _injection_defaults(nodes)
-    rebound = _rebound_names(nodes)
+    rebound = rebound_names(nodes)
     hints = _annotation_node_ids(nodes)
     seeded = _seeded_random_ids(nodes, aliases)
     sites: list[EffectSite] = [(None, use) for use in _global_effect_uses(nodes)]

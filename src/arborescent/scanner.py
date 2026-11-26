@@ -14,7 +14,7 @@ from typing import Any
 
 from .declaration_facts import DEV_TOOL_ROLE
 from .domain import Policy
-from .facts import ModuleInfo, extract
+from .facts import ModuleInfo, SourceFacts, extract
 from .path_exclusion import excluded_by_policy
 from .ports import ToolRunner
 from .scan_cache_codec import CACHE_VERSION, cached_facts, facts_to_json
@@ -28,6 +28,7 @@ from .source_discovery import (
     is_skipped,
     is_unclassified,
     misplaced_dev_tools,
+    patch_test_files,
     policies,
     sift_paths,
     still_unclassified,
@@ -86,6 +87,7 @@ class ScanData:
     dev_tool_modules: frozenset[str] = frozenset()  # modules below a `dev_tools` path
     misplaced_dev_tools: tuple[tuple[str, str], ...] = ()  # (module, path): annotated as dev tooling, outside every `dev_tools` path
     excluded_modules: dict[str, ModuleInfo] = field(default_factory=lambda: {})  # files under `exclude`, parsed only for `mixed-purity` (#173)
+    test_facts: dict[str, SourceFacts] = field(default_factory=lambda: {})  # path -> facts of the `unreachable-patch` tests folder (#226)
 
 
 def _load_cache(cache_file: Path | None) -> dict[str, list[Any]]:
@@ -179,7 +181,10 @@ class FsScanner:
         excluded_modules, extra_fresh, extra_parsed = (
             _excluded_modules(root, excluded_files, cache) if only is None and policy.mixed_purity.enabled and policy.mixed_purity.report_excluded else ({}, {}, 0)
         )
-        _store_cache(cache_file, cache, {**fresh, **extra_fresh}, only, parsed + extra_parsed)
+        test_facts, test_fresh, test_parsed = (
+            self._test_facts(policy, root, modules, {**cache, **fresh, **extra_fresh}) if only is None else ({}, {}, 0)
+        )
+        _store_cache(cache_file, cache, {**fresh, **extra_fresh, **test_fresh}, only, parsed + extra_parsed + test_parsed)
         misplaced: tuple[tuple[str, str], ...] = ()
         if annotations_enabled:
             tool_annotations = {name for name, info in modules.items() if info.facts.arbor_role == DEV_TOOL_ROLE}
@@ -199,8 +204,21 @@ class FsScanner:
             noise_files = tuple(path for path in noise_files if path in only)
         return ScanData(
             known, modules, entry, paths, parsed, excluded, noise_files, unclassified,
-            vendor_folders, arbor_index, scope_by_module, dev_tool_modules, misplaced, excluded_modules,
+            vendor_folders, arbor_index, scope_by_module, dev_tool_modules, misplaced, excluded_modules, test_facts,
         )
+
+    def _test_facts(
+        self, policy: Policy, root: Path, modules: dict[str, ModuleInfo], cache: dict[str, list[Any]],
+    ) -> tuple[dict[str, SourceFacts], dict[str, list[Any]], int]:
+        """Facts of every file under the `unreachable-patch` tests folder: reused when scanned, else parsed once and cached."""
+        if not policy.practices.get("unreachable-patch"):
+            return {}, {}, 0
+        wanted = patch_test_files(policy, _listed_paths(root, self._runner)[0])
+        scanned = {info.path: info.facts for info in modules.values()}
+        others, fresh, parsed = _excluded_modules(root, tuple(rel for rel in wanted if rel not in scanned), cache)
+        facts = {info.path: info.facts for info in others.values()}
+        facts.update({rel: scanned[rel] for rel in wanted if rel in scanned})
+        return facts, fresh, parsed
 
     def _discover(
         self, policy: Policy, root: Path
@@ -248,7 +266,8 @@ class FsScanner:
 def _excluded_modules(
     root: Path, rels: tuple[str, ...], cache: dict[str, list[Any]],
 ) -> tuple[dict[str, ModuleInfo], dict[str, list[Any]], int]:
-    """Facts for the files the policy excludes, so ``mixed-purity`` can say what the exclusion hides (#173).
+    """Facts for files outside the scan: what the policy excludes, so ``mixed-purity`` can say what the exclusion hides (#173),
+    and the tests ``unreachable-patch`` reads (#226).
 
     They are never ruled on, only assessed; a file that does not parse is skipped, since excluded folders hold fixtures
     and generated code on purpose. Same content-hash cache as the scanned files, keyed by path."""

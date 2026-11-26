@@ -2,20 +2,22 @@
 
 The result is plain data (``SourceFacts``) so it can be cached by content hash and reused by every check. Each family of
 facts is extracted by its own module (``import_syntax``, ``effect_facts``, ``declaration_facts``, ``definition_facts``,
-``call_facts``, ``forwarder_facts``, ``purity_facts``, ``import_time_facts``, ``seam_facts``); this one holds the result types and the one pass that fills them.
+``call_facts``, ``forwarder_facts``, ``purity_facts``, ``import_time_facts``, ``seam_facts``); this one holds the result types, the one
+pass that fills them, and the two queries over them that both ``unreachable-patch`` and its selftest probe ask.
 """
 
 from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from .call_facts import (
     CallShape,
     FunctionCalls,
     FunctionSpan,
+    absolute_callee,
     bare_calls,
     call_aliases,
     call_shapes,
@@ -25,6 +27,9 @@ from .call_facts import (
     dynamic_imports,
     function_calls,
     function_spans,
+    patch_targets,
+    private_attributes,
+    unqualified_from_calls,
 )
 from .declaration_facts import (
     arbor_annotation,
@@ -43,7 +48,7 @@ from .definition_facts import (
     top_level_defs,
     weak_port_returns,
 )
-from .effect_facts import EffectUse, effect_sites, merge_sites, running_ids
+from .effect_facts import EffectUse, effect_sites, merge_sites, rebound_names, running_ids
 from .forwarder_facts import Forwarder, forwarders
 from .import_syntax import RawImport, import_aliases, raw_imports
 from .import_time_facts import (
@@ -58,7 +63,7 @@ from .seam_facts import SeamFacts, SeamFrame, SeamParam, SeamUse, seam_facts
 
 __all__ = [
     "Forwarder", "ImportCall", "ImportTimeFacts", "ModuleInfo", "PurityFacts", "PurityUnit", "SeamFacts", "SeamFrame", "SeamParam",
-    "SeamUse", "SourceFacts", "extract",
+    "SeamUse", "SourceFacts", "extract", "file_module", "patched_targets", "unreached_bindings",
 ]
 
 
@@ -97,6 +102,9 @@ class SourceFacts:
     companion_exempt: tuple[tuple[int, str], ...] = ()  # (code line, reason) of `# companion-exempt:` comments (#231)
     call_shapes: tuple[CallShape, ...] = ()  # the arguments of each call on an imported or module-level name (#234)
     class_shapes: tuple[ClassShape, ...] = ()  # what each module-level class's constructor accepts (#234)
+    private_attrs: tuple[tuple[int, str], ...] = ()  # (line, dotted) of ``._name`` reached through an import; relative targets keep leading dots (#218)
+    patches: tuple[tuple[int, str], ...] = ()  # (line, dotted "module.name") a test double replaces (#226)
+    from_calls: tuple[tuple[int, str, str], ...] = ()  # (line, origin "X.name", local name) of ``from X import name`` called bare in a function (#226)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -112,6 +120,38 @@ class ModuleInfo:
     facts: SourceFacts
 
 
+def file_module(path: str) -> tuple[str, bool]:
+    """A test file's path as a dotted name, enough to resolve its relative imports."""
+    parts = path.removesuffix(".py").split("/")
+    is_package = parts[-1] == "__init__"
+    return ".".join(parts[:-1] if is_package else parts), is_package
+
+
+def patched_targets(tests: Mapping[str, SourceFacts]) -> dict[str, dict[str, int]]:
+    """Test file -> dotted ``module.name`` it patches -> the first line that does."""
+    out: dict[str, dict[str, int]] = {}
+    for path, facts in tests.items():
+        name, is_package = file_module(path)
+        found = out.setdefault(path, {})
+        for line, target in facts.patches:
+            if (dotted := absolute_callee(name, is_package, target)) is not None:
+                found.setdefault(dotted, line)
+    return out
+
+
+def unreached_bindings(modules: Mapping[str, ModuleInfo], known: Collection[str]) -> list[tuple[str, str, str, int]]:
+    """``(module, origin "X.name", local name, line)`` of each bare call through ``from X import name``, X first-party.
+
+    ``from package import submodule`` is a module, not a bound function, and is left out."""
+    return [
+        (name, origin, local, line)
+        for name, info in sorted(modules.items())
+        for line, target, local in info.facts.from_calls
+        if (origin := absolute_callee(name, info.is_package, target)) is not None
+        and origin not in known and (owner := origin.rpartition(".")[0]) in known and owner != name
+    ]
+
+
 def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     arbor_ring, arbor_error, arbor_role, arbor_reason = arbor_annotation(tree)
@@ -122,6 +162,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     sites = effect_sites(tree, nodes, aliases)
     running = running_ids(nodes)
     at_import = list(evaluated(tree.body))
+    rebound = rebound_names(nodes)
     return SourceFacts(
         raw_imports(tree),
         merge_sites(sites, {id(node) for node in at_import}, running),
@@ -154,6 +195,9 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         exemption_comments(source),
         call_shapes(tree, nodes, calls_aliases),
         class_shapes(tree, calls_aliases),
+        private_attributes(nodes, calls_aliases, rebound),
+        patch_targets(nodes, calls_aliases, rebound),
+        unqualified_from_calls(tree, nodes, rebound),
     )
 
 

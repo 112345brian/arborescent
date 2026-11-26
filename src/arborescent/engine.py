@@ -55,7 +55,7 @@ from .ports import (
 from .practices import run_practices
 from .purity import excluded_findings
 from .ratchet_measure import Subject
-from .rules import RuleContext, check_modules
+from .rules import RuleContext, check_modules, unreachable_patches
 from .suggestions import ClassSuggestion, Suggestion
 from .tach_visibility import invisible_import_violations
 from .taint import TaintResult, compute_taint
@@ -214,7 +214,19 @@ def run_own(
         checks = package_checks(policy, services)
         if checks is not None:
             found += checks.gap_violations(policy, root, services.fs, scan, services.scanner)
+        found += _unreachable_patch_findings(policy, scan)  # selftest runs without practices and still has to probe it
     return found, scan
+
+
+def _unreachable_patch_findings(policy: Policy, scan: ScanResult) -> list[Violation]:
+    """#226, configured as ``practices.unreachable-patch = "<tests folder>"``; a folder with no tests would check nothing silently."""
+    folder = policy.practices.get("unreachable-patch")
+    if not folder:
+        return []
+    if not scan.test_facts:
+        return [Violation(Rule.UNREACHABLE_PATCH, str(folder), "no Python files under the configured tests folder, so no patch is checked")]
+    exempt = policy.practices.get("unreachable-patch-exempt", [])
+    return unreachable_patches(scan.modules, scan.known, scan.test_facts, [str(item) for item in cast("list[object]", exempt)])
 
 
 def nested_exclusions(excluded: Mapping[str, int], patterns: Sequence[str]) -> dict[str, str]:

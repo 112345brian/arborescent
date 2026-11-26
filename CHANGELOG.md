@@ -73,6 +73,11 @@
 - A dataclass field marked `field(metadata={"arbor": "derived"})` may not be supplied by any caller, with no policy entry. A
   repository that already uses that exact metadata starts getting findings.
 - The scan cache layout changed, so the first run after upgrading re-parses every file.
+- `[tool.arborescent.private_access]` (opt-in, #218): `private-cross-module-access` reports a module that imports or reaches
+  another module's leading-underscore name, or a private submodule of a package it is not in. Test modules are exempt by default.
+- `practices.unreachable-patch = "<tests folder>"` (opt-in, #226): reports a test that patches `X.name` (`monkeypatch.setattr`,
+  `mock.patch`, `patch.object`) while a module it imports calls that function through its own `from X import name` binding,
+  which the patch never reaches.
 
 ### Changed
 - The scan cache layout changed (it now records function line spans, method calls and exemption comments), so the first run after upgrading re-parses every file.

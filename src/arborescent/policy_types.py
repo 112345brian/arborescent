@@ -14,7 +14,7 @@ from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
     "ALL", "ArchitectureFields", "CallAllowance", "CompanionCall", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError",
-    "ResultDiscard", "RingRule", "SeamBypass",
+    "PrivateAccess", "ResultDiscard", "RingRule", "SeamBypass",
     "in_unit", "normalized_source_path", "path_under", "unit_permits",
 ]
 
@@ -161,6 +161,19 @@ class SeamBypass:
         return marked or next((category for key, category in self.parameters if key == name), "")
 
 
+# Test code reaching into a helper's private name to unit-test it is ordinary, so the default `exempt` skips test modules.
+TEST_MODULES = ("tests", "*.tests", "*.tests.*", "test_*", "*.test_*", "conftest", "*.conftest")
+
+
+@dataclass(frozen=True)
+class PrivateAccess:
+    """Opt-in ``private_access`` (#218): another module's leading-underscore name or submodule is not part of its contract."""
+
+    rings: tuple[str, ...] = ()  # rings whose modules are checked; empty means every module
+    exempt: tuple[str, ...] = TEST_MODULES  # globs of accessing modules that are not checked
+    allow: tuple[str, ...] = ()  # globs of private targets ("pkg.mod._name") anyone may use
+
+
 @dataclass(frozen=True)
 class DocsPolicy:
     """``[tool.arborescent.docs]``: which module documentation rules are on (#110)."""
@@ -194,6 +207,7 @@ class ArchitectureFields:
     construction: tuple[ConstructionSite, ...] = ()  # #234; ``modules`` is the entry's ``only_from``
     result_discard: ResultDiscard | None = None
     effect_seam_bypassed: SeamBypass | None = None  # #233
+    private_access: PrivateAccess | None = None  # #218
     docs: DocsPolicy = DocsPolicy()
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts

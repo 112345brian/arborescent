@@ -27,6 +27,7 @@ from .domain import (
     OwnedLiteral,
     Policy,
     PolicyError,
+    PrivateAccess,
     ResultDiscard,
     RingRule,
     SeamBypass,
@@ -274,6 +275,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         construction=_construction(raw),
         result_discard=_result_discard(raw),
         effect_seam_bypassed=_seam_bypass(raw),
+        private_access=_private_access(raw),
         docs=_docs(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
@@ -532,7 +534,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "call_allowlist", "companion", "construction", "result_discard", "effect_seam_bypassed", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "call_allowlist", "companion", "construction", "result_discard", "private_access", "effect_seam_bypassed", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -949,6 +951,20 @@ def _seam_table(entry: Mapping[str, Any], key: str, default: tuple[tuple[str, st
     ):
         raise PolicyError(f"`effect_seam_bypassed.{key}` must map names to one of {sorted(INJECTABLE_EFFECTS)}")
     return tuple(sorted(cast("Mapping[str, str]", value).items()))
+
+
+def _private_access(raw: Mapping[str, Any]) -> PrivateAccess | None:
+    if "private_access" not in raw:
+        return None
+    if not isinstance(raw["private_access"], Mapping):
+        raise PolicyError("`private_access` must be a table: [tool.arborescent.private_access]")
+    entry = cast("Mapping[str, Any]", raw["private_access"])
+    if set(entry) - {"rings", "exempt", "allow"} or any(
+        not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[Any]", value))
+        for value in entry.values()
+    ):
+        raise PolicyError("`private_access` takes `rings`, `exempt` and `allow`, each a list of non-empty strings")
+    return PrivateAccess(**{key: tuple(cast("list[str]", value)) for key, value in entry.items()})
 
 
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:

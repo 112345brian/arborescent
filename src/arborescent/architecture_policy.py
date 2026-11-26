@@ -121,6 +121,10 @@ def validate_architecture(policy: ArchitectureFields, has_scopes: bool) -> None:
     _validate_pattern_table("module_forbid_imports", policy.module_forbid_imports, "target")
     _validate_pattern_table("importable_by", policy.importable_by, "importer")
     _validate_disabled_tools(policy.disabled_tools)
+    checked = () if policy.private_access is None else policy.private_access.rings
+    unknown = set(checked) - {rule.name for rule in policy.rings}
+    if unknown and policy.rings:  # a scoped root has no rings of its own; each scope validates its table against its own
+        raise PolicyError(f"`private_access` rings name unknown rings: {sorted(unknown)}")
     if policy.require_arbor_annotations and "arbor-annotations" in policy.disabled_tools:
         raise PolicyError(
             "`require_arbor_annotations` cannot be combined with `disabled_tools = [\"arbor-annotations\"]`"

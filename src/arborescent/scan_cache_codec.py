@@ -118,6 +118,8 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         [[s.name, s.line, s.end_line, s.start, [list(call) for call in s.method_calls]] for s in f.function_spans],
         [list(item) for item in f.companion_exempt],
         _calls_to_json(f.call_shapes), _classes_to_json(f.class_shapes),
+        [[line, target] for line, target in f.private_attrs],
+        [[line, target] for line, target in f.patches], [list(item) for item in f.from_calls],
     ]
 
 
@@ -152,4 +154,6 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple(FunctionSpan(s[0], s[1], s[2], s[3], tuple((c[0], c[1]) for c in s[4])) for s in raw[29]),
         tuple((item[0], item[1]) for item in raw[30]),
         _calls_from_json(raw[31]), _classes_from_json(raw[32]),
+        tuple((item[0], item[1]) for item in raw[33]),
+        tuple((item[0], item[1]) for item in raw[34]), tuple((item[0], item[1], item[2]) for item in raw[35]),
     )

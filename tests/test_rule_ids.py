@@ -46,6 +46,7 @@ def test_rule_id_strings_never_change() -> None:
             "lazy-import",
             "entrypoint-eager-commands",
             "result-discard",
+            "private-cross-module-access",
             "effect-clock",
             "effect-env",
             "effect-identity",
@@ -106,6 +107,7 @@ def test_rule_id_strings_never_change() -> None:
             "test-reference",
             "adapter-equivalence",
             "adapter-equivalence-report",
+            "unreachable-patch",
             "invalid-arbor-annotation",
             "arbor-ring-mismatch",
             "unannotated-module",
@@ -154,8 +156,10 @@ def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     # effect-at-import and effect-seam-bypassed are opt-in and this repository does not enable them; their own test files kill their probes.
     # The policy declares no `call_allowlist` idiom and no `companion` pair (it has no wrapper or recorder to name): their probes are run
     # by tests/test_call_allowlist.py and tests/test_companion.py
+    # `private_access` and `unreachable-patch` are opt-in and this repository enables neither: their probes are covered by
+    # tests/test_private_access.py and tests/test_unreachable_patch.py.
     old_tokenizer = {Rule.UNTOKENIZABLE_SOURCE} if sys.version_info < (3, 12) else set()  # 3.11 tokenizes a doubled CR: no probe (reported as skipped)
-    assert set(NO_MUTATION) | mutated | old_tokenizer | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, Rule.EFFECT_AT_IMPORT, Rule.EFFECT_SEAM_BYPASSED, Rule.HAND_ROLLED_IDIOM, Rule.MISSING_COMPANION_CALL, *DOCS_RULES, *PACKAGE_RULES, *CONSTRUCTION_ARGUMENT_RULES} >= set(Rule)
+    assert set(NO_MUTATION) | mutated | old_tokenizer | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, Rule.PRIVATE_ACCESS, Rule.UNREACHABLE_PATCH, Rule.EFFECT_AT_IMPORT, Rule.EFFECT_SEAM_BYPASSED, Rule.HAND_ROLLED_IDIOM, Rule.MISSING_COMPANION_CALL, *DOCS_RULES, *PACKAGE_RULES, *CONSTRUCTION_ARGUMENT_RULES} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
 
