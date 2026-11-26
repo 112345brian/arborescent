@@ -25,17 +25,19 @@ from .domain import (
     CompanionCall,
     ConstructionSite,
     NameCollisionPolicy,
+    ModuleStatePolicy,
     OwnedLiteral,
     Policy,
     PortBinding,
     RingRule,
     Rule,
     SeamBypass,
+    StateAllow,
     Violation,
     dist_name,
     in_unit,
 )
-from .effect_facts import EffectUse
+from .effect_facts import EffectUse, StateWrite
 from .effect_import_rules import (
     EffectEdge,
     EffectImport,
@@ -1269,7 +1271,8 @@ def check_modules(
         )
     out += effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
     out = with_move_closures(out, context, modules, known, tops)
-    out += mixed_purity_findings(context, modules, known, import_graph) + _argument_restrictions(context, modules, known)
+    out += _unguarded_state_findings(context, modules, known) + mixed_purity_findings(context, modules, known, import_graph)
+    out += _argument_restrictions(context, modules, known)
     return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
 
 
@@ -1282,6 +1285,66 @@ def _argument_restrictions(context: RuleContext, modules: Mapping[str, ModuleInf
         return out + _stale_construction_entries(policy, known, classes)
     for scope in policy.scopes:
         out += _stale_construction_entries(scope.policy, [n for n in known if context.scope_name(n) == scope.name], classes)
+    return out
+
+
+def _unguarded_state_findings(context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str]) -> list[Violation]:
+    """Module-level state written without a lock (#232): one finding per module, name and writing function, plus stale ``allow`` entries.
+
+    A failure in ``unguarded_module_state.rings`` (every ring when unset), a note in the others."""
+    setting = context.policy.module_state
+    if setting is None:
+        return []
+    out: list[Violation] = []
+    used: set[StateAllow] = set()
+    for name, info in sorted(modules.items()):
+        ring = context.resolve_ring(name)
+        if ring is None or name in context.tool_modules:
+            continue
+        rule = Rule.UNGUARDED_MODULE_STATE if setting.fails_in(ring) else Rule.UNGUARDED_MODULE_STATE_NOTE
+        found: dict[tuple[str, str], int] = {}
+        for write in _unlocked_writes(setting, modules, known, name, info):
+            allowing = setting.allowing(name, write.name)
+            used.update(allowing)
+            if not allowing:
+                found.setdefault((write.name, write.function), write.line)  # writes are sorted by line: the first one is reported
+        out.extend(
+            Violation(rule, name, f"[{ring}] module-level state {state!r} is written in {function}() outside a lock", line)
+            for (state, function), line in found.items()
+        )
+    return out + _stale_state_allow(setting, modules, known, used)
+
+
+def _unlocked_writes(
+    setting: ModuleStatePolicy, modules: Mapping[str, ModuleInfo], known: Collection[str], name: str, info: ModuleInfo,
+) -> list[StateWrite]:
+    """The module's writes that neither a configured guard nor another module's lock covers."""
+    out: list[StateWrite] = []
+    for write in info.facts.state_writes:
+        held = tuple(filter(None, (absolute_callee(name, info.is_package, item) for item in write.held)))
+        decorators = tuple(filter(None, (absolute_callee(name, info.is_package, item) for item in write.decorators)))
+        if not (setting.names_guard(held, decorators) or any(_is_module_lock(item, modules, known) for item in held)):
+            out.append(write)
+    return out
+
+
+def _is_module_lock(dotted: str, modules: Mapping[str, ModuleInfo], known: Collection[str]) -> bool:
+    """Whether ``dotted`` is a lock another module defines. A known module a partial scan did not read gets the benefit of the doubt."""
+    owner, _, attribute = dotted.rpartition(".")
+    info = modules.get(owner)
+    return owner in known if info is None else attribute in info.facts.module_locks
+
+
+def _stale_state_allow(
+    setting: ModuleStatePolicy, modules: Mapping[str, ModuleInfo], known: Collection[str], used: Collection[StateAllow],
+) -> list[Violation]:
+    out: list[Violation] = []
+    for entry in setting.allow:
+        matches = [module for module in known if in_unit(module, entry.module)]
+        if entry in used or not all(module in modules for module in matches):  # a partial scan cannot call an entry stale
+            continue
+        why = "no unguarded write matches; remove the entry" if matches else "matches no module"
+        out.append(Violation(Rule.UNGUARDED_MODULE_STATE, entry.module, f"`unguarded_module_state.allow` {entry.name!r}: {why}"))
     return out
 
 

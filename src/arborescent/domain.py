@@ -16,7 +16,7 @@ from .architecture_policy import (
     validate_architecture,
 )
 from .coupling_policy import CouplingPolicy
-from .effects_policy import EffectsPolicy
+from .effects_policy import EffectsPolicy, ModuleStatePolicy, StateAllow
 from .findings import (
     CONSTRAINT_RULES,
     EFFECT_RULES,
@@ -72,6 +72,7 @@ __all__ = [
     "DocsPolicy",
     "DuplicatePolicy",
     "ModuleLayer",
+    "ModuleStatePolicy",
     "Mutation",
     "NameCollisionPolicy",
     "OwnedLiteral",
@@ -84,6 +85,7 @@ __all__ = [
     "RingRule",
     "Rule",
     "SeamBypass",
+    "StateAllow",
     "ToolResult",
     "Violation",
     "dist_name",
@@ -169,6 +171,7 @@ class Policy(ArchitecturePolicy):
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
     modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
     lazy_import_rings: tuple[str, ...] = ()  # #199: rings whose function-level imports are findings; empty means every ring
+    module_state: ModuleStatePolicy | None = None  # #232: `[unguarded_module_state]`; None means the rule is off
     mixed_purity: PurityPolicy = field(default_factory=PurityPolicy)  # #173: thresholds, effect kinds and the reasoned allowlist of `mixed-purity`
     duplicate_logic: DuplicatePolicy = field(default_factory=DuplicatePolicy)  # #228: opt-in clone detection
     coupling: CouplingPolicy = field(default_factory=CouplingPolicy)  # #148: entrypoints and hub threshold for `arborescent coupling`

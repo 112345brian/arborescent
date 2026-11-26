@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -95,6 +96,15 @@ def fallback(now=None):
     if now is None:
         now = time.time()
     return now
+
+
+LOCK = threading.Lock()
+
+
+@guarded
+def write_state(key):
+    with other_lock():
+        CACHE[key] = 2
 
 
 def run_result() -> RunResult:

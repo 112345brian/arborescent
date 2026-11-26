@@ -52,8 +52,9 @@ from .definition_facts import (
 )
 from .effect_facts import (
     EffectUse,
-    effect_sites,
+    StateWrite,
     merge_sites,
+    module_effects,
     rebound_names,
     running_ids,
 )
@@ -114,6 +115,8 @@ class SourceFacts:
     patches: tuple[tuple[int, str], ...] = ()  # (line, dotted "module.name") a test double replaces (#226)
     from_calls: tuple[tuple[int, str, str], ...] = ()  # (line, origin "X.name", local name) of ``from X import name`` called bare in a function (#226)
     classes: tuple[ClassMembers, ...] = ()  # every class's bases and member names (#219)
+    state_writes: tuple[StateWrite, ...] = ()  # writes to module-level mutable state outside the module's own locks (#232)
+    module_locks: tuple[str, ...] = ()  # module-level names bound to a lock, so another module's `with locks.L:` can be believed (#232)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -169,7 +172,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     aliases = import_aliases(nodes)  # computed once: each fact below reads it
     calls_aliases = call_aliases(nodes, aliases)
     rebound = rebound_names(nodes)
-    sites = effect_sites(tree, nodes, aliases, rebound)
+    effects = module_effects(tree, nodes, aliases, rebound, calls_aliases)
+    sites = effects.sites
     running = running_ids(nodes)
     at_import = list(evaluated(tree.body))
     return SourceFacts(
@@ -208,6 +212,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         patch_targets(nodes, calls_aliases, rebound),
         unqualified_from_calls(tree, nodes, rebound),
         member_shapes(tree, calls_aliases),
+        effects.state_writes,
+        effects.locks,
     )
 
 

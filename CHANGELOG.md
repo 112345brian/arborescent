@@ -89,6 +89,10 @@
   modules; first-party copies of functions under `reference_paths` such as `vendor/`; and, with `branch_skeletons`, the same
   two-way branch repeated across functions. One baseline entry per function, so the ratchet only shrinks. `selftest` probes it
   when enabled. See *Duplicate logic* in the configuration reference.
+- Opt-in rule `unguarded-module-state` (`[unguarded_module_state]`): a function writes module-level mutable state (a
+  `dict`/`list`/`set` or a `global` name) outside a `with <module lock>:` block. `rings` limits where it fails (a note elsewhere);
+  `locks`, `guard_decorators` and reasoned `allow` entries cover what the scan cannot see; adopt with
+  `baseline --adopt unguarded-module-state`. Blind spots are listed in docs/configuration.md. The scan cache format is 26 (#232).
 
 ## 0.9.0 — 2026-11-12
 

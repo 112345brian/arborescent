@@ -10,7 +10,7 @@ from typing import Any
 
 from .call_facts import CallShape, FunctionCalls, FunctionSpan
 from .definition_facts import ClassMembers, ClassShape, Parameter, TopLevelDef
-from .effect_facts import EffectUse
+from .effect_facts import EffectUse, StateWrite
 from .facts import (
     Forwarder,
     ImportCall,
@@ -121,6 +121,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         [[line, target] for line, target in f.private_attrs],
         [[line, target] for line, target in f.patches], [list(item) for item in f.from_calls],
         [[c.name, c.line, list(c.bases), list(c.members), c.protocol, c.abstract] for c in f.classes],
+        [[w.line, w.name, w.function, list(w.held), list(w.decorators)] for w in f.state_writes], list(f.module_locks),
     ]
 
 
@@ -158,4 +159,5 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple((item[0], item[1]) for item in raw[33]),
         tuple((item[0], item[1]) for item in raw[34]), tuple((item[0], item[1], item[2]) for item in raw[35]),
         tuple(ClassMembers(c[0], c[1], tuple(c[2]), tuple(c[3]), c[4], c[5]) for c in raw[36]),
+        tuple(StateWrite(w[0], w[1], w[2], tuple(w[3]), tuple(w[4])) for w in raw[37]), tuple(raw[38]),
     )
