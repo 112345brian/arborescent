@@ -93,6 +93,7 @@ def test_rule_id_strings_never_change() -> None:
             "mixed-purity-excluded",
             "mixed-purity-weak",
             "untokenizable-source",
+            "duplicate-logic",
             "circular-import",
             "external-import",
             "os-branching",
@@ -161,7 +162,7 @@ def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     # `private_access` and `unreachable-patch` are opt-in and this repository enables neither: their probes are covered by
     # tests/test_private_access.py and tests/test_unreachable_patch.py.
     old_tokenizer = {Rule.UNTOKENIZABLE_SOURCE} if sys.version_info < (3, 12) else set()  # 3.11 tokenizes a doubled CR: no probe (reported as skipped)
-    assert set(NO_MUTATION) | mutated | old_tokenizer | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, Rule.PRIVATE_ACCESS, Rule.UNREACHABLE_PATCH, Rule.EFFECT_AT_IMPORT, Rule.EFFECT_SEAM_BYPASSED, Rule.HAND_ROLLED_IDIOM, Rule.MISSING_COMPANION_CALL, *DOCS_RULES, *PACKAGE_RULES, *CONSTRUCTION_ARGUMENT_RULES} >= set(Rule)
+    assert set(NO_MUTATION) | mutated | old_tokenizer | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, Rule.DUPLICATE_LOGIC, Rule.PRIVATE_ACCESS, Rule.UNREACHABLE_PATCH, Rule.EFFECT_AT_IMPORT, Rule.EFFECT_SEAM_BYPASSED, Rule.HAND_ROLLED_IDIOM, Rule.MISSING_COMPANION_CALL, *DOCS_RULES, *PACKAGE_RULES, *CONSTRUCTION_ARGUMENT_RULES} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
 

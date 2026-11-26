@@ -10,7 +10,7 @@ from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 
 from .domain import NOISE_DIRS, ArchitecturePolicy, Policy, PolicyError, path_under
-from .path_exclusion import excluded_by_policy, matches_exclusion
+from .path_exclusion import excluded_by_policy, matches_exclusion, vendor_parent
 
 __all__ = [
     "PRUNE",
@@ -30,7 +30,6 @@ __all__ = [
 ]
 
 PRUNE = NOISE_DIRS
-_VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
 def _under_sources(rel: str, sources: Sequence[str]) -> bool:
@@ -141,20 +140,9 @@ def _noise_parent(rel: str, tracked: bool) -> bool:
     return tracked and any(part in PRUNE for part in rel.split("/"))
 
 
-def _vendor_parent(rel: str) -> str | None:
-    parts = rel.split("/")[:-1]
-    noise_index = next((index for index, part in enumerate(parts) if part in PRUNE), len(parts))
-    for index in range(noise_index - 1, -1, -1):
-        if parts[index] in _VENDOR_NAMES:
-            if any(part in _VENDOR_NAMES for part in parts[:index]):
-                continue
-            return "/".join(parts[: index + 1])
-    return None
-
-
 def _skipped_vendor(rel: str, policy: Policy) -> str | None:
     """The auto-excluded vendor folder holding ``rel``, unless vendor scanning (global or per ``vendor_roots``) covers it."""
-    vendor = _vendor_parent(rel)
+    vendor = vendor_parent(rel, PRUNE)
     if vendor is None or policy.scan_vendors:
         return None
     if any(rel.startswith(root.rstrip("/") + "/") for root in policy.scan_vendor_paths):

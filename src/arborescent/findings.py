@@ -69,6 +69,7 @@ class Rule(StrEnum):
     MIXED_PURITY_EXCLUDED = "mixed-purity-excluded"
     MIXED_PURITY_WEAK = "mixed-purity-weak"
     UNTOKENIZABLE_SOURCE = "untokenizable-source"
+    DUPLICATE_LOGIC = "duplicate-logic"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
     CIRCULAR_IMPORT = "circular-import"

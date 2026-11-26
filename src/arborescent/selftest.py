@@ -30,6 +30,7 @@ from .domain import (
     Policy,
     Rule,
     in_unit,
+    path_under,
 )
 from .engine import Services, package_checks, run_own
 from .facts import ModuleInfo, SourceFacts, patched_targets, unreached_bindings
@@ -40,6 +41,7 @@ from .importable_by_probes import (
 from .module_forbid_probes import module_forbid_mutations
 from .owned_literal_probes import owned_literal_mutations
 from .package_constraint_probes import constraint_mutations
+from .path_exclusion import vendor_parent
 from .ports import PackageProbes
 from .purity_policy import PurityPolicy
 from .purity_probes import mixed_purity_mutations
@@ -170,6 +172,9 @@ def plan(
     ), None)
     if circular_anchor is None:
         skipped.append("circular-import: disabled by policy")
+    duplicate_found, duplicate_skipped = _duplicate_mutations(policy, {name: paths[name] for name in scan.modules if name in paths})
+    out.extend(duplicate_found)
+    skipped.extend(duplicate_skipped)
     if anchor is not None:
         out.extend(_anchor_mutations(anchor, paths[anchor]))
         if _rejects_doubled_cr():
@@ -273,6 +278,31 @@ def _seam_bypass_mutations(
     imported, expression = _AT_IMPORT_SNIPPETS[seam[1]]
     append = f"{imported}\ndef _arborescent_probe_seam({seam[0]}=None):\n    return {expression}"
     return [Mutation(Rule.EFFECT_SEAM_BYPASSED, f"a function given {seam[0]!r} that uses the real {seam[1]}", paths[host], append)], []
+
+
+def _duplicate_mutations(policy: Policy, paths: Mapping[str, str]) -> tuple[list[Mutation], list[str]]:
+    """Probe ``duplicate-logic`` (#228): two copies of one function and, when asked for, one branch repeated across functions."""
+    rule = policy.duplicate_logic
+    if not rule.enabled:
+        return [], [f"{Rule.DUPLICATE_LOGIC}: disabled by policy"]
+    host = next((
+        paths[name] for name in sorted(paths)
+        if not paths[name].endswith("__init__.py") and vendor_parent(paths[name], NOISE_DIRS) is None
+        and not any(path_under(paths[name], entry) for entry in rule.reference_paths)
+    ), None)
+    if host is None:
+        return [], [f"{Rule.DUPLICATE_LOGIC}: no first-party module to copy a function into"]
+    body = "".join(f"    v{i} = x + {i}\n" for i in range(rule.min_statements)) + "    return v0\n"
+    copies = "".join(f"def _arborescent_probe_copy_{n}(x: int) -> int:\n{body}\n\n" for n in ("a", "b"))
+    out = [Mutation(Rule.DUPLICATE_LOGIC, "two copies of one function", host, copies)]
+    if rule.branch_skeletons:
+        branches = "".join(
+            f"def _arborescent_probe_branch_{n}() -> None:\n    print({n})\n    if arborescent_probe_flag():\n"
+            "        arborescent_probe_then()\n    else:\n        arborescent_probe_else()\n\n\n"
+            for n in range(rule.min_branch_repeats)
+        )
+        out.append(Mutation(Rule.DUPLICATE_LOGIC, "one branch repeated across functions", host, branches))
+    return out, []
 
 
 def _docs_mutations(

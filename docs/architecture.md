@@ -108,6 +108,8 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.purity` | `single` | domain |
 | `arborescent.purity_facts` | `single` | domain |
 | `arborescent.purity_policy` | `single` | domain |
+| `arborescent.duplicate_facts` | `single` | domain |
+| `arborescent.duplicate_logic` | `single` | domain |
 | `arborescent.effects_policy` | `single` | domain |
 | `arborescent.driver_port` | `single` | ports |
 | `arborescent.annotate` | `single` | application |

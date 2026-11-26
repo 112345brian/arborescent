@@ -186,6 +186,12 @@ The I/O stdlib set (`os`, `subprocess`, `socket`, `sqlite3`, `pathlib`, ...: see
 the generated import-linter bans. Replace it per project with `io_modules = ["os", "subprocess", ...]` (an empty list means
 no stdlib module counts as I/O).
 
+## Duplicate logic (opt-in)
+
+`[tool.arborescent.duplicate_logic]` reports function bodies that repeat each other once local names are erased, and
+first-party copies of code under `reference_paths` such as `vendor/`. See
+[the configuration reference](docs/configuration.md#duplicate-logic-toolarborescentduplicate_logic).
+
 ## Ports
 
 - `ToolRunner` (`available`, `run`) -- how engines and git are executed; `arborescent.testing.FakeToolRunner` fakes it.

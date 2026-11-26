@@ -20,6 +20,7 @@ from .coupling_policy import EagerCommands
 from .domain import (
     CONSTRAINT_RULES,
     INFORMATIONAL_RULES,
+    NOISE_DIRS,
     Policy,
     PolicyError,
     Rule,
@@ -27,6 +28,7 @@ from .domain import (
     Violation,
     path_under,
 )
+from .duplicate_logic import find_duplicates
 from .generate import generate_for_scan
 from .generated_config import GENERATED_MARKER
 from .import_cycles import EdgeKind, resolved_internal_imports
@@ -37,7 +39,7 @@ from .lazy_imports import (
     lazy_import_violations,
     lazy_imports_of,
 )
-from .path_exclusion import nested_bare_pattern
+from .path_exclusion import nested_bare_pattern, vendor_parent
 from .ports import (
     Clock,
     ContractRenderer,
@@ -210,6 +212,8 @@ def run_own(
             policy.coupling.eager_commands, found, lambda path: services.fs.read_text(root / path), scan, complete=only is None
         )
     found += excluded_findings(policy, scan.excluded_modules)
+    if only is None and policy.duplicate_logic.enabled:  # a copy and its original may be anywhere: a whole-repository fact
+        found += _duplicate_findings(policy, root, services, scan)
     if only is None:  # these compare a module with its importers and peers: whole-repository facts
         found += port_binding_findings(indexes, scan.modules, scan.known)
         if policy.name_collisions is not None:  # re-reads every source: only when asked for
@@ -243,8 +247,8 @@ def nested_exclusions(excluded: Mapping[str, int], patterns: Sequence[str]) -> d
     return {folder: pattern for folder in excluded if (pattern := nested_bare_pattern(folder, patterns)) is not None}
 
 
-class _TaintCacheFile:
-    """The taint pass's fact cache as one file: a missing or unreadable file is an empty cache."""
+class _CacheFile:
+    """A whole-repository pass's fact cache as one file: a missing or unreadable file is an empty cache."""
 
     def __init__(self, fs: FileSystem, path: Path) -> None:
         self.fs = fs
@@ -280,8 +284,50 @@ def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult)
     file cannot be read contributes no facts, same as one the taint pass itself failed to parse."""
     sources = _module_sources(root, services, scan)
     cache_dir = services.scanner.cache_dir
-    store = _TaintCacheFile(services.fs, cache_dir / "taint.json") if cache_dir else None
+    store = _CacheFile(services.fs, cache_dir / "taint.json") if cache_dir else None
     return compute_taint(scan.modules, sources, scan.known, policy.taint_seeds, store)
+
+
+def _duplicate_findings(policy: Policy, root: Path, services: Services, scan: ScanResult) -> list[Violation]:
+    """#228: reads each module and reference file for the clone pass. Vendored and reference-path code is only ever a target."""
+    entries = policy.duplicate_logic.reference_paths
+    references = {entry: _reference_sources(root, services.fs, entry) for entry in entries}
+    modules: dict[str, str] = {}
+    for name in scan.modules:
+        path = scan.paths[name]
+        if any(path_under(path, entry) for entry in entries):
+            continue
+        text = _source_text(services.fs, root / path)
+        if text is None:
+            continue
+        if vendor_parent(path, NOISE_DIRS) is None:
+            modules[name] = text
+        else:
+            references[path] = {path: text}
+    cache_dir = services.scanner.cache_dir
+    store = _CacheFile(services.fs, cache_dir / "duplicates.json") if cache_dir else None
+    return [
+        Violation(Rule.DUPLICATE_LOGIC, item.subject, item.detail, item.line, hint=item.hint)
+        for item in find_duplicates(modules, references, policy.duplicate_logic, store)
+    ]
+
+
+def _source_text(fs: FileSystem, path: Path) -> str | None:
+    try:
+        return fs.read_bytes(path).decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _reference_sources(root: Path, fs: FileSystem, entry: str) -> dict[str, str | None]:
+    """The Python files of one reference path (a file or a folder), whether or not the scan covers them."""
+    base = root / entry
+    files = [base] if fs.is_file(base) else fs.rglob(base, "*.py") if fs.is_dir(base) else []
+    return {
+        path.relative_to(root).as_posix(): _source_text(fs, path)
+        for path in files
+        if path.suffix == ".py" and fs.is_file(path) and not NOISE_DIRS.intersection(path.relative_to(base).parts)
+    }
 
 
 def dev_tool_counts(policy: Policy, scan: ScanResult) -> dict[str, int]:

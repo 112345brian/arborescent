@@ -83,6 +83,11 @@
   member names; test doubles are not counted. The scan cache is rebuilt once (new class facts).
 - `[name_collisions]` (#221): opt-in observation `name-collision` (a `NOTE`, never failing) for a class field or local that
   reuses the name of a type from another module while its annotation or literal value shows it is something else.
+- `duplicate-logic` (#228), opt-in through `[tool.arborescent.duplicate_logic]`: reports functions whose bodies are the same
+  once local names, docstrings, comments and annotations are erased (literals and called names kept), within and across
+  modules; first-party copies of functions under `reference_paths` such as `vendor/`; and, with `branch_skeletons`, the same
+  two-way branch repeated across functions. One baseline entry per function, so the ratchet only shrinks. `selftest` probes it
+  when enabled. See *Duplicate logic* in the configuration reference.
 
 ### Changed
 - The scan cache layout changed (it now records function line spans, method calls and exemption comments), so the first run after upgrading re-parses every file.
