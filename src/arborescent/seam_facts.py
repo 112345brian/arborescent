@@ -69,7 +69,7 @@ def _mentioned(nodes: Sequence[ast.expr]) -> frozenset[str]:
 
 def _tested(test: ast.expr) -> tuple[frozenset[str], frozenset[str]]:
     """``(names absent when the test holds, names absent when it does not)``: where a fallback for them may sit."""
-    nothing: frozenset[str] = frozenset()
+    nothing = frozenset[str]()
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
         present_absent = _tested(test.operand)
         return present_absent[1], present_absent[0]
