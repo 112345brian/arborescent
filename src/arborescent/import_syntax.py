@@ -38,34 +38,37 @@ def _is_type_checking(test: ast.expr) -> bool:
     )
 
 
-def _walk(node: ast.AST, lazy: bool, type_only: bool, imports: list[RawImport]) -> None:
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, ast.Import):
-            end = child.end_lineno or child.lineno
-            imports += [RawImport(0, a.name, (), child.lineno, lazy, type_only, end) for a in child.names]
-        elif isinstance(child, ast.ImportFrom):
-            names = tuple(a.name for a in child.names)
-            end = child.end_lineno or child.lineno
-            imports.append(RawImport(child.level, child.module or "", names, child.lineno, lazy, type_only, end))
-        if isinstance(child, ast.If) and _is_type_checking(child.test):
-            _walk(child.test, lazy, type_only, imports)
-            for stmt in child.body:
-                _walk_stmt(stmt, lazy, True, imports)
-            for stmt in child.orelse:
-                _walk_stmt(stmt, lazy, type_only, imports)
-            continue
-        _walk(child, lazy or isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)), type_only, imports)
+_Pending = tuple[ast.AST, bool, bool]  # (statement, inside a function, under ``if TYPE_CHECKING``)
+_BLOCKS = (ast.stmt, ast.excepthandler, ast.match_case)  # an import is a statement: no expression is ever entered
 
 
-def _walk_stmt(stmt: ast.stmt, lazy: bool, type_only: bool, imports: list[RawImport]) -> None:
-    holder = ast.Module(body=[stmt], type_ignores=[])
-    _walk(holder, lazy, type_only, imports)
+def _import_of(node: ast.AST, lazy: bool, type_only: bool) -> list[RawImport]:
+    if isinstance(node, ast.Import):
+        return [RawImport(0, a.name, (), node.lineno, lazy, type_only, node.end_lineno or node.lineno) for a in node.names]
+    if isinstance(node, ast.ImportFrom):
+        names = tuple(a.name for a in node.names)
+        return [RawImport(node.level, node.module or "", names, node.lineno, lazy, type_only, node.end_lineno or node.lineno)]
+    return []
+
+
+def _inner(node: ast.AST, lazy: bool, type_only: bool) -> list[_Pending]:
+    """The statements directly inside ``node``, in source order, with the context each one is read in."""
+    if isinstance(node, ast.If) and _is_type_checking(node.test):
+        return [*((stmt, lazy, True) for stmt in node.body), *((stmt, lazy, type_only) for stmt in node.orelse)]
+    lazy = lazy or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    return [(child, lazy, type_only) for child in ast.iter_child_nodes(node) if isinstance(child, _BLOCKS)]
 
 
 def raw_imports(tree: ast.AST) -> tuple[RawImport, ...]:
-    """Every import in ``tree``, in source order; one inside a function is ``lazy``, one under ``if TYPE_CHECKING`` is ``type_only``."""
+    """Every import in ``tree``, in source order; one inside a function is ``lazy``, one under ``if TYPE_CHECKING`` is ``type_only``.
+
+    Iterative, so a long ``elif`` ladder cannot overflow the stack."""
     imports: list[RawImport] = []
-    _walk(tree, False, False, imports)
+    pending = _inner(tree, False, False)[::-1]
+    while pending:
+        node, lazy, type_only = pending.pop()
+        imports += _import_of(node, lazy, type_only)
+        pending += _inner(node, lazy, type_only)[::-1]
     return tuple(imports)
 
 

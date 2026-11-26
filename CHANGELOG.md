@@ -5,6 +5,8 @@
 ## Unreleased
 
 ### Fixed
+- Generated code with a very long expression or `elif` ladder no longer stops `check` with `RecursionError` while its
+  facts are extracted.
 - A memoised pure function is no longer a `memo` effect in `mixed-purity`: `functools.lru_cache`/`cache`/`cached_property` do not
   count (a written module-level cache still does). Fewer findings; stale baseline entries can be deleted (#195).
 - `selftest` no longer reports the `mixed-purity` mutations as surviving when the host module's ring is excluded by `exclude_rings`.
@@ -22,6 +24,7 @@
 - `check` no longer crashes with `SyntaxError` on a source file that starts with a UTF-8 byte order mark.
 
 ### Added
+- The scan cache layout changed (format version 28), so the first run after upgrading re-parses every file.
 - A finding can name a **root cause** beside its identity key. `lazy-import` (the imported module), `effect-via-import` (the
   last edge of the taint path) and `effect-unsanctioned-import` (the unlisted module) do. `check` prints
   `N violation(s) / M root cause(s)` and per-rule cause counts when findings share causes, `check --by-root-cause` lists each cause once with its fan-out, and
@@ -38,7 +41,6 @@
   output and baselines are unchanged until a ring lists them in `forbid` (or a package in `forbid_effects`). `mixed-purity` is unchanged.
   The forbid docs now list every detected category. Not covered: containers imported from another module, writes through `self`
   or an alias, and `global` slot loaders beyond the existing `global` category.
-- The scan cache is invalidated once (format version 25).
 - `arborescent purity --path PATH...` and `--module MODULE...` list only the mixed modules in a subset (a diff's changed files,
   say); importer counts and ordering still come from the whole scan (#217).
 - `check` prints a report-only `SUGGEST` line for a class with more than `class_field_threshold` fields or
@@ -52,7 +54,7 @@
   only: no wall-time, cold-start or third-party import measurement.
 - `effect-at-import` (#230), opt-in per ring with `forbid_at_import = [...]`: an effect that runs while a module is imported
   (module-level statement, class body, parameter default, decorator) fails, including one call into a first-party function
-  (`X = load_thing()` where `load_thing` reads a file). The scan cache is re-built once after upgrading.
+  (`X = load_thing()` where `load_thing` reads a file).
 - `effect-seam-bypassed` (#233), opt-in with `[tool.arborescent.effect_seam_bypassed]`: a function or class given an
   injected clock, environment or generator (by parameter name, annotation or effect-function default) that also uses the
   real one. Falling back to the real effect only when nothing was injected is not reported.
@@ -72,7 +74,6 @@
   docs/configuration.md.
 - A dataclass field marked `field(metadata={"arbor": "derived"})` may not be supplied by any caller, with no policy entry. A
   repository that already uses that exact metadata starts getting findings.
-- The scan cache layout changed, so the first run after upgrading re-parses every file.
 - `[tool.arborescent.private_access]` (opt-in, #218): `private-cross-module-access` reports a module that imports or reaches
   another module's leading-underscore name, or a private submodule of a package it is not in. Test modules are exempt by default.
 - `practices.unreachable-patch = "<tests folder>"` (opt-in, #226): reports a test that patches `X.name` (`monkeypatch.setattr`,
@@ -80,7 +81,7 @@
   which the patch never reaches.
 - `[[port_binding]]` (#219): opt-in rule `port-binding` for a declared Protocol or abstract class with no production
   implementor, or more than `max` (default 1). Implementors are subclasses and, for a Protocol, classes that define all of its
-  member names; test doubles are not counted. The scan cache is rebuilt once (new class facts).
+  member names; test doubles are not counted.
 - `[name_collisions]` (#221): opt-in observation `name-collision` (a `NOTE`, never failing) for a class field or local that
   reuses the name of a type from another module while its annotation or literal value shows it is something else.
 - `duplicate-logic` (#228), opt-in through `[tool.arborescent.duplicate_logic]`: reports functions whose bodies are the same
@@ -88,9 +89,6 @@
   modules; first-party copies of functions under `reference_paths` such as `vendor/`; and, with `branch_skeletons`, the same
   two-way branch repeated across functions. One baseline entry per function, so the ratchet only shrinks. `selftest` probes it
   when enabled. See *Duplicate logic* in the configuration reference.
-
-### Changed
-- The scan cache layout changed (it now records function line spans, method calls and exemption comments), so the first run after upgrading re-parses every file.
 
 ## 0.9.0 — 2026-11-12
 

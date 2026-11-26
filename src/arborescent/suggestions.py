@@ -168,13 +168,15 @@ def _members(node: ast.ClassDef) -> tuple[int, int]:
 
 def _class_body(body: list[ast.stmt]) -> Iterator[ast.stmt]:
     """The statements of a class body, looking inside ``if``/``try``/``with`` blocks."""
-    for stmt in body:
+    pending = body[::-1]  # a stack, so a long ``elif`` ladder cannot overflow it
+    while pending:
+        stmt = pending.pop()
         if isinstance(stmt, ast.If):
-            yield from _class_body([*stmt.body, *stmt.orelse])
+            pending += [*stmt.body, *stmt.orelse][::-1]
         elif isinstance(stmt, ast.Try):
-            yield from _class_body([*stmt.body, *(s for h in stmt.handlers for s in h.body), *stmt.orelse, *stmt.finalbody])
+            pending += [*stmt.body, *(s for h in stmt.handlers for s in h.body), *stmt.orelse, *stmt.finalbody][::-1]
         elif isinstance(stmt, ast.With):
-            yield from _class_body(stmt.body)
+            pending += stmt.body[::-1]
         else:
             yield stmt
 

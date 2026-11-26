@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import ast
 from bisect import bisect_right
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 __all__ = [
@@ -90,17 +90,15 @@ def function_spans(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str
     """Every function and method that is not inside another function, however the module or class body nests it."""
     out: list[tuple[str, int, int, int]] = []  # (name, def line, end line, first decorator line)
 
-    def visit(node: ast.AST, prefix: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                start = min([child.lineno, *(d.lineno for d in child.decorator_list)])
-                out.append((prefix + child.name, child.lineno, child.end_lineno or child.lineno, start))
-            elif isinstance(child, ast.ClassDef):
-                visit(child, f"{prefix}{child.name}.")
-            elif isinstance(child, ast.stmt | ast.excepthandler | ast.match_case):
-                visit(child, prefix)
-
-    visit(tree, "")
+    pending: list[tuple[ast.AST, str]] = [(child, "") for child in ast.iter_child_nodes(tree)][::-1]
+    while pending:  # a stack in source order, so a long ``elif`` ladder cannot overflow it
+        child, prefix = pending.pop()
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            start = min([child.lineno, *(d.lineno for d in child.decorator_list)])
+            out.append((prefix + child.name, child.lineno, child.end_lineno or child.lineno, start))
+        elif isinstance(child, ast.stmt | ast.excepthandler | ast.match_case):
+            inner = f"{prefix}{child.name}." if isinstance(child, ast.ClassDef) else prefix
+            pending += [(item, inner) for item in ast.iter_child_nodes(child)][::-1]
     methods = _method_calls(nodes, _heads(tree, aliases), out)
     return tuple(
         FunctionSpan(*span, tuple(sorted((line, text) for text, line in found.items())))
@@ -496,16 +494,49 @@ def unqualified_from_calls(tree: ast.Module, nodes: Sequence[ast.AST], rebound: 
     bound = _module_from_imports(tree)
     if not bound:
         return ()
-    functions = [node for node in nodes if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda)]
-    bodies = [item for node in functions for item in (node.body if isinstance(node.body, list) else [node.body])]
-    inner = [child for body in bodies for child in ast.walk(body)]
-    lazy = {item.asname or item.name for node in inner if isinstance(node, ast.Import | ast.ImportFrom) for item in node.names}
-    usable = bound.keys() - rebound - lazy
+    candidates = [  # filtered from the shared node list first: the function bodies are only located when one could count
+        (node, node.func.id) for node in nodes
+        if node.__class__ is ast.Call and node.func.__class__ is ast.Name and node.func.id in bound and node.func.id not in rebound
+    ]
+    if not candidates:
+        return ()
+    inside = _inside_function_bodies(nodes)
+    lazy = {item.asname or item.name for node in nodes if isinstance(node, ast.Import | ast.ImportFrom) and inside(node) for item in node.names}
     first: dict[str, int] = {}
-    for node in inner:
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in usable:
-            first[node.func.id] = min(node.lineno, first.get(node.func.id, node.lineno))
+    for node, name in candidates:
+        if name not in lazy and inside(node):
+            first[name] = min(node.lineno, first.get(name, node.lineno))
     return tuple(sorted((line, bound[local], local) for local, line in first.items()))
+
+
+def _inside_function_bodies(nodes: Sequence[ast.AST]) -> Callable[[ast.stmt | ast.expr], bool]:
+    """Whether a node lies in the body of a function or ``lambda`` (not in its defaults, decorators or annotations).
+
+    Answered by source position, so the bodies are not walked a second time."""
+    spans: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    for node in nodes:
+        if node.__class__ is ast.Lambda:
+            first = last = node.body
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            first, last = node.body[0], node.body[-1]
+        else:
+            continue
+        starts = [first, *getattr(first, "decorator_list", [])]  # a decorator sits above its `def` line
+        spans.append((min((item.lineno, item.col_offset) for item in starts), (last.end_lineno or last.lineno, last.end_col_offset or 0)))
+    merged: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    begins = [start for start, _ in merged]
+
+    def inside(node: ast.stmt | ast.expr) -> bool:
+        position = (node.lineno, node.col_offset)
+        slot = bisect_right(begins, position) - 1
+        return slot >= 0 and position < merged[slot][1]
+
+    return inside
 
 
 def _imported_calls(func: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str]) -> tuple[str, ...]:

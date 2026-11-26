@@ -292,6 +292,8 @@ def _global_effect_uses(nodes: Sequence[ast.AST]) -> list[EffectUse]:
     """A function that both declares ``global x`` and assigns ``x`` (plain, augmented or in a ``for``/``with``
     target) mutates module state from inside a call; one that only reads a global is not a use."""
     uses: list[EffectUse] = []
+    if not any(node.__class__ is ast.Global for node in nodes):  # most modules: do not walk every function's scope
+        return uses
     for func in (n for n in nodes if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
         declared: set[str] = set()
         assigned: dict[str, int] = {}
@@ -381,10 +383,9 @@ def _seeded_random_ids(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> set
     return seeded
 
 
-def effect_sites(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> list[EffectSite]:
+def effect_sites(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str], rebound: set[str]) -> list[EffectSite]:
     """Every effect use with its node, so a pass can ask where it sits (import time, a function body)."""
     seams = _injection_defaults(nodes)
-    rebound = rebound_names(nodes)
     hints = _annotation_node_ids(nodes)
     seeded = _seeded_random_ids(nodes, aliases)
     sites: list[EffectSite] = [(None, use) for use in _global_effect_uses(nodes)]

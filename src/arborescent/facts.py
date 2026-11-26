@@ -168,10 +168,10 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     nodes = list(ast.walk(tree))  # one walk, shared by every fact below
     aliases = import_aliases(nodes)  # computed once: each fact below reads it
     calls_aliases = call_aliases(nodes, aliases)
-    sites = effect_sites(tree, nodes, aliases)
+    rebound = rebound_names(nodes)
+    sites = effect_sites(tree, nodes, aliases, rebound)
     running = running_ids(nodes)
     at_import = list(evaluated(tree.body))
-    rebound = rebound_names(nodes)
     return SourceFacts(
         raw_imports(tree),
         merge_sites(sites, {id(node) for node in at_import}, running),

@@ -138,13 +138,14 @@ def _conditional_bodies(stmt: ast.stmt) -> list[list[ast.stmt]]:
 
 def _find_arbor_assignments(stmts: list[ast.stmt], conditional: bool) -> list[tuple[ast.expr | None, bool]]:
     found: list[tuple[ast.expr | None, bool]] = []
-    for stmt in stmts:
+    pending = [(stmt, conditional) for stmt in reversed(stmts)]  # a stack, so a long ``elif`` ladder cannot overflow it
+    while pending:
+        stmt, nested = pending.pop()
         if _is_arbor_target(stmt):
             value = stmt.value if isinstance(stmt, (ast.Assign, ast.AnnAssign)) else None
-            found.append((value, conditional))
+            found.append((value, nested))
         elif isinstance(stmt, _CONDITIONAL_CONTAINERS):
-            for body in _conditional_bodies(stmt):
-                found += _find_arbor_assignments(body, True)
+            pending += [(inner, True) for body in _conditional_bodies(stmt) for inner in body][::-1]
     return found
 
 

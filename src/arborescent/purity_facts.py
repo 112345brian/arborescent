@@ -75,13 +75,15 @@ def _module_level_defs(body: Sequence[ast.stmt]) -> list[ast.FunctionDef | ast.A
     """Functions and classes defined at module level, including inside ``if``/``try``/``with`` blocks (an
     ``except ImportError`` fallback is still a module-level function), but never inside another function or class."""
     found: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef] = []
-    for stmt in body:
+    pending = list(reversed(body))  # a stack, so a long ``elif`` ladder cannot overflow it
+    while pending:
+        stmt = pending.pop()
         if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             found.append(stmt)
         elif isinstance(stmt, ast.If | ast.With | ast.AsyncWith):
-            found += _module_level_defs([*stmt.body, *getattr(stmt, "orelse", [])])
+            pending += reversed([*stmt.body, *getattr(stmt, "orelse", [])])
         elif isinstance(stmt, ast.Try | ast.TryStar):
-            found += _module_level_defs([*stmt.body, *stmt.orelse, *stmt.finalbody, *(s for h in stmt.handlers for s in h.body)])
+            pending += reversed([*stmt.body, *stmt.orelse, *stmt.finalbody, *(s for h in stmt.handlers for s in h.body)])
     return found
 
 

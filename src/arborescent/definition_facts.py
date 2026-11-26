@@ -110,7 +110,12 @@ class ClassMembers:
 
 
 def _blocks(stmt: ast.stmt) -> Iterator[ast.stmt]:
-    """The statements directly inside a compound statement (`if`, `try`, `with`, `match`, loops)."""
+    """The statements directly inside a compound statement (`if`, `try`, `with`, `match`, loops).
+
+    An ``elif`` ladder is read arm by arm, so its length does not become recursion depth in the visitors."""
+    while isinstance(stmt, ast.If) and len(stmt.orelse) == 1 and isinstance(stmt.orelse[0], ast.If):
+        yield from stmt.body
+        stmt = stmt.orelse[0]
     for child in ast.iter_child_nodes(stmt):
         if isinstance(child, ast.stmt):
             yield child
