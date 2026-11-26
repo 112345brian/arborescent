@@ -334,7 +334,7 @@ reason = "the command port sets the timeout and kills the whole process tree"
 
 [[tool.arborescent.call_allowlist]]        # an idiom: either call alone is fine, both in one function is not
 calls = ["tempfile.mkstemp", "tempfile.NamedTemporaryFile"]
-and_calls = ["os.replace", "os.rename"]
+and_calls = ["os.replace", "os.rename", "pathlib.Path.replace", "pathlib.Path.rename"]
 modules = ["app.fsutil"]
 reason = "use save_text_atomic"
 ```
@@ -347,10 +347,22 @@ and `selftest` makes each entry's call (or pair) in a module that may not. `dev_
 `modules` if scripts may make the call. A first-party function can be a target as well (`app.queries.build`).
 
 Targets are resolved by syntax, through `import os as o`, `from os import replace as swap`, function-level and relative imports.
+
+**`pathlib` methods** are targets of their own, `pathlib.Path.<method>`; listing `os.replace` does not cover them. A method call
+counts when its receiver can only be a `Path`: `Path(tmp).replace(dest)`, `(root / name).rename(dest)`,
+`dest.with_suffix(".tmp").write_text(text)`, or a name or class attribute whose every binding says so (`tmp_path: Path`,
+`p: Path | None`, `tmp = Path(name)`, a dataclass field `tmp: Path` used as `self.tmp`). `str.replace` and `datetime.replace`
+are never taken for it. Only the methods that read or write the filesystem are recorded: `chmod`, `hardlink_to`, `lchmod`,
+`mkdir`, `open`, `read_bytes`, `read_text`, `rename`, `replace` (with its one argument), `rmdir`, `symlink_to`, `touch`,
+`unlink`, `write_bytes`, `write_text`. A glob such as `pathlib.*` matches them too.
+
 What it does not see:
 
-- a call on a value: `Path(tmp).replace(dest)`, `tmp_path.rename(dest)` and `proc.communicate()` are not `os.replace` or
-  `subprocess.*`, so an atomic write spelled with `pathlib` passes;
+- a call on a value of any other type: `proc.communicate()` is not `subprocess.*`;
+- a `Path` the module does not show to be one: an unannotated parameter or fixture (`def f(tmp_path):`), a `str | Path` value
+  even after `p = Path(p)`, a loop, `with` or unpacking target, what a function of yours returns, an imported constant,
+  `self.tmp = Path(...)` with no class-level annotation, a subclass of `Path`, a re-exported `Path`, or any method not listed
+  above;
 - a call that is never spelled: `swap = os.replace; swap(a, b)`, `getattr(os, "replace")(a, b)`, `functools.partial(os.replace, a)`,
   `asyncio.to_thread(subprocess.run, argv)`, `map(os.remove, paths)`;
 - `from os import *`, a re-export through another module (`from app.compat import replace`: list that name too), and a builtin
@@ -373,19 +385,46 @@ rings = ["adapters", "composition"]                  # where it applies (and/or 
 reason = "an unrecorded submission is lost"
 ```
 
-`missing-companion-call` reports a function or method that itself calls a `when_calls` target and neither calls a
-`must_also_call` target nor calls a function that does. "A function it calls" is one hop: a helper in the module, an imported
-function or static method of this repository, or `self.name()` / `cls.name()` in the same class. A dotted target is resolved as
-for `call_allowlist`; `*.name` matches a call of anything named `name` on any receiver (`self.recorder.record_outcome()`,
-`make().record_outcome()`, `record_outcome()` imported from anywhere), which is how an injected recorder is named.
+`missing-companion-call` reports a function or method that itself calls a `when_calls` target and has a path that finishes
+with no record: no `must_also_call` target is called on it, and no function that does is called on it. "A function it calls" is
+one hop: a helper in the module, an imported function or static method of this repository, or `self.name()` / `cls.name()` in
+the same class. A dotted target is resolved as for `call_allowlist` (`pathlib.Path.unlink` included); `*.name` matches a call of
+anything named `name` on any receiver (`self.recorder.record_outcome()`, `make().record_outcome()`, `record_outcome()` imported
+from anywhere), which is how an injected recorder is named. The finding is on the line of the action and says where the
+unrecorded path finishes. A record before the action on the same path counts.
+
+**Paths** are followed through `if`/`elif`/`else`, early `return`, `try`/`except`/`else`/`finally`, `match`, `for`, `while`,
+`break` and `continue`. To keep false findings low, these are assumptions, not proofs:
+
+- a path that leaves by an exception (`raise`, `sys.exit()`, `assert_never()`) need not record: the caller hears of it. A
+  function that records nowhere at all is still reported;
+- a loop runs its body at least once, so `for result in results: record(result)` records;
+- an `except` handler is entered by an exception from before the action: an action that raised is taken as not done. A record
+  the `try` body makes unconditionally counts there too (best-effort recording). An explicit `raise` in the body carries its
+  path to every handler, whatever the exception type;
+- a `match` covers its subject when it has a `case _` (or a bare name), or at least two unguarded cases that are all dotted
+  names, class patterns, `None`, `True` or `False`; otherwise there is a path that matches no case;
+- the same test twice gives the same answer (`if live: submit()` ... `if live: record()`), until a name in it is assigned.
+  Only names, attributes, constants, one `is`/`==` comparison, `not`, and a flat `and`/`or` of those are compared, spelled alike;
+- where the recorder is known to be missing there is nothing to record: `if self.recorder: self.recorder.record_outcome()`.
 
 To exempt a function, say why in a comment: `# companion-exempt: <reason>`, anywhere in it or on the line above it (a blank line
 ends it, and a comment without a reason exempts nothing). It exempts the function from every `companion` entry.
 
-**This is not a path-sensitive check.** What it does not see:
+What it does not see, or gets wrong:
 
-- a record on one branch satisfies the whole function: `if ok: record()` after `submit()`, a record only in an `except` handler,
-  or one before an early return that skips it are all accepted. It catches a function that never records, not a path that does not;
+- a record skipped in one iteration of a loop is not reported if a later iteration or the code after the loop records, and a
+  loop that never ends (`while True` with no `break` or `return`) has no finishing path. A loop that runs zero times is not
+  considered;
+- a record skipped because an exception was swallowed after the action (`submit()` and `notify()` inside the same `try`, then
+  `record()`), or because a context manager suppressed it;
+- `x and record()`, `record() if x else None`, a comprehension, and a nested function or `lambda` count as always running, where
+  they are written; a helper reached in one hop counts as recording even when only some of its own paths do;
+- conditions linked in any other way are taken as independent, so these can be reported though no real path skips the record:
+  a flag set beside the action (`sent = True` ... `if sent:`), a test with a call or `isinstance` in it, and `if result:
+  record(result)` where a false result means nothing happened. Use the exemption comment there;
+- a very large or deeply branching function whose paths cannot be enumerated within a fixed limit is judged as a whole: any
+  record in it will do;
 - order, count and arguments: recording before the action, once for ten actions, or recording something else all pass;
 - a record two or more calls away, or behind a call that cannot be named: a method on an injected or built object
   (`self.service.finish()`, `Helper().finish()`), an inherited method, `__init__`, a decorator, a context manager's exit, a
@@ -1069,7 +1108,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build, or builds a `construction` class outside its `only_from`; also an owner glob or target module that does not exist |
 | `call-outside-allowlist` | a module or ring calls a `call_allowlist` target that only other modules or rings may call; also an owner glob that matches no module |
 | `hand-rolled-idiom` | a function makes both halves of a `call_allowlist` idiom (`calls` and `and_calls`) outside the sanctioned modules and rings; also an owner glob that matches no module |
-| `missing-companion-call` | a function calls a `companion` action and neither it nor a function it calls records it (`must_also_call`), with no `# companion-exempt:` reason; also a scope glob that matches no module |
+| `missing-companion-call` | a function calls a `companion` action and has a finishing path on which neither it nor a function it calls records it (`must_also_call`), with no `# companion-exempt:` reason; also a scope glob that matches no module |
 | `construction-forbidden-argument` | a call or `replace` supplies a field that a `construction` entry forbids or a `metadata={"arbor": "derived"}` marker marks; also an entry whose class or field does not exist |
 | `construction-missing-argument` | a call constructs a `construction` class without passing a `require_kwargs` name by keyword; also an entry whose class or field does not exist |
 | `port-binding` | a `port_binding` port has no production implementor, or more than its `max` (default 1); also a port that does not exist or is not a Protocol or abstract class. Whole-repository runs only |

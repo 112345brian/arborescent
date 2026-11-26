@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -63,9 +64,9 @@ def test_the_action_without_the_record_is_reported(repo: Path, body: str) -> Non
 @pytest.mark.parametrize(
     "body",
     [
-        # the same function, directly, in either order and on any branch (no path sensitivity)
+        # the same function, directly, in either order
         "from app.ports import submit, record\n\n\ndef go() -> None:\n    submit()\n    record()\n",
-        "from app.ports import submit, record\n\n\ndef go(ok: bool) -> None:\n    if ok:\n        record()\n        return\n    submit()\n",
+        "from app.ports import submit, record\n\n\ndef go(ok: bool) -> None:\n    submit()\n    record()\n    if ok:\n        return\n",
         # one hop: a helper in this module, a method of this class, an imported helper, a static method of a class here
         "from app.ports import submit, record\n\n\ndef note() -> None:\n    record()\n\n\ndef go() -> None:\n    submit()\n    note()\n",
         "from app.ports import submit, record\n\n\nclass C:\n    def note(self) -> None:\n        record()\n\n    def go(self) -> None:\n        submit()\n        self.note()\n",
@@ -273,3 +274,167 @@ def test_a_changed_only_run_still_reports_a_caller_whose_only_unread_callee_is_t
     policy = mini_policy(companion=[PAIR], ring=OPEN)
     found, _ = run_own(policy, repo, services(), only=frozenset({"app/domain.py"}), practices=False)
     assert missing(found) == [("app.domain", 5)]
+
+
+HEADER = "from app.ports import submit, record\n\n\n"
+
+
+def function(body: str) -> str:
+    return HEADER + "def go(x, y, items, rec=None) -> None:\n" + "".join(f"    {line}\n" for line in body.splitlines())
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # if / else and early return
+        "submit()\nif x:\n    record()",
+        "if x:\n    submit()\nelse:\n    record()",
+        "if x:\n    record()\n    return\nsubmit()",
+        "submit()\nif x:\n    return\nrecord()",
+        "submit()\nif x:\n    record()\nelif y:\n    pass\nelse:\n    record()",
+        "if submit():\n    record()",
+        "if x:\n    submit()\nif y:\n    record()",
+        "if x and y:\n    submit()\nif x or y:\n    record()",
+        "if x:\n    submit()\nif not x:\n    record()",
+        "if x:\n    submit()\nx = y\nif x:\n    record()",  # `x` changed, so the second test says nothing
+        # try / except / else / finally
+        "try:\n    submit()\nexcept OSError:\n    record()",
+        "submit()\ntry:\n    x.check()\nexcept OSError:\n    return\nrecord()",
+        "try:\n    submit()\n    if x:\n        raise ValueError\n    record()\nexcept ValueError:\n    pass",
+        "try:\n    submit()\nexcept OSError:\n    return\nelse:\n    if x:\n        record()",
+        "try:\n    submit()\n    if x:\n        return\n    record()\nfinally:\n    y.close()",
+        # match
+        "submit()\nmatch x:\n    case 'a':\n        record()",
+        "submit()\nmatch x:\n    case 'a':\n        record()\n    case _:\n        pass",
+        "submit()\nmatch x:\n    case 'a':\n        record()\n    case 'b':\n        record()",  # strings are not exhaustive
+        # loops
+        "for item in items:\n    submit()\n    if item:\n        continue\n    record()",
+        "submit()\nfor item in items:\n    if item:\n        record()\n        break",
+        "while x:\n    submit()\n    if y:\n        return\n    record()",
+        "while True:\n    submit()\n    if y:\n        break\n    record()",
+        # a guard that is not the recorder
+        "submit()\nif x is not None:\n    record()",
+    ],
+)
+def test_a_path_that_skips_the_record_is_reported(repo: Path, body: str) -> None:
+    write(repo, function(body))
+    found = run(repo)
+    assert [subject for subject, _ in missing(found)] == ["app.domain"]
+    violation = next(v for v in found if v.rule == Rule.MISSING_COMPANION_CALL)
+    assert "on a path" in violation.detail
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "submit()\nif x:\n    record()\nelse:\n    record()",
+        "if x:\n    submit()\n    record()",
+        "if not x:\n    return\nsubmit()\nrecord()",
+        "record()\nsubmit()\nif x:\n    return",
+        "submit()\nif x:\n    raise ValueError\nrecord()",  # leaving by an exception is not a finished path
+        "submit()\nif x:\n    sys.exit(1)\nrecord()",
+        "submit()\nif x:\n    record()\nelse:\n    assert_never(x)",
+        # the same condition twice
+        "if x:\n    submit()\nif x:\n    record()",
+        "if not x:\n    submit()\nif not x:\n    record()",
+        "if x and not y:\n    submit()\nif x and not y:\n    record()",
+        "if x.dry is None:\n    submit()\nif x.dry is not None:\n    return\nrecord()",
+        # try
+        "try:\n    submit()\n    record()\nexcept OSError:\n    pass",
+        "try:\n    submit()\nexcept OSError:\n    return\nrecord()",
+        "try:\n    submit()\nexcept OSError:\n    record()\n    raise\nelse:\n    record()",
+        "submit()\ntry:\n    record()\nexcept Exception:\n    pass",  # best-effort recording
+        "submit()\ntry:\n    x.prepare()\n    record()\nexcept Exception:\n    pass",
+        "try:\n    submit()\n    if x:\n        return\nfinally:\n    record()",
+        "try:\n    submit()\nexcept* OSError:\n    pass\nfinally:\n    record()",
+        # match
+        "submit()\nmatch x:\n    case 'a':\n        record()\n    case _:\n        record()",
+        "submit()\nmatch x:\n    case S.A:\n        record()\n    case S.B | S.C:\n        record()",
+        "submit()\nmatch x:\n    case Ok():\n        record()\n    case Err():\n        record()",
+        "submit()\nmatch x:\n    case 'a':\n        record()\n    case other:\n        record()",
+        # loops run at least once
+        "submit()\nfor item in items:\n    record()",
+        "for item in items:\n    submit()\nfor item in items:\n    record()",
+        "for attempt in items:\n    try:\n        submit()\n        break\n    except OSError:\n        continue\nrecord()",
+        "while x:\n    submit()\n    record()",
+        # an optional recorder: with none there is nothing to record with
+        "submit()\nif rec:\n    rec.record()",
+        "submit()\nif rec is not None:\n    rec.record()",
+        "submit()\nif rec is None:\n    return\nrec.record()",
+        # not branches of control flow
+        "submit()\nx and record()",
+        "submit()\nwith x:\n    record()",
+        "def done() -> None:\n    record()\nif x:\n    submit()\n    done()",
+    ],
+)
+def test_every_finished_path_records_or_the_case_is_not_judged(repo: Path, body: str) -> None:
+    entry = {"when_calls": "app.ports.submit", "must_also_call": ["app.ports.record", "*.record"]}
+    write(repo, function(body))
+    assert missing(run(repo, entry)) == []
+
+
+def test_a_one_hop_record_counts_on_the_path_that_calls_it(repo: Path) -> None:
+    helper = "def note() -> None:\n    record()\n\n\n"
+    write(repo, HEADER + helper + "def go(x) -> None:\n    submit()\n    if x:\n        note()\n    else:\n        record()\n")
+    assert missing(run(repo)) == []
+    write(repo, HEADER + helper + "def go(x) -> None:\n    submit()\n    if x:\n        note()\n")
+    assert missing(run(repo)) == [("app.domain", 9)]
+
+
+def test_the_finding_names_the_action_line_and_where_the_path_leaves(repo: Path) -> None:
+    write(repo, function("submit()\nif x:\n    return\nrecord()"))
+    [violation] = [v for v in run(repo) if v.rule == Rule.MISSING_COMPANION_CALL]
+    assert violation.line == 5 and "line 7" in violation.hint
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def go(x) -> None:\n    submit()\n    if x == 0:\n        pass\n" + "    elif x == 1:\n        pass\n" * 1500
+        + "    else:\n        pass\n    record()\n",
+        "def go(x) -> None:\n    submit()\n" + "".join(f"    if x.a{i}:\n        x.go()\n    if x.a{i}:\n        x.go()\n" for i in range(60))
+        + "    record()\n",
+        "def go(x) -> None:\n    submit()\n" + "".join("    " * i + "try:\n" + "    " * (i + 1) + "x.go()\n" for i in range(1, 15))
+        + "".join("    " * i + "finally:\n" + "    " * (i + 1) + "x.go()\n" for i in range(14, 0, -1)) + "    record()\n",
+        "def go(x) -> None:\n    if x:\n        submit()\n    record(" + "a + " * 500 + "a)\n",
+    ],
+)
+def test_a_very_large_function_neither_crashes_nor_stalls(repo: Path, body: str) -> None:
+    write(repo, HEADER + body)
+    started = time.monotonic()
+    assert missing(run(repo)) == []
+    assert time.monotonic() - started < 20
+
+
+def test_the_flow_survives_the_scan_cache() -> None:
+    facts = extract(function("submit()\nif x:\n    record()\nif x:\n    return\ntry:\n    y.go()\nexcept OSError:\n    pass"))
+    assert facts.function_spans[0].flow
+    assert cached_facts(["digest", facts_to_json(facts)]) == facts
+
+
+def test_a_function_without_branches_keeps_no_flow() -> None:
+    assert extract(function("submit()\nrecord()")).function_spans[0].flow == ()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "async def go(x) -> None:\n    async with x:\n        submit()\n    async for item in x:\n        record()\n    if x:\n        return\n",
+        "def go(x) -> None:\n    while True:\n        submit()\n        record()\n        if x:\n            return\n",
+        "def go(x) -> None:\n    try:\n        x.prepare()\n    except OSError:\n        return\n    else:\n        submit()\n    finally:\n        x.close()\n    record()\n",
+        "def go(x) -> None:\n    for item in x:\n        pass\n    else:\n        submit()\n    if x:\n        record()\n    else:\n        record()\n",
+        "def go(x) -> None:\n    for item in x:\n        try:\n            submit()\n            if item:\n                break\n        finally:\n            record()\n",
+    ],
+)
+def test_other_shapes_that_always_record_are_accepted(repo: Path, body: str) -> None:
+    write(repo, HEADER + body)
+    assert missing(run(repo)) == []
+
+
+def test_a_pathlib_method_can_be_the_action_on_a_path(repo: Path) -> None:
+    entry = {"when_calls": "pathlib.Path.unlink", "must_also_call": "app.ports.record"}
+    head = "from pathlib import Path\nfrom app.ports import record\n\n\ndef go(p: Path, x) -> None:\n    p.unlink()\n"
+    write(repo, head + "    if x:\n        record()\n")
+    assert missing(run(repo, entry)) == [("app.domain", 6)]
+    write(repo, head + "    if x:\n        record()\n    else:\n        record()\n")
+    assert missing(run(repo, entry)) == []

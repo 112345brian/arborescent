@@ -151,6 +151,18 @@ def boot():
 boot()
 
 
+def branchy(key: str, path: Path) -> None:
+    path.with_suffix(".tmp").replace(path)
+    if key:
+        helper(key)
+    try:
+        helper(key)
+    except ValueError:
+        return
+    if key:
+        key = ""
+
+
 # companion-exempt: exercised only
 def exempted():
     helper(1)
