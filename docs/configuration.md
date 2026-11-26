@@ -1583,9 +1583,15 @@ domain = 40                      # report-only cap on distinct importers per rin
 
 - **Fan-in** per module: distinct importing modules (any kind), those that import it at module level, and the modules that reach
   it through module-level imports (transitive). A module never counts as its own importer. A ring over its `fan_in_max` is flagged.
-- **Closure** per entrypoint: the project modules loaded by following module-level imports, the entrypoint included. The modules
-  only its function-level imports reach, and those only `TYPE_CHECKING` imports reach, are counted separately and not in the size.
-  Like the ring checks, this does not add the `__init__` of each parent package.
+- **Closure** per entrypoint: the project modules that importing it loads: itself, its module-level imports followed all the
+  way, and the parent packages of each (`import a.b.c` runs `a` and `a.b`, with whatever their `__init__.py` imports). A folder
+  without `__init__.py` is not a module and is not counted. The modules that its function-level imports name, and those only its
+  `TYPE_CHECKING` imports name, are counted separately and not in the size. Fan-in and the ring checks count written imports
+  only, without parent packages.
+
+  A baseline recorded before parent packages were counted can report growth with no new import. The new size includes the
+  packages and what their `__init__.py` loads; record it once with `arborescent coupling baseline --allow-growth --reason ...`
+  and raise a `closure_max` that no longer fits, or trim the `__init__.py`.
 - **Ambient hub candidates**: a module with at least `hub_fan_in` importers whose public definitions mostly (more than half) use an
   effect directly (environment, file system, clock, process, ...). A definition owns the lines up to the next one; a parameter
   default that names an effect is a seam and does not count. Pass such a module in through a port instead of importing it.
@@ -1614,16 +1620,17 @@ backfill = "app.commands.backfill:app"
 "backfill conditions" = "app.commands.conditions:app"
 ```
 
-Both are static: they count project modules reached by module-level imports, not seconds. Only `startup --measure`
-(below) runs the project.
+Both are static: they count the project modules that importing loads (the closure above, parent packages included), not
+seconds. Only `startup --measure` (below) runs the project.
 
 - `arborescent coupling check` fails when a closure is over its `closure_max`, naming the imports to blame. The baseline
   does not excuse it, unlike growth, which `check` already reports against the `closure` counts.
-- It also fails when an entrypoint loads a mounted module at import time, and prints the import chain. This check also
-  follows parent packages (`import a.b.c` runs `a` and `a.b`). A `TYPE_CHECKING` or function-level import passes.
+- It also fails when an entrypoint loads a mounted module at import time, and prints the import chain, which may pass through
+  a parent package. A `TYPE_CHECKING` or function-level import passes.
 - `arborescent coupling startup [--top N]` is the report. Per entrypoint it prints the closure size and budget, the `N`
   heaviest imports (`a -> b pulls 12 module(s)` is what removing that import saves; several importers means every one of
-  those edges must go), and per lazy mount the modules running it adds, or `EAGER`.
+  those edges must go), and per lazy mount the modules running it adds, or `EAGER`. Only written imports are listed: the
+  implicit load of a parent package cannot be cut, so a package that a submodule still needs is never offered.
 
 A mount whose module does not exist is a policy error (exit 2); `attr` is checked for syntax only. How the mount loads the
 module (a string table with `importlib`) is the project's code. Add a mounted command module to `entrypoints` to ratchet
@@ -1641,8 +1648,8 @@ runs, so an entrypoint without a `__main__` guard starts its program. Nothing el
 `coupling check` never run it, and no budget or baseline holds the times. `--python` names the interpreter that has the
 project's dependencies (default: the one running arborescent).
 
-Per entrypoint it adds the measured import time, the number of project modules actually loaded, the time of each blamed
-import, and the third-party packages that the startup path imports at module level and that took at least
+Per entrypoint it adds the measured import time, the number of project modules actually loaded (those in `sys.modules`
+after the import), the time of each blamed import, and the third-party packages that the startup path imports at module level and that took at least
 `--threshold-ms` (cumulative, so a package includes what it was first to import). Each is listed with the modules that
 import it and the commands that use it:
 
@@ -1656,7 +1663,11 @@ app.cli: measured 412.0 ms, 38 project modules loaded
 function on the startup path, found as for `entrypoint-eager-commands` (it uses what its body imports or reads: the package,
 or a project module that loads it at module level). A use through a helper in the command's own module, a method of an
 object or a dynamic import is not seen, so "used by no command found" means unknown, not unused. A failed import, a
-timeout or a missing interpreter is printed and exits 1.
+timeout, a missing interpreter or an import that ends the process (`os._exit`) is printed and exits 1.
+
+A module loaded by `importlib.import_module` is in the loaded count, but `-X importtime` prints no line for it: it has no
+per-module time (its time is within whatever was importing then, so the total still holds it), and a third-party package
+loaded only that way is not listed as heavy. The loaded count can therefore exceed the static closure size.
 
 One run per entrypoint: the first after a change also pays for compiling `.pyc` files, so run it twice before comparing.
 Not measured: `argv` paths such as `backfill --help`, cold against warm starts, and process start-up before the import.

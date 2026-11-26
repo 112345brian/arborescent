@@ -19,6 +19,7 @@ from .coupling import NewModule, ambient_hubs, cost_of_new_modules, mount_cost
 from .coupling_measure import (
     HEAVY_MS,
     TIMEOUT_SECONDS,
+    ImportRun,
     Measure,
     MeasureSettings,
     Measuring,
@@ -111,16 +112,16 @@ def _startup(measure: Measure, args: argparse.Namespace, root: Path, fs: FileSys
         cap = budgets.get(closure.entrypoint)
         budget = "no budget" if cap is None else f"budget {cap}, {'OVER' if size > cap else 'ok'}"
         print(f"{closure.entrypoint}: {size} project modules ({budget})")
-        records = None if run is None else run_importtime(measure, run.runner, run.root, run.settings, closure.entrypoint)
-        times = {record.name: record.cumulative_us for record in records} if isinstance(records, list) else {}
+        result = None if run is None else run_importtime(measure, run.runner, run.root, run.settings, closure.entrypoint)
+        times = {record.name: record.cumulative_us for record in result.records} if isinstance(result, ImportRun) else {}
         for line in blame_lines(measure, closure.entrypoint, top, times):
             print(f"  {line}")
         _print_mounts(measure, closure.entrypoint, eager)
-        if isinstance(records, str):
-            print(f"{closure.entrypoint}: measurement failed: {records}")
+        if isinstance(result, str):
+            print(f"{closure.entrypoint}: measurement failed: {result}")
             failed = True
-        elif records is not None and run is not None:
-            for line in measured_lines(measure, run.read, closure.entrypoint, records, run.settings.threshold_ms):
+        elif result is not None and run is not None:
+            for line in measured_lines(measure, run.read, closure.entrypoint, result, run.settings.threshold_ms):
                 print(line)
     return 1 if failed else 0
 
@@ -129,7 +130,7 @@ def _print_mounts(measure: Measure, entrypoint: str, eager: set[tuple[str, str]]
     for mount in measure.policy.coupling.lazy_mounts:
         if mount.module == entrypoint:
             continue
-        cost = mount_cost(measure.edges.runtime, entrypoint, mount.module)
+        cost = mount_cost(measure.edges.loading, entrypoint, mount.module)
         state = "EAGER (loaded at import time)" if (mount.name, entrypoint) in eager else f"+{cost} module(s) when run"
         print(f"  lazy mount {mount.name} -> {mount.module}: {state}")
 
@@ -144,7 +145,7 @@ def _report(measure: Measure, top: int, as_json: bool) -> int:
         cap = measure.over_cap(row)
         flag = "" if cap is None else f"  OVER CAP {cap} for ring {measure.ring(row.module)}"
         print(f"  {row.module}: direct {row.direct}, module-level {row.runtime}, transitive {row.transitive}{flag}")
-    print("entrypoint closure (project modules loaded by module-level imports):")
+    print("entrypoint closure (project modules loaded by module-level imports, parent packages included):")
     for closure in measure.closures:
         print(f"  {closure.entrypoint}: {len(closure.modules)} (function-level only +{len(closure.lazy_only)}, type-only +{len(closure.type_only)})")
     if not measure.closures:

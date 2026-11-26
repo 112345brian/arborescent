@@ -466,7 +466,7 @@ def _eager_shares(commands: EagerCommands, read: Callable[[str], str], scan: Sca
     return shares
 
 
-def _hoist_cost(module: ModuleInfo, share: EagerShare, known: frozenset[str], runtime: Mapping[str, frozenset[str]]) -> int:
+def _hoist_cost(module: ModuleInfo, share: EagerShare, known: frozenset[str], loading: Mapping[str, frozenset[str]]) -> int:
     """Project modules importing ``module`` would additionally load if its command-body imports moved to module level."""
     targets = {
         target
@@ -474,7 +474,7 @@ def _hoist_cost(module: ModuleInfo, share: EagerShare, known: frozenset[str], ru
         if line in share.lines and kind == EdgeKind.LAZY
         for target in resolved if target
     }
-    return len(reach(runtime, [module.name, *targets]) - reach(runtime, [module.name]))
+    return len(reach(loading, [module.name, *targets]) - reach(loading, [module.name]))
 
 
 def _flag_eager_commands(
@@ -483,13 +483,13 @@ def _flag_eager_commands(
     """#215: one ``entrypoint-eager-commands`` note per module whose function-level imports are mostly in command bodies, and
     a hint on those ``lazy-import`` findings. Their keys do not change, so the baseline ratchet still holds each one."""
     shares = _eager_shares(commands, read, scan)
-    runtime = import_edges(scan.modules, scan.known).runtime if shares and complete else None  # a partial scan has no graph
+    loading = import_edges(scan.modules, scan.known).loading if shares and complete else None  # a partial scan has no graph
     notes: list[Violation] = []
     for name, share in shares.items():
         module = scan.modules[name]
         cost = ""
-        if runtime is not None:
-            cost = f"; hoisting them would add +{_hoist_cost(module, share, scan.known, runtime)} project module(s) to importing this one"
+        if loading is not None:
+            cost = f"; hoisting them would add +{_hoist_cost(module, share, scan.known, loading)} project module(s) to importing this one"
         names = ", ".join(share.commands[:5]) + (", ..." if len(share.commands) > 5 else "")
         detail = f"{share.inside} of {share.total} function-level imports are inside {len(share.commands)} command bodies ({names}){cost}"
         notes.append(Violation(Rule.ENTRYPOINT_EAGER_COMMANDS, name, detail, min(share.lines)))

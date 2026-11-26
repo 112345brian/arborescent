@@ -107,6 +107,14 @@ def test_enabled_it_adds_one_note_and_keeps_every_lazy_import_key(repo: Path) ->
     assert [v.detail for v in flagged.violations if v.hint == COMMAND_BODY_HINT] == ["json#1", "re#1", "app#1"]
 
 
+def test_the_hoisting_cost_counts_parent_packages(repo: Path) -> None:
+    source = TYPER.replace("from app import domain", "from app.extra import leaf")
+    write_files(repo, {"app/adapters.py": source, "app/extra/__init__.py": "", "app/extra/leaf.py": ""})
+    found, _ = run_own(mini_policy(coupling=ON), repo, services(), practices=False)
+    (note,) = [v for v in found if v.rule == Rule.ENTRYPOINT_EAGER_COMMANDS]
+    assert "+2 project module" in note.detail  # app.extra.leaf and the package app.extra it runs
+
+
 def test_deferred_comments_do_not_hide_the_pattern(repo: Path) -> None:
     source = TYPER.replace("import json", "import json  # deferred: startup").replace("import re", "import re  # deferred: startup")
     write_files(repo, {"app/adapters.py": source})
