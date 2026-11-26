@@ -14,10 +14,16 @@ from dataclasses import dataclass
 from .architecture_contracts import compile_contracts
 from .domain import NOISE_DIRS, Policy
 from .generated_config import HEADER, toml_list, toml_quote
-from .ports import ContractRenderer, PackageBoundaries, ScanResult, TypeChecker
+from .ports import (
+    ContractRenderer,
+    PackageBoundaries,
+    RootBoundRenderer,
+    ScanResult,
+    TypeChecker,
+)
 from .rules import RuleContext
 
-__all__ = ["GraphFacts", "generate", "generate_for_scan"]
+__all__ = ["GraphFacts", "generate", "generate_for_scan", "moved_to_root"]
 
 _RUFF_SELECT = (
     "PLC0415", "BLE001", "E722", "C901", "PLR0912", "PLR0913", "PLR0915", "TID252", "PLW1514",
@@ -132,14 +138,29 @@ def generate_for_scan(
     return _generate(policy, GraphFacts(sorted(scan.known), scan.arbor_index, scan.scope_by_module, packages), checkers, renderers)
 
 
+def _output_prefix(policy: Policy) -> str:
+    return "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/") + "/"
+
+
+def moved_to_root(policy: Policy, renderers: Sequence[ContractRenderer]) -> list[tuple[RootBoundRenderer, str]]:
+    """``(renderer, nested path)`` for each config ``output_dir`` would hold but its tool can only use at the root."""
+    prefix = _output_prefix(policy)
+    if not prefix:
+        return []
+    return [(renderer, prefix + renderer.config_file) for renderer in renderers if isinstance(renderer, RootBoundRenderer)]
+
+
 def _generate(
     policy: Policy, facts: GraphFacts, checkers: Sequence[TypeChecker], renderers: Sequence[ContractRenderer],
 ) -> dict[str, str]:
-    prefix = "" if policy.output_dir in ("", ".") else policy.output_dir.rstrip("/") + "/"
+    prefix = _output_prefix(policy)
     paths = sorted(set(policy.sources))
     names, arbor_index, scope_by_module = facts.names, facts.arbor_index, facts.scope_by_module
     contracts = compile_contracts(policy, names, arbor_index, scope_by_module, facts.packages)
-    files = {prefix + renderer.config_file: renderer.render_contracts(contracts) for renderer in renderers}
+    files = {
+        ("" if isinstance(renderer, RootBoundRenderer) else prefix) + renderer.config_file: renderer.render_contracts(contracts)
+        for renderer in renderers
+    }
     files[prefix + "ruff.toml"] = ruff(policy, names, arbor_index, scope_by_module)
     for checker in checkers:
         files[prefix + checker.config_file] = checker.render_config(policy, paths)

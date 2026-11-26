@@ -23,6 +23,7 @@ __all__ = [
     "TACH_FILE",
     "TextFiles",
     "has_own_importlinter_config",
+    "has_own_tach_table",
     "is_generated",
     "toml_list",
     "toml_quote",
@@ -136,6 +137,18 @@ _IMPORTLINTER_FILES = (
 def is_generated(fs: TextFiles, path: Path) -> bool:
     """Whether ``path`` exists and carries the header ``generate`` writes."""
     return fs.is_file(path) and fs.read_text(path).startswith(GENERATED_MARKER)
+
+
+def has_own_tach_table(fs: TextFiles, root: Path) -> bool:
+    """Whether ``pyproject.toml`` configures tach itself; a new ``tach.toml`` beside it would take precedence."""
+    path = root / "pyproject.toml"
+    if not fs.is_file(path):
+        return False
+    try:
+        tool = tomllib.loads(fs.read_text(path)).get("tool")
+    except tomllib.TOMLDecodeError:
+        return False
+    return isinstance(tool, dict) and "tach" in tool
 
 
 def has_own_importlinter_config(fs: TextFiles, root: Path) -> bool:

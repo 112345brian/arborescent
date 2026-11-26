@@ -5,6 +5,9 @@
 ## Unreleased
 
 ### Fixed
+- With a nested `output_dir`, `generate` wrote a `tach.toml` there whose source roots tach never read, so running it
+  checked nothing and passed. `tach.toml` is now written at the project root (never over an existing one, and not while
+  `tach` is disabled or configured in `pyproject.toml`), and `check` notes a generated nested one so it can be deleted.
 - `forbid_at_import` accepted `global`, `registry` and `cache` but could never report them. They now fire for a call made
   at import into a function that rebinds a global, writes a registry or cache, or is itself `functools.cache`d (one hop, as
   for every other category). A ring that already lists one can gain `effect-at-import` findings.

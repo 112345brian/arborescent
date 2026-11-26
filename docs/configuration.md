@@ -47,7 +47,7 @@ settings. The two forms cannot be mixed.
 | `taint_seeds` | every `effect-*` category that existed before 0.8.0 except `patch` and `global`, plus `network` (`monotonic`, `host` and `fs-query` are valid but not seeded unless listed; `state`, `registry` and `cache` mutate memory rather than do I/O and are not valid seeds) | Which I/O primitives the function-level taint pass (#98, below `classify-facts`) seeds a function as reaching. `[]` turns the pass into a no-op. Root-level (shared by all scopes). |
 | `disabled_tools` | `[]` | Tool names intentionally not run or installed: `import-linter`, `tach`, `ruff`, `pyright`, `basedpyright`, `ty`, or `pyrefly`. Disabled tools are omitted from missing-tool hints and setup prompts. Also accepts `arbor-annotations` to ignore `__arbor__` annotations and their validation findings (see below). |
 | `python` | `"3.11"` | Target Python version, a quoted string (`"3.12"`; a patch version such as `"3.12.1"` is read as `3.12`): written into the type-checker configs and selects which modules count as stdlib (`3.11` to `3.14`; anything else is an error). See [stdlib-table.md](stdlib-table.md). |
-| `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. |
+| `output_dir` | `"."` | Where `generate` writes the config files, relative to the root. `tach.toml` always goes to the root (see [How tach reads `source_roots`](#how-tach-reads-source_roots)). |
 | `baseline` | `"arborescent-baseline.json"` | The baseline file used by `arborescent baseline` and `check`. |
 | `ratchet_files` | `[]` | Extra numeric ratchet JSON files (`{"values": {"name": 3}, "growth": []}`) checked by `check --growth-against`. |
 | `suggestion_threshold` | `300` | Logical code lines above which `check` prints a report-only file-size suggestion. |
@@ -959,9 +959,10 @@ Not judged: absolute roots and roots outside the project (`../other/src`). Gener
 doubled separators.
 
 Tach 0.35.3 does not walk the files under a root outside the folder that holds `tach.toml`. An import from a file inside
-that folder into such a root is checked; the files out there are not, and no failure says so. A `tach.toml` generated
-into an `output_dir` other than `"."` lists every root as `../...`, so running tach in that folder checks nothing and
-passes. `arborescent check` runs tach at the project root with the root's own config.
+that folder into such a root is checked; the files out there are not, and no failure says so. For that reason `generate`
+writes `tach.toml` at the project root whatever `output_dir` says, which is also where `arborescent check` runs tach. With
+a nested `output_dir` it writes none while `tach` is in `disabled_tools` or `pyproject.toml` has a `[tool.tach]` table,
+and `check` notes a generated `tach.toml` left in that folder by an earlier version, which checks nothing.
 
 ## Module ring annotations: `__arbor__`
 

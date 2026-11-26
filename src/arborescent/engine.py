@@ -34,7 +34,7 @@ from .domain import (
     path_under,
 )
 from .duplicate_logic import find_duplicates
-from .generate import generate_for_scan
+from .generate import generate_for_scan, moved_to_root
 from .generated_config import GENERATED_MARKER
 from .import_cycles import EdgeKind, resolved_internal_imports
 from .lazy_imports import (
@@ -528,10 +528,15 @@ def write_generated(policy: Policy, root: Path, services: Services) -> list[str]
     written: list[str] = []
     checks = package_checks(policy, services)
     boundaries = None if checks is None else checks.boundaries(policy, root, services.fs, scan)
-    generated = sorted(generate_for_scan(policy, scan, wanted, contract_renderers(services), boundaries).items())
-    for rel, text in generated:
+    renderers = contract_renderers(services)
+    # never start putting a file at the root for a tool the project does not use or has configured itself
+    withheld = {
+        renderer.config_file for renderer, _ in moved_to_root(policy, renderers)
+        if tool_is_disabled(policy, renderer) or renderer.has_own_config(services.fs, root)
+    }
+    for rel, text in sorted(generate_for_scan(policy, scan, wanted, renderers, boundaries).items()):
         path = root / rel
-        if services.fs.exists(path):
+        if rel in withheld or services.fs.exists(path):
             continue
         services.fs.mkdir(path.parent)
         services.fs.write_text(path, text)
@@ -580,8 +585,14 @@ def drift_report(policy: Policy, root: Path, services: Services, scan: ScanResul
     checkers = [
         c for c in services.checkers if c.name in {*policy.type_checkers, checker.name} and not tool_is_disabled(policy, c)
     ]
-    expected = generate_for_scan(policy, scan, checkers, contract_renderers(services), boundaries)
-    return _tach_notes(policy, opts) + drift(services.fs, root, expected)
+    renderers = contract_renderers(services)
+    expected = generate_for_scan(policy, scan, checkers, renderers, boundaries)
+    unread = [
+        f"{rel}: checks nothing there (the tool reads only files below its config); delete it"
+        for _, rel in moved_to_root(policy, renderers)
+        if services.fs.is_file(root / rel) and services.fs.read_text(root / rel).startswith(GENERATED_MARKER)
+    ]
+    return _tach_notes(policy, opts) + unread + drift(services.fs, root, expected)
 
 
 def pick_checker(policy: Policy, services: Services, override: str | None = None) -> TypeChecker:

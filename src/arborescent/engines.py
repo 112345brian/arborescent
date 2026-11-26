@@ -14,6 +14,7 @@ from .generated_config import (
     IMPORT_LINTER_FILE,
     TACH_FILE,
     has_own_importlinter_config,
+    has_own_tach_table,
     is_generated,
     toml_list,
     toml_quote,
@@ -71,15 +72,14 @@ class Tach:
     def passed(self, result: ToolResult) -> bool:
         return result.returncode == 0
 
+    def has_own_config(self, fs: FileSystem, root: Path) -> bool:
+        return has_own_tach_table(fs, root)
+
     def render_contracts(self, contracts: ArchitectureContracts) -> str:
-        """Layers plus, when the boundaries are listed per module, each module's ``depends_on``. Paths are relative to this file."""
-        depth = len([part for part in contracts.config_dir.split("/") if part and part != "."])
-        relative = "../" * depth
+        """Layers plus, when the boundaries are listed per module, each module's ``depends_on``. Written at the project root."""
         # without `./` and doubled separators: tach reads no files under some such spellings, and says nothing
-        source_roots = [f"{relative}{PurePosixPath(root).as_posix()}" for root in contracts.source_roots]
-        excludes = [
-            f"{relative}**/{name}" if name == "__pycache__" else f"{relative}{name}" for name in TACH_EXCLUDED_FOLDERS
-        ]
+        source_roots = [PurePosixPath(root).as_posix() for root in contracts.source_roots]
+        excludes = [f"**/{name}" if name == "__pycache__" else name for name in TACH_EXCLUDED_FOLDERS]
         explicit = contracts.explicit_boundaries
         lines = [
             HEADER,

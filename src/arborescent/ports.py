@@ -29,6 +29,7 @@ __all__ = [
     "PackageProbes",
     "Parallel",
     "RootAwareEngine",
+    "RootBoundRenderer",
     "ScanResult",
     "ToolRunner",
     "TypeChecker",
@@ -135,9 +136,17 @@ class ContractRenderer(Protocol):
     """An engine that is configured from the neutral contracts: it writes its own file format and nothing else does."""
 
     @property
-    def config_file(self) -> str: ...  # relative to the generated-files directory
+    def config_file(self) -> str: ...  # relative to the generated-files directory (see RootBoundRenderer)
 
     def render_contracts(self, contracts: ArchitectureContracts) -> str: ...
+
+
+@runtime_checkable
+class RootBoundRenderer(ContractRenderer, Protocol):
+    """A renderer whose tool reads only the files below its config, so the config is written at the project root whatever
+    ``output_dir`` says: anywhere else it would check nothing and pass."""
+
+    def has_own_config(self, fs: FileSystem, root: Path) -> bool: ...  # configured elsewhere; a root file would override it
 
 
 class PackageBoundaries(Protocol):

@@ -57,7 +57,7 @@ def test_no_renderer_means_no_engine_config_rather_than_a_silent_default() -> No
     assert set(generate(mini_policy(), GraphFacts(NAMES, {}, {}), [], [])) == {"ruff.toml"}
 
 
-def test_contracts_are_relative_to_the_repository_and_the_adapter_offsets_them() -> None:
+def test_contracts_are_relative_to_the_repository_and_tach_is_never_offset() -> None:
     contracts = compile_contracts(mini_policy(output_dir="cfg/tools"), NAMES, {}, {}, None)
     assert contracts.config_dir == "cfg/tools" and contracts.source_roots == tuple(mini_policy().source_roots)
-    assert 'source_roots = ["../../' in Tach().render_contracts(contracts)
+    assert "../" not in Tach().render_contracts(contracts)  # tach.toml is written at the root: tach reads only below it
