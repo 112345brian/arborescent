@@ -1,7 +1,8 @@
 """``arborescent coupling`` (#148): fan-in, entrypoint closure, ambient hubs, the ratchet and the cost of a new module.
 
-``report`` and ``cost`` read only; ``check`` fails when a hub's importer count or an entrypoint's closure grew past the
-baseline; ``baseline`` lowers it and records any growth with a reason.
+``report``, ``startup`` and ``cost`` read only; ``check`` fails when a hub's importer count or an entrypoint's closure grew
+past the baseline, a ``closure_max`` budget is exceeded or a lazy mount loads eagerly (#216); ``baseline`` lowers it and
+records any growth with a reason.
 """
 
 from __future__ import annotations
@@ -12,8 +13,15 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import coupling_ratchet as ratchet
-from .coupling import NewModule, ambient_hubs, cost_of_new_modules
-from .coupling_measure import Measure, document, load_baseline
+from .coupling import NewModule, ambient_hubs, cost_of_new_modules, mount_cost
+from .coupling_measure import (
+    Measure,
+    blame_lines,
+    document,
+    eager_mounts,
+    load_baseline,
+    startup_failures,
+)
 from .domain import PolicyError
 from .ports import FileSystem
 
@@ -21,7 +29,8 @@ __all__ = ["add_coupling_parser", "run_coupling"]
 
 _ACTIONS = {
     "report": "fan-in, entrypoint closure sizes and ambient-hub candidates",
-    "check": "fail when a hub's importers or an entrypoint's closure grew past the baseline",
+    "check": "fail on growth past the baseline, an exceeded closure budget or an eagerly loaded lazy mount",
+    "startup": "per entrypoint: closure size and budget, the heaviest imports, and what each lazy mount adds",
     "baseline": "record or lower the coupling baseline; growth needs --allow-growth and --reason",
     "cost": "modules a new port, service and adapter would add to each entrypoint's closure",
 }
@@ -38,6 +47,7 @@ def add_coupling_parser(add_parser: Callable[..., argparse.ArgumentParser]) -> N
     base = actions.choices["baseline"]
     base.add_argument("--allow-growth", action="store_true", help="allow counts to rise or new entries, with a --reason")
     base.add_argument("--reason", help="why the baseline grows")
+    actions.choices["startup"].add_argument("--top", type=int, default=5, help="how many imports to blame (default 5)")
     cost = actions.choices["cost"]
     cost.add_argument("importer", help="the module that will import the new modules")
     cost.add_argument("--imports", nargs="*", default=[], metavar="MODULE", help="modules the new modules import")
@@ -53,7 +63,35 @@ def run_coupling(args: argparse.Namespace, measure: Measure, root: Path, fs: Fil
         return _cost(measure, NewModule(args.importer, tuple(args.imports), args.modules))
     if action == "baseline":
         return _baseline(measure, fs, path, args)
+    if action == "startup":
+        return _startup(measure, max(args.top, 0))
     return _check(measure, fs, path)
+
+
+def _startup(measure: Measure, top: int) -> int:
+    if not measure.closures:
+        print("no entrypoints declared (`[coupling] entrypoints = [...]`)")
+        return 0
+    budgets = dict(measure.policy.coupling.closure_max)
+    eager = {(mount, entrypoint) for mount, entrypoint, _ in eager_mounts(measure)}
+    for closure in measure.closures:
+        size = len(closure.modules)
+        cap = budgets.get(closure.entrypoint)
+        budget = "no budget" if cap is None else f"budget {cap}, {'OVER' if size > cap else 'ok'}"
+        print(f"{closure.entrypoint}: {size} project modules ({budget})")
+        for line in blame_lines(measure, closure.entrypoint, top):
+            print(f"  {line}")
+        _print_mounts(measure, closure.entrypoint, eager)
+    return 0
+
+
+def _print_mounts(measure: Measure, entrypoint: str, eager: set[tuple[str, str]]) -> None:
+    for mount in measure.policy.coupling.lazy_mounts:
+        if mount.module == entrypoint:
+            continue
+        cost = mount_cost(measure.edges.runtime, entrypoint, mount.module)
+        state = "EAGER (loaded at import time)" if (mount.name, entrypoint) in eager else f"+{cost} module(s) when run"
+        print(f"  lazy mount {mount.name} -> {mount.module}: {state}")
 
 
 def _report(measure: Measure, top: int, as_json: bool) -> int:
@@ -100,7 +138,7 @@ def _check(measure: Measure, fs: FileSystem, path: Path) -> int:
     if loaded is None:
         raise PolicyError(f"no coupling baseline at {path.name}; create it with `arborescent coupling baseline`")
     counts = measure.counts()
-    failures = ratchet.regressions(counts, loaded[0])
+    failures = [*ratchet.regressions(counts, loaded[0]), *startup_failures(measure)]
     for line in failures:
         print(f"FAIL   {line}")
     for line in ratchet.lowerable(counts, loaded[0]):

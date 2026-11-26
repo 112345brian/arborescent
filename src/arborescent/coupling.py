@@ -1,4 +1,4 @@
-"""Fan-in, entrypoint closure and ambient-hub metrics over the project import graph (#148).
+"""Fan-in, entrypoint closure, startup blame and ambient-hub metrics over the project import graph (#148, #216).
 
 Import edges use the same resolution as the cycle report, so ``from pkg import sub`` is one edge to ``pkg.sub`` as in every ring
 check. Each edge has one kind: ``runtime`` (module level), ``lazy`` (only inside a function body) or ``type-only`` (only
@@ -133,6 +133,71 @@ def entrypoint_closure(edges: ImportEdges, entrypoint: str) -> Closure:
         _beyond(edges.lazy, loaded),
         _beyond(edges.type_only, loaded) - _beyond(edges.lazy, loaded),
     )
+
+
+@dataclass(frozen=True)
+class Blame:
+    """``modules`` are loaded only because ``target`` is: cutting every ``importers`` -> ``target`` edge removes them."""
+
+    target: str
+    importers: tuple[str, ...]  # one module: that single edge is responsible
+    modules: int
+
+
+def blame(graph: Graph, entrypoint: str) -> list[Blame]:
+    """What each module of ``entrypoint``'s closure alone brings in, heaviest first, with the edges that import it."""
+    loaded = reach(graph, [entrypoint])
+    importers = _reverse({name: graph.get(name, frozenset()) for name in loaded})
+    found: list[Blame] = []
+    for target in loaded - {entrypoint}:
+        without = _reach_without(graph, entrypoint, target)
+        direct = tuple(sorted(name for name in importers.get(target, ()) if name in without))
+        found.append(Blame(target, direct, len(loaded) - len(without)))
+    return sorted(found, key=lambda item: (-item.modules, item.target))
+
+
+def _reach_without(graph: Graph, start: str, avoid: str) -> frozenset[str]:
+    seen: set[str] = {start}
+    pending: list[str] = [start]
+    while pending:
+        for target in graph.get(pending.pop(), frozenset()):
+            if target != avoid and target not in seen:
+                seen.add(target)
+                pending.append(target)
+    return frozenset(seen)
+
+
+def import_chain(graph: Graph, start: str, target: str) -> tuple[str, ...] | None:
+    """A shortest import path from ``start`` to ``target``, or None when it is not reached."""
+    came_from = {start: start}
+    pending = deque([start])
+    while pending:
+        name = pending.popleft()
+        for following in sorted(graph.get(name, frozenset())):
+            if following not in came_from:
+                came_from[following] = name
+                pending.append(following)
+    if target not in came_from:
+        return None
+    path = [target]
+    while path[-1] != start:
+        path.append(came_from[path[-1]])
+    return tuple(reversed(path))
+
+
+def with_parent_packages(graph: Graph, known: Collection[str]) -> Graph:
+    """``graph`` where each module also loads its parent packages, as importing it does."""
+    names = set(known) | set(graph)
+    parents = {
+        name: frozenset(parent for end in range(1, name.count(".") + 1) if (parent := ".".join(name.split(".")[:end])) in names)
+        for name in names
+    }
+    return _merge(graph, parents)
+
+
+def mount_cost(graph: Graph, entrypoint: str, module: str) -> int:
+    """Modules that running a lazily mounted command adds to what ``entrypoint`` already loaded."""
+    return len(reach(graph, [module]) - reach(graph, [entrypoint]))
 
 
 def _beyond(graph: Graph, loaded: frozenset[str]) -> frozenset[str]:

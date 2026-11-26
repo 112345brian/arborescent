@@ -309,6 +309,10 @@ path = "src/arborescent/coupling_policy.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/command_imports.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/coupling_ratchet.py"
 role = "source"
 

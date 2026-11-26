@@ -20,6 +20,7 @@ class Rule(StrEnum):
     SUPPRESSION = "suppression"
     DISCARD = "discard"
     LAZY_IMPORT = "lazy-import"
+    ENTRYPOINT_EAGER_COMMANDS = "entrypoint-eager-commands"
     RESULT_DISCARD = "result-discard"
     EFFECT_CLOCK = "effect-clock"
     EFFECT_ENV = "effect-env"
@@ -137,7 +138,7 @@ CONSTRAINT_RULES: frozenset[Rule] = frozenset({Rule.PACKAGE_CONSTRAINT_FACTS, Ru
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
     Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE, Rule.MIXED_PURITY_EXCLUDED, Rule.MIXED_PURITY_WEAK,
-    Rule.ADAPTER_EQUIVALENCE_REPORT,
+    Rule.ADAPTER_EQUIVALENCE_REPORT, Rule.ENTRYPOINT_EAGER_COMMANDS,
 })
 
 
@@ -194,6 +195,10 @@ def root_cause_hint(cause: str, findings: int) -> str:
 
 _RENDER_HINTS = {
     Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on the statement or above it)",
+    Rule.ENTRYPOINT_EAGER_COMMANDS: (
+        "; split into one module per command with its imports at the top and mount each lazily from the composition root,"
+        " declared in `[coupling.lazy_mounts]`"
+    ),
     Rule.VENDOR_FOLDER: (
         " (folder excluded from the scan; to govern it list it under `vendor_roots` or set `scan_vendors = true`,"
         " otherwise first-party imports of it are reported as external)"

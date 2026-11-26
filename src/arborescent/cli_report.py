@@ -6,6 +6,7 @@ import argparse
 from collections.abc import Sequence
 
 from . import baseline as ratchet_mod
+from .command_imports import COMMAND_BODY_HINT
 from .domain import Policy, Rule, Violation, root_cause_hint
 from .engine import CheckReport
 from .lazy_imports import lazy_import_adoption_hint, lazy_import_lines
@@ -98,7 +99,23 @@ def _print_root_causes(shown: list[Violation]) -> list[Violation]:
 def _finding_lines(shown: Sequence[Violation], report: CheckReport) -> list[str]:
     """Findings as printed lines; the ``lazy-import`` ones are folded to one line per module (#199)."""
     others = [v.render() for v in shown if v.rule != Rule.LAZY_IMPORT]
-    return others + lazy_import_lines([v for v in shown if v.rule == Rule.LAZY_IMPORT], report.lazy_import_counts)
+    lazy = [v for v in shown if v.rule == Rule.LAZY_IMPORT]
+    bodies = _command_body_groups(lazy)
+    rest = [v for v in lazy if not (v.hint == COMMAND_BODY_HINT and v.subject in bodies)]
+    commands = [
+        f"{module}: [lazy-import] {len(details)} function-level imports in command bodies: {', '.join(details)}{COMMAND_BODY_HINT}"
+        for module, details in bodies.items()
+    ]
+    return others + lazy_import_lines(rest, report.lazy_import_counts) + commands
+
+
+def _command_body_groups(lazy: Sequence[Violation]) -> dict[str, list[str]]:
+    """Modules with several ``lazy-import`` findings inside command bodies, which share one line of their own (#215)."""
+    found: dict[str, list[str]] = {}
+    for v in lazy:
+        if v.hint == COMMAND_BODY_HINT:
+            found.setdefault(v.subject, []).append(v.detail)
+    return {module: details for module, details in found.items() if len(details) > 1}
 
 
 def _adoption_hint(args: argparse.Namespace, report: CheckReport) -> str | None:

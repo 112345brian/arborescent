@@ -43,6 +43,13 @@
   say); importer counts and ordering still come from the whole scan (#217).
 - `check` prints a report-only `SUGGEST` line for a class with more than `class_field_threshold` fields or
   `class_method_threshold` methods (both default 20, `0` switches one off). It never fails a check and is never baselined (#220).
+- `[coupling.eager_commands]` reports `entrypoint-eager-commands` (informational) for a module whose function-level imports
+  mostly sit inside Typer, Click or argparse command bodies, with the structural fix and the number of project modules
+  hoisting them would load. `lazy-import` keys are unchanged; the failing ones in those bodies print as one line per module (#215).
+- `[coupling.closure_max]` caps an entrypoint's module-level import closure and `[coupling.lazy_mounts]` declares command
+  modules that no entrypoint may load at import time; `arborescent coupling check` fails on either, naming the imports or the
+  chain. `arborescent coupling startup` reports closure, budget, heaviest imports and what each mount adds (#216). Static
+  only: no wall-time, cold-start or third-party import measurement.
 
 ## 0.9.0 — 2026-11-12
 

@@ -82,7 +82,8 @@ def lazy_import_lines(found: Sequence[Violation], counts: Mapping[str, LazyImpor
     for module, items in sorted(by_module.items()):
         count = counts.get(module)
         totals = f"{count.total}/{count.deferred}" if count is not None else f"{len(items)}/0"
-        lines.append(f"{module}: [{Rule.LAZY_IMPORT}] {totals} (total/deferred), unjustified: {', '.join(v.detail for v in items)}{_FIX}")
+        hint = next((v.hint for v in items if v.hint), "")
+        lines.append(f"{module}: [{Rule.LAZY_IMPORT}] {totals} (total/deferred), unjustified: {', '.join(v.detail for v in items)}{_FIX}{hint}")
     return lines
 
 

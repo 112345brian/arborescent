@@ -4,8 +4,8 @@ shared parse, then apply the baseline ratchet."""
 from __future__ import annotations
 
 import sys
-from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -13,7 +13,10 @@ from . import baseline as ratchet_mod
 from . import ratchets as named_ratchets
 from .certification import tach_multi_root_note
 from .classify_audit import audit_classification
+from .command_imports import COMMAND_BODY_HINT, EagerShare, eager_share
 from .config import find_child_policy
+from .coupling import import_edges, reach
+from .coupling_policy import EagerCommands
 from .domain import (
     CONSTRAINT_RULES,
     INFORMATIONAL_RULES,
@@ -26,11 +29,13 @@ from .domain import (
 )
 from .generate import generate_for_scan
 from .generated_config import GENERATED_MARKER
+from .import_cycles import EdgeKind, resolved_internal_imports
 from .lazy_imports import (
     LazyImportCount,
     lazy_import_counts,
     lazy_import_in_scope,
     lazy_import_violations,
+    lazy_imports_of,
 )
 from .path_exclusion import nested_bare_pattern
 from .ports import (
@@ -194,6 +199,10 @@ def run_own(
     found += [Violation(Rule.NOISE_DIR_CODE, path, "") for path in scan.noise_files]
     found += [Violation(Rule.VENDOR_FOLDER, folder, fingerprint) for folder, fingerprint in scan.vendor_folders]
     found += _inventory_violations(scan.modules, policy.lazy_import_rings, indexes)
+    if policy.coupling.eager_commands is not None:
+        found = _flag_eager_commands(
+            policy.coupling.eager_commands, found, lambda path: services.fs.read_text(root / path), scan, complete=only is None
+        )
     found += excluded_findings(policy, scan.excluded_modules)
     if only is None:  # the signals compare a module with its importers and peers: a whole-repository fact
         found += audit_classification(indexes, scan.modules, scan.known, _run_taint(policy, root, services, scan))
@@ -312,6 +321,55 @@ def _inventory_violations(modules: Mapping[str, ModuleInfo], lazy_rings: tuple[s
         if lazy_import_in_scope(lazy_rings, context.resolve_ring(module.name)):
             found.extend(lazy_import_violations(module))
     return found
+
+
+def _eager_shares(commands: EagerCommands, read: Callable[[str], str], scan: ScanResult) -> dict[str, EagerShare]:
+    shares: dict[str, EagerShare] = {}
+    for name, module in sorted(scan.modules.items()):
+        lines = [imp.line for imp in lazy_imports_of(module)]
+        if len(lines) < commands.min_imports:  # nothing to report: do not re-read the file
+            continue
+        try:
+            source = read(module.path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        if (share := eager_share(source, lines, commands)) is not None:
+            shares[name] = share
+    return shares
+
+
+def _hoist_cost(module: ModuleInfo, share: EagerShare, known: frozenset[str], runtime: Mapping[str, frozenset[str]]) -> int:
+    """Project modules importing ``module`` would additionally load if its command-body imports moved to module level."""
+    targets = {
+        target
+        for _, kind, line, resolved in resolved_internal_imports({module.name: module}, known)
+        if line in share.lines and kind == EdgeKind.LAZY
+        for target in resolved if target
+    }
+    return len(reach(runtime, [module.name, *targets]) - reach(runtime, [module.name]))
+
+
+def _flag_eager_commands(
+    commands: EagerCommands, found: Sequence[Violation], read: Callable[[str], str], scan: ScanResult, complete: bool
+) -> list[Violation]:
+    """#215: one ``entrypoint-eager-commands`` note per module whose function-level imports are mostly in command bodies, and
+    a hint on those ``lazy-import`` findings. Their keys do not change, so the baseline ratchet still holds each one."""
+    shares = _eager_shares(commands, read, scan)
+    runtime = import_edges(scan.modules, scan.known).runtime if shares and complete else None  # a partial scan has no graph
+    notes: list[Violation] = []
+    for name, share in shares.items():
+        module = scan.modules[name]
+        cost = ""
+        if runtime is not None:
+            cost = f"; hoisting them would add +{_hoist_cost(module, share, scan.known, runtime)} project module(s) to importing this one"
+        names = ", ".join(share.commands[:5]) + (", ..." if len(share.commands) > 5 else "")
+        detail = f"{share.inside} of {share.total} function-level imports are inside {len(share.commands)} command bodies ({names}){cost}"
+        notes.append(Violation(Rule.ENTRYPOINT_EAGER_COMMANDS, name, detail, min(share.lines)))
+    flagged = [  # only findings the rule already made, so ``[lazy_import] rings`` has been applied to them
+        replace(v, hint=COMMAND_BODY_HINT) if v.rule == Rule.LAZY_IMPORT and v.subject in shares and v.line in shares[v.subject].lines else v
+        for v in found
+    ]
+    return [*flagged, *notes]
 
 
 def _inventory_counts(modules: Mapping[str, ModuleInfo]) -> tuple[dict[tuple[str, str], int], dict[str, int]]:

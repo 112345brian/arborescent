@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Any, cast
 
 from .architecture_policy import architecture_of
-from .coupling_policy import DEFAULT_BASELINE, DEFAULT_HUB_FAN_IN, CouplingPolicy
+from .coupling_policy import (
+    DEFAULT_BASELINE,
+    DEFAULT_HUB_FAN_IN,
+    CouplingPolicy,
+    EagerCommands,
+    LazyMount,
+)
 from .domain import (
     ArchitectureScope,
     ChildArbor,
@@ -312,7 +318,7 @@ def _coupling(raw: Mapping[str, Any]) -> CouplingPolicy:
     if not isinstance(table, Mapping):
         raise PolicyError("`coupling` must be a table")
     table = cast("Mapping[str, Any]", table)
-    unknown = set(table) - {"entrypoints", "fan_in_max", "hub_fan_in", "baseline"}
+    unknown = set(table) - {"entrypoints", "fan_in_max", "hub_fan_in", "baseline", "closure_max", "lazy_mounts", "eager_commands"}
     if unknown:
         raise PolicyError(f"unknown key in `coupling`: {sorted(unknown)}")
     caps = table.get("fan_in_max", {})
@@ -324,9 +330,68 @@ def _coupling(raw: Mapping[str, Any]) -> CouplingPolicy:
         raise PolicyError("`coupling.hub_fan_in` must be a positive integer")
     if not isinstance(baseline, str) or not baseline:
         raise PolicyError("`coupling.baseline` must be a file path")
-    return CouplingPolicy(
-        _string_list(table, "entrypoints"), tuple(sorted(cast("Mapping[str, int]", caps).items())), hub, baseline
+    try:
+        return CouplingPolicy(
+            _string_list(table, "entrypoints"), tuple(sorted(cast("Mapping[str, int]", caps).items())), hub, baseline,
+            _closure_max(table), _lazy_mounts(table), _eager_commands(table),
+        )
+    except ValueError as exc:
+        raise PolicyError(str(exc)) from exc
+
+
+def _closure_max(table: Mapping[str, Any]) -> tuple[tuple[str, int], ...]:
+    caps = table.get("closure_max", {})
+    if not isinstance(caps, Mapping) or not all(
+        isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in cast("Mapping[str, Any]", caps).values()
+    ):
+        raise PolicyError("`coupling.closure_max` must map entrypoint modules to positive integers")
+    return tuple(sorted(cast("Mapping[str, int]", caps).items()))
+
+
+def _lazy_mounts(table: Mapping[str, Any]) -> tuple[LazyMount, ...]:
+    mounts = table.get("lazy_mounts", {})
+    if not isinstance(mounts, Mapping):
+        raise PolicyError("`coupling.lazy_mounts` must be a table of command name -> \"module:attr\"")
+    return tuple(_lazy_mount(name, target) for name, target in sorted(cast("Mapping[str, object]", mounts).items()))
+
+
+def _lazy_mount(name: str, target: object) -> LazyMount:
+    module, separator, attr = target.partition(":") if isinstance(target, str) else ("", "", "")
+    if not name.strip() or not separator or not all(part.isidentifier() for part in (*module.split("."), *attr.split("."))):
+        raise PolicyError(f"`coupling.lazy_mounts` {name!r} must be \"module:attr\", not {target!r}")
+    return LazyMount(name, module, attr)
+
+
+def _eager_commands(raw: Mapping[str, Any]) -> EagerCommands | None:
+    if "eager_commands" not in raw:
+        return None
+    table = raw["eager_commands"]
+    if not isinstance(table, Mapping):
+        raise PolicyError("`coupling.eager_commands` must be a table")
+    table = cast("Mapping[str, Any]", table)
+    unknown = set(table) - {"decorators", "min_imports", "min_share", "min_commands"}
+    if unknown:
+        raise PolicyError(f"unknown key in `coupling.eager_commands`: {sorted(unknown)}")
+    defaults = EagerCommands()
+    decorators = _string_list(table, "decorators") if "decorators" in table else defaults.decorators
+    if not decorators or not all(name.strip() for name in decorators):
+        raise PolicyError("`coupling.eager_commands.decorators` must name at least one decorator")
+    share = table.get("min_share", defaults.min_share)
+    if not isinstance(share, int | float) or isinstance(share, bool) or not 0 < share <= 1:
+        raise PolicyError("`coupling.eager_commands.min_share` must be a number above 0 and at most 1")
+    return EagerCommands(
+        decorators,
+        _count(table, "min_imports", defaults.min_imports),
+        float(share),
+        _count(table, "min_commands", defaults.min_commands),
     )
+
+
+def _count(table: Mapping[str, Any], key: str, default: int) -> int:
+    value = table.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise PolicyError(f"`coupling.eager_commands.{key}` must be a positive integer")
+    return value
 
 
 def _positive_int(table: Mapping[str, Any], key: str, default: int) -> int:
