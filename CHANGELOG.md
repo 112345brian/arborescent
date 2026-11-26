@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+### Added
+- `duplicate-logic` (#228), opt-in through `[tool.arborescent.duplicate_logic]`: reports functions whose bodies are the same
+  once local names, docstrings, comments and annotations are erased (literals and called names kept), within and across
+  modules; first-party copies of functions under `reference_paths` such as `vendor/`; and, with `branch_skeletons`, the same
+  two-way branch repeated across functions. One baseline entry per function, so the ratchet only shrinks. `selftest` probes it
+  when enabled. See *Duplicate logic* in the configuration reference.
+
 ## 0.9.0 — 2026-11-12
 
 ### Fixed

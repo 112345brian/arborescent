@@ -842,6 +842,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
 | `mixed-purity` | a module holds at least `min_pure_units` (default 2) substantial pure top-level functions or classes (a body of at least `min_body_lines`, default 4, lines) and at least one effectful one, or an effect that runs at import time. Enforced in every ring; see [Mixed purity](#mixed-purity-toolarborescentmixed_purity). The detail names only the ring, so the baseline key survives renaming functions; the hint lists the effect kinds, the effectful and pure definitions and the importer count. Also an `allow` entry that matches no module or no mixed module |
+| `duplicate-logic` | opt-in (`[tool.arborescent.duplicate_logic]`): a function body repeats another one, or a reference-path one, after local names are erased; with `branch_skeletons`, a function repeats the same two-way branch as others. See "Duplicate logic" below |
 | `untokenizable-source` | a file Python's `ast` accepts but `tokenize` rejects (a doubled carriage return `\r\r\n` is the usual cause, #181). Its `# noqa`, `# type: ignore` and `# deferred:` comments cannot be read, so the file gets no comment facts and this finding instead of aborting the run. A violation, so it can be baselined; the detail is fixed text (the tokenizer's line and message ride in the hint), and the fix is to remove the stray byte |
 | `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
@@ -1225,6 +1226,63 @@ are reported as `mixed-purity-excluded` notes. Tooling, tests and fixtures stay 
 **Limits.** Only top-level functions and classes are units, and a class is one unit. A call through an object of unknown type
 is not followed, so a method called as `self.helper()` does not carry its effect to the caller. Developer tooling
 (`dev_tools`) has no ring and is not judged.
+
+## Duplicate logic: `[tool.arborescent.duplicate_logic]`
+
+`duplicate-logic` (#228) finds the same narrow rule implemented a second time. It is **off** unless the table is present.
+
+```toml
+[tool.arborescent.duplicate_logic]
+min_statements = 5                      # smallest body compared (statements at any depth, docstring excluded)
+reference_paths = ["vendor", "libs/shared/helpers.py"]  # compared against, never flagged
+branch_skeletons = false                # also match a repeated two-way branch
+min_branch_repeats = 3                  # functions that make a branch a repeat (at least 2)
+```
+
+| key | default | meaning |
+|---|---|---|
+| `enabled` | `true` when the table is present | `false` keeps the table and turns the rule off |
+| `min_statements` | `5` | positive integer |
+| `reference_paths` | `[]` | repository-relative folders or `.py` files (no `..`, `.` or absolute path) |
+| `branch_skeletons` | `false` | see "Repeated branches" |
+| `min_branch_repeats` | `3` | integer of at least 2 |
+
+The table is whole-run configuration: one per repository, not per scope, and copies are found across scopes.
+
+**What counts as the same body.** Parameter and local names, the function's own name where it calls itself, docstrings,
+comments and annotations are erased. Literals, operators, attribute and keyword-argument names and every name the function
+does not bind (so the called names) are kept; `async` differs from plain `def`. Parameter order, defaults and decorators are
+not compared. The match is exact after that: one changed literal or one extra statement is a different body.
+
+Module-level functions and class methods are compared; a nested `def` is part of its parent. Stubs (`...`, `pass`, a
+docstring, `raise NotImplementedError`, `return NotImplemented`), such as `Protocol` and abstract members, are never compared.
+
+**Reference paths.** Their `.py` files are read whether or not the scan covers them (an auto-excluded `vendor/` folder, an
+`exclude`d one). Their functions are targets only. A first-party function with the same body is reported with the reference
+function to use instead, even when it is the only copy. A scanned module below a reference path or a vendor-named folder
+(`vendor_roots`, `scan_vendors`) is treated the same way. A reference path that holds no readable Python file, and a
+reference file that cannot be parsed, are findings: a check that compares against nothing does not pass silently. A vendor
+folder that is not listed in `reference_paths` and not scanned is not compared.
+
+**Repeated branches** (`branch_skeletons = true`). Matches an `if`/`else`, a conditional expression, or a guard (`if c: return a`
+followed by the block's final `return b`) whose condition is the same (local names erased) and whose two sides call the same
+set of names, in at least `min_branch_repeats` functions. Both sides must call something. Branches of more than 200 syntax
+nodes are skipped. Sides that call differently named functions do not match. Copies already reported as whole duplicates
+count as one function.
+
+**Findings and the ratchet.** One finding per function, `duplicate-logic|module|function `Class.name` duplicates logic
+defined elsewhere`; the partners are in the rendered hint, not in the key. So the baseline only shrinks: removing one of three
+copies leaves one stale entry, removing one of two leaves two, editing all copies alike changes nothing, and only a function
+that was not a duplicate before is new. A function name repeated within a module is numbered `#2`. A repeated branch adds the
+condition and called names (and a short digest) to the key. Moving or renaming a duplicated function changes its key.
+
+Adopt on an existing repository with `arborescent baseline --adopt duplicate-logic`. A named ratchet
+(`rule = "duplicate-logic"`) counts findings per module.
+
+**Limits.** This is a clone detector, not a proof of equivalence: two functions that call same-named functions imported from
+different modules match, and two that compute the same thing differently do not. `check --changed` does not evaluate it, since
+the original may be in an unchanged file. Each file is parsed once more (cached by content in `.arborescent` beside the scan
+cache) and functions are grouped by digest, never compared pair by pair.
 
 ## Named ratchets: `[tool.arborescent.ratchet.<name>]`
 

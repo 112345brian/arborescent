@@ -13,11 +13,16 @@ from pathlib import PurePosixPath
 from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
-    "ALL", "ArchitectureFields", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError", "ResultDiscard", "RingRule",
+    "ALL", "ArchitectureFields", "ConstructionSite", "DocsPolicy", "DuplicatePolicy",
+    "OwnedLiteral", "PolicyError", "ResultDiscard", "RingRule",
     "in_unit", "normalized_source_path", "path_under", "unit_permits",
 ]
 
 ALL = "*"  # in `may_import` or `external`: no restriction
+
+_DEFAULT_MIN_STATEMENTS = 5
+_DEFAULT_MIN_BRANCH_REPEATS = 3
+_MIN_REPEATS = 2  # a repeat needs at least two
 
 
 class PolicyError(ValueError):
@@ -43,6 +48,25 @@ def unit_permits(modules: Sequence[str], rings: Sequence[str], module: str, ring
 
 def normalized_source_path(value: str) -> str:
     return PurePosixPath(value).as_posix().removeprefix("./").rstrip("/") or "."
+
+
+@dataclass(frozen=True)
+class DuplicatePolicy:
+    """The ``[duplicate_logic]`` table (#228), opt-in. ``reference_paths`` are repository-relative folders or files whose
+    functions are comparison targets and never flagged. ``branch_skeletons`` adds the repeated-branch match;
+    ``min_branch_repeats`` is how many functions make a repeat."""
+
+    enabled: bool = False
+    min_statements: int = _DEFAULT_MIN_STATEMENTS
+    reference_paths: tuple[str, ...] = ()
+    branch_skeletons: bool = False
+    min_branch_repeats: int = _DEFAULT_MIN_BRANCH_REPEATS
+
+    def __post_init__(self) -> None:
+        if self.min_statements < 1:
+            raise PolicyError("`duplicate_logic.min_statements` must be a positive integer")
+        if self.min_branch_repeats < _MIN_REPEATS:
+            raise PolicyError("`duplicate_logic.min_branch_repeats` must be an integer of at least 2")
 
 
 @dataclass(frozen=True)

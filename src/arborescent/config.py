@@ -16,6 +16,7 @@ from .domain import (
     ChildArbor,
     ConstructionSite,
     DocsPolicy,
+    DuplicatePolicy,
     OwnedLiteral,
     Policy,
     PolicyError,
@@ -263,7 +264,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         dependencies=dict(raw.get("dependencies", {})),
         forbid_everywhere=tuple(raw.get("forbid_everywhere", [])),
         forbidden_modules=_string_list(raw, "forbidden_modules"),
-        dev_tools=_dev_tool_paths(raw),
+        dev_tools=_repository_paths(raw, "dev_tools"),
         dev_tools_forbid=_effect_list(raw, "dev_tools_forbid", ("process",)),
         dev_tools_may_import=_string_list(raw, "dev_tools_may_import"),
         effect_defaults=_effect_defaults(raw),
@@ -291,6 +292,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         taint_seeds=_taint_seeds(raw),
         coupling=_coupling(raw),
         mixed_purity=_mixed_purity(raw),
+        duplicate_logic=_duplicate_logic(raw),
         effects=_effects(raw),
         package_constraints=_package_constraints(raw),
         ratchets=ratchet_specs(raw.get("ratchet", {})),
@@ -378,6 +380,27 @@ def _mixed_purity(raw: Mapping[str, Any]) -> PurityPolicy:
     )
 
 
+def _duplicate_logic(raw: Mapping[str, Any]) -> DuplicatePolicy:
+    """Opt-in: absent means off; a present table is on unless it says ``enabled = false``."""
+    if "duplicate_logic" not in raw:
+        return DuplicatePolicy()
+    table = raw["duplicate_logic"]
+    if not isinstance(table, Mapping):
+        raise PolicyError("`duplicate_logic` must be a table")
+    table = cast("Mapping[str, Any]", table)
+    unknown = set(table) - {"enabled", "min_statements", "reference_paths", "branch_skeletons", "min_branch_repeats"}
+    if unknown:
+        raise PolicyError(f"unknown key in `duplicate_logic`: {sorted(unknown)}")
+    defaults = DuplicatePolicy()
+    numbers = (table.get("min_statements", defaults.min_statements), table.get("min_branch_repeats", defaults.min_branch_repeats))
+    if not all(type(number) is int for number in numbers):
+        raise PolicyError("`duplicate_logic.min_statements` and `min_branch_repeats` must be integers")
+    return DuplicatePolicy(
+        _boolean_option(table, "enabled", True), numbers[0], _repository_paths(table, "reference_paths"),
+        _boolean_option(table, "branch_skeletons", False), numbers[1],
+    )
+
+
 def _effects(raw: Mapping[str, Any]) -> EffectsPolicy:
     table = raw.get("effects", {})
     if not isinstance(table, Mapping):
@@ -407,7 +430,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
-    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling", "mixed_purity", "package", "effects",
+    "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling", "mixed_purity", "duplicate_logic", "package", "effects",
     "ratchet",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
@@ -601,13 +624,13 @@ def _effect_list(raw: Mapping[str, Any], key: str, default: tuple[str, ...]) -> 
     return categories
 
 
-def _dev_tool_paths(raw: Mapping[str, Any]) -> tuple[str, ...]:
-    """`dev_tools` entries as canonical repository-relative paths: `./tools/` becomes `tools`; `.`, `..` and absolute paths are refused."""
+def _repository_paths(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    """``key`` entries as canonical repository-relative paths: `./tools/` becomes `tools`; `.`, `..` and absolute paths are refused."""
     out: list[str] = []
-    for entry in _string_list(raw, "dev_tools"):
+    for entry in _string_list(raw, key):
         parts = [part for part in entry.replace("\\", "/").split("/") if part not in ("", ".")]
         if ".." in parts or not parts or entry.startswith(("/", "\\")) or (len(entry) > 1 and entry[1] == ":"):
-            raise PolicyError(f"`dev_tools` entry {entry!r} must be a folder or file below the repository root (no `.`, `..` or absolute path)")
+            raise PolicyError(f"`{key}` entry {entry!r} must be a folder or file below the repository root (no `.`, `..` or absolute path)")
         out.append("/".join(parts))
     return tuple(out)
 

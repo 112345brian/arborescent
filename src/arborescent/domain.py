@@ -29,6 +29,7 @@ from .policy_types import (
     ALL,
     ConstructionSite,
     DocsPolicy,
+    DuplicatePolicy,
     OwnedLiteral,
     PolicyError,
     ResultDiscard,
@@ -58,6 +59,7 @@ __all__ = [
     "ConstructionSite",
     "Contract",
     "DocsPolicy",
+    "DuplicatePolicy",
     "ModuleLayer",
     "Mutation",
     "OwnedLiteral",
@@ -149,6 +151,7 @@ class Policy(ArchitecturePolicy):
     package_pyproject: bool = False  # opt-in, needs package_catalog: derive each package's pyproject.toml fields (#60)
     modularity: str = "ready"  # "ready": package gaps fail `check`; "report": they are notes (needs package_catalog). Independent of the lint preset
     mixed_purity: PurityPolicy = field(default_factory=PurityPolicy)  # #173: thresholds, effect kinds and the reasoned allowlist of `mixed-purity`
+    duplicate_logic: DuplicatePolicy = field(default_factory=DuplicatePolicy)  # #228: opt-in clone detection
     coupling: CouplingPolicy = field(default_factory=CouplingPolicy)  # #148: entrypoints and hub threshold for `arborescent coupling`
     package_constraints: PackageConstraints = field(default_factory=PackageConstraints)  # #164: `[package.constraints]`, parsed only, not enforced
     ratchets: tuple[RatchetSpec, ...] = ()  # #147: `[ratchet.<name>]` counters compared with their baseline by `check`

@@ -245,6 +245,14 @@ path = "src/arborescent/purity_policy.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/duplicate_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/duplicate_logic.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/effects_policy.py"
 role = "source"
 

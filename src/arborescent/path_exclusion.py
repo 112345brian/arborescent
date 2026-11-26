@@ -1,5 +1,5 @@
-"""The policy's ``exclude`` patterns applied to one repository-relative path. Pure; shared by the scanner and the
-package asset listing so both agree on what is out of scope.
+"""The policy's ``exclude`` patterns applied to one repository-relative path, and which vendor folder holds a path. Pure;
+shared by the scanner, the package asset listing and the clone pass so all agree on what is out of scope.
 
 Two forms, like a ``.gitignore`` entry:
 
@@ -12,11 +12,12 @@ Two forms, like a ``.gitignore`` entry:
 from __future__ import annotations
 
 import fnmatch
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
-__all__ = ["excluded_by_policy", "matches_exclusion", "nested_bare_pattern"]
+__all__ = ["excluded_by_policy", "matches_exclusion", "nested_bare_pattern", "vendor_parent"]
 
 _GLOB_CHARS = frozenset("*?[")
+_VENDOR_NAMES = frozenset({"vendor", "vendored", "third_party", "site-packages"})
 
 
 def matches_exclusion(candidate: str, pattern: str) -> bool:
@@ -43,4 +44,16 @@ def nested_bare_pattern(folder: str, patterns: Sequence[str]) -> str | None:
             continue
         if len(parts) > 1 and pattern in parts[1:] and pattern != parts[0]:
             return pattern
+    return None
+
+
+def vendor_parent(rel: str, noise: Collection[str]) -> str | None:
+    """The outermost convention-named vendor folder above ``rel``; folders at or below a ``noise`` directory do not count."""
+    parts = rel.split("/")[:-1]
+    noise_index = next((index for index, part in enumerate(parts) if part in noise), len(parts))
+    for index in range(noise_index - 1, -1, -1):
+        if parts[index] in _VENDOR_NAMES:
+            if any(part in _VENDOR_NAMES for part in parts[:index]):
+                continue
+            return "/".join(parts[: index + 1])
     return None
