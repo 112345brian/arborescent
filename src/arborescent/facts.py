@@ -28,6 +28,7 @@ from .call_facts import (
     function_calls,
     function_spans,
     patch_targets,
+    path_calls,
     private_attributes,
     unqualified_from_calls,
 )
@@ -122,6 +123,7 @@ class SourceFacts:
     state_writes: tuple[StateWrite, ...] = ()  # writes to module-level mutable state outside the module's own locks (#232)
     module_locks: tuple[str, ...] = ()  # module-level names bound to a lock, so another module's `with locks.L:` can be believed (#232)
     shared_state: SharedState = field(default_factory=SharedState)  # containers others can write, and writes to imported names (#194)
+    path_calls: tuple[tuple[int, str], ...] = ()  # (line, "pathlib.Path.<method>") of a method on a value known to be a Path (#229)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -232,6 +234,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     sites = effects.sites
     running = running_ids(nodes)
     at_import = list(evaluated(tree.body))
+    on_paths = path_calls(tree, nodes, aliases)
     return SourceFacts(
         raw_imports(tree),
         merge_sites(sites, {id(node) for node in at_import}, running),
@@ -260,7 +263,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         untokenizable,
         import_time_facts(Walked(tree, at_import, sites, running, effects.state_runs, effects.foreign_runs), calls_aliases, dotted_name),
         seam_facts(tree, sites, running, aliases, dotted_name),
-        function_spans(tree, nodes, calls_aliases),
+        function_spans(tree, nodes, calls_aliases, on_paths),
         exemption_comments(source),
         call_shapes(tree, nodes, calls_aliases),
         class_shapes(tree, calls_aliases),
@@ -271,6 +274,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         effects.state_writes,
         effects.locks,
         effects.shared,
+        on_paths,
     )
 
 

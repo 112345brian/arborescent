@@ -69,12 +69,15 @@
 - `[[call_allowlist]]` (#229): name the modules and rings that may make a specific call (`os.replace`, `subprocess.*`,
   `app.queries.build`); every other call is `call-outside-allowlist`. With `and_calls` it is an idiom: a function making both
   (a temporary file *and* `os.replace`) is `hand-rolled-idiom`, while either call alone stays legitimate. Off until declared,
-  covered by `selftest` and the baseline. Resolution is syntactic: a method on a value (`Path.replace`), a re-bound or passed-on
-  function, `getattr`, `*` imports and re-exports are not seen (see *Configuration reference*).
+  covered by `selftest` and the baseline. Resolution is syntactic, plus `pathlib`: a file method on a value the module shows to
+  be a `Path` (`Path(tmp).replace(dest)`, `tmp_path.rename(dest)` with `tmp_path: Path`) is the target
+  `pathlib.Path.<method>`, never confused with `str.replace`. A re-bound or passed-on function, `getattr`, `*` imports,
+  re-exports and values of unknown type are not seen (see *Configuration reference*).
 - `[[companion]]` (#231): a function that calls an action (`when_calls`) must also call its record (`must_also_call`), itself or
-  in a function it calls (one hop), else `missing-companion-call`. `*.name` names a method on any receiver, `modules`/`rings`
-  scope it, and `# companion-exempt: <reason>` exempts a function. Off until declared. It is not path-sensitive: a record on
-  any branch satisfies the function.
+  in a function it calls (one hop), on every path that finishes normally, else `missing-companion-call`. Paths run through
+  `if`, early `return`, `try`, `match` and loops, on stated assumptions that favour silence (leaving by an exception needs no
+  record, a loop runs at least once). `*.name` names a method on any receiver, `modules`/`rings` scope it, and
+  `# companion-exempt: <reason>` exempts a function. Off until declared.
 - `[[tool.arborescent.construction]]` (#234): `forbid_kwargs`, `require_kwargs` and `only_from` for a class, checked at call sites
   resolved through imports, aliases and re-exports, including positional arguments that land on a field and `dataclasses.replace` on
   a value whose type the module states. New rules `construction-forbidden-argument` and `construction-missing-argument`; `only_from`

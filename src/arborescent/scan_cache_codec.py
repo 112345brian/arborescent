@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from .call_facts import CallShape, FunctionCalls, FunctionSpan
+from .call_facts import (
+    CallShape,
+    FlowCall,
+    FlowEdge,
+    FlowNode,
+    FunctionCalls,
+    FunctionSpan,
+)
 from .definition_facts import ClassMembers, ClassShape, Parameter, TopLevelDef
 from .effect_facts import EffectUse, StateWrite
 from .facts import (
@@ -29,7 +36,7 @@ from .import_syntax import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 
-CACHE_VERSION = 29
+CACHE_VERSION = 30
 
 
 def _purity_to_json(p: PurityFacts) -> list[Any]:
@@ -96,6 +103,44 @@ def _classes_from_json(raw: list[Any]) -> tuple[ClassShape, ...]:
     )
 
 
+def _flow_calls_to_json(calls: tuple[FlowCall, ...]) -> list[Any]:
+    return [[c.line, c.text, c.resolved] for c in calls]
+
+
+def _flow_calls_from_json(raw: list[Any]) -> tuple[FlowCall, ...]:
+    return tuple(FlowCall(c[0], c[1], c[2]) for c in raw)
+
+
+def _spans_to_json(spans: tuple[FunctionSpan, ...]) -> list[Any]:
+    return [
+        [s.name, s.line, s.end_line, s.start, [list(call) for call in s.method_calls], [
+            [
+                _flow_calls_to_json(n.calls), list(n.assigned),
+                # most edges only name their target, and are written as that number
+                [
+                    e.target if e == FlowEdge(e.target) else [e.target, e.condition, e.truth, e.absent, _flow_calls_to_json(e.unless), e.line]
+                    for e in n.edges
+                ],
+            ]
+            for n in s.flow
+        ]]
+        for s in spans
+    ]
+
+
+def _spans_from_json(raw: list[Any]) -> tuple[FunctionSpan, ...]:
+    return tuple(
+        FunctionSpan(s[0], s[1], s[2], s[3], tuple((c[0], c[1]) for c in s[4]), tuple(
+            FlowNode(
+                _flow_calls_from_json(n[0]), tuple(n[1]),
+                tuple(FlowEdge(e) if isinstance(e, int) else FlowEdge(e[0], e[1], e[2], e[3], _flow_calls_from_json(e[4]), e[5]) for e in n[2]),
+            )
+            for n in s[5]
+        ))
+        for s in raw
+    )
+
+
 def facts_to_json(f: SourceFacts) -> list[Any]:
     imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only, i.end_line] for i in f.imports]
     effects = [[u.line, u.category, u.target, u.seam, u.at_import] for u in f.effect_uses]
@@ -117,7 +162,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         _purity_to_json(f.purity), f.untokenizable,
         [[[c.line, c.callee, c.local] for c in f.import_time.calls], [list(item) for item in f.import_time.function_effects], [list(item) for item in f.import_time.function_writes]],
         _seams_to_json(f.seams),
-        [[s.name, s.line, s.end_line, s.start, [list(call) for call in s.method_calls]] for s in f.function_spans],
+        _spans_to_json(f.function_spans),
         [list(item) for item in f.companion_exempt],
         _calls_to_json(f.call_shapes), _classes_to_json(f.class_shapes),
         [[line, target] for line, target in f.private_attrs],
@@ -125,6 +170,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         [[c.name, c.line, list(c.bases), list(c.members), c.protocol, c.abstract] for c in f.classes],
         [[w.line, w.name, w.function, list(w.held), list(w.decorators)] for w in f.state_writes], list(f.module_locks),
         [list(f.shared_state.containers), [[w.line, w.function, w.target] for w in f.shared_state.writes]],
+        [list(item) for item in f.path_calls],
     ]
 
 
@@ -156,7 +202,7 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple(FunctionCalls(c[0], c[1], tuple(c[2])) for c in raw[21]),
         raw[22], raw[23], tuple((item[0], item[1]) for item in raw[24]),
         _purity_from_json(raw[25]), raw[26], _import_time_from_json(raw[27]), _seams_from_json(raw[28]),
-        tuple(FunctionSpan(s[0], s[1], s[2], s[3], tuple((c[0], c[1]) for c in s[4])) for s in raw[29]),
+        _spans_from_json(raw[29]),
         tuple((item[0], item[1]) for item in raw[30]),
         _calls_from_json(raw[31]), _classes_from_json(raw[32]),
         tuple((item[0], item[1]) for item in raw[33]),
@@ -164,4 +210,5 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple(ClassMembers(c[0], c[1], tuple(c[2]), tuple(c[3]), c[4], c[5]) for c in raw[36]),
         tuple(StateWrite(w[0], w[1], w[2], tuple(w[3]), tuple(w[4])) for w in raw[37]), tuple(raw[38]),
         SharedState(tuple(raw[39][0]), tuple(SharedWrite(w[0], w[1], w[2]) for w in raw[39][1])),
+        tuple((item[0], item[1]) for item in raw[40]),
     )

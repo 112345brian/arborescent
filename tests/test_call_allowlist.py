@@ -73,7 +73,6 @@ def test_every_spelling_of_a_listed_call_is_reported(repo: Path, body: str) -> N
         "import os\n\ngetattr(os, 'replace')('a', 'b')\n",
         "import functools\nimport os\n\nfunctools.partial(os.replace, 'a')\n",
         "from os import *\n\nreplace('a', 'b')\n",
-        "from pathlib import Path\n\nPath('a').replace('b')\n",
     ],
 )
 def test_what_is_not_a_listed_call_is_left_alone(repo: Path, body: str) -> None:
@@ -239,3 +238,101 @@ def test_selftest_says_why_an_entry_every_module_may_call_has_no_probe(repo: Pat
     mutations, skipped = plan(policy, FsScanner().scan(policy, repo))
     assert not [m for m in mutations if m.rule == Rule.CALL_OUTSIDE_ALLOWLIST]
     assert any(text.startswith("call_allowlist os.replace:") for text in skipped)
+
+
+PATHLIB = {"calls": ["pathlib.Path.replace", "pathlib.Path.rename"], "modules": ["app.adapters"]}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "from pathlib import Path\n\nPath('a').replace('b')\n",
+        "import pathlib\n\npathlib.Path('a').rename('b')\n",
+        "from pathlib import Path as P\n\nP('a').replace(target='b')\n",
+        "from pathlib import Path\n\n\ndef f(tmp_path: Path) -> None:\n    tmp_path.rename('b')\n",
+        "from pathlib import Path\n\n\ndef f(p: 'Path | None') -> None:\n    p.replace('b')\n",
+        "from typing import Optional\nfrom pathlib import Path\n\n\ndef f(p: Optional[Path]) -> None:\n    p.replace('b')\n",
+        "from pathlib import Path\n\n\ndef f(name: str) -> None:\n    tmp = Path(name)\n    tmp.replace('b')\n",
+        "from pathlib import Path\n\n\ndef f(dest: Path) -> None:\n    tmp = dest.with_suffix('.tmp')\n    tmp.replace(dest)\n",
+        "from pathlib import Path\n\n\ndef f(root: Path) -> None:\n    (root / 'a' / 'b').replace(root)\n",
+        "from pathlib import Path\n\n\ndef f(root: Path) -> None:\n    root.parent.joinpath('a').resolve().rename(root)\n",
+        "from pathlib import Path\n\nTMP = Path.cwd() / 'x'\n\n\ndef f() -> None:\n    TMP.replace('b')\n",
+        "from dataclasses import dataclass\nfrom pathlib import Path\n\n\n@dataclass\nclass C:\n    tmp: Path\n\n    def f(self) -> None:\n        self.tmp.replace('b')\n",
+        "from pathlib import Path\n\n\ndef f(p: Path) -> None:\n    p = p.with_name('c')\n    p.replace('b')\n",
+        "from pathlib import Path\n\n\ndef f() -> None:\n    p: Path = make()\n    p.replace('b')\n",
+        "from __future__ import annotations\n\nfrom typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    from pathlib import Path\n\n\ndef f(p: Path) -> None:\n    p.replace('b')\n",
+    ],
+)
+def test_a_method_on_a_value_known_to_be_a_path_is_a_pathlib_call(repo: Path, body: str) -> None:
+    write_files(repo, {"app/domain.py": body})
+    assert [subject for subject, _ in outside(run(repo, PATHLIB))] == ["app.domain"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "from pathlib import Path\n\n\ndef f(s: str) -> str:\n    return s.replace('a', 'b')\n",
+        "from pathlib import Path\n\n\ndef f(s) -> str:\n    return s.replace('a')\n",  # nothing says what `s` is
+        "from pathlib import Path\n\n\ndef f(s: 'str | Path') -> None:\n    s.replace('a')\n",
+        "from pathlib import Path\n\n\ndef f(p: Path) -> str:\n    return str(p).replace('a', 'b')\n",
+        "from pathlib import Path\n\n\ndef f(p: Path) -> str:\n    return p.name.replace('a', 'b')\n",
+        "from pathlib import Path\n\n\ndef f(p: Path) -> str:\n    return p.as_posix().replace('a', 'b')\n",
+        "from pathlib import Path\n\n\ndef f(s: str) -> str:\n    s = s.replace('a', 'b')\n    return s\n",
+        "from pathlib import Path\n\n\ndef f(items) -> None:\n    p = Path('a')\n    for p in items:\n        p.replace('b')\n",
+        "from pathlib import Path\n\n\ndef f(s) -> None:\n    if s:\n        s = Path('a')\n    s.replace('b')\n",
+        "from pathlib import Path\n\np = Path('a')\n\n\ndef f(p: str) -> None:\n    p.replace('b')\n",  # the parameter shadows it
+        "from fastapi import Path\n\n\ndef f(p: Path) -> None:\n    p.replace('b')\n",
+        "class Path:\n    pass\n\n\ndef f(p: Path) -> None:\n    p.replace('b')\n",
+        "from datetime import datetime\nfrom pathlib import Path\n\n\ndef f(when: datetime) -> None:\n    when.replace(year=1)\n",
+        "from pathlib import Path\n\n\ndef f(p: list[Path]) -> None:\n    p.rename('b')\n",
+    ],
+)
+def test_a_replace_on_anything_else_is_left_alone(repo: Path, body: str) -> None:
+    write_files(repo, {"app/domain.py": body})
+    assert outside(run(repo, PATHLIB)) == []
+
+
+def test_the_unbound_form_is_reported_once(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": "from pathlib import Path\n\n\ndef f(p: Path) -> None:\n    Path.replace(p, 'b')\n"})
+    assert outside(run(repo, PATHLIB)) == [("app.domain", 5)]
+
+
+def test_a_pathlib_atomic_write_is_a_hand_rolled_idiom(repo: Path) -> None:
+    entry = {"calls": ["tempfile.mkstemp", "pathlib.Path.write_text"], "and_calls": ["pathlib.Path.replace"], "modules": ["app.adapters"]}
+    body = (
+        "import tempfile\nfrom pathlib import Path\n\n\ndef save() -> None:\n    fd, name = tempfile.mkstemp()\n    Path(name).replace('b')\n\n\n"
+        "def other(dest: Path) -> None:\n    tmp = dest.with_suffix('.tmp')\n    tmp.write_text('x')\n    tmp.replace(dest)\n\n\n"
+        "def fine(s: str, dest: Path) -> None:\n    dest.write_text(s.replace('a', 'b'))\n"
+    )
+    write_files(repo, {"app/domain.py": body})
+    assert idioms(run(repo, entry)) == [("app.domain", 5), ("app.domain", 10)]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "from pathlib import Path\n\np = Path('a')" + " / 'b'" * 500 + "\np.replace('c')\n",
+        "from pathlib import Path\n\na = b\nb = a\na.replace('c')\n",
+        "from pathlib import Path\n\n" + "".join(f"v{i} = v{i + 1}\n" for i in range(3000)) + "v0.replace('c')\n",
+        "from pathlib import Path\n\nPath.nothing\n''.replace('a', 'b')\n",
+        "import pathlib\n",
+        "",
+    ],
+)
+def test_odd_path_expressions_do_not_crash(body: str) -> None:
+    assert all(name.startswith("pathlib.Path.") for _, name in extract(body).path_calls)
+
+
+def test_the_path_calls_survive_the_scan_cache() -> None:
+    facts = extract("from pathlib import Path\n\nPath('a').replace('b')\n")
+    assert facts.path_calls == ((3, "pathlib.Path.replace"),)
+    assert cached_facts(["digest", facts_to_json(facts)]) == facts
+
+
+def test_selftest_probes_a_pathlib_entry_with_a_path_value(repo: Path) -> None:
+    write_files(repo, {"app/domain.py": HEAD, "app/adapters.py": HEAD})
+    policy = mini_policy(call_allowlist=[PATHLIB], ring=OPEN)
+    [mutation] = [m for m in plan(policy, FsScanner().scan(policy, repo))[0] if m.rule == Rule.CALL_OUTSIDE_ALLOWLIST]
+    assert '.Path("_arborescent_probe").replace(' in mutation.append
+    report = selftest(replace(policy, type_checkers=()), repo, services())
+    assert sum(entry.startswith("[call-outside-allowlist]") for entry in report.killed) == 1, report.survived

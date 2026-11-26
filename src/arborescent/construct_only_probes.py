@@ -75,8 +75,12 @@ def _probe_source(item: CallAllowance) -> str:
     calls: list[str] = []
     for position, pattern in enumerate((item.calls[0], *item.and_calls[:1])):
         parent, _, function = pattern.replace("*", "_arborescent_probe").rpartition(".")
-        imports.append(f"import {parent} as _arborescent_probe_{position}")
-        calls.append(f"_arborescent_probe_{position}.{function}()")
+        if parent == "pathlib.Path":  # a method on a Path value, which is how the call is usually spelled
+            imports.append(f"import pathlib as _arborescent_probe_{position}")
+            calls.append(f'_arborescent_probe_{position}.Path("_arborescent_probe").{function}("_arborescent_probe")')
+        else:
+            imports.append(f"import {parent} as _arborescent_probe_{position}")
+            calls.append(f"_arborescent_probe_{position}.{function}()")
     if item.and_calls:
         calls = ["def _arborescent_probe_idiom() -> None:", *(f"    {call}" for call in calls)]
     return "\n".join(imports + calls)

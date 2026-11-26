@@ -11,10 +11,17 @@ import ast
 import fnmatch
 import re
 from bisect import bisect_right
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from typing import NamedTuple
 
-from .call_facts import REPLACE_CALLS, CallShape, absolute_callee, is_private_name
+from .call_facts import (
+    REPLACE_CALLS,
+    CallShape,
+    FlowNode,
+    absolute_callee,
+    is_private_name,
+    unrecorded_path,
+)
 from .definition_facts import ClassIndex, NameDecl, Signature, name_declarations
 from .domain import (
     ALL,
@@ -552,8 +559,9 @@ def _call_allowlist_findings(context: RuleContext, name: str, info: ModuleInfo) 
 
 
 def _absolute_calls(name: str, info: ModuleInfo) -> list[tuple[int, str]]:
-    """The module's recorded call sites as ``(line, absolute dotted callee)``, in line order."""
-    return [(line, callee) for line, target in info.facts.calls if (callee := absolute_callee(name, info.is_package, target)) is not None]
+    """The module's recorded call sites as ``(line, absolute dotted callee)``, in line order; methods on a ``Path`` included."""
+    calls = [(line, callee) for line, target in info.facts.calls if (callee := absolute_callee(name, info.is_package, target)) is not None]
+    return sorted({*calls, *info.facts.path_calls}) if info.facts.path_calls else calls
 
 
 def _call_matches(callee: str, patterns: tuple[str, ...]) -> bool:
@@ -631,14 +639,15 @@ class _FunctionCalls(NamedTuple):
         )
 
 
+def _qualified(name: str, info: ModuleInfo, local: Collection[str], target: str) -> str | None:
+    """``Class.method`` on a class of this module is recorded as written: it is not a module called ``Class``."""
+    return f"{name}.{target}" if "." in target and target.split(".", 1)[0] in local else absolute_callee(name, info.is_package, target)
+
+
 def _calls_by_function(name: str, info: ModuleInfo) -> list[tuple[str, _FunctionCalls]]:
     local = {item.name for item in info.facts.top_level_defs}
-    sites: list[tuple[int, str]] = []
-    for line, target in info.facts.calls:
-        # `Class.method` on a class of this module is recorded as written: it is not a module called `Class`
-        qualified = f"{name}.{target}" if "." in target and target.split(".", 1)[0] in local else absolute_callee(name, info.is_package, target)
-        if qualified is not None:
-            sites.append((line, qualified))
+    sites = [(line, found) for line, target in info.facts.calls if (found := _qualified(name, info, local, target)) is not None]
+    sites = sorted({*sites, *info.facts.path_calls}) if info.facts.path_calls else sites
     return [
         (span.name, _FunctionCalls(inside, span.method_calls))
         for span, inside in zip(info.facts.function_spans, _calls_inside(info, sites), strict=True)
@@ -689,8 +698,28 @@ class _Hops:
         )
 
 
+    def skipping_path(self, module: str, function: str, flow: Sequence[FlowNode], item: CompanionCall) -> tuple[int, int] | None:
+        """A path of ``function`` that does the action and finishes with no record, as ``unrecorded_path`` reports it (#231).
+
+        Each call of the flow is asked the two questions the whole function is: is it the action, and does it reach a record."""
+        info = self.modules[module]
+        local = {entry.name for entry in info.facts.top_level_defs}
+        actions: set[tuple[str, bool]] = set()
+        records: set[tuple[str, bool]] = set()
+        for call in {(c.text, c.resolved): c for node in flow for c in node.calls}.values():
+            name = _qualified(module, info, local, call.text) if call.resolved else call.text
+            if name is None:
+                continue
+            one = _FunctionCalls([(call.line, name)], ()) if call.resolved else _FunctionCalls([], ((call.line, name),))
+            if one.matching(item.when_calls):
+                actions.add((call.text, call.resolved))
+            if self.reach(module, function, one, item):
+                records.add((call.text, call.resolved))
+        return unrecorded_path(flow, actions, records)
+
+
 def _companion_findings(context: RuleContext, name: str, info: ModuleInfo, hops: _Hops) -> list[Violation]:
-    """A function that does an action and reaches no record of it (#231). Not path-sensitive: a record on any branch counts."""
+    """A function that does an action and reaches no record of it, at all or on one of its paths (#231)."""
     local_policy = context.policy_for(name)
     if local_policy is None or not local_policy.companion:
         return []
@@ -700,25 +729,32 @@ def _companion_findings(context: RuleContext, name: str, info: ModuleInfo, hops:
         return []
     exempt = [line for line, _ in info.facts.companion_exempt]
     functions = [
-        (function, calls, any(span.start <= line <= span.end_line for line in exempt))
+        (function, calls, span.flow, any(span.start <= line <= span.end_line for line in exempt))
         for span, (function, calls) in zip(info.facts.function_spans, hops.functions(name), strict=True)
     ]
     out: list[Violation] = []
     for item in entries:
         seen: dict[str, int] = {}
-        for function, calls, excused in functions:
+        for function, calls, flow, excused in functions:
             actions = calls.matching(item.when_calls)
-            if not actions or excused or hops.reach(name, function, calls, item):
+            if not actions or excused:
                 continue
+            line, where = actions[0][0], ""
+            if hops.reach(name, function, calls, item):
+                skipped = hops.skipping_path(name, function, flow, item) if flow else None
+                if skipped is None:
+                    continue
+                line = skipped[0]
+                where = f"; the path that finishes {f'at line {skipped[1]}' if skipped[1] else 'at the end of the function'} makes no record"
             seen[function] = seen.get(function, 0) + 1
             again = f" (definition #{seen[function]})" if seen[function] > 1 else ""
             detail = (
-                f"[{name}] (ring {ring or 'none'}) {function}(){again} calls {' or '.join(item.when_calls)} but neither it nor a function"
-                f" it calls calls {' or '.join(item.must_also_call)}" + (f": {item.reason}" if item.reason else "")
+                f"[{name}] (ring {ring or 'none'}) {function}(){again} calls {' or '.join(item.when_calls)} on a path where neither it"
+                f" nor a function it calls calls {' or '.join(item.must_also_call)}" + (f": {item.reason}" if item.reason else "")
             )
             found = ", ".join(sorted({callee for _, callee in actions}))
-            hint = f" (found: {found}; record it, or exempt the function with `# companion-exempt: <reason>`)"
-            out.append(Violation(Rule.MISSING_COMPANION_CALL, name, detail, actions[0][0], hint=hint))
+            hint = f" (found: {found}{where}; record it, or exempt the function with `# companion-exempt: <reason>`)"
+            out.append(Violation(Rule.MISSING_COMPANION_CALL, name, detail, line, hint=hint))
     return out
 
 
