@@ -35,7 +35,7 @@ def _purity_from_json(raw: list[Any]) -> PurityFacts:
 
 
 def facts_to_json(f: SourceFacts) -> list[Any]:
-    imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only] for i in f.imports]
+    imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only, i.end_line] for i in f.imports]
     effects = [[u.line, u.category, u.target, u.seam] for u in f.effect_uses]
     suppressions = [[line, kind] for line, kind in f.suppressions]
     top_level_defs = [[d.name, d.line, d.is_class, d.is_abstract] for d in f.top_level_defs]
@@ -67,7 +67,7 @@ def cached_facts(hit: list[Any]) -> SourceFacts | None:
 
 
 def facts_from_json(raw: list[Any]) -> SourceFacts:
-    imports = tuple(RawImport(i[0], i[1], tuple(i[2]), i[3], i[4], i[5]) for i in raw[0])
+    imports = tuple(RawImport(i[0], i[1], tuple(i[2]), i[3], i[4], i[5], i[6]) for i in raw[0])
     effects = tuple(EffectUse(u[0], u[1], u[2], u[3]) for u in raw[1])
     suppressions = tuple((item[0], item[1]) for item in raw[3])
     top_level_defs = tuple(TopLevelDef(d[0], d[1], d[2], d[3]) for d in raw[5])

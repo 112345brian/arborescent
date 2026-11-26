@@ -2,8 +2,8 @@
 
 A function-level ``import`` is the usual workaround for an import cycle or a heavy dependency. It stops the
 ``ImportError`` and leaves the coupling in the graph, so each one is inventoried per module and ratcheted. A
-``# deferred: <reason>`` comment on the import line, or alone on the line above it, records that it was a decision.
-``[lazy_import] rings`` limits the rule to some rings (#199); a module outside them has no findings and no count.
+``# deferred: <reason>`` comment on any line of the import statement, or alone on the line above it, records that it
+was a decision. ``[lazy_import] rings`` limits the rule to some rings (#199); a module outside them has no findings and no count.
 An import under ``if TYPE_CHECKING`` never runs and is not counted.
 """
 
@@ -41,6 +41,11 @@ def _label(imp: RawImport) -> str:
     return "." * imp.level + imp.module
 
 
+def _is_justified(imp: RawImport, justified: set[int]) -> bool:
+    """Any line of the statement counts, so a formatter that wraps it cannot move the reason out of reach (#213)."""
+    return any(line in justified for line in range(imp.line, max(imp.line, imp.end_line) + 1))
+
+
 def lazy_import_violations(info: ModuleInfo) -> list[Violation]:
     """One finding per function-level import with no ``# deferred:`` reason, keyed by what it imports and its ordinal.
 
@@ -51,7 +56,7 @@ def lazy_import_violations(info: ModuleInfo) -> list[Violation]:
     for imp in lazy_imports_of(info):
         label = _label(imp)
         seen[label] = seen.get(label, 0) + 1
-        if imp.line not in justified:
+        if not _is_justified(imp, justified):
             cause = f"{Rule.LAZY_IMPORT}|{imp.absolute_module(info.name, info.is_package)}"  # what every importer of it shares (#201)
             found.append(Violation(Rule.LAZY_IMPORT, info.name, f"{label}#{seen[label]}", imp.line, root_cause=cause))
     return found
@@ -60,7 +65,7 @@ def lazy_import_violations(info: ModuleInfo) -> list[Violation]:
 def lazy_import_counts(info: ModuleInfo) -> LazyImportCount:
     justified = {line for line, _ in info.facts.deferred}
     imports = lazy_imports_of(info)
-    return LazyImportCount(len(imports), sum(1 for imp in imports if imp.line in justified))
+    return LazyImportCount(len(imports), sum(1 for imp in imports if _is_justified(imp, justified)))
 
 
 _FIX = " (put each at module level, or record why it stays with `# deferred: <reason>` on or above the line)"

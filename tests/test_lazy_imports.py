@@ -100,6 +100,50 @@ def test_type_checking_and_module_level_imports_are_not_function_level() -> None
     assert lazy_import_counts(info) == LazyImportCount(0, 0)
 
 
+@pytest.mark.parametrize("statement", [
+    "    from json import (\n        dumps,  # deferred: why\n    )\n",  # where ruff's isort moves it (#213)
+    "    from json import (\n        dumps,\n        loads,  # deferred: why\n    )\n",
+    "    from json import (\n        # deferred: why\n        dumps,\n    )\n",
+    "    from json import (\n        dumps,\n    )  # deferred: why\n",
+    "    from json import (  # deferred: why\n        dumps,\n    )\n",
+    "    # deferred: why\n    from json import (\n        dumps,\n    )\n",
+    "    from json import \\\n        dumps  # deferred: why\n",
+    "    import \\\n        json  # deferred: why\n",
+    "    from json import (\r\n        dumps,  # deferred: why\r\n    )\r\n",
+])
+def test_a_comment_anywhere_in_a_wrapped_import_justifies_it(statement: str) -> None:
+    info = _info("def f() -> None:\n" + statement)
+    assert lazy_import_violations(info) == []
+    assert lazy_import_counts(info) == LazyImportCount(total=1, deferred=1)
+
+
+@pytest.mark.parametrize("statement", [
+    "    from json import (\n        dumps,\n    )\n    x = 1  # deferred: about x\n",
+    "    x = 1  # deferred: about x\n    from json import (\n        dumps,\n    )\n",
+    "    from json import (\n        dumps,  # deferred:\n    )\n",
+])
+def test_a_comment_outside_a_wrapped_import_does_not_justify_it(statement: str) -> None:
+    info = _info("def f() -> None:\n" + statement)
+    assert [v.detail for v in lazy_import_violations(info)] == ["json#1"]
+    assert lazy_import_counts(info) == LazyImportCount(total=1, deferred=0)
+
+
+def test_a_comment_in_one_wrapped_import_does_not_justify_its_neighbour() -> None:
+    first = "    from json import (\n        dumps,  # deferred: why\n    )\n"
+    second = "    from re import (\n        match,\n    )\n"
+    assert [v.detail for v in lazy_import_violations(_info("def f() -> None:\n" + first + second))] == ["re#1"]
+
+
+def test_a_wrapped_import_stays_justified_after_a_warm_cache_scan(tmp_path: Path) -> None:
+    write_files(tmp_path, {"app/a.py": "def f() -> None:\n    from json import (\n        dumps,  # deferred: cached\n    )\n"})
+    scanner = FsScanner(tmp_path / ".arborescent")
+    cold = scanner.scan(mini_policy(), tmp_path)
+    warm = scanner.scan(mini_policy(), tmp_path)
+    assert (cold.parsed, warm.parsed) == (1, 0)
+    assert warm.modules["app.a"].facts.imports == cold.modules["app.a"].facts.imports
+    assert lazy_import_violations(warm.modules["app.a"]) == []
+
+
 def test_a_lambda_and_a_method_count_as_function_level() -> None:
     source = "class C:\n    def m(self) -> None:\n        import json\n\n\nF = lambda: __import__('json')\n"
     assert [v.detail for v in lazy_import_violations(_info(source))] == ["json#1"]

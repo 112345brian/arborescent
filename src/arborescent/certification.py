@@ -251,7 +251,7 @@ def _tach_layer_probe(
         _append_import(fs, source_path, original, target)
         result = runner.run(accepted_command, temp)
         fs.write_bytes(source_path, original)
-        if result.returncode != 0:
+        if _rejected(result):
             return True
     return False
 
@@ -261,7 +261,12 @@ def _tach_external_probe(temp: Path, source_path: Path, runner: ToolRunner, fs: 
     _append_import(fs, source_path, original, "__arborescent_profile_missing_external_7f0f6c19__")
     result = runner.run(["tach", "check-external"], temp)
     fs.write_bytes(source_path, original)
-    return result.returncode != 0
+    return _rejected(result)
+
+
+def _rejected(result: ToolResult) -> bool:
+    """Whether tach ran and refused; one that timed out or never started proves nothing."""
+    return result.returncode is not None and result.returncode > 0
 
 
 def _append_import(fs: FileSystem, path: Path, original: bytes, module: str) -> None:

@@ -812,7 +812,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `wildcard-ring` | a non-outermost ring uses `*` in `external` or `may_import` (one finding per ring and axis) |
 | `suppression` | a `# noqa`, `# ruff: noqa` or `# type: ignore` directive is inventoried by module and kind; each occurrence is ratcheted |
 | `discard` | a `discard(value, reason=...)` call is inventoried by module; each call is ratcheted without claiming type-aware `Result` detection |
-| `lazy-import` | a function-level `import` with no `# deferred: <reason>` on its line or alone on the line above it; keyed by what it imports and its ordinal in the module, so moving it does not change the key. See "Function-level imports and import cycles" below |
+| `lazy-import` | a function-level `import` with no `# deferred: <reason>` on any line of the statement or alone on the line above it; keyed by what it imports and its ordinal in the module, so moving it does not change the key. See "Function-level imports and import cycles" below |
 | `effect-clock` | a ring that forbids `clock` reads the ambient clock (`time.time`, `datetime.now` and related calls) |
 | `effect-env` | a ring that forbids `env` reads environment variables through `os.environ` or `os.getenv` |
 | `effect-identity` | a ring that forbids `identity` generates UUID identities |
@@ -901,14 +901,18 @@ names which function actually calls the effectful code, instead of flagging ever
 A function-level `import` is the usual workaround for an import cycle or a heavy dependency: it stops the
 `ImportError` and leaves the coupling in the graph. Each one is its own finding, `lazy-import`, so a baseline of them is
 a visible, shrink-only list per module. `check` prints `function-level imports by module:` with the total and how many
-carry a reason. An import under `if TYPE_CHECKING` never runs and is not counted. A decision is recorded on the line
-or alone on the line above (comment lines that continue it are fine, a blank line ends it):
+carry a reason. An import under `if TYPE_CHECKING` never runs and is not counted. A decision is recorded on any line of
+the import statement (so a formatter that wraps it keeps it justified) or alone on the line above (comment lines that
+continue it are fine, a blank line ends it):
 
 ```python
 def load() -> None:
     import heavy  # deferred: 300 ms of startup the CLI help path should not pay
     # deferred: the registry imports this module at import time
     import registry
+    from composition import (
+        Container,  # deferred: only the callback builds it
+    )
 ```
 
 The reason must not be empty. A justified import is counted but is not a finding.
