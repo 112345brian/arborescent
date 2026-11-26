@@ -5,6 +5,16 @@
 ## Unreleased
 
 ### Fixed
+- **Coupling closure baselines may grow.** The closure of an entrypoint did not count parent packages, so with
+  `app/__init__.py` importing `app.heavy`, `app.cli` was reported as 1 module while importing it loads 3, and a
+  `closure_max` budget passed. Closure sizes, `closure_max`, the ratchet, `startup` blame and lazy-mount costs,
+  `coupling cost` and the `entrypoint-eager-commands` hoisting cost now count parent packages and what they import. After
+  upgrading, `coupling check` can fail with no code change: record the new sizes with
+  `arborescent coupling baseline --allow-growth --reason ...` and review any `closure_max`. Fan-in is unchanged, and
+  `startup` no longer offers to cut an import whose removal would leave the module loaded as a parent package (#216).
+- `coupling startup --measure` left modules loaded by `importlib.import_module` out of the loaded project module count.
+  It now counts `sys.modules` after the import; those modules still have no per-module time. An import that ends the
+  process before the list is written (`os._exit(0)`) is now a failed measurement (#216).
 - With a nested `output_dir`, `generate` wrote a `tach.toml` there whose source roots tach never read, so running it
   checked nothing and passed. `tach.toml` is now written at the project root (never over an existing one, and not while
   `tach` is disabled or configured in `pyproject.toml`), and `check` notes a generated nested one so it can be deleted.

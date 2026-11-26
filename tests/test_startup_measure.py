@@ -1,6 +1,6 @@
 """#216: the opt-in runtime measurement (``coupling startup --measure``) and its heavy third-party import report.
 
-Every test feeds canned ``-X importtime`` output through a fake runner, except one that runs the real interpreter.
+Most tests feed canned ``-X importtime`` output through a fake runner; the ones near the end run the real interpreter.
 """
 
 from __future__ import annotations
@@ -17,9 +17,11 @@ from arborescent.adapters import SubprocessToolRunner
 from arborescent.cli import main
 from arborescent.coupling import (
     IMPORTTIME_MARKER,
+    LOADED_MARKER,
     ImportRecord,
     package_costs,
     parse_importtime,
+    parse_loaded_modules,
 )
 from arborescent.domain import ToolResult
 from arborescent.testing import FakeToolRunner
@@ -85,6 +87,7 @@ CANNED = (
     + line("pydantic", 180_000, 2)
     + line("app.models", 190_000, 1)
     + line("app.cli", 260_000)
+    + f"\n{LOADED_MARKER} sys app typer pydantic app.models app.cli \n"
 )
 
 
@@ -158,6 +161,9 @@ def test_a_handler_registered_from_another_module_counts_as_a_command(tmp_path: 
         ("python: not installed", None, "not installed"),
         ("", 0, "no import-time output"),
         ("\x00\n", 1, "exit code 1"),
+        (f"{IMPORTTIME_MARKER}\n\n{LOADED_MARKER} sys app \n", 3, "exit code 3"),  # a silent sys.exit(3): not the list
+        (CANNED + "KeyError: 'x'\n", -1, "KeyError: 'x'"),
+        (IMPORTTIME_MARKER + "\n" + line("app.cli", 5), 0, "no list of loaded modules"),
     ],
 )
 def test_a_failed_measurement_is_said_and_fails(
@@ -235,3 +241,60 @@ def test_a_real_interpreter_produces_output_the_report_reads(
     out = capsys.readouterr().out
     assert "app.cli: measured" in out and "3 project modules loaded" in out
     assert "fakeheavy" in out and "imported by app.models" in out
+
+
+def test_the_loaded_list_is_the_last_one_after_the_marker() -> None:
+    before = f"{LOADED_MARKER} early\n"
+    assert parse_loaded_modules("") is None and parse_loaded_modules(before + IMPORTTIME_MARKER + "\n") is None
+    text = before + IMPORTTIME_MARKER + f"\nnoise\n{LOADED_MARKER} a \r\n{LOADED_MARKER} a a.b \r\nlater\n"
+    assert parse_loaded_modules(text) == {"a", "a.b"}
+
+
+def real_run(tmp_path: Path, capsys: pytest.CaptureFixture[str], files: Mapping[str, str], *options: str, code: int = 0) -> str:
+    base = project(tmp_path, files)
+    real = replace(services(), runner=SubprocessToolRunner())
+    assert main([*base, "startup", "--measure", *options], real) == code
+    return capsys.readouterr().out
+
+
+def test_modules_loaded_by_importlib_are_counted_though_they_have_no_time(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    files = {
+        "app/__init__.py": "",
+        "app/cli.py": "import importlib\n\nimportlib.import_module('app.dynamic')\n",
+        "app/dynamic.py": "",
+        "app/__main__.py": "",
+    }
+    out = real_run(tmp_path, capsys, files)
+    assert "app.cli: 2 project modules" in out  # static: app and app.cli
+    assert "3 project modules loaded" in out
+
+
+@pytest.mark.parametrize(
+    ("source", "loaded"),
+    [
+        ("raise SystemExit(0)\n", 1),  # `app` only: a module whose import raised is no longer in `sys.modules`
+        ("import sys\n\nsys.stderr.write('no newline')\n", 2),
+        ("import sys\n\nsys.stderr.close()\n", 2),
+        ("import io\nimport sys\n\nsys.stderr = io.StringIO()\n", 2),
+    ],
+)
+def test_an_import_that_exits_cleanly_or_takes_over_stderr_is_still_measured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, loaded: int
+) -> None:
+    assert f"{loaded} project modules loaded" in real_run(tmp_path, capsys, {"app/cli.py": source})
+
+
+@pytest.mark.parametrize(
+    ("source", "options", "expected"),
+    [
+        ("raise SystemExit(3)\n", (), "exit code 3"),
+        ("raise RuntimeError('broken')\n", (), "RuntimeError: broken"),
+        ("import os\n\nos._exit(0)\n", (), "no list of loaded modules"),
+        ("import time\n\ntime.sleep(60)\n", ("--timeout", "3"), "timed out"),
+    ],
+)
+def test_a_real_failed_or_timed_out_run_is_still_a_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str, options: tuple[str, ...], expected: str
+) -> None:
+    out = real_run(tmp_path, capsys, {"app/cli.py": source}, *options, code=1)
+    assert "app.cli: measurement failed" in out and expected in out and "project modules loaded" not in out

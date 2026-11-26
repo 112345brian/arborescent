@@ -2,11 +2,13 @@
 
 Import edges use the same resolution as the cycle report, so ``from pkg import sub`` is one edge to ``pkg.sub`` as in every ring
 check. Each edge has one kind: ``runtime`` (module level), ``lazy`` (only inside a function body) or ``type-only`` (only
-under ``if TYPE_CHECKING``). A pair imported in several ways takes the strongest kind. A closure follows ``runtime`` edges
-alone, because that is what loading the entrypoint runs; the modules only its function-level or type-only imports reach
-are counted separately.
+under ``if TYPE_CHECKING``). A pair imported in several ways takes the strongest kind. Fan-in counts these written imports.
 
-``parse_importtime`` and ``package_costs`` read the output of ``python -X importtime`` for the opt-in measurement (#216).
+Startup numbers (closure, blame, lazy mounts, cost of a new module) follow ``ImportEdges.loading``: the ``runtime`` edges
+plus each module's parent packages, because importing ``a.b.c`` runs ``a`` and ``a.b`` first. The modules only a closure's
+function-level or type-only imports name are counted separately.
+
+``parse_importtime``, ``parse_loaded_modules`` and ``package_costs`` read the output of the opt-in measured run (#216).
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ _MOSTLY = 2  # "mostly": more than 1 in 2 public definitions use an effect direc
 
 # Written to stderr just before the measured import, so the interpreter's own startup imports are not counted.
 IMPORTTIME_MARKER = "arborescent-importtime-start"
+# Starts the line listing ``sys.modules`` after the measured import: ``-X importtime`` has no line for ``importlib.import_module``.
+LOADED_MARKER = "arborescent-importtime-modules"
 _IMPORTTIME_LINE = re.compile(r"import time:\s*\d+ \|\s*(\d+) \| ( *)(\S+)\s*")
 
 
@@ -33,12 +37,14 @@ class ImportEdges:
     runtime: Graph
     lazy: Graph  # edges that exist only as function-level imports
     type_only: Graph  # edges that exist only under TYPE_CHECKING
+    parents: Graph  # implicit: each module's parent packages, which no import statement can be cut to avoid
+    loading: Graph  # ``runtime`` and ``parents``: what importing a module runs
 
 
 @dataclass(frozen=True)
 class Closure:
     entrypoint: str
-    modules: frozenset[str]  # every project module loaded by module-level imports, the entrypoint included
+    modules: frozenset[str]  # every project module that importing the entrypoint loads: itself and parent packages included
     lazy_only: frozenset[str]  # modules the closure imports only inside functions, not loaded with it
     type_only: frozenset[str]  # modules the closure imports only for type checking
 
@@ -76,7 +82,9 @@ def import_edges(modules: Mapping[str, ModuleInfo], known: Collection[str]) -> I
         found[kind].setdefault(name, set()).update(target for target in targets if target and target != name)
     runtime = {name: frozenset(found[EdgeKind.EAGER].get(name, ())) for name in modules}
     lazy = _without(found[EdgeKind.LAZY], runtime)
-    return ImportEdges(runtime, lazy, _without(found[EdgeKind.TYPE_ONLY], runtime, lazy))
+    parents = with_parent_packages({}, set(known) | set(modules))
+    type_only = _without(found[EdgeKind.TYPE_ONLY], runtime, lazy)
+    return ImportEdges(runtime, lazy, type_only, parents, _merge(runtime, parents))
 
 
 def _without(edges: Mapping[str, set[str]], *stronger: Graph) -> Graph:
@@ -133,7 +141,7 @@ def _merge(*graphs: Graph) -> Graph:
 
 
 def entrypoint_closure(edges: ImportEdges, entrypoint: str) -> Closure:
-    loaded = reach(edges.runtime, [entrypoint])
+    loaded = reach(edges.loading, [entrypoint])
     return Closure(
         entrypoint,
         loaded,
@@ -144,31 +152,38 @@ def entrypoint_closure(edges: ImportEdges, entrypoint: str) -> Closure:
 
 @dataclass(frozen=True)
 class Blame:
-    """``modules`` are loaded only because ``target`` is: cutting every ``importers`` -> ``target`` edge removes them."""
+    """``modules`` are loaded only because of the imports of ``target``: cutting every ``importers`` -> ``target`` one removes them."""
 
     target: str
     importers: tuple[str, ...]  # one module: that single edge is responsible
     modules: int
 
 
-def blame(graph: Graph, entrypoint: str) -> list[Blame]:
-    """What each module of ``entrypoint``'s closure alone brings in, heaviest first, with the edges that import it."""
-    loaded = reach(graph, [entrypoint])
+def blame(graph: Graph, entrypoint: str, parents: Graph | None = None) -> list[Blame]:
+    """What cutting the imports of each module of ``entrypoint``'s closure removes, heaviest first, with the importers.
+
+    ``graph`` holds the written imports, which can be cut. ``parents`` (module -> its parent packages) is loaded with each
+    module and cannot be: a package that stays loaded for a submodule removes nothing, so it is not listed."""
+    implicit: Graph = dict[str, frozenset[str]]() if parents is None else parents
+    loaded = reach(_merge(graph, implicit), [entrypoint])
     importers = _reverse({name: graph.get(name, frozenset()) for name in loaded})
     found: list[Blame] = []
-    for target in loaded - {entrypoint}:
-        without = _reach_without(graph, entrypoint, target)
-        direct = tuple(sorted(name for name in importers.get(target, ()) if name in without))
-        found.append(Blame(target, direct, len(loaded) - len(without)))
+    for target in importers.keys() - {entrypoint}:
+        without = _reach_without(graph, implicit, entrypoint, target)
+        if target not in without:
+            direct = tuple(sorted(name for name in importers[target] if name in without))
+            found.append(Blame(target, direct, len(loaded) - len(without)))
     return sorted(found, key=lambda item: (-item.modules, item.target))
 
 
-def _reach_without(graph: Graph, start: str, avoid: str) -> frozenset[str]:
+def _reach_without(graph: Graph, parents: Graph, start: str, avoid: str) -> frozenset[str]:
+    """``reach`` from ``start`` with every written import of ``avoid`` cut."""
     seen: set[str] = {start}
     pending: list[str] = [start]
     while pending:
-        for target in graph.get(pending.pop(), frozenset()):
-            if target != avoid and target not in seen:
+        name = pending.pop()
+        for target in (graph.get(name, frozenset()) - {avoid}) | parents.get(name, frozenset()):
+            if target not in seen:
                 seen.add(target)
                 pending.append(target)
     return frozenset(seen)
@@ -203,7 +218,9 @@ def with_parent_packages(graph: Graph, known: Collection[str]) -> Graph:
 
 
 def mount_cost(graph: Graph, entrypoint: str, module: str) -> int:
-    """Modules that running a lazily mounted command adds to what ``entrypoint`` already loaded."""
+    """Modules that running a lazily mounted command adds to what ``entrypoint`` already loaded.
+
+    ``graph`` is ``ImportEdges.loading``, so the command's parent packages count."""
     return len(reach(graph, [module]) - reach(graph, [entrypoint]))
 
 
@@ -244,9 +261,11 @@ def ambient_hubs(rows: Iterable[FanIn], modules: Mapping[str, ModuleInfo], minim
 
 
 def cost_of_new_modules(closures: Iterable[Closure], edges: ImportEdges, new: NewModule) -> dict[str, int]:
-    """Per entrypoint whose closure holds ``new.importer``: modules the closure gains (the new ones plus any closure they pull in)."""
+    """Per entrypoint whose closure holds ``new.importer``: modules the closure gains (the new ones plus any closure they pull in).
+
+    The new modules' own packages are taken to be loaded already: where they will live is not known."""
     return {
-        closure.entrypoint: new.count + len(reach(edges.runtime, new.imports) - closure.modules)
+        closure.entrypoint: new.count + len(reach(edges.loading, new.imports) - closure.modules)
         for closure in closures
         if new.importer in closure.modules
     }
@@ -278,6 +297,15 @@ def parse_importtime(text: str) -> list[ImportRecord]:
         found.append(ImportRecord(name, int(cumulative), tuple(outer for _, outer in stack)))
         stack.append((len(indent), name))
     return found[::-1]
+
+
+def parse_loaded_modules(text: str) -> frozenset[str] | None:
+    """The module names of the last ``LOADED_MARKER`` line after ``IMPORTTIME_MARKER``, or None when there is none."""
+    _, _, measured = text.partition(IMPORTTIME_MARKER)
+    for line in reversed(measured.splitlines()):
+        if line.startswith(LOADED_MARKER):
+            return frozenset(line.split()[1:])
+    return None
 
 
 def package_costs(records: Iterable[ImportRecord]) -> dict[str, int]:

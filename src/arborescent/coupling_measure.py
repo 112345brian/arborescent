@@ -16,6 +16,7 @@ from . import coupling_ratchet as ratchet
 from .command_imports import command_references, registrations_by_module
 from .coupling import (
     IMPORTTIME_MARKER,
+    LOADED_MARKER,
     Closure,
     FanIn,
     Hub,
@@ -28,15 +29,15 @@ from .coupling import (
     import_edges,
     package_costs,
     parse_importtime,
+    parse_loaded_modules,
     reach,
-    with_parent_packages,
 )
 from .coupling_policy import EagerCommands
 from .domain import Policy, PolicyError, ToolResult
 from .ports import FileSystem, ScanResult, ToolRunner
 
 __all__ = [
-    "HEAVY_MS", "TIMEOUT_SECONDS", "Measure", "MeasureSettings", "Measuring", "blame_lines", "command_users", "document", "eager_mounts",
+    "HEAVY_MS", "TIMEOUT_SECONDS", "ImportRun", "Measure", "MeasureSettings", "Measuring", "blame_lines", "command_users", "document", "eager_mounts",
     "importtime_code", "importtime_records", "load_baseline", "measure_settings", "measured_lines", "run_importtime",
     "startup_failures", "startup_packages",
 ]
@@ -82,7 +83,7 @@ def blame_lines(
     """The ``top`` heaviest imports of an entrypoint's closure. A module several others import needs every edge cut.
 
     ``times`` (module -> measured cumulative microseconds) adds what importing each target took."""
-    found = blame(measure.edges.runtime, entrypoint)
+    found = blame(measure.edges.runtime, entrypoint, measure.edges.parents)
     return [
         f"{', '.join(item.importers)} -> {item.target} pulls {item.modules} module(s)"
         + (f", {times[item.target] / 1000:.1f} ms" if times is not None and item.target in times else "")
@@ -98,13 +99,12 @@ def eager_mounts(measure: Measure) -> list[tuple[str, str, tuple[str, ...]]]:
     mounts = measure.policy.coupling.lazy_mounts
     if not mounts:
         return []
-    graph = with_parent_packages(measure.edges.runtime, measure.scan.known)
     return [
         (mount.name, entrypoint, chain)
         for mount in mounts
         for entrypoint in measure.policy.coupling.entrypoints
         if entrypoint != mount.module and not entrypoint.startswith(mount.module + ".")
-        if (chain := import_chain(graph, entrypoint, mount.module)) is not None
+        if (chain := import_chain(measure.edges.loading, entrypoint, mount.module)) is not None
     ]
 
 
@@ -148,12 +148,18 @@ def load_baseline(fs: FileSystem, path: Path) -> tuple[ratchet.Counts, list[obje
 
 
 def importtime_code(measure: Measure, root: Path, entrypoint: str) -> str:
-    """The program ``python -X importtime -c`` runs: put the source roots on the path, mark the start, import the entrypoint."""
+    """The program ``python -X importtime -c`` runs: put the source roots on the path, mark the start, import the entrypoint
+    and list what is then in ``sys.modules``.
+
+    The list goes to file descriptor 2, so an entrypoint that replaces or closes ``sys.stderr`` does not lose it, and is
+    written in ``finally``, so an import that raises ``SystemExit(0)`` still has one. ``__main__`` is this program itself."""
     parts = [scope.policy for scope in measure.policy.scopes] or [measure.policy]
     roots = list(dict.fromkeys(str((root / folder).absolute()) for part in parts for folder in part.source_roots))
     return (
-        f"import sys\nsys.path[:0] = {roots!r}\nsys.stderr.write({IMPORTTIME_MARKER + chr(10)!r})\nsys.stderr.flush()\n"
-        f"__import__({entrypoint!r})\n"
+        f"import os, sys\nsys.path[:0] = {roots!r}\nsys.stderr.write({IMPORTTIME_MARKER + chr(10)!r})\nsys.stderr.flush()\n"
+        f"try:\n    __import__({entrypoint!r})\nfinally:\n"
+        "    names = [name for name, module in list(sys.modules.items()) if module is not None and name != '__main__']\n"
+        f"    os.write(2, ' '.join([{chr(10) + LOADED_MARKER!r}, *names, {chr(10)!r}]).encode('utf-8', 'replace'))\n"
     )
 
 
@@ -175,7 +181,7 @@ def _third_party(measure: Measure, modules: Iterable[str], lazy: bool) -> dict[s
 
 
 def _startup_modules(measure: Measure, entrypoint: str) -> frozenset[str]:
-    return reach(with_parent_packages(measure.edges.runtime, measure.scan.known), [entrypoint])
+    return reach(measure.edges.loading, [entrypoint])
 
 
 def startup_packages(measure: Measure, entrypoint: str) -> dict[str, list[str]]:
@@ -199,7 +205,7 @@ def command_users(measure: Measure, read: Callable[[str], str | None], entrypoin
     A lazy mount uses what the modules it loads import. A command function on the startup path (decorated or registered,
     as for ``entrypoint-eager-commands``) uses what it imports or reads in its body: the package itself, or a project
     module that loads it at module level. A use through a helper in the command's own module is not followed."""
-    graph = with_parent_packages(measure.edges.runtime, measure.scan.known)
+    graph = measure.edges.loading
     users: dict[str, list[str]] = {}
     mounts = [mount for mount in measure.policy.coupling.lazy_mounts if mount.module != entrypoint]
     for mount in mounts:
@@ -221,15 +227,29 @@ def command_users(measure: Measure, read: Callable[[str], str | None], entrypoin
     return {package: sorted(names) for package, names in users.items()}
 
 
-def importtime_records(result: ToolResult) -> list[ImportRecord] | str:
-    """The records of one ``-X importtime`` run, or why there are none. A run that did not exit 0 gives no records."""
+@dataclass(frozen=True)
+class ImportRun:
+    """One successful measured import."""
+
+    records: list[ImportRecord]  # what ``-X importtime`` timed: no line for a module ``importlib.import_module`` loaded
+    loaded: frozenset[str]  # every name in ``sys.modules`` afterwards
+
+
+def importtime_records(result: ToolResult) -> ImportRun | str:
+    """What one ``-X importtime`` run measured, or why it measured nothing. A run that did not exit 0 gives no numbers."""
     if result.returncode != 0:
         said = [
             line.strip() for line in result.stderr.replace("\x00", "").splitlines()
-            if line.strip() and not line.startswith(("import time:", IMPORTTIME_MARKER))
+            if line.strip() and not line.startswith(("import time:", IMPORTTIME_MARKER, LOADED_MARKER))
         ]
         return said[-1] if said else f"exit code {result.returncode}"
-    return parse_importtime(result.stderr) or "no import-time output"
+    records = parse_importtime(result.stderr)
+    if not records:
+        return "no import-time output"
+    loaded = parse_loaded_modules(result.stderr)
+    if loaded is None:
+        return "no list of loaded modules: the process ended during the import"
+    return ImportRun(records, loaded)
 
 
 def _listed(names: list[str]) -> str:
@@ -245,13 +265,14 @@ def _used_by(commands: list[str]) -> str:
 
 
 def measured_lines(
-    measure: Measure, read: Callable[[str], str | None], entrypoint: str, records: list[ImportRecord], threshold_ms: float
+    measure: Measure, read: Callable[[str], str | None], entrypoint: str, run: ImportRun, threshold_ms: float
 ) -> list[str]:
     """The measured time of one entrypoint and its heavy third-party imports with the commands that use each (#216).
 
     A package is listed when the startup path imports it itself and the run spent at least ``threshold_ms`` importing it."""
+    records = run.records
     total = sum(record.cumulative_us for record in records if not record.ancestors)
-    loaded = len({record.name for record in records} & set(measure.scan.known))
+    loaded = len(run.loaded & measure.scan.known)
     first = f"{entrypoint}: measured {total / 1000:.1f} ms, {loaded} project modules loaded"
     costs = package_costs(records)
     heavy = sorted(
@@ -315,8 +336,8 @@ class Measuring:
 
 def run_importtime(
     measure: Measure, runner: ToolRunner, root: Path, settings: MeasureSettings, entrypoint: str
-) -> list[ImportRecord] | str:
-    """Import ``entrypoint`` in a subprocess under ``-X importtime``: its records, or why there are none.
+) -> ImportRun | str:
+    """Import ``entrypoint`` in a subprocess under ``-X importtime``: what it measured, or why it measured nothing.
 
     This runs the project's import-time code, so only the explicit reporting command calls it."""
     argv = [settings.python, "-X", "importtime", "-c", importtime_code(measure, root, entrypoint)]

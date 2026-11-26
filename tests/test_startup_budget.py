@@ -93,7 +93,7 @@ def run(base: list[str], action: str) -> int:
 
 
 def test_check_passes_within_budget(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    base = repo(tmp_path, BUDGET.format(3) + MOUNTS)
+    base = repo(tmp_path, BUDGET.format(4) + MOUNTS)
     assert run(base, "baseline") == 0
     assert run(base, "check") == 0
     assert "FAIL " not in capsys.readouterr().out
@@ -105,7 +105,7 @@ def test_an_exceeded_budget_fails_even_when_baselined_and_blames_an_edge(tmp_pat
     _ = capsys.readouterr()
     assert run(base, "check") == 1
     out = capsys.readouterr().out
-    assert "startup budget: app.cli loads 3 project modules, budget 2" in out
+    assert "startup budget: app.cli loads 4 project modules, budget 2" in out
     assert "app.cli -> app.hub pulls 2 module(s)" in out
     assert "(1 regression(s))" in out
 
@@ -143,7 +143,7 @@ def test_startup_reports_closure_budget_blame_and_mounts(tmp_path: Path, capsys:
     base = repo(tmp_path, BUDGET.format(2) + MOUNTS)
     assert run(base, "startup") == 0  # a report: `check` is what fails
     out = capsys.readouterr().out
-    assert "app.cli: 3 project modules (budget 2, OVER)" in out
+    assert "app.cli: 4 project modules (budget 2, OVER)"  # the package `app` included in out
     assert "app.cli -> app.hub pulls 2 module(s)" in out
     assert "backfill -> app.backfill: +2 module(s) when run" in out  # backfill and heavy; hub and dep are shared
 

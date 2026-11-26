@@ -217,14 +217,14 @@ def test_report_prints_fan_in_closure_and_flags_a_ring_cap(tmp_path: Path, capsy
     out = capsys.readouterr().out
     assert "app.domain: direct 2, module-level 2, transitive" in out
     assert "OVER CAP 1 for ring domain" in out
-    assert "app.main: 4 (function-level only +0, type-only +0)" in out
+    assert "app.main: 5 (function-level only +0, type-only +0)"  # the package `app` included in out
 
 
 def test_report_json_carries_the_same_numbers(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert run(repo(tmp_path), "report", "--json") == 0
     out = capsys.readouterr().out
     assert '"entrypoint": "app.main"' in out
-    assert '"modules": 4' in out
+    assert '"modules": 5' in out
 
 
 def test_baseline_then_check_then_a_new_import_fails_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -239,13 +239,13 @@ def test_baseline_then_check_then_a_new_import_fails_it(tmp_path: Path, capsys: 
     (tmp_path / "app" / "extra.py").write_text("", encoding="utf-8")
     (tmp_path / "app" / "main.py").write_text(MINI_FILES["app/main.py"] + "from . import extra\n", encoding="utf-8")
     assert run(config, "check") == 1
-    assert "FAIL   closure: app.main grew from 4 to 5" in capsys.readouterr().out
+    assert "FAIL   closure: app.main grew from 5 to 6" in capsys.readouterr().out
 
 
 def test_cost_reports_per_entrypoint_growth(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     config = repo(tmp_path)
     assert run(config, "cost", "app.adapters", "--modules", "2") == 0
-    assert "app.main: closure 4 -> 6 (+2)" in capsys.readouterr().out
+    assert "app.main: closure 5 -> 7 (+2)" in capsys.readouterr().out
     assert run(config, "cost", "app.nope") == 2
 
 
