@@ -302,6 +302,8 @@ def _global_effect_uses(nodes: Sequence[ast.AST]) -> list[EffectUse]:
 
 _CACHE_DECORATORS = frozenset({"functools.cache", "functools.lru_cache"})  # not `cached_property`: that cache is per instance
 _CACHE_NAME = re.compile(r"cache|memo", re.IGNORECASE)
+_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)  # a tuple: a `|` union is rebuilt at every check, and these run once per node
+_WRITE_NODES = frozenset({ast.Call, ast.Subscript})  # the only node types `mutated_container` can answer for
 
 
 def _module_state_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> list[EffectUse]:
@@ -310,26 +312,40 @@ def _module_state_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[st
     memo; a ``functools.cache``/``lru_cache`` decorator is a ``cache`` use. A name the function (or one around it) binds itself is a
     local, not the module's container; import-time fills and reads are not uses. Recorded in every module, failing only where a ring
     lists the category in ``forbid`` (see ``MODULE_STATE_CATEGORIES``)."""
+    functions = [node for node in nodes if isinstance(node, _DEFS)]
     uses = [
         EffectUse(decorator.lineno, "cache", target)
-        for func in nodes if isinstance(func, ast.FunctionDef | ast.AsyncFunctionDef)
+        for func in functions
         for decorator in func.decorator_list
         if (target := dotted_name(decorator.func if isinstance(decorator, ast.Call) else decorator, aliases)) in _CACHE_DECORATORS
     ]
-    containers = module_containers(tree, aliases, dotted_name) if isinstance(tree, ast.Module) else set()
-    if not containers:
+    if not isinstance(tree, ast.Module) or not (containers := module_containers(tree, aliases, dotted_name)):
         return uses
-    stack: list[tuple[ast.AST, tuple[tuple[str, set[str]], ...]]] = [(tree, ())]
-    while stack:
-        node, scopes = stack.pop()
-        for child in ast.iter_child_nodes(node):
-            inner = scopes
-            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                inner = (*scopes, (child.name, local_names(child)))
-            elif scopes and (name := mutated_container(child, containers)) is not None and not any(name in bound for _, bound in scopes):
-                category = "cache" if _CACHE_NAME.search(name) else "registry"
-                uses.append(EffectUse(getattr(child, "lineno", 0), category, f"{scopes[-1][0]}.{name}"))
-            stack.append((child, inner))
+    return uses + _container_writes(nodes, functions, containers)
+
+
+def _container_writes(
+    nodes: Sequence[ast.AST], functions: Sequence[ast.FunctionDef | ast.AsyncFunctionDef], containers: set[str],
+) -> list[EffectUse]:
+    """The function-level writes to ``containers``. The functions around a write are found by source position, so the tree is not
+    walked again, and a function's local names are computed only when a write is found inside it."""
+    spans = sorted(
+        ((min([f.lineno, *(d.lineno for d in f.decorator_list)]), f.end_lineno or f.lineno, f.col_offset, f) for f in functions),
+        key=lambda span: span[:3],
+    )
+    bound: dict[ast.AST, set[str]] = {}
+    uses: list[EffectUse] = []
+    for node in [n for n in nodes if n.__class__ in _WRITE_NODES]:  # nearly every module has `__all__`, so this runs over most: filter first
+        if (name := mutated_container(node, containers)) is None:
+            continue
+        line, column = getattr(node, "lineno", 0), getattr(node, "col_offset", 0)
+        scopes = [f for start, end, indent, f in spans if start <= line <= end and (line > start or column >= indent)]
+        for scope in scopes:
+            if scope not in bound:
+                bound[scope] = local_names(scope)
+        if scopes and not any(name in bound[scope] for scope in scopes):
+            category = "cache" if _CACHE_NAME.search(name) else "registry"
+            uses.append(EffectUse(line, category, f"{scopes[-1].name}.{name}"))
     return uses
 
 

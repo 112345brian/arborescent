@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import ast
 import re
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -40,6 +40,7 @@ _LOGGING_FUNCTIONS = frozenset(f"logging.{name}" for name in (*_LOG_METHODS, "ba
 _LOGGER_FACTORIES = frozenset({"logging.getLogger", "structlog.get_logger", "structlog.getLogger"})
 _LOGGER_OBJECTS = frozenset({"loguru.logger"})
 _CONTAINER_CALLS = frozenset({"dict", "list", "set", "defaultdict", "OrderedDict", "Counter", "deque"})
+_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)  # a tuple: a `|` union is rebuilt at every check, and this runs once per node
 _CONTAINER_LITERALS = (ast.Dict, ast.List, ast.Set, ast.DictComp, ast.ListComp, ast.SetComp)
 _MUTATORS = frozenset({
     "append", "extend", "insert", "add", "update", "pop", "popitem", "remove", "discard", "clear", "setdefault", "appendleft", "popleft",
@@ -167,23 +168,15 @@ def _annotation_types(node: ast.expr | None, aliases: dict[str, str], local: set
     return _class_name(node, aliases, local, dotted) if isinstance(node, ast.Name | ast.Attribute) else []
 
 
-def _port_calls(func: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str], local: set[str], dotted: Dotted) -> list[tuple[int, str, str, bool]]:
-    """(line, class, method, local) for ``param.method(...)`` where the parameter is annotated with an imported or module-level class."""
+def _typed_params(
+    func: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str], local: set[str], dotted: Dotted,
+) -> dict[str, list[tuple[str, bool]]]:
+    """parameter -> the imported or module-level classes its annotation names."""
     typed: dict[str, list[tuple[str, bool]]] = {}
     for arg in (*func.args.posonlyargs, *func.args.args, *func.args.kwonlyargs):
         if arg.annotation is not None and (types := _annotation_types(arg.annotation, aliases, local, dotted)):
             typed[arg.arg] = types
-    if not typed:
-        return []
-    inner = list(ast.walk(func))
-    rebound = {n.id for n in inner if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
-    return [
-        (node.lineno, name, node.func.attr, is_local)
-        for node in inner
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
-        and node.func.value.id in typed and node.func.value.id not in rebound
-        for name, is_local in typed[node.func.value.id]
-    ]
+    return typed
 
 
 def _is_logging_call(node: ast.Call, loggers: set[str], aliases: dict[str, str], dotted: Dotted) -> bool:
@@ -232,6 +225,7 @@ class _Collector:
         self.candidates: list[tuple[int, int, str]] = []  # (unit index, line, container name)
         self.import_time: set[tuple[int, str]] = set()
         self.port_calls: set[tuple[int, str, str, bool]] = set()
+        self.receivers: list[tuple[int, str, str]] = []  # (line, name, method) of every `name.method()`, for port calls
 
     def owner(self, line: int) -> int | None:
         slot = bisect_right(self.starts, line) - 1
@@ -241,6 +235,8 @@ class _Collector:
         line = getattr(node, "lineno", 0)
         if not line or not isinstance(node, ast.Call | ast.Subscript):
             return
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            self.receivers.append((line, node.func.value.id, node.func.attr))
         owner = self.owner(line)
         if isinstance(node, ast.Call) and _is_logging_call(node, self.loggers, self.aliases, self.helpers.dotted):
             (self.import_time if owner is None else self.kinds[owner]).add((line, LOGGING))
@@ -261,10 +257,33 @@ class _Collector:
                 self.kinds[owner].add((line, MEMO if _MEMO_NAME.search(name) else STATE))
 
     def collect_port_calls(self, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> None:
-        """Calls on typed parameters, for every function or method with an annotated parameter; ``aliases`` keep relative imports' dots."""
+        """(line, class, method, local) for ``param.method(...)`` where the parameter is annotated with an imported or module-level
+        class and the function does not reassign it. ``aliases`` keep relative imports' dots. Needs every node ``visit``ed first.
+
+        A function's calls and assignments are those on its lines, so no function is walked again; a function without a method call
+        on one of its annotated parameters costs a lookup, and its annotations are not resolved."""
+        calls = sorted(self.receivers)
+        if not calls:
+            return
+        stores: list[tuple[int, str]] | None = None
         for node in nodes:
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(a.annotation for a in (*node.args.args, *node.args.kwonlyargs, *node.args.posonlyargs)):
-                self.port_calls.update(_port_calls(node, aliases, self.unit_names, self.helpers.dotted))
+            if not isinstance(node, _DEFS):
+                continue
+            start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+            end = (node.end_lineno or node.lineno) + 1
+            inside = calls[bisect_left(calls, (start,)):bisect_left(calls, (end,))]
+            names = {name for _, name, _ in inside}
+            if names.isdisjoint(a.arg for a in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs) if a.annotation):
+                continue
+            typed = _typed_params(node, aliases, self.unit_names, self.helpers.dotted)
+            if stores is None:
+                stores = sorted((n.lineno, n.id) for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store))
+            rebound = {name for _, name in stores[bisect_left(stores, (start,)):bisect_left(stores, (end,))]}
+            self.port_calls.update(
+                (line, cls, method, local)
+                for line, name, method in inside if name in typed and name not in rebound
+                for cls, local in typed[name]
+            )
 
     def unit(self, index: int) -> PurityUnit:
         node = self.defs[index]
