@@ -1026,6 +1026,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `suppression` | a `# noqa`, `# ruff: noqa` or `# type: ignore` directive is inventoried by module and kind; each occurrence is ratcheted |
 | `discard` | a `discard(value, reason=...)` call is inventoried by module; each call is ratcheted without claiming type-aware `Result` detection |
 | `lazy-import` | a function-level `import` with no `# deferred: <reason>` on any line of the statement or alone on the line above it; keyed by what it imports and its ordinal in the module, so moving it does not change the key. See "Function-level imports and import cycles" below |
+| `shadowed-callee` | opt-in (`practices.shadowed-callee`): a local assigned from a call to the same-named module-level name; see "Shadowed callees" |
+| `unresolved-patch-target` | opt-in (`practices.unresolved-patch-target`): a test patches a name its module does not have; see "Unresolved patch targets" |
 | `entrypoint-eager-commands` | informational, opt-in (`[coupling.eager_commands]`): a module whose function-level imports mostly sit inside CLI command bodies; see "Eager command modules" below |
 | `effect-clock` | a ring that forbids `clock` reads the ambient clock (`time.time`, `datetime.now` and related calls) |
 | `effect-env` | a ring that forbids `env` reads environment variables through `os.environ` or `os.getenv` |
@@ -1238,7 +1240,9 @@ min_commands = 2    # across at least this many commands
 ```
 
 A command is a function with one of those decorators, one registered by calling it (`app.command("x")(run)`), or one
-passed to argparse as `set_defaults(func=run)` in the same module. A module over every threshold gets one
+passed to argparse as `set_defaults(func=run)`. The registration may sit in another module that imports the function
+(`set_defaults(func=handlers.run)`); a re-export through a third module is not followed, and under `check --changed` a
+registration in an unchanged file is not seen. A module over every threshold gets one
 `entrypoint-eager-commands` note with the number of imports and commands, and how many project modules importing it would
 load if those imports were hoisted (left out under `check --changed`). Imports with a `# deferred:` reason count toward
 the share. The note never fails a check and is never baselined. The `lazy-import` findings and their baseline keys do not
@@ -1334,6 +1338,8 @@ Each practice is off until it has a value.
 | `test-reference` | tests folder, e.g. `"tests"`; `test-reference-exempt` lists `module.function` names or module globs to skip | information only: a public module-level function in an I/O-free ring (one that forbids `filesystem`, `network`, `database` and `process`; the innermost ring by default) that no function under the tests folder imports and calls. Resolved through import aliases and package re-exports; not through an object of unknown type, a fixture or a parametrized argument, and a function only a tested caller reaches is reported. Private, abstract and class members are skipped. A name that is only imported or mentioned does not count (#104) |
 | `adapter-equivalence` | list of groups of full module names, e.g. `[["pkg.fact_queries", "pkg.modes_store"]]`; `adapter-equivalence-tests` is the tests folder (default `"tests"`); `adapter-equivalence-report = true` makes the missing-test finding information only | fails when no single test function calls a function of every module in a group, so two adapters of one port cannot both ship without a differential test (#113). Group errors always fail, even with `adapter-equivalence-report`: an unknown module (not a scanned module; a unique suffix match is suggested), a group with fewer than two distinct modules, a module in two groups, a value that is not a list of lists of strings. See "Adapter equivalence" below |
 | `unreachable-patch` | tests folder, e.g. `"tests"`; `unreachable-patch-exempt` lists `module.name` bindings or module globs to skip | a test patches `X.name` while a module it reaches calls `name` through its own `from X import name`, which the patch never reaches. See "Unreachable patches" below (#226) |
+| `unresolved-patch-target` | tests folder, e.g. `"tests"`; `unresolved-patch-target-exempt` lists `module.name` targets or module globs to skip | a test patches `module.name` and the first-party `module` has no `name`. See "Unresolved patch targets" below (#215) |
+| `shadowed-callee` | `true` | a function assigns a local from a call to the module-level name it shadows (`rows = rows()`), which raises `UnboundLocalError`. See "Shadowed callees" below (#215) |
 | `adapter-equivalence-report` | `true` | not a check of its own: makes `adapter-equivalence`'s missing-test finding information only (rule id `adapter-equivalence-report`, never fails, never baselined); group errors still fail |
 
 ### Unreachable patches
@@ -1360,6 +1366,34 @@ re-export chain (`from package import name` patched at `package.impl.name`), thi
 files are parsed once and cached like source files, whether or not they are in `sources`; the check is skipped under
 `--changed`. A configured folder with no Python files is itself reported. Findings join the baseline ratchet, and `selftest`
 adds a test that patches an unpatched binding.
+
+### Unresolved patch targets
+
+After a name moves to another module, the tests that still patch the old place need retargeting. `unresolved-patch-target`
+reports one finding per test file and target, so the output is the whole list. It reads the same patch forms and test files
+as `unreachable-patch` (the two may name different folders) and works without it.
+
+A target is reported when its longest known module is first-party and has no attribute or submodule of the next name:
+`app.repo.gone`, `app.gone.load` (the module `app.gone` is gone) or `app.repo.Gone.get`. Not reported:
+
+- anything after that first name (`app.repo.Store.missing` only checks `Store`);
+- a module whose namespace its source does not settle: a `*` import, a module `__getattr__`, `globals`, a bare `vars()`,
+  `exec` without a namespace argument or `sys.modules[__name__]`;
+- builtins (`mock.patch` creates them), dunder names, and a patch allowed to create the name (`create=True`,
+  `raising=False`);
+- third-party and stdlib targets.
+
+A name that only another module assigns onto this one is not seen, so it is reported: exempt it. A name that is only
+annotated (`x: int`) or only imported under `TYPE_CHECKING` does not exist at run time and is reported too.
+The check is skipped under `--changed`, a folder with no Python files is itself reported, and findings join the baseline.
+
+### Shadowed callees
+
+Renaming `_rows` to `rows` for cross-module use turns `rows = _rows()` into `rows = rows()`. The assignment makes `rows`
+local to the whole function, so the call raises `UnboundLocalError`. `shadowed-callee` reports it once per function and name,
+for a name the module imports or defines at top level. Module and class bodies are left out (the call finds the global
+there), as are parameters, `global`/`nonlocal` names, and a name the function binds before the assignment. A call through a
+lambda or generator is not counted, since it may never run. It also runs under `--changed` and findings join the baseline.
 
 ### Adapter equivalence
 
@@ -1486,7 +1520,8 @@ backfill = "app.commands.backfill:app"
 "backfill conditions" = "app.commands.conditions:app"
 ```
 
-Both are static: they count project modules reached by module-level imports, not seconds.
+Both are static: they count project modules reached by module-level imports, not seconds. Only `startup --measure`
+(below) runs the project.
 
 - `arborescent coupling check` fails when a closure is over its `closure_max`, naming the imports to blame. The baseline
   does not excuse it, unlike growth, which `check` already reports against the `closure` counts.
@@ -1498,8 +1533,39 @@ Both are static: they count project modules reached by module-level imports, not
 
 A mount whose module does not exist is a policy error (exit 2); `attr` is checked for syntax only. How the mount loads the
 module (a string table with `importlib`) is the project's code. Add a mounted command module to `entrypoints` to ratchet
-or cap its own closure. Not measured: wall time, cold against warm starts, per-argv subprocess runs and the cost of
-third-party imports.
+or cap its own closure.
+
+#### Measured startup and heavy third-party imports
+
+```
+arborescent coupling startup --measure [--threshold-ms 50] [--python PATH] [--timeout 120]
+```
+
+**This runs your code**: each entrypoint is imported (not executed as `__main__`) by `python -X importtime` in a
+subprocess, with the project root as the working directory and the source roots first on `sys.path`. Module-level code
+runs, so an entrypoint without a `__main__` guard starts its program. Nothing else in arborescent does this; `check` and
+`coupling check` never run it, and no budget or baseline holds the times. `--python` names the interpreter that has the
+project's dependencies (default: the one running arborescent).
+
+Per entrypoint it adds the measured import time, the number of project modules actually loaded, the time of each blamed
+import, and the third-party packages that the startup path imports at module level and that took at least
+`--threshold-ms` (cumulative, so a package includes what it was first to import). Each is listed with the modules that
+import it and the commands that use it:
+
+```
+app.cli: measured 412.0 ms, 38 project modules loaded
+  heavy third-party imports (>= 50 ms):
+    pydantic 180.0 ms: imported by app.models; only used by app.cli:export: import it where that command runs
+```
+
+"Used by" is a static approximation. A command is a lazy mount (it uses what the modules it loads import) or a command
+function on the startup path, found as for `entrypoint-eager-commands` (it uses what its body imports or reads: the package,
+or a project module that loads it at module level). A use through a helper in the command's own module, a method of an
+object or a dynamic import is not seen, so "used by no command found" means unknown, not unused. A failed import, a
+timeout or a missing interpreter is printed and exits 1.
+
+One run per entrypoint: the first after a change also pays for compiling `.pyc` files, so run it twice before comparing.
+Not measured: `argv` paths such as `backfill --help`, cold against warm starts, and process start-up before the import.
 
 ## Effect categories and the `[effects]` table
 

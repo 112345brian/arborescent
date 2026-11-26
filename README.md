@@ -134,7 +134,7 @@ arborescent check --require-tools --require-profile  # require profile v1 and it
 arborescent check --require-modularity                # fail unless every module and asset has exactly one owning package (modularity = "ready")
 arborescent check --changed origin/main      # only files changed since a git ref
 arborescent coupling report  # fan-in, entrypoint closure sizes and ambient-hub candidates (see docs/configuration.md)
-arborescent coupling startup # per entrypoint: closure budget, heaviest imports, lazy mounts (static)
+arborescent coupling startup # per entrypoint: closure budget, heaviest imports, lazy mounts (static; --measure runs the imports)
 arborescent discover     # list Python files that still need ring classification
 arborescent baseline     # record existing violations; future checks fail on new findings
 arborescent baseline report  # read-only: clusters, concentration and burn-down of the baseline

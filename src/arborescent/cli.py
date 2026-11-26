@@ -23,7 +23,7 @@ from .cli_arguments import (
     validate_rule_selection,
 )
 from .cli_baseline_report import run_report
-from .cli_coupling import run_coupling
+from .cli_coupling import Interpreter, run_coupling
 from .cli_install import _install_tools, _setup_install_command
 from .cli_migrate import MigrationTools, run_migrate
 from .cli_purity import Listing, run_explain, run_purity
@@ -154,7 +154,8 @@ def _dispatch(
     if args.command == "packages":
         return _dispatch_packages(args, policy, root, svc, tools)
     if args.command == "coupling":
-        return run_coupling(args, Measure(policy, svc.scanner.scan(policy, root)), root, svc.fs)
+        measure = Measure(policy, svc.scanner.scan(policy, root))
+        return run_coupling(args, measure, root, svc.fs, Interpreter(svc.runner, sys.executable))
     if args.command == "baseline" and args.baseline_action == "report":
         return _report_baselines(args, policy, root, svc)
     if args.command == "cycles":

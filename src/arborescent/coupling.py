@@ -5,10 +5,13 @@ check. Each edge has one kind: ``runtime`` (module level), ``lazy`` (only inside
 under ``if TYPE_CHECKING``). A pair imported in several ways takes the strongest kind. A closure follows ``runtime`` edges
 alone, because that is what loading the entrypoint runs; the modules only its function-level or type-only imports reach
 are counted separately.
+
+``parse_importtime`` and ``package_costs`` read the output of ``python -X importtime`` for the opt-in measurement (#216).
 """
 
 from __future__ import annotations
 
+import re
 from collections import deque
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
@@ -19,6 +22,10 @@ from .import_cycles import EdgeKind, resolved_internal_imports
 Graph = Mapping[str, frozenset[str]]
 
 _MOSTLY = 2  # "mostly": more than 1 in 2 public definitions use an effect directly (a parameter default is a seam, not a use)
+
+# Written to stderr just before the measured import, so the interpreter's own startup imports are not counted.
+IMPORTTIME_MARKER = "arborescent-importtime-start"
+_IMPORTTIME_LINE = re.compile(r"import time:\s*\d+ \|\s*(\d+) \| ( *)(\S+)\s*")
 
 
 @dataclass(frozen=True)
@@ -243,3 +250,41 @@ def cost_of_new_modules(closures: Iterable[Closure], edges: ImportEdges, new: Ne
         for closure in closures
         if new.importer in closure.modules
     }
+
+
+@dataclass(frozen=True)
+class ImportRecord:
+    """One module ``-X importtime`` says was imported."""
+
+    name: str
+    cumulative_us: int  # its own time plus that of everything it was first to import
+    ancestors: tuple[str, ...]  # the modules that were being imported when it was, outermost first
+
+
+def parse_importtime(text: str) -> list[ImportRecord]:
+    """The records after ``IMPORTTIME_MARKER``, in output order; other lines (headers, warnings, cut-off lines) are skipped.
+
+    A module is printed after what it imports, indented two spaces per level, so the tree is rebuilt from the end."""
+    _, _, measured = text.partition(IMPORTTIME_MARKER)
+    found: list[ImportRecord] = []
+    stack: list[tuple[int, str]] = []
+    for line in reversed(measured.splitlines()):
+        match = _IMPORTTIME_LINE.fullmatch(line)
+        if match is None:
+            continue
+        cumulative, indent, name = match.groups()
+        while stack and stack[-1][0] >= len(indent):
+            _ = stack.pop()
+        found.append(ImportRecord(name, int(cumulative), tuple(outer for _, outer in stack)))
+        stack.append((len(indent), name))
+    return found[::-1]
+
+
+def package_costs(records: Iterable[ImportRecord]) -> dict[str, int]:
+    """Top-level package -> microseconds spent importing it: its outermost records, so no module is counted twice."""
+    costs: dict[str, int] = {}
+    for record in records:
+        top = record.name.partition(".")[0]
+        if not any(outer.partition(".")[0] == top for outer in record.ancestors):
+            costs[top] = costs.get(top, 0) + record.cumulative_us
+    return costs

@@ -221,7 +221,7 @@ class ScanResult(Protocol):
     def excluded_modules(self) -> Mapping[str, ModuleInfo]: ...  # files under `exclude`, parsed for `mixed-purity` only (#173)
 
     @property
-    def test_facts(self) -> Mapping[str, SourceFacts]: ...  # path -> facts of the `unreachable-patch` tests folder (#226)
+    def test_facts(self) -> Mapping[str, SourceFacts]: ...  # path -> facts of the patch practices' tests folders (#226, #215)
 
     @property
     def noise_files(self) -> Sequence[str]: ...  # tracked Python files found below NOISE_DIRS

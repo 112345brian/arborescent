@@ -92,6 +92,8 @@ class Rule(StrEnum):
     ADAPTER_EQUIVALENCE = "adapter-equivalence"
     ADAPTER_EQUIVALENCE_REPORT = "adapter-equivalence-report"
     UNREACHABLE_PATCH = "unreachable-patch"
+    UNRESOLVED_PATCH_TARGET = "unresolved-patch-target"
+    SHADOWED_CALLEE = "shadowed-callee"
     INVALID_ARBOR_ANNOTATION = "invalid-arbor-annotation"
     ARBOR_RING_MISMATCH = "arbor-ring-mismatch"
     UNANNOTATED_MODULE = "unannotated-module"

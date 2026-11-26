@@ -1,32 +1,50 @@
 """Pure measurement for ``arborescent coupling`` (#148): one scan's fan-in, closures and ratchet counts, and the JSON report.
 
-Split out of ``cli_coupling`` so the command module holds only the effectful steps (printing, saving the baseline); this
-module computes values from a scan and reads the baseline through the injected ``FileSystem``, matching ``cycles_report``.
+Split out of ``cli_coupling`` so the command module holds only the effectful steps (printing, saving the baseline, running
+the measurement); this module computes values from a scan and reads files through the injected ``FileSystem``, matching
+``cycles_report``. For the heavy-import report (#216) it says which third-party packages an entrypoint's startup path
+imports and which commands use each one.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import coupling_ratchet as ratchet
+from .command_imports import command_references, registrations_by_module
 from .coupling import (
+    IMPORTTIME_MARKER,
     Closure,
     FanIn,
     Hub,
     ImportEdges,
+    ImportRecord,
     blame,
     entrypoint_closure,
     fan_in,
     import_chain,
     import_edges,
+    package_costs,
+    parse_importtime,
+    reach,
     with_parent_packages,
 )
-from .domain import Policy, PolicyError
-from .ports import FileSystem, ScanResult
+from .coupling_policy import EagerCommands
+from .domain import Policy, PolicyError, ToolResult
+from .ports import FileSystem, ScanResult, ToolRunner
 
-__all__ = ["Measure", "blame_lines", "document", "eager_mounts", "load_baseline", "startup_failures"]
+__all__ = [
+    "HEAVY_MS", "TIMEOUT_SECONDS", "Measure", "MeasureSettings", "Measuring", "blame_lines", "command_users", "document", "eager_mounts",
+    "importtime_code", "importtime_records", "load_baseline", "measure_settings", "measured_lines", "run_importtime",
+    "startup_failures", "startup_packages",
+]
 
 BLAME_LINES = 5
+HEAVY_MS = 50.0  # a third-party package that takes at least this long to import is heavy
+TIMEOUT_SECONDS = 120.0  # per measured entrypoint
+_NAMED = 5  # importers and commands listed per heavy package
 
 
 class Measure:
@@ -58,11 +76,16 @@ class Measure:
         return ratchet.measured(self.policy.coupling, self.rows, self.closures)
 
 
-def blame_lines(measure: Measure, entrypoint: str, top: int = BLAME_LINES) -> list[str]:
-    """The ``top`` heaviest imports of an entrypoint's closure. A module several others import needs every edge cut."""
+def blame_lines(
+    measure: Measure, entrypoint: str, top: int = BLAME_LINES, times: Mapping[str, int] | None = None
+) -> list[str]:
+    """The ``top`` heaviest imports of an entrypoint's closure. A module several others import needs every edge cut.
+
+    ``times`` (module -> measured cumulative microseconds) adds what importing each target took."""
     found = blame(measure.edges.runtime, entrypoint)
     return [
         f"{', '.join(item.importers)} -> {item.target} pulls {item.modules} module(s)"
+        + (f", {times[item.target] / 1000:.1f} ms" if times is not None and item.target in times else "")
         + (" (every one of these edges must go)" if len(item.importers) > 1 else "")
         for item in found[:top]
     ]
@@ -122,3 +145,183 @@ def load_baseline(fs: FileSystem, path: Path) -> tuple[ratchet.Counts, list[obje
         return ratchet.parse(fs.read_json(path)) if fs.exists(path) else None
     except ValueError as exc:
         raise PolicyError(f"{path.name}: {exc}") from exc
+
+
+def importtime_code(measure: Measure, root: Path, entrypoint: str) -> str:
+    """The program ``python -X importtime -c`` runs: put the source roots on the path, mark the start, import the entrypoint."""
+    parts = [scope.policy for scope in measure.policy.scopes] or [measure.policy]
+    roots = list(dict.fromkeys(str((root / folder).absolute()) for part in parts for folder in part.source_roots))
+    return (
+        f"import sys\nsys.path[:0] = {roots!r}\nsys.stderr.write({IMPORTTIME_MARKER + chr(10)!r})\nsys.stderr.flush()\n"
+        f"__import__({entrypoint!r})\n"
+    )
+
+
+def _tops(measure: Measure) -> frozenset[str]:
+    return frozenset(name.partition(".")[0] for name in measure.scan.known)
+
+
+def _third_party(measure: Measure, modules: Iterable[str], lazy: bool) -> dict[str, list[str]]:
+    """Third-party top-level package -> the ``modules`` that import it, at module level (``lazy``: in a function too)."""
+    tops, stdlib = _tops(measure), measure.policy.stdlib
+    found: dict[str, list[str]] = {}
+    for name in sorted(modules):
+        info = measure.scan.modules.get(name)
+        for imp in () if info is None else info.facts.imports:
+            top = "" if imp.level or imp.type_only or (imp.lazy and not lazy) else imp.module.partition(".")[0]
+            if top and top not in tops and top not in stdlib and name not in found.setdefault(top, []):
+                found[top].append(name)
+    return found
+
+
+def _startup_modules(measure: Measure, entrypoint: str) -> frozenset[str]:
+    return reach(with_parent_packages(measure.edges.runtime, measure.scan.known), [entrypoint])
+
+
+def startup_packages(measure: Measure, entrypoint: str) -> dict[str, list[str]]:
+    """Third-party packages the entrypoint's startup path imports itself, with the project modules that import each."""
+    return _third_party(measure, _startup_modules(measure, entrypoint), lazy=False)
+
+
+def _reached_by(measure: Measure, graph: Mapping[str, frozenset[str]], target: str) -> Iterable[str]:
+    """Third-party packages a dotted name a command reads stands for: itself, or what its project module loads."""
+    top = target.partition(".")[0]
+    if top not in _tops(measure):
+        return () if top in measure.policy.stdlib else (top,)
+    parts = target.split(".")
+    owner = next((name for end in range(len(parts), 0, -1) if (name := ".".join(parts[:end])) in measure.scan.known), None)
+    return () if owner is None else _third_party(measure, reach(graph, [owner]), lazy=False)
+
+
+def command_users(measure: Measure, read: Callable[[str], str | None], entrypoint: str) -> dict[str, list[str]]:
+    """Third-party package -> the commands that use it, a static approximation.
+
+    A lazy mount uses what the modules it loads import. A command function on the startup path (decorated or registered,
+    as for ``entrypoint-eager-commands``) uses what it imports or reads in its body: the package itself, or a project
+    module that loads it at module level. A use through a helper in the command's own module is not followed."""
+    graph = with_parent_packages(measure.edges.runtime, measure.scan.known)
+    users: dict[str, list[str]] = {}
+    mounts = [mount for mount in measure.policy.coupling.lazy_mounts if mount.module != entrypoint]
+    for mount in mounts:
+        for package in _third_party(measure, reach(graph, [mount.module]), lazy=True):
+            users.setdefault(package, []).append(mount.name)
+    decorators = (measure.policy.coupling.eager_commands or EagerCommands()).decorators
+    modules = {name: (info.path, info.is_package) for name, info in measure.scan.modules.items()}
+    registered = registrations_by_module(modules, read, decorators)
+    mounted = tuple(mount.module for mount in mounts)
+    for name in sorted(_startup_modules(measure, entrypoint)):
+        if name not in modules or name in mounted or name.startswith(tuple(module + "." for module in mounted)):
+            continue
+        path, is_package = modules[name]
+        source = read(path)
+        commands = () if source is None else command_references(source, name, is_package, decorators, registered.get(name, frozenset()))
+        for function, targets in commands:
+            for package in sorted({package for target in targets for package in _reached_by(measure, graph, target)}):
+                users.setdefault(package, []).append(f"{name}:{function}")
+    return {package: sorted(names) for package, names in users.items()}
+
+
+def importtime_records(result: ToolResult) -> list[ImportRecord] | str:
+    """The records of one ``-X importtime`` run, or why there are none. A run that did not exit 0 gives no records."""
+    if result.returncode != 0:
+        said = [
+            line.strip() for line in result.stderr.replace("\x00", "").splitlines()
+            if line.strip() and not line.startswith(("import time:", IMPORTTIME_MARKER))
+        ]
+        return said[-1] if said else f"exit code {result.returncode}"
+    return parse_importtime(result.stderr) or "no import-time output"
+
+
+def _listed(names: list[str]) -> str:
+    return ", ".join(names[:_NAMED]) + (f" and {len(names) - _NAMED} more" if len(names) > _NAMED else "")
+
+
+def _used_by(commands: list[str]) -> str:
+    if not commands:
+        return "used by no command found"
+    if len(commands) == 1:
+        return f"only used by {commands[0]}: import it where that command runs"
+    return f"used by {len(commands)} commands: {_listed(commands)}"
+
+
+def measured_lines(
+    measure: Measure, read: Callable[[str], str | None], entrypoint: str, records: list[ImportRecord], threshold_ms: float
+) -> list[str]:
+    """The measured time of one entrypoint and its heavy third-party imports with the commands that use each (#216).
+
+    A package is listed when the startup path imports it itself and the run spent at least ``threshold_ms`` importing it."""
+    total = sum(record.cumulative_us for record in records if not record.ancestors)
+    loaded = len({record.name for record in records} & set(measure.scan.known))
+    first = f"{entrypoint}: measured {total / 1000:.1f} ms, {loaded} project modules loaded"
+    costs = package_costs(records)
+    heavy = sorted(
+        (
+            (costs[package], package, importers)
+            for package, importers in startup_packages(measure, entrypoint).items()
+            if package in costs and costs[package] >= threshold_ms * 1000
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    title = f"  heavy third-party imports (>= {threshold_ms:g} ms):"
+    if not heavy:
+        return [first, f"{title} none"]
+    users = command_users(measure, read, entrypoint)
+    return [first, title] + [
+        f"    {package} {cost / 1000:.1f} ms: imported by {_listed(importers)}; {_used_by(users.get(package, []))}"
+        for cost, package, importers in heavy
+    ]
+
+
+@dataclass(frozen=True)
+class MeasureSettings:
+    """The settings of one ``coupling startup --measure`` run."""
+
+    python: str
+    timeout: float = TIMEOUT_SECONDS
+    threshold_ms: float = HEAVY_MS
+
+
+def measure_settings(
+    measure: bool, defaults: MeasureSettings, python: str | None, timeout: float | None, threshold_ms: float | None
+) -> MeasureSettings | None:
+    """The settings of a measured run, or None without ``--measure``; its options without it are an error, not ignored."""
+    if not measure:
+        if python is not None or timeout is not None or threshold_ms is not None:
+            raise PolicyError("--python, --timeout and --threshold-ms need --measure")
+        return None
+    return replace(
+        defaults,
+        python=defaults.python if python is None else python,
+        timeout=defaults.timeout if timeout is None else timeout,
+        threshold_ms=defaults.threshold_ms if threshold_ms is None else threshold_ms,
+    )
+
+
+@dataclass(frozen=True)
+class Measuring:
+    """What one ``--measure`` run works with: its settings, the process runner and the project's files."""
+
+    settings: MeasureSettings
+    runner: ToolRunner
+    root: Path
+    fs: FileSystem
+
+    def read(self, path: str) -> str | None:
+        try:
+            return self.fs.read_text(self.root / path)
+        except (OSError, UnicodeDecodeError):
+            return None
+
+
+def run_importtime(
+    measure: Measure, runner: ToolRunner, root: Path, settings: MeasureSettings, entrypoint: str
+) -> list[ImportRecord] | str:
+    """Import ``entrypoint`` in a subprocess under ``-X importtime``: its records, or why there are none.
+
+    This runs the project's import-time code, so only the explicit reporting command calls it."""
+    argv = [settings.python, "-X", "importtime", "-c", importtime_code(measure, root, entrypoint)]
+    try:
+        result = runner.run(argv, root, settings.timeout)
+    except OSError as exc:
+        return str(exc)
+    return importtime_records(result)

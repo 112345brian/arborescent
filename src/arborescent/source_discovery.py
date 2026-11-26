@@ -13,6 +13,7 @@ from .domain import NOISE_DIRS, ArchitecturePolicy, Policy, PolicyError, path_un
 from .path_exclusion import excluded_by_policy, matches_exclusion, vendor_parent
 
 __all__ = [
+    "PATCH_PRACTICES",
     "PRUNE",
     "add_discovered",
     "annotated_modules",
@@ -40,24 +41,28 @@ def _under_sources(rel: str, sources: Sequence[str]) -> bool:
     return False
 
 
-def patch_tests_folder(policy: Policy) -> str | None:
-    """The tests folder ``practices.unreachable-patch`` names (#226), or None when the check is off."""
-    value = policy.practices.get("unreachable-patch")
+PATCH_PRACTICES = ("unreachable-patch", "unresolved-patch-target")  # each names the tests folder it reads
+
+
+def patch_tests_folder(policy: Policy, practice: str) -> str | None:
+    """The tests folder a patch practice names (#226, #215), or None when that check is off."""
+    value = policy.practices.get(practice)
     if value in (None, False, ""):
         return None
     if isinstance(value, str):
         folder = str(value).replace("\\", "/").strip("/").removeprefix("./")
         if folder:
             return folder
-    raise PolicyError('`practices.unreachable-patch` names the tests folder, e.g. unreachable-patch = "tests"')
+    raise PolicyError(f'`practices.{practice}` names the tests folder, e.g. {practice} = "tests"')
 
 
 def patch_test_files(policy: Policy, paths: Sequence[str]) -> tuple[str, ...]:
-    """The Python files whose patches ``unreachable-patch`` reads: under its tests folder, outside noise folders."""
-    folder = patch_tests_folder(policy)
-    if folder is None:
-        return ()
-    return tuple(rel for rel in paths if rel.endswith(".py") and path_under(rel, folder) and not PRUNE.intersection(rel.split("/")))
+    """The Python files whose patches the patch practices read: under their tests folders, outside noise folders."""
+    folders = [folder for practice in PATCH_PRACTICES if (folder := patch_tests_folder(policy, practice)) is not None]
+    return tuple(
+        rel for rel in paths
+        if rel.endswith(".py") and any(path_under(rel, folder) for folder in folders) and not PRUNE.intersection(rel.split("/"))
+    )
 
 
 def policies(policy: Policy) -> tuple[ArchitecturePolicy, ...]:
