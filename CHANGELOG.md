@@ -8,6 +8,13 @@
 - `lazy-import` accepts a `# deferred: <reason>` comment on any line of the import statement, not only its first, so a
   formatter that wraps `from x import y  # deferred: ...` no longer turns a recorded decision back into a finding
   (#213). A baseline that holds such an import now has a stale entry; delete it with `arborescent baseline`.
+- On Windows the `tach` and `tach-external` engines, and the tach probes of `--require-profile`, no longer report false
+  unused dependencies for forward-slash `source_roots` such as `libs/a/src` (#214). tach 0.35.x reads no files under such
+  a root, so when `tach.toml` has one it now runs on a temporary copy of the project (Python files and the config tach
+  reads) whose `source_roots` use backslashes; the project is not written to. Files tach now reads can surface real
+  findings it was skipping. A copy that cannot be made fails the engine. A `[tool.tach]` table in `pyproject.toml` is
+  not rewritten.
+- A tach profile probe that timed out or did not start is no longer counted as tach rejecting the forbidden import.
 
 ## 0.9.0 — 2026-11-12
 
