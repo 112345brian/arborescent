@@ -17,13 +17,17 @@ from .facts import (
     ImportTimeFacts,
     PurityFacts,
     PurityUnit,
+    SeamFacts,
+    SeamFrame,
+    SeamParam,
+    SeamUse,
     SourceFacts,
 )
 from .import_syntax import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 
-CACHE_VERSION = 26  # 25 is used by a parallel branch
+CACHE_VERSION = 27  # 25 is used by a parallel branch
 
 
 def _purity_to_json(p: PurityFacts) -> list[Any]:
@@ -46,6 +50,16 @@ def _import_time_from_json(raw: list[Any]) -> ImportTimeFacts:
     return ImportTimeFacts(calls, tuple((item[0], item[1], item[2]) for item in raw[1]))
 
 
+def _seams_to_json(seams: SeamFacts) -> list[Any]:
+    frames = [[f.name, f.parent, [[p.name, p.annotation, p.default] for p in f.params], f.is_class] for f in seams.frames]
+    return [frames, [[u.frame, u.line, u.category, u.target, list(u.guards)] for u in seams.uses]]
+
+
+def _seams_from_json(raw: list[Any]) -> SeamFacts:
+    frames = tuple(SeamFrame(f[0], f[1], tuple(SeamParam(p[0], p[1], p[2]) for p in f[2]), f[3]) for f in raw[0])
+    return SeamFacts(frames, tuple(SeamUse(u[0], u[1], u[2], u[3], tuple(u[4])) for u in raw[1]))
+
+
 def facts_to_json(f: SourceFacts) -> list[Any]:
     imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only] for i in f.imports]
     effects = [[u.line, u.category, u.target, u.seam, u.at_import] for u in f.effect_uses]
@@ -66,6 +80,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         f.arbor_reason, [[line, target] for line, target in f.dynamic_imports],
         _purity_to_json(f.purity), f.untokenizable,
         [[[c.line, c.callee, c.local] for c in f.import_time.calls], [list(item) for item in f.import_time.function_effects]],
+        _seams_to_json(f.seams),
     ]
 
 
@@ -96,5 +111,5 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple(raw[19]), tuple((item[0], item[1]) for item in raw[20]),
         tuple(FunctionCalls(c[0], c[1], tuple(c[2])) for c in raw[21]),
         raw[22], raw[23], tuple((item[0], item[1]) for item in raw[24]),
-        _purity_from_json(raw[25]), raw[26], _import_time_from_json(raw[27]),
+        _purity_from_json(raw[25]), raw[26], _import_time_from_json(raw[27]), _seams_from_json(raw[28]),
     )

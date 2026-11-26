@@ -8,6 +8,9 @@
 - `effect-at-import` (#230), opt-in per ring with `forbid_at_import = [...]`: an effect that runs while a module is imported
   (module-level statement, class body, parameter default, decorator) fails, including one call into a first-party function
   (`X = load_thing()` where `load_thing` reads a file). The scan cache is re-built once after upgrading.
+- `effect-seam-bypassed` (#233), opt-in with `[tool.arborescent.effect_seam_bypassed]`: a function or class given an
+  injected clock, environment or generator (by parameter name, annotation or effect-function default) that also uses the
+  real one. Falling back to the real effect only when nothing was injected is not reported.
 
 ## 0.9.0 — 2026-11-12
 

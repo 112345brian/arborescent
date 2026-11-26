@@ -114,6 +114,7 @@ external = ["@pure", "argparse", "pathlib", "os", "shlex", "datetime", "random",
 "arborescent.import_syntax" = "domain"
 "arborescent.effect_facts" = "domain"
 "arborescent.import_time_facts" = "domain"
+"arborescent.seam_facts" = "domain"
 "arborescent.effect_categories" = "domain"
 "arborescent.declaration_facts" = "domain"
 "arborescent.definition_facts" = "domain"

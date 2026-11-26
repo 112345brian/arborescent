@@ -21,6 +21,7 @@ from .domain import (
     PolicyError,
     ResultDiscard,
     RingRule,
+    SeamBypass,
 )
 from .effects_policy import DEFAULT_PROVIDER_RINGS, EffectsPolicy
 from .package_constraints import (
@@ -33,6 +34,7 @@ from .presets import (
     DEFAULT_PRESET,
     DEFAULT_TAINT_SEEDS,
     EFFECT_CATEGORIES,
+    INJECTABLE_EFFECTS,
     IO_MODULES,
     PRESETS,
     TAINT_SEED_CATEGORIES,
@@ -258,6 +260,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         owned_literals=_owned_literals(raw),
         construct_only=_construct_only(raw),
         result_discard=_result_discard(raw),
+        effect_seam_bypassed=_seam_bypass(raw),
         docs=_docs(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
         dependencies=dict(raw.get("dependencies", {})),
@@ -412,7 +415,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "result_discard", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "result_discard", "effect_seam_bypassed", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -695,6 +698,36 @@ def _result_discard(raw: Mapping[str, Any]) -> ResultDiscard | None:
     ):
         raise PolicyError("`result_discard` takes `functions` and `rings` (lists of non-empty strings) and `convention` (a boolean)")
     return ResultDiscard(tuple(cast("list[str]", lists["functions"])), tuple(cast("list[str]", lists["rings"])), convention)
+
+
+def _seam_bypass(raw: Mapping[str, Any]) -> SeamBypass | None:
+    if "effect_seam_bypassed" not in raw:
+        return None
+    value: object = raw["effect_seam_bypassed"]
+    if not isinstance(value, Mapping) or set(cast("Mapping[str, Any]", value)) - {"rings", "parameters", "annotations"}:
+        raise PolicyError("`effect_seam_bypassed` must be a table with only `rings`, `parameters` and `annotations`")
+    entry = cast("Mapping[str, Any]", value)
+    rings: object = entry.get("rings", [])
+    if not isinstance(rings, list) or not all(isinstance(item, str) and item for item in cast("list[object]", rings)):
+        raise PolicyError("`effect_seam_bypassed.rings` must be a list of non-empty ring names")
+    default = SeamBypass()
+    return SeamBypass(
+        _seam_table(entry, "parameters", default.parameters), _seam_table(entry, "annotations", default.annotations),
+        tuple(cast("list[str]", rings)),
+    )
+
+
+def _seam_table(entry: Mapping[str, Any], key: str, default: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
+    """``name = "category"`` pairs; a table that is given replaces the default one."""
+    if key not in entry:
+        return default
+    value: object = entry[key]
+    if not isinstance(value, Mapping) or not all(
+        isinstance(name, str) and name and isinstance(category, str) and category in INJECTABLE_EFFECTS
+        for name, category in cast("Mapping[object, object]", value).items()
+    ):
+        raise PolicyError(f"`effect_seam_bypassed.{key}` must map names to one of {sorted(INJECTABLE_EFFECTS)}")
+    return tuple(sorted(cast("Mapping[str, str]", value).items()))
 
 
 def _module_forbids(raw: Mapping[str, Any]) -> Mapping[str, list[str]]:

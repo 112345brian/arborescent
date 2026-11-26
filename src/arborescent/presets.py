@@ -8,9 +8,9 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
-from .effect_categories import EFFECT_CATEGORIES
+from .effect_categories import EFFECT_CATEGORIES, INJECTABLE_EFFECTS
 
-__all__ = ["DEFAULT_FORBID_CATEGORIES", "DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "PRESETS", "TAINT_SEED_CATEGORIES", "Preset", "Scope"]
+__all__ = ["DEFAULT_FORBID_CATEGORIES", "DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "INJECTABLE_EFFECTS", "PRESETS", "TAINT_SEED_CATEGORIES", "Preset", "Scope"]
 
 # What a ring forbids when the policy does not say (the strict preset's middle rings, and the innermost ring): the categories that
 # existed before 0.8.0. Opt in to the rest by listing them in a ring's `forbid`.

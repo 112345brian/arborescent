@@ -2,7 +2,7 @@
 
 The result is plain data (``SourceFacts``) so it can be cached by content hash and reused by every check. Each family of
 facts is extracted by its own module (``import_syntax``, ``effect_facts``, ``declaration_facts``, ``definition_facts``,
-``call_facts``, ``forwarder_facts``, ``purity_facts``, ``import_time_facts``); this one holds the result types and the one pass that fills them.
+``call_facts``, ``forwarder_facts``, ``purity_facts``, ``import_time_facts``, ``seam_facts``); this one holds the result types and the one pass that fills them.
 """
 
 from __future__ import annotations
@@ -43,8 +43,12 @@ from .import_time_facts import (
     import_time_facts,
 )
 from .purity_facts import PurityFacts, PurityUnit, purity_facts
+from .seam_facts import SeamFacts, SeamFrame, SeamParam, SeamUse, seam_facts
 
-__all__ = ["Forwarder", "ImportCall", "ImportTimeFacts", "ModuleInfo", "PurityFacts", "PurityUnit", "SourceFacts", "extract"]
+__all__ = [
+    "Forwarder", "ImportCall", "ImportTimeFacts", "ModuleInfo", "PurityFacts", "PurityUnit", "SeamFacts", "SeamFrame", "SeamParam",
+    "SeamUse", "SourceFacts", "extract",
+]
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,7 @@ class SourceFacts:
     purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
     untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
     import_time: ImportTimeFacts = field(default_factory=ImportTimeFacts)  # calls made at import and what each function runs (#230)
+    seams: SeamFacts = field(default_factory=SeamFacts)  # real injectable effects inside functions, with the parameters around them (#233)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -129,6 +134,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         purity_facts(tree, nodes, aliases, purity_helpers(aliases)),
         untokenizable,
         import_time_facts(Walked(tree, at_import, sites, running), calls_aliases, dotted_name),
+        seam_facts(tree, sites, running, aliases, dotted_name),
     )
 
 

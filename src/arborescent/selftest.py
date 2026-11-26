@@ -202,12 +202,33 @@ def _local_mutations(
     steps.append(owned_literal_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(mixed_purity_mutations(local_policy, purity, local_paths, arbor_index, scan.modules))
+    steps.append(_seam_bypass_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(_docs_mutations(local_policy, local_paths, local_known, arbor_index))
     for found, step_skipped in steps:
         out.extend(found)
         skipped.extend(step_skipped)
     out.extend(_entry_dependency_mutations(local_policy, local_paths, local_known, arbor_index))
     return out, skipped
+
+
+def _seam_bypass_mutations(
+    policy: ArchitecturePolicy, paths: Mapping[str, str], known: Collection[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[list[Mutation], list[str]]:
+    """Probe ``effect-seam-bypassed`` (#233): a new function that takes a configured seam parameter and uses the real effect."""
+    setting = policy.effect_seam_bypassed
+    if setting is None:
+        return [], []
+    host = next((
+        module for module in sorted(known)
+        if module in paths and not paths[module].endswith("__init__.py")
+        and (ring := policy.resolve_ring(arbor_index, module)) is not None and (not setting.rings or ring in setting.rings)
+    ), None)
+    seam = next(((name, category) for name, category in setting.parameters if category in _AT_IMPORT_SNIPPETS and name.isidentifier()), None)
+    if host is None or seam is None:
+        return [], [f"effect-seam-bypassed: no {'module in a checked ring' if host is None else 'seam parameter name'} to mutate"]
+    imported, expression = _AT_IMPORT_SNIPPETS[seam[1]]
+    append = f"{imported}\ndef _arborescent_probe_seam({seam[0]}=None):\n    return {expression}"
+    return [Mutation(Rule.EFFECT_SEAM_BYPASSED, f"a function given {seam[0]!r} that uses the real {seam[1]}", paths[host], append)], []
 
 
 def _docs_mutations(

@@ -14,6 +14,7 @@ from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
     "ALL", "ArchitectureFields", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError", "ResultDiscard", "RingRule",
+    "SeamBypass",
     "in_unit", "normalized_source_path", "path_under", "unit_permits",
 ]
 
@@ -97,6 +98,30 @@ class ResultDiscard:
     convention: bool = True  # a module-level `-> *Result` / `-> *Outcome` function is result-bearing
 
 
+# Parameter names, and annotations, that mark an injected effect, with the category each stands in for.
+DEFAULT_SEAM_PARAMETERS = (
+    ("clock", "clock"), ("clock_now", "clock"), ("environ", "env"), ("now", "clock"), ("rng", "randomness"), ("uuid_factory", "identity"),
+)
+DEFAULT_SEAM_ANNOTATIONS = (("Clock", "clock"), ("random.Random", "randomness"))
+
+
+@dataclass(frozen=True)
+class SeamBypass:
+    """Opt-in ``effect_seam_bypassed`` (#233): a function given an injected effect that also uses the real one."""
+
+    parameters: tuple[tuple[str, str], ...] = DEFAULT_SEAM_PARAMETERS  # (parameter name, effect category)
+    annotations: tuple[tuple[str, str], ...] = DEFAULT_SEAM_ANNOTATIONS  # (dotted annotation, or a bare class name, category)
+    rings: tuple[str, ...] = ()  # rings whose modules are checked; empty means every ring
+
+    def category_of(self, name: str, annotation: str, default: str) -> str:
+        """The effect a parameter is a seam for, or "". What its default stands for is the surest sign, then its annotation."""
+        if default:
+            return default
+        bare = annotation.rsplit(".", 1)[-1]
+        marked = next((category for key, category in self.annotations if key in (annotation, bare)), "")
+        return marked or next((category for key, category in self.parameters if key == name), "")
+
+
 @dataclass(frozen=True)
 class DocsPolicy:
     """``[tool.arborescent.docs]``: which module documentation rules are on (#110)."""
@@ -126,6 +151,7 @@ class ArchitectureFields:
     owned_literals: tuple[OwnedLiteral, ...] = ()
     construct_only: tuple[ConstructionSite, ...] = ()  # #85
     result_discard: ResultDiscard | None = None
+    effect_seam_bypassed: SeamBypass | None = None  # #233
     docs: DocsPolicy = DocsPolicy()
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts

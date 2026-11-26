@@ -45,6 +45,7 @@ class Rule(StrEnum):
     EFFECT_UNSANCTIONED_IMPORT = "effect-unsanctioned-import"
     EFFECT_VIA_IMPORT = "effect-via-import"
     EFFECT_AT_IMPORT = "effect-at-import"
+    EFFECT_SEAM_BYPASSED = "effect-seam-bypassed"
     INTERNAL_IMPORT = "internal-import"
     FORWARDED_IMPORT = "forwarded-import"
     RESTRICTED_IMPORT = "restricted-import"

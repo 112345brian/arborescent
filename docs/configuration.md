@@ -834,6 +834,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-fs-query` | a ring that forbids `fs-query` asks the filesystem a question: `os.path.exists`, `os.getcwd`, `Path.cwd`, `p.exists()`, `shutil.which`... (0.8.0) |
 | `effect-unsanctioned-import` | with `[effects] sanctioned` set, a ring that forbids effects imports a module of an `effects.rings` ring that is not listed as a sanctioned seam and has effects of its own (0.8.0) |
 | `effect-at-import` | a category in a ring's `forbid_at_import` runs while a module of the ring is imported, directly or through one call into a function of a scanned module. See "Effects at import time" |
+| `effect-seam-bypassed` | with `effect_seam_bypassed` set, a function (or a method of a class) that was given an injected clock, environment or generator also uses the real one. See "Bypassed effect seams" |
 | `effect-via-import` | a ring forbids an effect that a module it imports (directly or through that module's own imports, same scope, not an `if TYPE_CHECKING` import) uses directly; the message names the import chain |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `forwarded-import` | a module imports a pass-through function (`def f(a): return other.f(a)`: one call to an imported name, arguments exactly the parameters, no default, decorator or other statement) whose target `module_forbid_imports` forbids it: the dependency one hop away. Chains of forwarders are followed. Only `from B import f` is seen, not `B.f` attribute use; wrappers that add logic are real boundaries and are not flagged. Counts against the importing module and takes its own baseline key |
@@ -927,6 +928,38 @@ judge only direct and same-module effects. `check --changed` follows calls only 
 
 The finding is reported per module, category and target (or callee), so several lines share one baseline key. Record
 existing ones with `arborescent baseline --adopt effect-at-import`.
+
+### Bypassed effect seams
+
+A function that takes `now` and also calls `time.time()` defeats its own injection: a test that passes a fake still gets
+the real clock. The ring may well allow the effect, so no `effect-*` rule sees it. The check is off until its table exists
+(in a scoped policy, set it per scope):
+
+```toml
+[tool.arborescent.effect_seam_bypassed]
+rings = []   # default: every ring
+# Both tables replace the defaults when given.
+parameters = { now = "clock", clock = "clock", clock_now = "clock", environ = "env", rng = "randomness", uuid_factory = "identity" }
+annotations = { "random.Random" = "randomness", "Clock" = "clock" }   # a key with no dot matches any class of that name
+```
+
+A parameter is a seam when its default is an effect function (`new_id=uuid.uuid4`, `clock=lambda: datetime.now()`), when
+its annotation is listed, or when its name is, in that order; the first that applies decides the category, so
+`clock=time.monotonic` stands for `monotonic` and not for the wall clock. The categories are the injectable ones (`clock`,
+`env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `monotonic`, `host`). The parameters of a class are those
+of its `__init__` (its fields, for a dataclass without one) and cover its instance methods, not its static or class methods.
+
+Reported: a call of the real effect, or a read of `os.environ`, `sys.argv` or `sys.stdin`, of the seam's category, in the
+body of the function or in closures and lambdas inside it. One finding per function and category, so each function is
+baselined on its own. A seeded `random.Random(seed)` is not a use.
+
+**Not reported**, because a caller who passed a fake still gets only the fake: the fallback for a missing seam, written as
+`now or datetime.now()`, `datetime.now() if now is None else now`, `if now is None: ...`, or the lines after
+`if now is not None: return now()`. **Not seen:** other spellings of that fallback are reported (baseline them or use one
+above); the real function passed on without being called (`g(clock=time.time)`); a seam kept under a different attribute
+name than `self.now`/`self._now` inside such a fallback; inherited constructors. Developer tooling is not checked.
+
+Record existing findings with `arborescent baseline --adopt effect-seam-bypassed`.
 
 ### Function-level imports and import cycles
 
