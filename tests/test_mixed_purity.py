@@ -431,6 +431,6 @@ def test_two_pure_definitions_of_one_name_count_as_one_pure_unit() -> None:
     effect = "\n\ndef announce():\n    print('x')\n    return 1\n"
     one_logical = ModuleInfo("m", "m.py", False, extract(dumps + effect, "m.py"))
     two_logical = ModuleInfo("m", "m.py", False, extract(dumps + f"\n\ndef other(value):\n{PURE_BODY}" + effect, "m.py"))
-    assert assess(one_logical, mini_policy()) is None  # one pure definition (written twice) is below min_pure_units
-    report = assess(two_logical, mini_policy())
+    assert assess(one_logical, mini_policy(), mini_policy().mixed_purity) is None  # one pure definition (written twice) is below min_pure_units
+    report = assess(two_logical, mini_policy(), mini_policy().mixed_purity)
     assert report is not None and report.pure == ("dumps", "other")

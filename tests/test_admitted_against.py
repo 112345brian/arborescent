@@ -290,4 +290,4 @@ def test_no_caller_discards_the_admission_diff_result() -> None:
                 pytest.fail(f"{path.name}:{node.lineno} discards the result of {called}")  # type: ignore[attr-defined]
         if path.name != "admitted_against.py" and "admission_problems" in path.read_text(encoding="utf-8"):
             users.append(path.name)
-    assert users == ["cli.py"]  # a new caller must be added to this scan on purpose
+    assert users == ["check_gates.py"]  # a new caller must be added to this scan on purpose

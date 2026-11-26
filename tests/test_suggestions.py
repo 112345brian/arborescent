@@ -6,7 +6,8 @@ from pathlib import Path
 from arborescent_helpers import MINI_FILES, mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
-from arborescent.engine import Options, Services, run_check, write_generated
+from arborescent.check_runner import run_check
+from arborescent.engine import Options, Services, write_generated
 from arborescent.engines import default_engines
 from arborescent.suggestions import file_size_suggestions, logical_code_lines
 from arborescent.testing import FakeToolRunner
@@ -45,7 +46,7 @@ def test_file_size_is_a_suggestion_and_threshold_is_configurable(
     path.write_text(source, encoding="utf-8")
 
     suggestions = file_size_suggestions(
-        LocalFileSystem(), tmp_path, {"large": "large.py"}, threshold=10
+        LocalFileSystem().read_text, tmp_path, {"large": "large.py"}, threshold=10
     )
 
     assert len(suggestions) == 1
@@ -53,7 +54,7 @@ def test_file_size_is_a_suggestion_and_threshold_is_configurable(
     assert suggestions[0].logical_lines == 12
     assert (
         file_size_suggestions(
-            LocalFileSystem(), tmp_path, {"large": "large.py"}, threshold=20
+            LocalFileSystem().read_text, tmp_path, {"large": "large.py"}, threshold=20
         )
         == []
     )

@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from arborescent_helpers import mini_policy, ring_with, write_files
 
-from arborescent import rules
+from arborescent import effect_import_rules, rules
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
 from arborescent.config import policy_from_mapping
 from arborescent.domain import Mutation, Policy, PolicyError, Rule, Violation
@@ -340,6 +340,6 @@ def test_removing_a_rule_makes_its_probe_survive(repo: Path, monkeypatch: pytest
 
 def test_removing_reachability_leaves_the_direct_checks_working(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pure_tree(repo, domain=CLOCK, ports="from . import domain\n\nX = domain.NOW\n")
-    monkeypatch.setattr(rules, "reach_violations", lambda *args, **kwargs: [])
+    monkeypatch.setattr(effect_import_rules, "reach_violations", lambda *args, **kwargs: [])
     found = constrained(repo, FACTS, must_be_pure=True)
     assert subjects(found) == {"app.domain"}  # only the reach finding for app.ports went away

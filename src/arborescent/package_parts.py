@@ -6,7 +6,8 @@ from collections.abc import Collection, Mapping
 from pathlib import Path, PurePosixPath
 
 from .domain import Policy
-from .facts import ModuleInfo, resolve_runtime_targets
+from .facts import ModuleInfo
+from .import_facts import resolve_runtime_targets, resolve_targets
 from .package_manifest import load_extracted_package
 from .package_model import CatalogError
 from .package_preservation import PartFacts
@@ -14,7 +15,7 @@ from .package_tree import shipped_policy
 from .ports import FileSystem, ModuleScanner
 from .rules import RuleContext
 
-__all__ = ["load_parts", "module_imports", "public_symbols"]
+__all__ = ["load_parts", "module_imports", "public_symbols", "third_party_imports"]
 
 
 def module_imports(modules: Mapping[str, ModuleInfo], known: Collection[str]) -> dict[str, tuple[str, ...]]:
@@ -30,6 +31,22 @@ def module_imports(modules: Mapping[str, ModuleInfo], known: Collection[str]) ->
         }
         out[name] = tuple(sorted(targets))
     return out
+
+
+def third_party_imports(
+    modules: Mapping[str, ModuleInfo], known: Collection[str], stdlib: Collection[str],
+) -> dict[str, tuple[str, ...]]:
+    """Module -> its imported top-level names outside the workspace and standard library."""
+    tops = {name.split(".")[0] for name in known}
+    return {
+        name: tuple(sorted({
+            target
+            for imp in info.facts.imports
+            for target in resolve_targets(name, info.is_package, imp, known, tops)[1]
+            if target not in stdlib
+        }))
+        for name, info in modules.items()
+    }
 
 
 def public_symbols(modules: Mapping[str, ModuleInfo]) -> dict[str, frozenset[str]]:

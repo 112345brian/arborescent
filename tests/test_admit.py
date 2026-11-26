@@ -25,7 +25,8 @@ from arborescent.classify_audit import (
 from arborescent.cli import main
 from arborescent.facts import ModuleInfo, extract
 from arborescent.rules import RuleContext
-from arborescent.scanner import _facts_from_json, _facts_to_json
+from arborescent.scan_cache_codec import facts_from_json as _facts_from_json
+from arborescent.scan_cache_codec import facts_to_json as _facts_to_json
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "arborescent"
 HEADER = "from __future__ import annotations\n\n"

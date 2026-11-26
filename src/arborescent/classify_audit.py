@@ -15,9 +15,9 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 
-from .domain import ALL, Policy, Rule, Violation
-from .facts import ModuleInfo, RawImport, resolve_targets
-from .presets import MODULE_STATE_CATEGORIES
+from .domain import ALL, ArchitecturePolicy, Rule, Violation
+from .facts import ModuleInfo
+from .import_facts import RawImport, resolve_targets
 from .rules import RuleContext, fits_ring
 from .taint import TaintResult
 
@@ -56,7 +56,7 @@ class _Subject:
     """One module under judgement, with the policy and ring it is judged against and the import graph around it."""
 
     context: RuleContext
-    policy: Policy
+    policy: ArchitecturePolicy
     name: str
     info: ModuleInfo
     ring: str
@@ -144,7 +144,7 @@ def _evidence(info: ModuleInfo, known: Collection[str], name: str) -> str:
         inner, outer, _ = resolve_targets(name, info.is_package, imp, known, tops)
         internal.update(inner)
         external.update(outer)
-    effects = sorted({f"{use.category} ({use.target}, line {use.line})" for use in info.facts.effect_uses if use.seam == 0 and use.category not in MODULE_STATE_CATEGORIES})
+    effects = sorted({f"{use.category} ({use.target}, line {use.line})" for use in info.facts.effect_uses if use.seam == 0 and not use.is_module_state})
     return (
         f"{len(internal)} project import(s), externals {sorted(external) or 'none'}, "
         f"effects {', '.join(effects) if effects else 'none'}"

@@ -13,8 +13,9 @@ import fnmatch
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
-from .domain import Policy, Rule, Violation, in_unit
-from .facts import ModuleInfo, absolute_callee
+from .call_facts import absolute_callee
+from .domain import ArchitecturePolicy, Policy, Rule, Violation, in_unit
+from .facts import ModuleInfo
 from .purity_policy import AMBIENT, PurityPolicy
 
 __all__ = ["Followed", "ModulePurity", "assess", "assess_in_ring", "by_ring", "excluded_findings", "explain", "importer_counts", "is_allowed", "ring_scanned", "summarize"]
@@ -36,18 +37,19 @@ class ModulePurity:
     weak: bool = False  # every effect kind is one of ``mixed_purity.weak_kinds``: reported as a note, not a finding (#195)
 
 
-def ring_scanned(policy: Policy, ring: str) -> bool:
+def ring_scanned(local: ArchitecturePolicy, rule: PurityPolicy, ring: str) -> bool:
     """Whether ``mixed-purity`` looks at modules of ``ring``: not in ``exclude_rings``, in ``rings`` when that is set, and (with
     ``skip_unrestricted_rings``) in a ring whose effective ``forbid`` is not empty."""
-    rule = policy.mixed_purity
     if ring in rule.exclude_rings or (rule.rings and ring not in rule.rings):
         return False
-    return not (rule.skip_unrestricted_rings and not policy.forbidden_effects(ring))
+    return not (rule.skip_unrestricted_rings and not local.forbidden_effects(ring))
 
 
-def assess_in_ring(info: ModuleInfo, policy: Policy, ring: str, followed: Followed | None = None) -> ModulePurity | None:
+def assess_in_ring(
+    info: ModuleInfo, local: ArchitecturePolicy, rule: PurityPolicy, ring: str, followed: Followed | None = None,
+) -> ModulePurity | None:
     """``assess``, except that a module in a ring the ring filter skips (``exclude_rings``, ``rings``, ``skip_unrestricted_rings``) is never mixed."""
-    return assess(info, policy, followed) if ring_scanned(policy, ring) else None
+    return assess(info, local, rule, followed) if ring_scanned(local, rule, ring) else None
 
 
 def is_allowed(policy: PurityPolicy, module: str) -> bool:
@@ -71,11 +73,11 @@ class Followed:
         module, _, name = target.rpartition(".")
         return (module, name) if module in self.modules else None
 
-    def kinds(self, policy: Policy, wanted: Collection[str], module: str, name: str) -> set[str]:
+    def kinds(self, local: ArchitecturePolicy, rule: PurityPolicy, wanted: Collection[str], module: str, name: str) -> set[str]:
         key = (module, frozenset(wanted))
         if key not in self._cache:
             info = self.modules[module]
-            tally = _tally(info, policy, wanted, None)
+            tally = _tally(info, local, rule, wanted, None)
             _close_over_local_calls(info, tally.kinds)
             functions = {u.name for u in info.facts.purity.units if not u.is_class}
             self._cache[key] = {unit: kinds for unit, kinds in tally.kinds.items() if unit in functions}
@@ -112,25 +114,25 @@ class _Tally:
         self.evidence.setdefault(owner, []).append((line, kind, what))
 
 
-def _tally(info: ModuleInfo, policy: Policy, wanted: Collection[str], followed: Followed | None) -> _Tally:
+def _tally(info: ModuleInfo, local: ArchitecturePolicy, rule: PurityPolicy, wanted: Collection[str], followed: Followed | None) -> _Tally:
     tally = _Tally(info, wanted)
     facts = info.facts
     for use in facts.effect_uses:
-        if use.category not in _NON_PROPAGATING and policy.counts_effect_seam(use.seam):
+        if use.category not in _NON_PROPAGATING and local.counts_effect_seam(use.seam):
             tally.add(use.line, use.category, use.target)
     for unit in facts.purity.units:
         for line, kind in unit.kinds:
             tally.add(line, kind, kind)
     for line, kind in facts.purity.import_time:
         tally.add(line, kind, kind)
-    _add_ambient(info, policy, tally)
+    _add_ambient(info, rule, tally)
     if followed is not None:
-        _add_followed(info, policy, wanted, followed, tally)
+        _add_followed(info, (local, rule), wanted, followed, tally)
     return tally
 
 
-def _add_ambient(info: ModuleInfo, policy: Policy, tally: _Tally) -> None:
-    patterns = policy.mixed_purity.ambient
+def _add_ambient(info: ModuleInfo, rule: PurityPolicy, tally: _Tally) -> None:
+    patterns = rule.ambient
     if not patterns:
         return
     calls = list(info.facts.calls)
@@ -142,13 +144,13 @@ def _add_ambient(info: ModuleInfo, policy: Policy, tally: _Tally) -> None:
             tally.add(line, AMBIENT, target)
 
 
-def _add_followed(info: ModuleInfo, policy: Policy, wanted: Collection[str], followed: Followed, tally: _Tally) -> None:
+def _add_followed(info: ModuleInfo, policies: tuple[ArchitecturePolicy, PurityPolicy], wanted: Collection[str], followed: Followed, tally: _Tally) -> None:
     """The effects of the other-module functions this module calls (one hop), attributed to the calling line."""
     for line, callee in info.facts.calls:
         target = absolute_callee(info.name, info.is_package, callee)
         hop = followed.split(target) if target is not None else None
         if hop is not None and hop[0] != info.name:  # a call to a sibling of this module is closed over locally
-            for kind in followed.kinds(policy, wanted, *hop):
+            for kind in followed.kinds(*policies, wanted, *hop):
                 tally.add(line, kind, f"{target} (calls into {hop[0]})")
 
 
@@ -166,16 +168,15 @@ def _close_over_local_calls(info: ModuleInfo, kinds: dict[str, set[str]]) -> Non
                     changed = True
 
 
-def assess(info: ModuleInfo, policy: Policy, followed: Followed | None = None) -> ModulePurity | None:
-    """The module's report when it is mixed under ``policy.mixed_purity``, else ``None``. Allowlisting is the caller's business.
+def assess(info: ModuleInfo, local: ArchitecturePolicy, rule: PurityPolicy, followed: Followed | None = None) -> ModulePurity | None:
+    """The module's report when it is mixed under ``rule`` (the root's ``mixed_purity``), else ``None``. Allowlisting is the caller's business.
 
     ``followed``: the scanned modules, so a call into another module's effectful function counts (#200). Without it only a
     module's own text is read. Every caller that has the scan passes it, or the same module is judged differently by two reports."""
-    rule = policy.mixed_purity
     facts = info.facts
     if not rule.enabled or (not facts.purity.units and not facts.purity.import_time):
         return None
-    tally = _tally(info, policy, set(rule.kinds) | ({AMBIENT} if rule.ambient else set()), followed)
+    tally = _tally(info, local, rule, set(rule.kinds) | ({AMBIENT} if rule.ambient else set()), followed)
     _close_over_local_calls(info, tally.kinds)
     forwarding = {f.name for f in facts.forwarders}
     effectful = [u for u in facts.purity.units if tally.kinds[u.name]]
@@ -230,21 +231,20 @@ def excluded_findings(policy: Policy, modules: Mapping[str, ModuleInfo]) -> list
     """Mixed modules under an excluded path: reported as notes, never failures and never baselined, so the exclusion hides nothing silently."""
     found: list[Violation] = []
     for name, info in sorted(modules.items()):
-        report = assess(info, policy)
+        report = assess(info, policy, policy.mixed_purity)
         if report is not None:
             detail = f"{info.path} is excluded from the scan and mixes substantial pure logic with effectful code"
             found.append(Violation(Rule.MIXED_PURITY_EXCLUDED, name, detail, report.line, hint=summarize(report)))
     return found
 
 
-def explain(info: ModuleInfo, policy: Policy, followed: Followed | None = None) -> list[str]:
+def explain(info: ModuleInfo, local: ArchitecturePolicy, rule: PurityPolicy, followed: Followed | None = None) -> list[str]:
     """One line per top-level definition (and import time): the effect that made it effectful, or why it does not count as pure logic.
 
     The advice of a ``mixed-purity`` finding lists definitions as pure or effectful; this is the evidence behind each label, so a
     wrong one is easy to report. It answers for the module whether or not the module is mixed."""
-    rule = policy.mixed_purity
     wanted = set(rule.kinds) | ({AMBIENT} if rule.ambient else set())
-    tally = _tally(info, policy, wanted, followed)
+    tally = _tally(info, local, rule, wanted, followed)
     _close_over_local_calls(info, tally.kinds)
     forwarding = {f.name for f in info.facts.forwarders}
     out: list[str] = []

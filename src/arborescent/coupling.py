@@ -1,6 +1,6 @@
 """Fan-in, entrypoint closure and ambient-hub metrics over the project import graph (#148).
 
-Import edges come from ``facts.resolve_targets``, so ``from pkg import sub`` is one edge to ``pkg.sub`` as in every ring
+Import edges use the same resolution as the cycle report, so ``from pkg import sub`` is one edge to ``pkg.sub`` as in every ring
 check. Each edge has one kind: ``runtime`` (module level), ``lazy`` (only inside a function body) or ``type-only`` (only
 under ``if TYPE_CHECKING``). A pair imported in several ways takes the strongest kind. A closure follows ``runtime`` edges
 alone, because that is what loading the entrypoint runs; the modules only its function-level or type-only imports reach
@@ -13,8 +13,8 @@ from collections import deque
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
-from .facts import ModuleInfo, RawImport, resolve_targets
-from .presets import MODULE_STATE_CATEGORIES
+from .facts import ModuleInfo
+from .import_cycles import EdgeKind, resolved_internal_imports
 
 Graph = Mapping[str, frozenset[str]]
 
@@ -63,23 +63,13 @@ class NewModule:
     count: int = 3
 
 
-def _kind(imp: RawImport) -> str:
-    if imp.type_only:
-        return "type-only"
-    return "lazy" if imp.lazy else "runtime"
-
-
 def import_edges(modules: Mapping[str, ModuleInfo], known: Collection[str]) -> ImportEdges:
-    tops = {name.split(".")[0] for name in known}
-    found: dict[str, dict[str, set[str]]] = {"runtime": {}, "lazy": {}, "type-only": {}}
-    for name, info in modules.items():
-        for imp in info.facts.imports:
-            internal, _, _ = resolve_targets(name, info.is_package, imp, known, tops)
-            targets = {target for target in internal if target and target != name}
-            found[_kind(imp)].setdefault(name, set()).update(targets)
-    runtime = {name: frozenset(found["runtime"].get(name, ())) for name in modules}
-    lazy = _without(found["lazy"], runtime)
-    return ImportEdges(runtime, lazy, _without(found["type-only"], runtime, lazy))
+    found: dict[EdgeKind, dict[str, set[str]]] = {kind: {} for kind in EdgeKind}
+    for name, kind, _, targets in resolved_internal_imports(modules, known):
+        found[kind].setdefault(name, set()).update(target for target in targets if target and target != name)
+    runtime = {name: frozenset(found[EdgeKind.EAGER].get(name, ())) for name in modules}
+    lazy = _without(found[EdgeKind.LAZY], runtime)
+    return ImportEdges(runtime, lazy, _without(found[EdgeKind.TYPE_ONLY], runtime, lazy))
 
 
 def _without(edges: Mapping[str, set[str]], *stronger: Graph) -> Graph:
@@ -156,7 +146,7 @@ def accessor_surface(info: ModuleInfo) -> tuple[tuple[str, ...], int]:
     module-level state and belongs to none, so it never makes a surface look like accessors.
     """
     defs = sorted(info.facts.top_level_defs, key=lambda item: item.line)
-    uses = [use.line for use in info.facts.effect_uses if use.seam == 0 and use.category not in MODULE_STATE_CATEGORIES]
+    uses = [use.line for use in info.facts.effect_uses if use.seam == 0 and not use.is_module_state]
     accessors: list[str] = []
     public = 0
     for index, item in enumerate(defs):

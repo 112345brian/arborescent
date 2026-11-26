@@ -15,9 +15,10 @@ from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from .facts import ModuleInfo, RawImport, resolve_targets
+from .facts import ModuleInfo
+from .import_facts import RawImport, resolve_targets
 
-__all__ = ["Cycle", "EdgeKind", "ImportEdge", "cyclic_components", "find_cycles", "import_edges"]
+__all__ = ["Cycle", "EdgeKind", "ImportEdge", "cyclic_components", "find_cycles", "import_edges", "resolved_internal_imports"]
 
 
 class EdgeKind(StrEnum):
@@ -58,18 +59,26 @@ def _kind(imp: RawImport) -> EdgeKind:
     return EdgeKind.LAZY if imp.lazy else EdgeKind.EAGER
 
 
+def resolved_internal_imports(
+    modules: Mapping[str, ModuleInfo], known: Collection[str],
+) -> Iterator[tuple[str, EdgeKind, int, list[str]]]:
+    """Resolve each statement before applying cycle or coupling filters to its targets."""
+    tops = {name.split(".")[0] for name in known}
+    for name, info in modules.items():
+        for imp in info.facts.imports:
+            targets, _, _ = resolve_targets(name, info.is_package, imp, known, tops)
+            yield name, _kind(imp), imp.line, targets
+
+
 def import_edges(
     modules: Mapping[str, ModuleInfo], known: Collection[str], scope_of: Callable[[str], str | None],
 ) -> list[ImportEdge]:
     """The internal import edges between ``modules``, within one architecture scope, with the kind of each."""
-    tops = {name.split(".")[0] for name in known}
     found: dict[tuple[str, str], list[tuple[EdgeKind, int]]] = {}
-    for name, info in sorted(modules.items()):
-        for imp in info.facts.imports:
-            internal = resolve_targets(name, info.is_package, imp, known, tops)[0]
-            for target in internal:
-                if target in modules and scope_of(target) == scope_of(name):
-                    found.setdefault((name, target), []).append((_kind(imp), imp.line))
+    for name, kind, line, targets in resolved_internal_imports(modules, known):
+        for target in targets:
+            if target in modules and scope_of(target) == scope_of(name):
+                found.setdefault((name, target), []).append((kind, line))
     return [
         ImportEdge(source, target, min((kind for kind, _ in uses), key=_STRENGTH.__getitem__), tuple(sorted({line for _, line in uses})))
         for (source, target), uses in sorted(found.items())

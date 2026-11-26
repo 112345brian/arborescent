@@ -5,22 +5,15 @@
 ## Unreleased
 
 ### Fixed
-- `mixed-purity` no longer lists effectful functions as pure (#200). A method call on a module-level `Path` constant
-  (`REGISTRY = Path(...)` then `REGISTRY.read_text()` inside a function) is filesystem use, for the `effect-filesystem` rule as
-  well; a call to a function of another scanned module is followed one hop, so a caller of `save_text_atomic` (or of a
-  `@contextmanager` that takes a lock) is effectful whatever ring the wrapper is in, including through a function-level
-  import; and `fcntl.flock`/`fcntl.lockf`/`msvcrt.locking` are filesystem. Expect a few more `effect-filesystem` findings
-  and some functions moving from "pure" to "effectful" in `mixed-purity` hints (a module can newly become mixed).
-- `effect-unsanctioned-import` only fires when the imported `effects.rings` module has measured effects of its own. A pure module
-  (which `admit` steers into the innermost ring) is importable by anyone, so `effects.sanctioned` means exactly "a designated seam
-  that does raw effects". What a pure module imports still reaches its importers through `effect-via-import` (#202).
 - A memoised pure function is no longer a `memo` effect in `mixed-purity`: `functools.lru_cache`/`cache`/`cached_property` do not
   count (a written module-level cache still does). Fewer findings; stale baseline entries can be deleted (#195).
 - `selftest` no longer reports the `mixed-purity` mutations as surviving when the host module's ring is excluded by `exclude_rings`.
 - `arborescent baseline --adopt lazy-import` was refused as an unknown family; it now adopts the `lazy-import` findings once.
 
 ### Added
-  counts when findings share causes, `check --by-root-cause` lists each cause once with its fan-out, and
+- A finding can name a **root cause** beside its identity key. `lazy-import` (the imported module), `effect-via-import` (the
+  last edge of the taint path) and `effect-unsanctioned-import` (the unlisted module) do. `check` prints
+  `N violation(s) / M root cause(s)` and per-rule cause counts when findings share causes, `check --by-root-cause` lists each cause once with its fan-out, and
   `baseline [--adopt FAMILY] --by-root-cause` records one shrink-only entry per cause (a new member of a recorded cause is
   growth). `check --by-root-cause` prints a fix per cause (inject a port at the edge, or list the module under
   `effects.sanctioned`, to clear N findings). Baselines without the new `root_causes` section behave as before (#201, #198).
@@ -36,6 +29,21 @@
   or an alias, and `global` slot loaders beyond the existing `global` category.
 - The scan cache is invalidated once (format version 25).
 
+## 0.9.0 — 2026-11-12
+
+### Fixed
+- `mixed-purity` no longer lists effectful functions as pure (#200). A method call on a module-level `Path` constant
+  (`REGISTRY = Path(...)` then `REGISTRY.read_text()` inside a function) is filesystem use, for the `effect-filesystem` rule as
+  well; a call to a function of another scanned module is followed one hop, so a caller of `save_text_atomic` (or of a
+  `@contextmanager` that takes a lock) is effectful whatever ring the wrapper is in, including through a function-level
+  import; and `fcntl.flock`/`fcntl.lockf`/`msvcrt.locking` are filesystem. Expect a few more `effect-filesystem` findings
+  and some functions moving from "pure" to "effectful" in `mixed-purity` hints (a module can newly become mixed).
+- `effect-unsanctioned-import` only fires when the imported `effects.rings` module has measured effects of its own. A pure module
+  (which `admit` steers into the innermost ring) is importable by anyone, so `effects.sanctioned` means exactly "a designated seam
+  that does raw effects". What a pure module imports still reaches its importers through `effect-via-import` (#202).
+
+### Added
+- `arborescent purity --explain MODULE` prints, per definition, the call that made it effectful or `no effect found`.
 
 ## 0.8.0 — 2026-11-11
 

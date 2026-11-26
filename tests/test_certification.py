@@ -16,9 +16,10 @@ from arborescent.certification import (
     tach_multi_root_note,
     version_warnings,
 )
+from arborescent.check_runner import run_check
 from arborescent.config import policy_from_mapping
 from arborescent.domain import ToolResult
-from arborescent.engine import Options, run_check
+from arborescent.engine import Options
 from arborescent.installer_adapter import _toml_array_close
 from arborescent.testing import FakeToolRunner
 

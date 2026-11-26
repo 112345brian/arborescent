@@ -47,7 +47,7 @@ The driver is five modules, one per ring, and the annotation layer never imports
 - ports, `driver_port`: the `MigrationLibrary` protocol (availability, the arguments it cannot apply, the exact arguments, `supply`) and, separately, `ImportRewriter` (statements it cannot rewrite safely, the exact commands, `apply`).
 - application, `driver_plan`: `plan_supply` turns a `PackageArguments` into a request, refusing while an error gap, a bypass edge or an undeclared first-party dependency is open, and for a workspace member (it keeps its history where it is); `supply` calls the port. `driver_rewrite` turns the plan into rewrite requests for the second port.
 - application, `local_targets`: the git-ignored local config that says where a package's new repository is checked out on this machine (found through `ARBORESCENT_LOCAL_CONFIG`, a `.env`, or `.arborescent/local.toml`). Machine-specific, so only `packages migrate` reads it; the export, derived files and contracts never do. Files go through the `FileSystem` port and the environment arrives as a mapping.
-- adapters, `driver_filter_repo`: git filter-repo behind the port, reached through `ToolRunner`. `driver_libcst`: LibCST's rename command behind `ImportRewriter`, through an isolated subprocess; `driver_libcst_scan` is the entry it runs to parse with LibCST (never imported by `cli`).
+- adapters, `driver_filter_repo`: git filter-repo behind the port, reached through `ToolRunner`. `driver_libcst`: LibCST's rename command behind `ImportRewriter`, through an isolated subprocess; `driver_libcst_scan` is the entry it runs (walking, reading and writing files), and `driver_libcst_forms` the pure LibCST analysis and rewrite it calls; neither is imported by `cli`.
 - composition, `cli_migrate`: `arborescent packages migrate`; `cli` binds the adapter.
 
 The constraint "the annotation layer must not import the driver" is `module_forbid_imports` in Arborescent's own policy,
@@ -65,11 +65,26 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 |---|---|---|
 | `arborescent` | `single` | domain |
 | `arborescent.domain` | `single` | domain |
+| `arborescent.findings` | `single` | domain |
+| `arborescent.policy_types` | `single` | domain |
+| `arborescent.policy_rings` | `single` | domain |
+| `arborescent.policy_imports` | `single` | domain |
+| `arborescent.architecture_policy` | `single` | domain |
 | `arborescent.facts` | `single` | domain |
+| `arborescent.import_facts` | `single` | domain |
+| `arborescent.import_syntax` | `single` | domain |
+| `arborescent.effect_facts` | `single` | domain |
+| `arborescent.effect_categories` | `single` | domain |
+| `arborescent.declaration_facts` | `single` | domain |
+| `arborescent.definition_facts` | `single` | domain |
+| `arborescent.call_facts` | `single` | domain |
 | `arborescent.forwarder_facts` | `single` | domain |
 | `arborescent.stdlib` | `single` | domain |
 | `arborescent.presets` | `single` | domain |
 | `arborescent.rules` | `single` | domain |
+| `arborescent.rule_context` | `single` | domain |
+| `arborescent.purity_rules` | `single` | domain |
+| `arborescent.effect_import_rules` | `single` | domain |
 | `arborescent.package_model` | `single` | domain |
 | `arborescent.package_fields` | `single` | domain |
 | `arborescent.package_parse` | `single` | domain |
@@ -95,9 +110,9 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.driver_port` | `single` | ports |
 | `arborescent.annotate` | `single` | application |
 | `arborescent.baseline` | `single` | application |
-| `arborescent.baseline_report` | `single` | application |
+| `arborescent.baseline_report` | `single` | domain |
 | `arborescent.baseline_history` | `single` | application |
-| `arborescent.ratchet_config` | `single` | application |
+| `arborescent.ratchet_config` | `single` | domain |
 | `arborescent.ratchet_measure` | `single` | application |
 | `arborescent.ratchets` | `single` | application |
 | `arborescent.pytest_io_block` | `single` | composition |
@@ -107,11 +122,12 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.git_hook` | `single` | application |
 | `arborescent.install_tools` | `single` | application |
 | `arborescent.engine` | `single` | application |
+| `arborescent.check_runner` | `single` | application |
 | `arborescent.generate` | `single` | application |
 | `arborescent.architecture_contracts` | `single` | application |
 | `arborescent.practices` | `single` | application |
 | `arborescent.selftest` | `single` | application |
-| `arborescent.admission_probes` | `single` | application |
+| `arborescent.admission_probes` | `single` | domain |
 | `arborescent.admitted_against` | `single` | application |
 | `arborescent.suggestions` | `single` | application |
 | `arborescent.packages` | `single` | application |
@@ -128,43 +144,51 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 | `arborescent.driver_plan` | `single` | application |
 | `arborescent.local_targets` | `single` | application |
 | `arborescent.driver_rewrite` | `single` | application |
-| `arborescent.module_forbid_probes` | `single` | application |
-| `arborescent.importable_by_probes` | `single` | application |
-| `arborescent.owned_literal_probes` | `single` | application |
-| `arborescent.construct_only_probes` | `single` | application |
-| `arborescent.purity_probes` | `single` | application |
+| `arborescent.module_forbid_probes` | `single` | domain |
+| `arborescent.importable_by_probes` | `single` | domain |
+| `arborescent.owned_literal_probes` | `single` | domain |
+| `arborescent.construct_only_probes` | `single` | domain |
+| `arborescent.purity_probes` | `single` | domain |
 | `arborescent.adapters` | `single` | adapters |
 | `arborescent.installer_adapter` | `single` | adapters |
 | `arborescent.clock_adapter` | `single` | adapters |
 | `arborescent.filesystem_adapter` | `single` | adapters |
 | `arborescent.parallel_adapter` | `single` | adapters |
 | `arborescent.scanner` | `single` | adapters |
+| `arborescent.scan_cache_codec` | `single` | domain |
+| `arborescent.source_discovery` | `single` | domain |
 | `arborescent.tool_runner` | `single` | adapters |
 | `arborescent.engines` | `single` | adapters |
-| `arborescent.driver_filter_repo` | `single` | adapters |
-| `arborescent.driver_libcst` | `single` | adapters |
+| `arborescent.driver_filter_repo` | `single` | application |
+| `arborescent.driver_libcst` | `single` | application |
 | `arborescent.driver_libcst_scan` | `single` | adapters |
+| `arborescent.driver_libcst_forms` | `single` | adapters |
 | `arborescent.tach_visibility` | `single` | domain |
 | `arborescent.classify_audit` | `single` | domain |
 | `arborescent.taint` | `single` | domain |
 | `arborescent.coupling` | `single` | domain |
 | `arborescent.coupling_policy` | `single` | domain |
-| `arborescent.coupling_ratchet` | `single` | domain |
+| `arborescent.coupling_ratchet` | `single` | application |
 | `arborescent.package_constraints` | `single` | domain |
 | `arborescent.package_constraint_rules` | `single` | domain |
-| `arborescent.package_constraint_probes` | `single` | application |
+| `arborescent.package_constraint_probes` | `single` | domain |
 | `arborescent.testing` | `single` | adapters |
-| `arborescent.typecheckers` | `single` | adapters |
+| `arborescent.typecheckers` | `single` | domain |
 | `arborescent.__main__` | `single` | composition |
 | `arborescent.cli` | `single` | composition |
+| `arborescent.check_gates` | `single` | application |
+| `arborescent.cli_arguments` | `single` | composition |
 | `arborescent.cli_ratchet` | `single` | composition |
 | `arborescent.cli_install` | `single` | composition |
 | `arborescent.cli_report` | `single` | composition |
 | `arborescent.cli_baseline_report` | `single` | composition |
+| `arborescent.baseline_report_view` | `single` | application |
 | `arborescent.cli_migrate` | `single` | composition |
 | `arborescent.cli_coupling` | `single` | composition |
-| `arborescent.cli_cycles` | `single` | composition |
-| `arborescent.cli_purity` | `single` | composition |
+| `arborescent.coupling_measure` | `single` | application |
+| `arborescent.cli_cycles` | `single` | application |
+| `arborescent.cycles_report` | `single` | application |
+| `arborescent.cli_purity` | `single` | application |
 | `arborescent.cli_admit` | `single` | composition |
 
 ## Data flow of `arborescent check`

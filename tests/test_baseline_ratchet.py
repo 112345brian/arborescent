@@ -9,9 +9,10 @@ from arborescent_helpers import mini_policy, write_files
 
 from arborescent import baseline
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.check_runner import run_check
 from arborescent.cli import main
 from arborescent.domain import ToolResult, Violation
-from arborescent.engine import Options, Services, run_check
+from arborescent.engine import Options, Services
 from arborescent.engines import default_engines
 from arborescent.testing import FakeFileSystem, FakeToolRunner
 from arborescent.typecheckers import all_checkers
@@ -62,14 +63,15 @@ def test_allow_growth_requires_reason_and_logs_exact_added_keys() -> None:
     baseline.save(fs, path, [v("internal-import", "old")])
 
     with pytest.raises(baseline.BaselineError, match="reason"):
-        baseline.record(fs, path, [v("internal-import", "old"), v("internal-import", "new")], allow_growth=True)
+        baseline.record(
+            fs, path, [v("internal-import", "old"), v("internal-import", "new")], baseline.RecordOptions(allow_growth=True)
+        )
 
     baseline.record(
         fs,
         path,
         [v("internal-import", "old"), v("internal-import", "new")],
-        allow_growth=True,
-        reason="adopt new rule",
+        baseline.RecordOptions(allow_growth=True, reason="adopt new rule"),
     )
     document = fs.read_json(path)
     assert document["version"] == 2
@@ -84,7 +86,7 @@ def test_adopt_records_one_unrepresented_family_and_refuses_existing_family() ->
         fs,
         path,
         [v("internal-import", "existing"), v("ruff-BLE001", "old")],
-        adopt="ruff",
+        baseline.RecordOptions(adopt="ruff"),
     )
     assert baseline.load(fs, path) == {v("internal-import", "existing").key, v("ruff-BLE001", "old").key}
     assert fs.read_json(path)["growth"] == [{"reason": "adopt ruff family", "added": [v("ruff-BLE001", "old").key]}]
@@ -94,7 +96,7 @@ def test_adopt_records_one_unrepresented_family_and_refuses_existing_family() ->
             fs,
             path,
             [v("internal-import", "existing"), v("ruff-BLE001", "old"), v("ruff-BLE001", "new")],
-            adopt="ruff",
+            baseline.RecordOptions(adopt="ruff"),
         )
 
 
@@ -104,7 +106,7 @@ def test_adopt_can_record_inventory_counter_families(family: str, rule: str) -> 
     baseline.save(fs, path, [v("internal-import", "existing")])
 
     counter = Violation(rule, "app.module", "count#1")
-    baseline.record(fs, path, [v("internal-import", "existing"), counter], adopt=family)
+    baseline.record(fs, path, [v("internal-import", "existing"), counter], baseline.RecordOptions(adopt=family))
 
     assert counter.key in baseline.load(fs, path)
 
@@ -117,7 +119,7 @@ def test_adopt_coverage_includes_unclassified_and_noise_dir_code() -> None:
         fs,
         path,
         [v("internal-import", "existing"), v("unclassified", "scripts/build"), v("noise-dir-code", ".venv/x.py")],
-        adopt="coverage",
+        baseline.RecordOptions(adopt="coverage"),
     )
     assert baseline.load(fs, path) == {
         v("internal-import", "existing").key,
@@ -132,7 +134,7 @@ def test_version_one_baseline_loads_and_upgrades_when_written() -> None:
     fs.write_json(path, {"version": 1, "violations": [original]})
     assert baseline.load(fs, path) == {original}
 
-    baseline.record(fs, path, [v("internal-import", "old")], allow_growth=True, reason="upgrade")
+    baseline.record(fs, path, [v("internal-import", "old")], baseline.RecordOptions(allow_growth=True, reason="upgrade"))
     assert fs.read_json(path) == {"version": 2, "violations": [original], "growth": []}
 
 
@@ -232,7 +234,12 @@ def test_suppression_and_discard_counts_are_reported_and_ratcheted(repo: Path, c
 def test_prune_removes_stale_entries_without_adding_new_ones_or_touching_growth() -> None:
     fs, path = filesystem()
     baseline.record(fs, path, [v("internal-import", "a"), v("internal-import", "b")])
-    baseline.record(fs, path, [v("internal-import", "a"), v("internal-import", "b"), v("internal-import", "c")], allow_growth=True, reason="why")
+    baseline.record(
+        fs,
+        path,
+        [v("internal-import", "a"), v("internal-import", "b"), v("internal-import", "c")],
+        baseline.RecordOptions(allow_growth=True, reason="why"),
+    )
     growth_before = baseline.document(fs, path)["growth"]
     # "b" is gone; "n" is a brand-new violation that must NOT be recorded.
     removed = baseline.prune(fs, path, [v("internal-import", "a"), v("internal-import", "c"), v("internal-import", "n")])

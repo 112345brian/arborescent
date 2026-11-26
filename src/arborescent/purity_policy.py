@@ -42,3 +42,12 @@ class PurityPolicy:
     rings: tuple[str, ...] = ()  # when set, the only rings the rule looks at (#195)
     skip_unrestricted_rings: bool = False  # skip every ring whose effective `forbid` is empty: effects are allowed there (#195)
     weak_kinds: tuple[str, ...] = ()  # kinds that alone do not make a module worth splitting: such a module is a `mixed-purity-weak` note (#195)
+
+    def __post_init__(self) -> None:
+        if self.min_pure_units < 1:
+            raise ValueError("`mixed_purity.min_pure_units` must be a positive integer")
+        if self.min_body_lines < 1:
+            raise ValueError("`mixed_purity.min_body_lines` must be a positive integer")
+        unknown = set(self.kinds) - KNOWN_KINDS
+        if unknown:
+            raise ValueError(f"unknown effect kind in `mixed_purity.kinds`: {sorted(unknown)}; known: {sorted(KNOWN_KINDS)}")

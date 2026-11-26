@@ -81,6 +81,26 @@ path = "src/arborescent/domain.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/findings.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/policy_types.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/policy_rings.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/policy_imports.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/architecture_policy.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/equivalence.py"
 role = "source"
 
@@ -89,11 +109,43 @@ path = "src/arborescent/engine.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/check_runner.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/engines.py"
 role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/import_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/import_syntax.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/effect_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/effect_categories.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/declaration_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/definition_facts.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/call_facts.py"
 role = "source"
 
 [[packages.paths]]
@@ -201,7 +253,27 @@ path = "src/arborescent/rules.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/rule_context.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/purity_rules.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/effect_import_rules.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/scanner.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/scan_cache_codec.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/source_discovery.py"
 role = "source"
 
 [[packages.paths]]
@@ -395,6 +467,10 @@ path = "src/arborescent/driver_libcst_scan.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/driver_libcst_forms.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/driver_plan.py"
 role = "source"
 
@@ -434,11 +510,23 @@ path = "src/arborescent/cli.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/check_gates.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cli_arguments.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/cli_install.py"
 role = "source"
 
 [[packages.paths]]
 path = "src/arborescent/cli_cycles.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/cycles_report.py"
 role = "source"
 
 [[packages.paths]]
@@ -458,7 +546,15 @@ path = "src/arborescent/cli_baseline_report.py"
 role = "source"
 
 [[packages.paths]]
+path = "src/arborescent/baseline_report_view.py"
+role = "source"
+
+[[packages.paths]]
 path = "src/arborescent/cli_coupling.py"
+role = "source"
+
+[[packages.paths]]
+path = "src/arborescent/coupling_measure.py"
 role = "source"
 
 [[packages.paths]]

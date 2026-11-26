@@ -12,8 +12,9 @@ from .domain import PolicyError, Rule, Violation
 from .ports import FileSystem
 
 __all__ = [
-    "OWN_ADOPTION_FAMILIES", "Ratchet", "apply", "cause_count", "growth_consistent", "growth_count", "internal_import_summary", "load",
-    "load_root_causes", "prune", "record", "recorded_rules", "root_cause_groups", "save", "stamp_approval", "values_growth_problems",
+    "OWN_ADOPTION_FAMILIES", "Ratchet", "RecordOptions", "apply", "cause_count", "growth_consistent", "growth_count",
+    "internal_import_summary", "load", "load_root_causes", "prune", "record", "recorded_rules", "root_cause_groups", "save",
+    "stamp_approval", "values_growth_problems",
 ]
 
 VERSION = 2
@@ -103,31 +104,34 @@ def save(fs: FileSystem, path: Path, violations: Iterable[Violation]) -> int:
     return len(keys)
 
 
-def record(
-    fs: FileSystem,
-    path: Path,
-    violations: Iterable[Violation],
-    *,
-    adopt: str | None = None,
-    allow_growth: bool = False,
-    reason: str | None = None,
-    by_root_cause: bool = False,
-) -> int:
+@dataclass(frozen=True)
+class RecordOptions:
+    """How `record` may grow the baseline (a one-time adoption, an unconditional allowance, or an explicit reason), and its layout.
+
+    ``by_root_cause`` records a finding that names a root cause as a member of that cause's entry instead of as its own key (#201)."""
+
+    adopt: str | None = None
+    allow_growth: bool = False
+    reason: str | None = None
+    by_root_cause: bool = False
+
+
+def record(fs: FileSystem, path: Path, violations: Iterable[Violation], options: RecordOptions | None = None) -> int:
     """Create or shrink a baseline; growth requires a one-time adoption or an explicit reason.
 
-    ``by_root_cause`` records a finding that names a root cause as a member of that cause's entry instead of as its own key (#201).
     The layout is sticky: a finding already recorded under its own key stays there, and a cause already in the file keeps grouping."""
-    _validate_record_options(adopt, allow_growth, reason)
+    opts = options or RecordOptions()
+    _validate_record_options(opts.adopt, opts.allow_growth, opts.reason)
     found = list({v.key: v for v in violations}.values())
     old_doc = document(fs, path)
     old_plain = {str(key) for key in _list(old_doc["violations"])}
-    old_causes = _root_causes(old_doc)
-    plain, grouped = _layout(found, old_plain, old_causes, by_root_cause)
+    plain, grouped = _layout(found, old_plain, _root_causes(old_doc), opts.by_root_cause)
     entries = _entries(plain, grouped)
     if not fs.is_file(path):
         fs.write_json(path, {"version": VERSION, "violations": entries["violations"], "growth": [], **_causes_part(entries)})
         return len(found)
-    growth = [*_list(old_doc["growth"]), *_growth_entries(_ids(old_doc), _ids(entries), adopt, allow_growth, reason)]
+    added = _growth_entries(_ids(old_doc), _ids(entries), opts.adopt, opts.allow_growth, opts.reason)
+    growth = [*_list(old_doc["growth"]), *added]
     fs.write_json(path, {"version": VERSION, "violations": entries["violations"], "growth": growth, **_causes_part(entries)})
     return len(found)
 

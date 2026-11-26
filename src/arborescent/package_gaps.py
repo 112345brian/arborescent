@@ -6,11 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .domain import Policy, Violation
-from .facts import resolve_targets
-from .package_assignment import RepositoryFacts, assignment_violations
+from .package_assignment import WorkspaceFacts, assignment_violations
 from .package_contracts import PackageLayout, layout_of
 from .package_model import CatalogDocument, CatalogError
-from .package_parts import load_parts, module_imports, public_symbols
+from .package_parts import (
+    load_parts,
+    module_imports,
+    public_symbols,
+    third_party_imports,
+)
 from .package_policy import policy_violations
 from .package_preservation import PartFacts, preservation_violations
 from .package_pyproject_gaps import (
@@ -40,7 +44,7 @@ class PackageContext:
     """The catalog and the repository facts it is checked against (also what the selftest plans its probes from)."""
 
     catalog: CatalogDocument
-    facts: RepositoryFacts
+    facts: WorkspaceFacts
     parts: tuple[PartFacts, ...] = ()
     derived: tuple[str, ...] = ()  # derived package pyproject files that exist (the drift probe edits one)
 
@@ -84,19 +88,14 @@ def package_gap_violations(
     return found
 
 
-def repository_facts(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> RepositoryFacts:
+def repository_facts(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> WorkspaceFacts:
     context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
-    tops = {name.split(".")[0] for name in scan.known}
-    externals: dict[str, tuple[str, ...]] = {}
-    for name, info in scan.modules.items():
-        resolved = [resolve_targets(name, info.is_package, imp, scan.known, tops) for imp in info.facts.imports]
-        externals[name] = tuple(sorted({t for _, outside, _ in resolved for t in outside if t not in policy.stdlib}))
-    return RepositoryFacts(
+    return WorkspaceFacts(
         dict(scan.paths),
         {name: context.resolve_ring(name) for name in scan.paths},
         module_imports(scan.modules, scan.known),
         asset_paths(policy, root, fs),
-        externals=externals,
+        externals=third_party_imports(scan.modules, scan.known, policy.stdlib),
         symbols=public_symbols(scan.modules),
         file_refs={name: len(info.facts.file_refs) for name, info in scan.modules.items() if info.facts.file_refs},
     )

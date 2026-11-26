@@ -9,13 +9,13 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Collection, Mapping
 
-from .domain import Mutation, Policy, Rule, in_unit
+from .domain import ArchitecturePolicy, Mutation, Rule, in_unit
 
 __all__ = ["importable_by_mutations"]
 
 
 def importable_by_mutations(
-    policy: Policy, paths: Mapping[str, str], known: Collection[str]
+    policy: ArchitecturePolicy, paths: Mapping[str, str], known: Collection[str]
 ) -> tuple[list[Mutation], list[str]]:
     """(mutations, reasons a restriction got none). A restriction with no target or no outside host is reported, never skipped silently."""
     out: list[Mutation] = []

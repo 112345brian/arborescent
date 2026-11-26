@@ -8,21 +8,9 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .effect_categories import EFFECT_CATEGORIES, MODULE_STATE_CATEGORIES
+
 __all__ = ["DEFAULT_FORBID_CATEGORIES", "DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "MODULE_STATE_CATEGORIES", "PRESETS", "TAINT_SEED_CATEGORIES", "Preset", "Scope"]
-
-# The categories a policy may name in `forbid`. Four were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`); they are valid
-# in every `forbid` list but in no default one (`DEFAULT_FORBID_CATEGORIES`), so a policy that forbids nothing new keeps its findings.
-EFFECT_CATEGORIES: frozenset[str] = frozenset(
-    {
-        "clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "network", "filesystem", "dynamic-import", "patch",
-        "console", "global", "state", "monotonic", "host", "fs-query", "registry", "cache",
-    }
-)
-
-# #194: shared module state that is not I/O. `registry` is a module-level dict/list/set written from inside a function; `cache` is a
-# `functools.cache`/`lru_cache` loader or a cache-named module container written from inside a function. Both report as `effect-state`,
-# are in no default `forbid`, taint seed or `must_be_pure`, and are skipped by the readers that describe a module's I/O.
-MODULE_STATE_CATEGORIES: frozenset[str] = frozenset({"registry", "cache"})
 
 # What a ring forbids when the policy does not say (the strict preset's middle rings, and the innermost ring): the categories that
 # existed before 0.8.0. Opt in to the rest by listing them in a ring's `forbid`.

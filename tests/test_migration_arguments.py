@@ -14,7 +14,7 @@ from arborescent.migration_arguments import (
     MigrationArguments,
     build_migration_arguments,
 )
-from arborescent.package_assignment import RepositoryFacts
+from arborescent.package_assignment import WorkspaceFacts
 from arborescent.package_model import CatalogError, PackageHome, is_git_url
 from arborescent.package_parse import parse_catalog
 
@@ -75,7 +75,7 @@ pattern = "src/app/**/*.sql"
 package = "core"
 """
 
-FACTS = RepositoryFacts(
+FACTS = WorkspaceFacts(
     modules={
         "app.core.api": "src/app/core/api.py",
         "app.core.internal": "src/app/core/internal.py",
@@ -89,7 +89,7 @@ FACTS = RepositoryFacts(
 )
 
 
-def build(catalog: str = CATALOG, facts: RepositoryFacts = FACTS) -> MigrationArguments:
+def build(catalog: str = CATALOG, facts: WorkspaceFacts = FACTS) -> MigrationArguments:
     return build_migration_arguments(parse_catalog(tomllib.loads(catalog)), facts)
 
 
@@ -187,7 +187,7 @@ def test_an_owned_path_outside_the_root_without_a_destination_is_unplaceable() -
 
 
 def test_an_asset_below_no_owned_path_is_an_unplaced_gap() -> None:
-    facts = RepositoryFacts(FACTS.modules, FACTS.rings, FACTS.imports, (*FACTS.assets, "src/app/q.sql"), FACTS.externals)
+    facts = WorkspaceFacts(FACTS.modules, FACTS.rings, FACTS.imports, (*FACTS.assets, "src/app/q.sql"), FACTS.externals)
     arguments = build(facts=facts)
     assert ("package-unplaced-asset", "src/app/q.sql") in codes(arguments)
     assert "src/app/q.sql" in [a.path for a in package(arguments, "core").assets]  # owned by the glob, so listed, without a target
@@ -195,7 +195,7 @@ def test_an_asset_below_no_owned_path_is_an_unplaced_gap() -> None:
 
 
 def test_the_assignment_findings_are_gaps_with_their_rule_id_and_ring_spans_is_information() -> None:
-    facts = RepositoryFacts({**FACTS.modules, "app.stray": "src/app/stray.py"}, FACTS.rings, FACTS.imports, FACTS.assets, FACTS.externals)
+    facts = WorkspaceFacts({**FACTS.modules, "app.stray": "src/app/stray.py"}, FACTS.rings, FACTS.imports, FACTS.assets, FACTS.externals)
     arguments = build(facts=facts)
     unassigned = [g for g in arguments.gaps if g.code == Rule.PACKAGE_UNASSIGNED_MODULE]
     assert [(g.subject, g.severity) for g in unassigned] == [("app.stray", "error")]
@@ -294,7 +294,7 @@ path = "app/core"
 role = "source"
 {destination}
 """
-RENAME_FACTS = RepositoryFacts(
+RENAME_FACTS = WorkspaceFacts(
     modules={"app.core.models": "app/core/models.py", "app.core": "app/core/__init__.py", "app.core.sub.deep": "app/core/sub/deep.py"},
     rings={}, imports={}, assets=(), externals={},
 )
@@ -343,7 +343,7 @@ def test_a_workspace_member_is_measured_from_its_own_folder() -> None:
 
 
 def test_a_module_with_no_target_path_is_left_to_the_unplaced_rules() -> None:
-    facts = RepositoryFacts({"app.core.models": "app/core/models.py", "app.other": "app/other.py"}, {}, {}, (), {})
+    facts = WorkspaceFacts({"app.core.models": "app/core/models.py", "app.other": "app/other.py"}, {}, {}, (), {})
     text = RENAME_CATALOG.format(kind="repository", home='repository = "example/core"', renames="", destination=_destination("app/core"))
     assert not [g for g in build(text, facts).gaps if g.code == GapCode.MODULE_RENAME_MISMATCH and g.subject == "app.other"]
 

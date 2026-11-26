@@ -5,7 +5,7 @@
     "arborescent.facts": 20,
     "arborescent.package_model": 20,
     "arborescent.ports": 35,
-    "arborescent.rules": 15
+    "arborescent.rules": 13
   },
   "closure": {
     "arborescent.__main__": 99

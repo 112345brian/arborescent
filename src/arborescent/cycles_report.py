@@ -1,0 +1,63 @@
+"""Pure rendering for ``arborescent cycles`` (#149): ring ranks, cut edges and function-level breaks as text, no I/O.
+
+Split out of ``cli_cycles`` so the command module holds only the one effectful step (printing); this module holds every
+pure computation `cli_cycles.run_cycles` calls, matching how ``baseline_report``/``cli_baseline_report`` split the same way.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Sequence
+
+from .import_cycles import Cycle, EdgeKind, ImportEdge
+from .rules import RuleContext
+
+__all__ = ["render_cycles", "rings"]
+
+
+def rings(context: RuleContext, modules: Iterable[str]) -> dict[str, int]:
+    """Each classified module's ring, innermost first, as an index into its own scope's ring list."""
+    rank: dict[str, int] = {}
+    for name in modules:
+        ring = context.resolve_ring(name)
+        local = context.policy_for(name)
+        if ring is not None and local is not None:
+            rank[name] = [item.name for item in local.rings].index(ring)
+    return rank
+
+
+def _edge_text(edge: ImportEdge) -> str:
+    lines = ", ".join(str(line) for line in edge.lines)
+    return f"{edge.source} -> {edge.target} [{edge.kind.value}] line {lines}"
+
+
+def _cycle_lines(number: int, cycle: Cycle) -> list[str]:
+    lines = [f"cycle {number}: {len(cycle.modules)} module(s): {', '.join(cycle.modules)}"]
+    lines.append(f"  edges ({len(cycle.edges)}):")
+    lines.extend(f"    {_edge_text(edge)}" for edge in cycle.edges)
+    lines.append(f"  cut {len(cycle.cut)} edge(s) to make it acyclic (approximate minimum):")
+    lines.extend(f"    {_edge_text(edge)}" for edge in cycle.cut)
+    if cycle.cycle_breaking:
+        lines.append("  function-level imports that exist to break this cycle (module level would close an import-time cycle):")
+        lines.extend(f"    {_edge_text(edge)}" for edge in cycle.cycle_breaking)
+    lines.append(
+        f"  invert with a Protocol owned by {cycle.protocol_owner}, the lowest-ring module here: "
+        "the other modules depend on it and the importer registers its implementation"
+    )
+    return lines
+
+
+def render_cycles(cycles: Sequence[Cycle], edges: Sequence[ImportEdge]) -> list[str]:
+    function_level = [edge for edge in edges if edge.kind is EdgeKind.LAZY]
+    inside = {(edge.source, edge.target) for cycle in cycles for edge in cycle.edges}
+    on_cycle = sum(1 for edge in function_level if (edge.source, edge.target) in inside)
+    breaking = sum(len(cycle.cycle_breaking) for cycle in cycles)
+    if not cycles:
+        return [f"no import cycles ({len(function_level)} function-level import edge(s), none on a cycle)"]
+    lines = [f"{len(cycles)} import cycle(s)"]
+    for number, cycle in enumerate(cycles, start=1):
+        lines.extend(_cycle_lines(number, cycle))
+    lines.append(
+        f"function-level import edges: {len(function_level)}, {on_cycle} on a cycle ({breaking} exist to break one), "
+        f"{len(function_level) - on_cycle} outside every cycle"
+    )
+    return lines

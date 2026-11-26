@@ -110,7 +110,7 @@ def test_arbor_ring_and_role_are_legal_and_anything_else_is_an_error() -> None:
 @pytest.mark.parametrize("name", ["_ARBOR_LEGAL_KEYS"])
 def test_the_legal_key_set_is_read_only_by_the_facts_module(name: str) -> None:
     users = sorted(p.name for p in SRC.glob("*.py") if _names_used(p, name) or name in p.read_text(encoding="utf-8"))
-    assert users == ["facts.py"]
+    assert users == ["declaration_facts.py"]
 
 
 def test_the_mini_policy_pins_four_rings_innermost_first() -> None:

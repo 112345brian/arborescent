@@ -8,7 +8,11 @@ from pathlib import Path
 
 SRC = Path(__file__).parents[1] / "src" / "arborescent"
 
-RING_QUESTION = {"classify_audit.py", "coupling.py", "import_cycles.py", "package_constraint_rules.py", "package_gaps.py", "practices.py", "rules.py"}
+RING_QUESTION = {
+    "classify_audit.py", "import_cycles.py", "package_constraint_rules.py", "package_parts.py", "practices.py",
+    "purity_rules.py", "rules.py",
+}
+# Package parts use ring resolution for external dependencies and runtime resolution for package closure.
 RUNTIME_QUESTION = {"package_parts.py"}
 
 
@@ -16,7 +20,7 @@ def _calls(name: str) -> dict[str, list[ast.Call]]:
     """Every call of ``name`` in the package, by file, other than its own definition module."""
     found: dict[str, list[ast.Call]] = {}
     for path in sorted(SRC.glob("*.py")):
-        if path.name == "facts.py":
+        if path.name == "import_facts.py":
             continue
         calls = [
             node for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
@@ -53,6 +57,6 @@ def test_no_caller_discards_the_result_of_either_resolver() -> None:
 
 def test_the_discard_scan_would_notice_a_discarded_call(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """Guard against the scan going vacuous: point it at a file that does discard the result."""
-    (tmp_path / "bad.py").write_text("from arborescent.facts import resolve_targets\n\nresolve_targets('m', False, None, [], [])\n", encoding="utf-8")
+    (tmp_path / "bad.py").write_text("from arborescent.import_facts import resolve_targets\n\nresolve_targets('m', False, None, [], [])\n", encoding="utf-8")
     monkeypatch.setattr(__import__(__name__), "SRC", tmp_path)
     assert _discarding_files("resolve_targets") == ["bad.py"]

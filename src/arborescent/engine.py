@@ -5,14 +5,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from . import baseline as ratchet_mod
 from . import ratchets as named_ratchets
-from .certification import PROFILE, certify, tach_multi_root_note, version_warnings
+from .certification import tach_multi_root_note
 from .classify_audit import audit_classification
 from .config import find_child_policy
 from .domain import (
@@ -52,14 +51,19 @@ from .practices import run_practices
 from .purity import excluded_findings
 from .ratchet_measure import Subject
 from .rules import RuleContext, check_modules
-from .suggestions import Suggestion, file_size_suggestions
+from .suggestions import Suggestion
 from .tach_visibility import invisible_import_violations
 from .taint import TaintResult, compute_taint
 
 if TYPE_CHECKING:
     from .facts import ModuleInfo
 
-__all__ = ["CheckReport", "EngineRun", "Options", "Services", "blocking", "changed_files", "contract_renderers", "drift", "enforced", "package_checks", "run_check", "run_engine", "run_own", "tool_is_disabled", "write_generated"]
+__all__ = [
+    "CheckReport", "EngineRun", "Options", "Services", "apply_modularity", "apply_ratchet", "blocking", "changed_files",
+    "child_arbor_runs", "contract_renderers", "dev_tool_counts", "drift", "drift_report", "enforced",
+    "nested_exclusions", "package_checks", "plan_engines", "ratchet_runs", "record_inventories", "run_engine",
+    "run_own", "run_tool", "tool_is_disabled", "write_generated",
+]
 
 
 @dataclass(frozen=True)
@@ -144,7 +148,7 @@ class CheckReport:
         return self.tool_checks_enabled and engines_ok and (self.ratchet is None or self.ratchet.ok)
 
 
-def _ratchet_runs(policy: Policy, root: Path, services: Services, scan: ScanResult, found: Sequence[Violation]) -> list[EngineRun]:
+def ratchet_runs(policy: Policy, root: Path, services: Services, scan: ScanResult, found: Sequence[Violation]) -> list[EngineRun]:
     """One run per ``[ratchet.<name>]``: it fails on a count above its baseline, or (whole-repository runs) below it."""
     started = services.clock.now()
     subject = Subject(root, services.fs, services.runner, {m: scan.paths[m] for m in scan.modules if m in scan.paths}, found)
@@ -204,7 +208,7 @@ def run_own(
     return found, scan
 
 
-def _nested_exclusions(excluded: Mapping[str, int], patterns: Sequence[str]) -> dict[str, str]:
+def nested_exclusions(excluded: Mapping[str, int], patterns: Sequence[str]) -> dict[str, str]:
     """Excluded folder -> the bare ``exclude`` name that hid it below the repository root (the entry that may have been meant as ``/name``)."""
     return {folder: pattern for folder in excluded if (pattern := nested_bare_pattern(folder, patterns)) is not None}
 
@@ -244,7 +248,7 @@ def _run_taint(policy: Policy, root: Path, services: Services, scan: ScanResult)
     return compute_taint(scan.modules, sources, scan.known, policy.taint_seeds, store)
 
 
-def _dev_tool_counts(policy: Policy, scan: ScanResult) -> dict[str, int]:
+def dev_tool_counts(policy: Policy, scan: ScanResult) -> dict[str, int]:
     return {
         entry: sum(1 for module in scan.dev_tool_modules if path_under(scan.paths[module], entry))
         for entry in policy.dev_tools
@@ -269,7 +273,7 @@ def enforced(policy: Policy, found: Iterable[Violation]) -> tuple[list[Violation
     return [v for v in kept if not _is_package_gap(v)], [v for v in kept if _is_package_gap(v)]
 
 
-def _apply_modularity(policy: Policy, report: CheckReport, found: Sequence[Violation], opts: Options, complete: bool) -> list[Violation]:
+def apply_modularity(policy: Policy, report: CheckReport, found: Sequence[Violation], opts: Options, complete: bool) -> list[Violation]:
     """The enforced findings. Records the demoted gaps as notes, the ``--require-modularity`` certificate and the ``--require-visible`` failures."""
     kept, demoted = enforced(policy, found)
     report.notes += demoted
@@ -322,9 +326,11 @@ def _inventory_counts(modules: Mapping[str, ModuleInfo]) -> tuple[dict[tuple[str
     return suppressions, discards
 
 
-def _record_inventories(report: CheckReport, modules: Mapping[str, ModuleInfo], lazy_rings: tuple[str, ...], context: RuleContext) -> None:
+def record_inventories(report: CheckReport, policy: Policy, scan: ScanResult) -> None:
+    modules = scan.modules
+    context = RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules))
     report.suppression_counts, report.discard_counts = _inventory_counts(modules)
-    scoped = (module for module in modules.values() if lazy_import_in_scope(lazy_rings, context.resolve_ring(module.name)))
+    scoped = (module for module in modules.values() if lazy_import_in_scope(policy.lazy_import_rings, context.resolve_ring(module.name)))
     counts = ((module.name, lazy_import_counts(module)) for module in scoped)
     report.lazy_import_counts = {name: count for name, count in counts if count.total}
 
@@ -381,7 +387,7 @@ def drift(fs: FileSystem, root: Path, expected: Mapping[str, str]) -> list[str]:
     return out
 
 
-def _drift_report(policy: Policy, root: Path, services: Services, scan: ScanResult, opts: Options) -> list[str]:
+def drift_report(policy: Policy, root: Path, services: Services, scan: ScanResult, opts: Options) -> list[str]:
     checker = pick_checker(policy, services, opts.type_checker)
     checks = package_checks(policy, services)
     boundaries = None if checks is None else checks.boundaries(policy, root, services.fs, scan)
@@ -421,7 +427,7 @@ def _command(engine: Engine, files: Sequence[str], root: Path, fs: FileSystem) -
     return cast(RootAwareEngine, engine).command_in(files, root, fs) if callable(command_in) else engine.command(files)
 
 
-def _tool(services: Services, engine: Engine, files: Sequence[str], root: Path, opts: Options) -> EngineRun:
+def run_tool(services: Services, engine: Engine, files: Sequence[str], root: Path, opts: Options) -> EngineRun:
     name, argv, ok = engine.name, _command(engine, files, root, services.fs), engine.passed
     if not services.runner.available(argv[0]):
         return EngineRun(name, "fail" if opts.require_tools else "skipped", 0.0, [f"{argv[0]} is not installed (extra)"])
@@ -431,7 +437,7 @@ def _tool(services: Services, engine: Engine, files: Sequence[str], root: Path, 
     findings: list[Violation] = []
     try:
         findings = _engine_violations(engine, result, root, services.fs)
-    except Exception as exc:
+    except (ValueError, TypeError, OSError) as exc:
         status = "fail"
         text.append(f"failed to collect violations: {exc}")
     return EngineRun(name, status, result.seconds, text[-15:] if status == "fail" else text[-1:], findings)
@@ -458,7 +464,7 @@ def child_arbor_command(config_path: Path, opts: Options) -> list[str]:
     return argv
 
 
-def _child_arbor_runs(policy: Policy, root: Path, services: Services, opts: Options) -> list[EngineRun]:
+def child_arbor_runs(policy: Policy, root: Path, services: Services, opts: Options) -> list[EngineRun]:
     if policy.child_policy_mode == "parent":
         return []
     runs: list[EngineRun] = []
@@ -492,7 +498,7 @@ def run_engine(services: Services, name: str, root: Path) -> EngineRun:
     if engine is None:
         raise PolicyError(f"unknown findings engine {name!r}; choose from {sorted(item.name for item in engines)}")
     cwd = root / getattr(engine, "working_directory", ".")
-    result = _tool(services, engine, [], cwd, Options(require_tools=True))
+    result = run_tool(services, engine, [], cwd, Options(require_tools=True))
     if result.status == "fail":
         raise PolicyError(f"could not adopt {name} findings: {' | '.join(result.lines)}")
     return result
@@ -511,7 +517,7 @@ def _engine_violations(engine: Engine, result: ToolResult, root: Path, fs: FileS
     return findings
 
 
-def _plan_engines(policy: Policy, services: Services, opts: Options, files: Sequence[str] | None) -> list[Engine | EngineRun]:
+def plan_engines(policy: Policy, services: Services, opts: Options, files: Sequence[str] | None) -> list[Engine | EngineRun]:
     """One entry per engine and checker: the engine itself when it should run, or an immediate skipped/disabled result.
 
     ``files`` is None for a whole-repository run and the changed Python files for ``--changed``."""
@@ -543,7 +549,7 @@ def _plan_engines(policy: Policy, services: Services, opts: Options, files: Sequ
     return futures
 
 
-def _apply_ratchet(
+def apply_ratchet(
     report: CheckReport, base: set[str], rules: tuple[str, ...], complete: bool, causes: Mapping[str, Collection[str]] | None = None,
 ) -> ratchet_mod.Ratchet:
     """Narrow findings and the baseline to the `--rule` families first, so nothing outside them is new or stale (#137)."""
@@ -554,64 +560,3 @@ def _apply_ratchet(
         base = {key for key in base if ratchet_mod.in_any_family(key, rules)}
         causes = {cause: members for cause, members in causes.items() if ratchet_mod.in_any_family(cause, rules)}
     return ratchet_mod.apply(report.violations, base, complete=complete, root_causes=causes)
-
-
-def _recorded(policy: Policy, root: Path, services: Services, opts: Options) -> tuple[set[str], dict[str, frozenset[str]]]:
-    """The baseline's own-key entries and its root-cause entries (#201); empty under `--no-baseline`."""
-    if not opts.use_baseline:
-        return set(), {}
-    path = root / policy.baseline
-    return ratchet_mod.load(services.fs, path), ratchet_mod.load_root_causes(services.fs, path)
-
-
-def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
-    opts = opts if opts is not None else Options()
-    if opts.require_profile and not opts.require_tools:
-        opts = replace(opts, require_tools=True)
-    started = services.clock.now()
-    report = CheckReport(tool_checks_enabled=opts.tools)
-    only = changed_files(services.runner, root, opts.changed) if opts.changed is not None else None
-    report.partial = only is not None
-    pool = ThreadPoolExecutor(max_workers=max(1, len(services.engines) + 1))
-    try:
-        files = sorted(path for path in only if services.fs.is_file(root / path)) if only is not None else []
-        planned = _plan_engines(policy, services, opts, files if only is not None else None)
-        futures: list[Future[EngineRun] | EngineRun] = [
-            item if isinstance(item, EngineRun)
-            else pool.submit(_tool, services, item, files, root / getattr(item, "working_directory", "."), opts)
-            for item in planned
-        ]
-        t0 = services.clock.now()
-        found, scan = run_own(policy, root, services, only)
-        report.engines.append(EngineRun("arborescent", "ok", services.clock.now() - t0, [f"{len(scan.modules)} modules, {scan.parsed} parsed"]))
-        report.parsed = scan.parsed
-        _record_inventories(report, scan.modules, policy.lazy_import_rings, RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules)))
-        report.excluded, report.excluded_nested = dict(scan.excluded), _nested_exclusions(scan.excluded, policy.exclude)
-        report.vendor_folders = tuple(scan.vendor_folders)
-        report.dev_tools = _dev_tool_counts(policy, scan)
-        report.suggestions = file_size_suggestions(
-            services.fs,
-            root,
-            {module.name: module.path for module in scan.modules.values()},
-            threshold=policy.suggestion_threshold,
-        )
-        report.drift = _drift_report(policy, root, services, scan, opts)
-        engine_runs = [f.result() if isinstance(f, Future) else f for f in futures]
-        report.engines += [*engine_runs, *_ratchet_runs(policy, root, services, scan, found)]
-        report.notes = [v for v in found if v.rule in INFORMATIONAL_RULES]
-        report.violations = _apply_modularity(policy, report, found, opts, only is None) + [v for run in engine_runs for v in run.violations]
-        base, causes = _recorded(policy, root, services, opts)
-        ruff_skipped = any(run.name == "ruff" and run.status in {"skipped", "disabled"} for run in engine_runs)
-        if not opts.tools or ruff_skipped:
-            # Ruff is the only external engine whose findings enter the baseline; absent output cannot prove them stale.
-            base = {key for key in base if not key.split("|", 1)[0].startswith("ruff-")}
-        report.ratchet = _apply_ratchet(report, base, opts.rules, only is None, causes)
-        if opts.require_profile:
-            report.profile = PROFILE
-            report.profile_failures = certify(root, policy, scan, services.runner, services.fs)
-            report.profile_warnings = version_warnings(root, services.runner, policy.disabled_tools)
-        report.engines.extend(_child_arbor_runs(policy, root, services, opts))
-    finally:
-        pool.shutdown(wait=True, cancel_futures=True)
-    report.seconds = services.clock.now() - started
-    return report

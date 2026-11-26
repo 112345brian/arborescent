@@ -10,7 +10,7 @@ import tomllib
 from pathlib import Path
 
 from .domain import ALL, Policy, Rule, Violation
-from .package_assignment import RepositoryFacts, owners_of
+from .package_assignment import WorkspaceFacts, owners_of
 from .package_model import CatalogDocument
 from .package_pyproject import (
     DerivedProject,
@@ -26,7 +26,7 @@ __all__ = ["derived_projects", "existing_derived_paths", "pyproject_files", "pyp
 
 
 def derived_projects(
-    policy: Policy, scan: ScanResult, catalog: CatalogDocument, facts: RepositoryFacts
+    policy: Policy, scan: ScanResult, catalog: CatalogDocument, facts: WorkspaceFacts
 ) -> tuple[DerivedProject, ...]:
     owned: dict[str, list[str]] = {package.id: [] for package in catalog.packages}
     for module, path in facts.modules.items():

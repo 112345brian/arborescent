@@ -10,15 +10,15 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
-from .domain import Mutation, Policy, Rule
+from .domain import ArchitecturePolicy, Mutation, Rule
 from .facts import ModuleInfo
 from .purity import Followed, assess, is_allowed, ring_scanned
+from .purity_policy import PurityPolicy
 
 __all__ = ["mixed_purity_mutations"]
 
 
-def _pure_block(policy: Policy) -> str:
-    rule = policy.mixed_purity
+def _pure_block(rule: PurityPolicy) -> str:
     assignments = "".join(f"    v{i} = x + {i}\n" for i in range(rule.min_body_lines - 1))
     return "".join(f"def _arborescent_probe_pure_{n}(x: int) -> int:\n{assignments}    return v0\n\n\n" for n in range(rule.min_pure_units))
 
@@ -37,11 +37,12 @@ def _effects(kinds: Collection[str]) -> list[tuple[str, str]]:
 
 
 def mixed_purity_mutations(
-    policy: Policy, paths: Mapping[str, str], known: Collection[str], arbor_index: Mapping[str, tuple[str | None, str | None]],
+    policy: ArchitecturePolicy, rule: PurityPolicy, paths: Mapping[str, str], arbor_index: Mapping[str, tuple[str | None, str | None]],
     modules: Mapping[str, ModuleInfo],
 ) -> tuple[list[Mutation], list[str]]:
-    """(mutations, why none). A policy that turns the rule off, or counts no kind a probe can use, is reported, never skipped silently."""
-    rule = policy.mixed_purity
+    """(mutations, why none). A policy that turns the rule off, or counts no kind a probe can use, is reported, never skipped silently.
+
+    ``policy`` is the scope probed (``paths`` holds only its modules); ``rule`` is the root's ``mixed_purity``, the same for every scope."""
     if not rule.enabled:
         return [], ["mixed-purity: disabled by policy"]
     effects = _effects([kind for kind in rule.kinds if kind not in rule.weak_kinds])  # a weak-only host would be a note, not the finding the probe expects
@@ -49,14 +50,14 @@ def mixed_purity_mutations(
         return [], ["mixed-purity: no probe shape for the configured `mixed_purity.kinds` less `weak_kinds` (needs console, filesystem or logging)"]
     followed = Followed(modules)
     host = next((
-        name for name in sorted(known)
-        if name in paths and name in modules and not paths[name].endswith("__init__.py")
-        and (ring := policy.resolve_ring(arbor_index, name)) is not None and ring_scanned(policy, ring)
-        and not is_allowed(rule, name) and assess(modules[name], policy, followed) is None
+        name for name in sorted(paths)
+        if name in modules and not paths[name].endswith("__init__.py")
+        and (ring := policy.resolve_ring(arbor_index, name)) is not None and ring_scanned(policy, rule, ring)
+        and not is_allowed(rule, name) and assess(modules[name], policy, rule, followed) is None
     ), None)
     if host is None:
         return [], ["mixed-purity: every module is already mixed, allowed or in a ring the rule skips, so none can be mutated"]
-    pure = _pure_block(policy)
+    pure = _pure_block(rule)
     return [
         Mutation(Rule.MIXED_PURITY, f"mixed-purity: {label} beside {rule.min_pure_units} pure functions in {host}", paths[host], pure + source)
         for label, source in effects

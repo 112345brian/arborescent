@@ -71,7 +71,7 @@ def test_record_logs_plain_growth_keys_and_refuses_unexplained_growth() -> None:
     baseline.save(fs, path, [v("r", "old")])
     with pytest.raises(baseline.BaselineError, match="growth refused"):
         baseline.record(fs, path, [v("r", "old"), v("r", "new")])
-    baseline.record(fs, path, [v("r", "old"), v("r", "new")], allow_growth=True, reason="why")
+    baseline.record(fs, path, [v("r", "old"), v("r", "new")], baseline.RecordOptions(allow_growth=True, reason="why"))
     assert fs.read_json(path) == {
         "version": 2,
         "violations": ["r|new|detail", "r|old|detail"],

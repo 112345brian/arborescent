@@ -30,18 +30,18 @@ class Subject:
 
 
 def measure(spec: RatchetSpec, subject: Subject) -> dict[str, int]:
-    """The count per module that has a non-zero count, restricted to the ratchet's ``scope``."""
+    """The count per module that has a non-zero count, restricted to the ratchet's ``modules`` globs."""
     if spec.measure == "rule":
         counts = _by_rule(spec.argument[0], subject.found)
     elif spec.measure == "command":
         counts = _by_command(spec, subject)
     else:
         counts = _by_source(spec, subject)
-    return {module: count for module, count in sorted(counts.items()) if count > 0 and _in_scope(spec, module)}
+    return {module: count for module, count in sorted(counts.items()) if count > 0 and _in_ratchet_modules(spec, module)}
 
 
-def _in_scope(spec: RatchetSpec, module: str) -> bool:
-    return not spec.scope or any(in_unit(module, glob) for glob in spec.scope)
+def _in_ratchet_modules(spec: RatchetSpec, module: str) -> bool:
+    return not spec.modules or any(in_unit(module, glob) for glob in spec.modules)
 
 
 def _by_rule(rule: str, found: Sequence[Violation]) -> dict[str, int]:
@@ -56,7 +56,7 @@ def _by_source(spec: RatchetSpec, subject: Subject) -> dict[str, int]:
     counter = _regex_count if spec.measure == "regex" else _call_count
     counts: dict[str, int] = {}
     for module, path in subject.paths.items():
-        if not _in_scope(spec, module):
+        if not _in_ratchet_modules(spec, module):
             continue
         try:
             counts[module] = counter(spec.argument[0], subject.fs.read_text(subject.root / path))

@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
+from .architecture_policy import architecture_of
 from .coupling_policy import DEFAULT_BASELINE, DEFAULT_HUB_FAN_IN, CouplingPolicy
 from .domain import (
     ArchitectureScope,
@@ -460,8 +461,11 @@ _LEGACY_ARCHITECTURE_KEYS = frozenset({
 _SCOPE_ARCHITECTURE_KEYS = _LEGACY_ARCHITECTURE_KEYS - {"sources"}
 
 
-def _scope_from_raw(name: object, raw_scope: object, raw: Mapping[str, Any]) -> ArchitectureScope:
-    """One entry of ``scopes``: validate its shape and build its policy from the root globals plus its own keys."""
+def _scope_from_raw(name: object, raw_scope: object, raw: Mapping[str, Any]) -> tuple[ArchitectureScope, Policy]:
+    """One entry of ``scopes``: validate its shape and build its policy from the root globals plus its own keys.
+
+    The scope keeps only the `ArchitecturePolicy` part; the full parse is returned beside it because the root takes its
+    whole-run settings (and the scopes' `customization_labels`) from it."""
     if not isinstance(name, str) or not name:
         raise PolicyError("scope names must be non-empty strings")
     if not isinstance(raw_scope, Mapping):
@@ -481,7 +485,7 @@ def _scope_from_raw(name: object, raw_scope: object, raw: Mapping[str, Any]) -> 
     for key, value in (("sources", raw_scope["sources"]), ("source_roots", raw_scope["source_roots"])):
         if not isinstance(value, list) or not all(isinstance(path, str) and path for path in value):
             raise PolicyError(f"scope {name!r} `{key}` must be a list of non-empty paths")
-    return ArchitectureScope(name, policy, public, depends_on)
+    return ArchitectureScope(name, architecture_of(policy), public, depends_on), policy
 
 
 def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
@@ -491,9 +495,10 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
     raw_scopes = raw.get("scopes")
     if not isinstance(raw_scopes, Mapping) or not raw_scopes:
         raise PolicyError("`scopes` must map non-empty scope names to tables")
-    scopes = [_scope_from_raw(name, raw_scope, raw) for name, raw_scope in raw_scopes.items()]
+    parsed = [_scope_from_raw(name, raw_scope, raw) for name, raw_scope in raw_scopes.items()]
+    scopes = [scope for scope, _ in parsed]
 
-    first = scopes[0].policy
+    first = parsed[0][1]
     return replace(
         first,
         coupling=_coupling(raw),
@@ -512,7 +517,7 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
         require_arbor_annotations=False,
         require_arbor_annotations_exclude=(),
         customization_labels=tuple(sorted({
-            label for scope in scopes for label in scope.policy.customization_labels
+            label for _, full in parsed for label in full.customization_labels
         })),
         children=_child_arbors(raw),
         scan_vendors=_boolean_option(raw, "scan_vendors", False),

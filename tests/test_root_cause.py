@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from test_baseline_ratchet import write_policy
 
 from arborescent import baseline
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.baseline_report import parse_entries
 from arborescent.cli import main
 from arborescent.cli_report import _print_summary
 from arborescent.domain import FAN_OUT_RULES, Rule, Violation
@@ -18,6 +20,7 @@ from arborescent.engine import CheckReport, Services
 from arborescent.engines import default_engines
 from arborescent.facts import ModuleInfo, extract
 from arborescent.lazy_imports import lazy_import_violations
+from arborescent.scan_cache_codec import cached_facts, facts_to_json
 from arborescent.testing import FakeFileSystem, FakeToolRunner
 from arborescent.typecheckers import all_checkers
 
@@ -83,7 +86,7 @@ def test_empty_inputs() -> None:
 
 def test_by_root_cause_writes_one_entry_per_cause() -> None:
     fs, path = filesystem()
-    baseline.record(fs, path, [f("b"), f("a"), f("x", cause="fan|other"), Violation("plain", "p", "d")], by_root_cause=True)
+    baseline.record(fs, path, [f("b"), f("a"), f("x", cause="fan|other"), Violation("plain", "p", "d")], baseline.RecordOptions(by_root_cause=True))
     assert fs.read_json(path) == {
         "version": 2,
         "violations": ["plain|p|d"],
@@ -100,7 +103,7 @@ def test_without_the_flag_a_new_baseline_stays_per_finding() -> None:
 
 def test_root_causes_are_never_written_when_empty() -> None:
     fs, path = filesystem()
-    baseline.record(fs, path, [Violation("plain", "p", "d")], by_root_cause=True)
+    baseline.record(fs, path, [Violation("plain", "p", "d")], baseline.RecordOptions(by_root_cause=True))
     assert "root_causes" not in fs.read_json(path)
 
 
@@ -108,24 +111,24 @@ def test_adopt_by_root_cause_logs_the_members_and_is_once_per_family() -> None:
     fs, path = filesystem()
     baseline.save(fs, path, [Violation("internal-import", "old", "d")])
     found = [Violation("internal-import", "old", "d"), Violation("effect-x", "a", "d", root_cause="effect-x|k"), Violation("effect-x", "b", "d", root_cause="effect-x|k")]
-    baseline.record(fs, path, found, adopt="effects", by_root_cause=True)
+    baseline.record(fs, path, found, baseline.RecordOptions(adopt="effects", by_root_cause=True))
     doc = fs.read_json(path)
     assert doc["root_causes"] == {"effect-x|k": ["a", "b"]}
     assert doc["violations"] == ["internal-import|old|d"]
     assert doc["growth"] == [{"reason": "adopt effects family", "added": ["effect-x|k|a", "effect-x|k|b"]}]
     with pytest.raises(baseline.BaselineError, match="already contains"):
-        baseline.record(fs, path, [*found, Violation("effect-x", "c", "d", root_cause="effect-x|k")], adopt="effects", by_root_cause=True)
+        baseline.record(fs, path, [*found, Violation("effect-x", "c", "d", root_cause="effect-x|k")], baseline.RecordOptions(adopt="effects", by_root_cause=True))
 
 
 def test_a_new_member_of_a_recorded_cause_is_refused_without_a_reason_and_leaves_the_file_alone() -> None:
     fs, path = filesystem()
-    baseline.record(fs, path, [f("a")], by_root_cause=True)
+    baseline.record(fs, path, [f("a")], baseline.RecordOptions(by_root_cause=True))
     before = fs.read_text(path)
     with pytest.raises(baseline.BaselineError, match="growth refused"):
         baseline.record(fs, path, [f("a"), f("b")])
     assert fs.read_text(path) == before
     # the second attempt, with a reason, succeeds and keeps the grouping although the flag is absent
-    baseline.record(fs, path, [f("a"), f("b")], allow_growth=True, reason="why")
+    baseline.record(fs, path, [f("a"), f("b")], baseline.RecordOptions(allow_growth=True, reason="why"))
     doc = fs.read_json(path)
     assert doc["root_causes"] == {CAUSE: ["a", "b"]} and doc["violations"] == []
     assert doc["growth"][-1] == {"reason": "why", "added": [f"{CAUSE}|b"]}
@@ -133,24 +136,24 @@ def test_a_new_member_of_a_recorded_cause_is_refused_without_a_reason_and_leaves
 
 def test_shrinking_a_cause_needs_no_reason_and_recording_twice_is_stable() -> None:
     fs, path = filesystem()
-    baseline.record(fs, path, [f("a"), f("b")], by_root_cause=True)
-    baseline.record(fs, path, [f("a")], by_root_cause=True)
+    baseline.record(fs, path, [f("a"), f("b")], baseline.RecordOptions(by_root_cause=True))
+    baseline.record(fs, path, [f("a")], baseline.RecordOptions(by_root_cause=True))
     first = fs.read_text(path)
     assert fs.read_json(path)["root_causes"] == {CAUSE: ["a"]}
-    baseline.record(fs, path, [f("a")], by_root_cause=True)
+    baseline.record(fs, path, [f("a")], baseline.RecordOptions(by_root_cause=True))
     assert fs.read_text(path) == first
 
 
 def test_findings_already_recorded_by_key_stay_by_key() -> None:
     fs, path = filesystem()
     baseline.record(fs, path, [f("a")])
-    baseline.record(fs, path, [f("a")], by_root_cause=True)
+    baseline.record(fs, path, [f("a")], baseline.RecordOptions(by_root_cause=True))
     assert fs.read_json(path) == {"version": 2, "violations": ["fan|a|d"], "growth": []}
 
 
 def test_duplicate_findings_are_recorded_once() -> None:
     fs, path = filesystem()
-    assert baseline.record(fs, path, [f("a"), f("a")], by_root_cause=True) == 1
+    assert baseline.record(fs, path, [f("a"), f("a")], baseline.RecordOptions(by_root_cause=True)) == 1
 
 
 def test_growth_consistency_sees_root_cause_members() -> None:
@@ -164,7 +167,7 @@ def test_growth_consistency_sees_root_cause_members() -> None:
 
 def test_prune_drops_gone_members_and_empty_causes() -> None:
     fs, path = filesystem()
-    baseline.record(fs, path, [f("a"), f("b"), f("x", cause="fan|other")], by_root_cause=True)
+    baseline.record(fs, path, [f("a"), f("b"), f("x", cause="fan|other")], baseline.RecordOptions(by_root_cause=True))
     assert baseline.prune(fs, path, [f("a"), f("x", cause="fan|other")]) == 1
     assert fs.read_json(path)["root_causes"] == {CAUSE: ["a"], "fan|other": ["x"]}
     assert baseline.prune(fs, path, [f("a")]) == 1
@@ -176,7 +179,7 @@ def test_prune_drops_gone_members_and_empty_causes() -> None:
 def test_load_and_recorded_rules() -> None:
     fs, path = filesystem()
     assert baseline.load_root_causes(fs, path) == {}
-    baseline.record(fs, path, [f("a"), Violation("plain", "p", "d")], by_root_cause=True)
+    baseline.record(fs, path, [f("a"), Violation("plain", "p", "d")], baseline.RecordOptions(by_root_cause=True))
     assert baseline.load_root_causes(fs, path) == {CAUSE: frozenset({"a"})}
     assert baseline.load(fs, path) == {"plain|p|d"}
     assert baseline.recorded_rules(fs, path) == {"fan", "plain"}
@@ -341,3 +344,24 @@ def test_check_by_root_cause_still_lists_findings_without_a_cause(repo: Path, ca
 def test_prune_refuses_by_root_cause(repo: Path) -> None:
     config = _lazy_repo(repo)
     assert main(["--config", str(config), "baseline", "--prune", "--by-root-cause"], _svc()) == 2
+
+
+def test_baseline_report_counts_root_cause_members() -> None:
+    """`baseline report` reads the same file: a finding recorded under its cause must not vanish from the totals."""
+    shape, entries = parse_entries({"version": 2, "violations": ["plain|p|d"], "root_causes": {"fan|k": ["a", "b"]}, "growth": []})
+    assert shape == "keys"
+    assert [(e.rule, e.subject, e.target, e.weight) for e in entries] == [("plain", "p", "", 1), ("fan", "a", "k", 1), ("fan", "b", "k", 1)]
+
+
+@pytest.mark.parametrize("causes", [[], {"fan|k": "a"}])
+def test_baseline_report_rejects_a_malformed_root_cause_section(causes: object) -> None:
+    with pytest.raises(ValueError, match="root"):
+        _ = parse_entries({"version": 2, "violations": [], "root_causes": causes})
+
+
+def test_the_scan_cache_keeps_typed_port_calls(tmp_path: Path) -> None:
+    """A warm run must judge `mixed_purity.ambient` the same way a cold one does (#195)."""
+    source = "from app.ports import Reader\n\n\ndef go(reader: Reader) -> None:\n    reader.read()\n"
+    facts = extract(source, "m.py")
+    assert facts.purity.port_calls
+    assert cached_facts(["digest", json.loads(json.dumps(facts_to_json(facts)))]) == facts

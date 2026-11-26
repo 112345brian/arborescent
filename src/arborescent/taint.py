@@ -33,7 +33,7 @@ What is and is not followed, by design (see "Non-goals" in #98):
   another function.
 - ``Path(...).read_text()`` and similar are real I/O but are a method call on the *result* of a call, not on an
   import alias; recognising them needs a type, which this module does not have. They are a known false
-  negative, the same one ``facts._path_io_use`` documents for the module-level effect scan.
+  negative, the same one ``effect_facts._path_io_use`` documents for the module-level effect scan.
 - Lazy (function-local) imports are not read as aliases; only module-level ``import``/``from ... import`` lines
   bind a name this pass will follow.
 """
@@ -47,7 +47,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from .facts import ModuleInfo, effect_category_of
+from .effect_categories import effect_category_of
 from .presets import DEFAULT_TAINT_SEEDS
 
 __all__ = ["DEFAULT_TAINT_SEEDS", "TaintCacheStore", "TaintResult", "TaintedFunction", "compute_taint"]
@@ -361,8 +361,15 @@ def _store_file_cache(store: TaintCacheStore | None, seeds_key: str, fresh: dict
         store.write(json.dumps({"v": _CACHE_VERSION, "seeds": seeds_key, "files": fresh}))
 
 
+class _PackageShape(Protocol):
+    """The module fact needed to resolve relative imported calls."""
+
+    @property
+    def is_package(self) -> bool: ...
+
+
 def _extract_files_cached(
-    modules: Mapping[str, ModuleInfo], sources: Mapping[str, str], known: Collection[str],
+    modules: Mapping[str, _PackageShape], sources: Mapping[str, str], known: Collection[str],
     seeds: frozenset[str], cache: Mapping[str, list[Any]],
 ) -> tuple[dict[str, _FileFacts], dict[str, list[Any]]]:
     """Reuse a module's cached facts when its text digest still matches; re-extract (and re-cache) otherwise."""
@@ -503,7 +510,7 @@ def _line_of(files: Mapping[str, _FileFacts], module: str, qualname: str) -> int
 
 
 def compute_taint(
-    modules: Mapping[str, ModuleInfo], sources: Mapping[str, str], known: Collection[str], seeds: Collection[str] = DEFAULT_TAINT_SEEDS,
+    modules: Mapping[str, _PackageShape], sources: Mapping[str, str], known: Collection[str], seeds: Collection[str] = DEFAULT_TAINT_SEEDS,
     cache: TaintCacheStore | None = None,
 ) -> TaintResult:
     """Whole-repository pass: which functions call an I/O primitive directly, or call (through a resolvable

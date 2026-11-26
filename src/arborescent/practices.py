@@ -27,7 +27,8 @@ from typing import Any, cast
 
 from .domain import NOISE_DIRS, Policy, Rule, Violation, dist_name, in_unit
 from .equivalence import equivalence_findings
-from .facts import ModuleInfo, extract, resolve_targets
+from .facts import ModuleInfo, extract
+from .import_facts import resolve_targets
 from .ports import FileSystem, ScanResult, ToolRunner
 from .rules import RuleContext
 

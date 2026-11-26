@@ -282,8 +282,8 @@ def test_scope_policy_parses_local_rings_and_public_boundary() -> None:
     assert alpha.public == ("alpha.api*",)
     assert alpha.depends_on == ()
     assert shared.policy.rings[0].name == "domain"
-    assert policy.python == alpha.policy.python == "3.12"
-    assert policy.disabled_tools == alpha.policy.disabled_tools == ("ruff",)
+    assert policy.python == "3.12" and not hasattr(alpha.policy, "python")  # whole-run configuration stays on the root
+    assert policy.disabled_tools == alpha.policy.disabled_tools == ("ruff",)  # inherited: the annotation queries read it
     assert policy.scope_for_path("libs/alpha/src/internal/service.py") == alpha
     assert policy.scope_for_path("libs/other/src/file.py") is None
 
@@ -300,7 +300,7 @@ def test_declared_children_can_coexist_with_parent_scopes() -> None:
 
     assert tuple(child.path for child in policy.children) == ("packages/core",)
     assert {scope.name for scope in policy.scopes} == {"alpha", "shared"}
-    assert all(not scope.policy.children for scope in policy.scopes)
+    assert all(not hasattr(scope.policy, "children") for scope in policy.scopes)  # a scope holds rule data, never child arbors
 
 
 def test_scope_config_rejects_legacy_architecture_keys() -> None:
@@ -476,13 +476,10 @@ def test_unclassified_detail_hints_when_a_glob_names_only_the_parent_package() -
     assert "did you mean" not in p.unclassified_detail("pkg")
 
 
-def test_scope_path_normalization_memoizes_sources_but_not_file_paths() -> None:
-    domain._NORMALIZED_SOURCES.clear()
+def test_scope_path_normalization_handles_trailing_slashes_and_dot_prefixes() -> None:
     assert domain._path_contains("./libs/alpha/src/", "libs/alpha/src/x.py")
-    assert domain._NORMALIZED_SOURCES == {"./libs/alpha/src/": "libs/alpha/src"}
     p = policy_from_mapping({"rings": ["domain"], "classify": {}})
     assert p.scope_for_path("libs/alpha/src/y.py") is None
-    assert "libs/alpha/src/y.py" not in domain._NORMALIZED_SOURCES
 
 
 def _classify_from_repo(tmp_path, arbor: str, tach: str | None = None):  # type: ignore[no-untyped-def]

@@ -59,10 +59,12 @@ def _mapping(value: object) -> dict[str, object] | None:
 def parse_entries(data: object) -> tuple[str, list[Entry]]:
     """Read a baseline document of any known shape into ``(shape, entries)``; ``ValueError`` names an unknown one."""
     document = _mapping(data)
+    members: list[Entry] = []
     if document is not None and "violations" in document:
+        members = _from_root_causes(document.get("root_causes", {}))
         data, document = document["violations"], _mapping(document["violations"])
     if isinstance(data, list):
-        return "keys", [_from_key(item) for item in cast("list[object]", data)]
+        return "keys", [*(_from_key(item) for item in cast("list[object]", data)), *members]
     if document is None:
         raise ValueError(f"unsupported baseline shape: {type(data).__name__}")
     items = [(str(name), value) for name, value in document.items() if name not in _META_KEYS]
@@ -77,6 +79,20 @@ def _from_key(item: object) -> Entry:
     subject, _, detail = rest.partition("|")
     found = _TARGET.search(detail)
     return Entry(item, rule if rest else "", subject if rest else item, found.group(1) if found else "", 1)
+
+
+def _from_root_causes(raw: object) -> list[Entry]:
+    """One entry per member of a per-root-cause entry (#201): each is a baselined finding, so the report counts it."""
+    causes = _mapping(raw)
+    if causes is None:
+        raise ValueError("baseline root_causes must be an object")
+    entries: list[Entry] = []
+    for cause, members in causes.items():
+        if not isinstance(members, list):
+            raise ValueError(f"baseline root cause {cause!r} must list its members")
+        rule, _, target = cause.partition("|")
+        entries.extend(Entry(f"{cause}|{member}", rule, str(member), target, 1) for member in cast("list[object]", members))
+    return entries
 
 
 def _from_value(name: str, value: object) -> Entry:

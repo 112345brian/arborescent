@@ -19,7 +19,7 @@ from .purity import (
     is_allowed,
     summarize,
 )
-from .rules import RuleContext
+from .rule_context import RuleContext
 
 _HEADER = "mixed modules, most imported first (a module's importers are the ones that inherit its effects):"
 
@@ -37,9 +37,9 @@ def ranked(policy: Policy, root: Path, svc: Services) -> list[tuple[ModulePurity
     followed = Followed(scan.modules)
     for name, ring in rings.items():
         local = context.policy_for(name)
-        report = assess_in_ring(scan.modules[name], local, ring, followed) if local is not None else None
+        report = assess_in_ring(scan.modules[name], local, policy.mixed_purity, ring, followed) if local is not None else None
         if local is not None and report is not None:
-            rows.append((replace(report, importers=len(importers.get(name, ()))), ring, is_allowed(local.mixed_purity, name)))
+            rows.append((replace(report, importers=len(importers.get(name, ()))), ring, is_allowed(policy.mixed_purity, name)))
     return sorted(rows, key=lambda row: (-row[0].importers, -len(row[0].pure), row[0].module))
 
 
@@ -56,7 +56,7 @@ def run_explain(policy: Policy, root: Path, svc: Services, module: str) -> int:
         print(f"{module} is not covered by a policy scope", file=sys.stderr)
         return 2
     print(f"{module} ({info.path}):")
-    lines = explain(info, local, Followed(scan.modules))
+    lines = explain(info, local, policy.mixed_purity, Followed(scan.modules))
     for line in lines or ["no top-level functions or classes"]:
         print(f"  {line}")
     return 0

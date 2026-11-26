@@ -31,6 +31,7 @@ from arborescent.adapters import (
     SystemClock,
 )
 from arborescent.bench import bench_one
+from arborescent.check_runner import run_check
 from arborescent.cli import main
 from arborescent.config import policy_from_mapping
 from arborescent.domain import PolicyError, ToolResult, Violation
@@ -38,7 +39,6 @@ from arborescent.engine import (
     Options,
     Services,
     pick_checker,
-    run_check,
     run_own,
     write_generated,
 )
@@ -272,7 +272,7 @@ def test_old_fact_cache_schema_is_discarded(repo: Path, tmp_path: Path) -> None:
 
 
 def test_a_cache_record_of_the_wrong_shape_at_the_current_version_is_discarded_not_fatal(repo: Path, tmp_path: Path) -> None:
-    """Review finding: `_CACHE_VERSION` is bumped by hand, so two branches can write different record layouts under the
+    """Review finding: `CACHE_VERSION` is bumped by hand, so two branches can write different record layouts under the
     same version. Reading the other layout raised IndexError and aborted the run; a bad record must read as a miss."""
     cache = tmp_path / "c"
     first = run_own(mini_policy(), repo, services(cache=cache), practices=False)[1]
@@ -623,7 +623,7 @@ def test_core_mode_rejects_options_that_demand_an_engine(repo: Path, flag: str, 
 
 
 def test_list_dev_tools_still_rejects_a_core_mode_conflict_first(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """`--list-dev-tools` must not bypass `_core_mode_conflict`: it used to return before that check ever ran."""
+    """`--list-dev-tools` must not bypass `core_mode_conflict`: it used to return before that check ever ran."""
     cfg = repo / "arborescent.toml"
     cfg.write_text(CORE_POLICY, encoding="utf-8")
 

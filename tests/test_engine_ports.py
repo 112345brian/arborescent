@@ -13,9 +13,10 @@ import pytest
 from arborescent_helpers import generate, mini_policy, write_files
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SystemClock
+from arborescent.check_runner import run_check
 from arborescent.cli import main
 from arborescent.domain import PolicyError, ToolResult, Violation
-from arborescent.engine import Options, Services, run_check
+from arborescent.engine import Options, Services
 from arborescent.engines import ImportLinter, Tach, default_engines
 from arborescent.testing import FakeToolRunner
 from arborescent.typecheckers import all_checkers, by_name
@@ -275,9 +276,10 @@ def test_engine_violation_results_have_a_consuming_call_site() -> None:
     engine_tree = trees[source_dir / "engine.py"]
     violation_collector = next(n for n in ast.walk(engine_tree) if isinstance(n, ast.FunctionDef) and n.name == "_engine_violations")
     assert direct_call in list(ast.walk(violation_collector)), "direct Engine.violations calls must stay in the collector"
-    tool = next(n for n in ast.walk(engine_tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "_tool")
+    tool = next(n for n in ast.walk(engine_tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "run_tool")
     assert any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "_engine_violations" for n in ast.walk(tool))
-    run_check_node = next(n for n in ast.walk(engine_tree) if isinstance(n, ast.FunctionDef) and n.name == "run_check")
+    check_runner_tree = trees[source_dir / "check_runner.py"]
+    run_check_node = next(n for n in ast.walk(check_runner_tree) if isinstance(n, ast.FunctionDef) and n.name == "run_check")
     report_assignment = next(
         n
         for n in ast.walk(run_check_node)

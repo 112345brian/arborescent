@@ -10,96 +10,43 @@ from __future__ import annotations
 import fnmatch
 import re
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass, replace
 from typing import NamedTuple
 
+from .call_facts import absolute_callee
 from .domain import (
     ALL,
     EFFECT_RULES,
+    ArchitecturePolicy,
     ArchitectureScope,
     ConstructionSite,
     OwnedLiteral,
     Policy,
-    PolicyError,
     RingRule,
     Rule,
     Violation,
     dist_name,
     in_unit,
 )
-from .facts import (
-    EffectUse,
-    Forwarder,
-    ModuleInfo,
-    RawImport,
-    absolute_callee,
-    resolve_targets,
+from .effect_facts import EffectUse
+from .effect_import_rules import (
+    EffectEdge,
+    EffectImport,
+    effect_via_import_violations,
+    record_effect_edge,
+    unsanctioned_effect_imports,
 )
+from .facts import Forwarder, ModuleInfo
 from .import_cycles import cyclic_components
-from .package_constraint_rules import (
-    is_exempt_path,
-    placement_violations,
-    reach_violations,
-    use_violations,
-)
+from .import_facts import RawImport, resolve_targets
+from .package_constraint_rules import placement_violations, use_violations
 from .package_constraints import PackageConstraints
-from .purity import (
-    Followed,
-    ModulePurity,
-    assess_in_ring,
-    importer_counts,
-    is_allowed,
-    summarize,
-)
+from .purity_rules import mixed_purity_findings, with_move_closures
+from .rule_context import RuleContext
 
 __all__ = ["RuleContext", "check_modules", "fits_ring"]
 
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
 NO_CONSTRAINTS = PackageConstraints()  # a policy that declares none: the constraint rules cost nothing
-
-
-@dataclass(frozen=True)
-class RuleContext:
-    policy: Policy
-    arbor_index: Mapping[str, tuple[str | None, str | None]]
-    scope_by_module: Mapping[str, str]
-    tool_modules: frozenset[str] = frozenset()  # modules below a `dev_tools` path: no ring, never imported by product code
-
-    def scope_name(self, name: str) -> str | None:
-        return self.scope_by_module.get(name) if self.policy.scopes else None
-
-    def policy_for(self, name: str) -> Policy | None:
-        if not self.policy.scopes:
-            return self.policy
-        scope_name = self.scope_name(name)
-        return self.policy.scope(scope_name).policy if scope_name is not None else None
-
-    def require_policy(self, name: str) -> Policy:
-        policy = self.policy_for(name)
-        if policy is None:
-            raise PolicyError(f"module {name!r} has no owning architecture scope")
-        return policy
-
-    def resolve_ring(self, name: str) -> str | None:
-        policy = self.policy_for(name)
-        return policy.resolve_ring(self.arbor_index, name) if policy is not None else None
-
-    def annotation_violation(self, name: str) -> str | None:
-        policy = self.policy_for(name)
-        if policy is not None:
-            return policy.annotation_violation(self.arbor_index, name)
-        if "arbor-annotations" in self.policy.disabled_tools:
-            return None
-        annotation = self.arbor_index.get(name)
-        return annotation[1] if annotation is not None else None
-
-    def annotation_ring_mismatch(self, name: str) -> str | None:
-        policy = self.policy_for(name)
-        return policy.annotation_ring_mismatch(self.arbor_index, name) if policy is not None else None
-
-    def annotation_required_violation(self, name: str) -> str | None:
-        policy = self.policy_for(name)
-        return policy.annotation_required_violation(self.arbor_index, name) if policy is not None else None
 
 
 def _most_specific(targets: Collection[str]) -> list[str]:
@@ -131,7 +78,7 @@ class _ImportEnv(NamedTuple):
 def _dev_tool_findings(context: RuleContext, name: str, info: ModuleInfo, env: _ImportEnv) -> list[Violation]:
     """Ring and external-import rules do not apply to tooling; unresolvable imports, import cycles, `dev_tools_forbid`
     effects and `dev_tools_may_import` still do."""
-    out = _dev_tool_effects(context.policy_for(name) or context.policy, name, info)
+    out = _dev_tool_effects(context.policy.dev_tools_forbid, context.policy_for(name) or context.policy, name, info)
     for imp in info.facts.imports:
         internal, _, error = resolve_targets(name, info.is_package, imp, env.known, env.tops)
         out += _dev_tool_product_imports(context, name, imp.line, internal)
@@ -144,14 +91,14 @@ def _dev_tool_findings(context: RuleContext, name: str, info: ModuleInfo, env: _
     return out
 
 
-def _dev_tool_effects(policy: Policy, name: str, info: ModuleInfo) -> list[Violation]:
+def _dev_tool_effects(dev_tools_forbid: Collection[str], policy: ArchitecturePolicy, name: str, info: ModuleInfo) -> list[Violation]:
     # `counts_effect_seam` is also called ad hoc in `_effect_uses`, `_patch_violation` and `_scope_effect_leaks`
     # (selftest.py's `_leaking_public_dependency` too); centralizing it (e.g. `SourceFacts.counted_effect_uses`)
     # would remove the risk of one of these call sites using the wrong scope's policy, as two of them once did.
     return [
         Violation(EFFECT_RULES[use.category], name, f"[dev tool] effect {use.category} uses {use.target}; tooling may not use it (`dev_tools_forbid`)", use.line)
         for use in info.facts.effect_uses
-        if use.category in policy.dev_tools_forbid and use.category in EFFECT_RULES and policy.counts_effect_seam(use.seam)
+        if use.category in dev_tools_forbid and use.category in EFFECT_RULES and policy.counts_effect_seam(use.seam)
     ]
 
 
@@ -228,7 +175,7 @@ def _forwarded_targets(env: _ImportEnv, host: str, fwd: Forwarder, seen: set[str
     return out
 
 
-def _restricted_import(policy: Policy, name: str, target: str, line: int) -> Violation | None:
+def _restricted_import(policy: ArchitecturePolicy, name: str, target: str, line: int) -> Violation | None:
     allowed = policy.restricted_importers(name, target)
     if allowed is None:
         return None
@@ -307,7 +254,7 @@ def _owner_text(item: OwnedLiteral) -> str:
     return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
 
 
-def _stale_owned_literals(policy: Policy, modules: Collection[str]) -> list[Violation]:
+def _stale_owned_literals(policy: ArchitecturePolicy, modules: Collection[str]) -> list[Violation]:
     """An owner glob that matches no module: after a rename the literal would be owned by nobody."""
     return [
         Violation(Rule.LITERAL_OUTSIDE_OWNER, item.literal, f"`owned_literal` {item.literal!r}: modules glob {glob!r} matches no module")
@@ -341,7 +288,7 @@ def _site_text(item: ConstructionSite) -> str:
     return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
 
 
-def _stale_construction_sites(policy: Policy, modules: Collection[str]) -> list[Violation]:
+def _stale_construction_sites(policy: ArchitecturePolicy, modules: Collection[str]) -> list[Violation]:
     """A target module or owner glob that matches no module: after a rename the rule would restrict, or allow, nothing."""
     out: list[Violation] = []
     for item in policy.construct_only:
@@ -354,7 +301,7 @@ def _stale_construction_sites(policy: Policy, modules: Collection[str]) -> list[
     return out
 
 
-def _stale_importable_by(policy: Policy, modules: Collection[str]) -> list[Violation]:
+def _stale_importable_by(policy: ArchitecturePolicy, modules: Collection[str]) -> list[Violation]:
     """Each `importable_by` key or importer glob that matches no module: a rename would otherwise leave the rule restricting nothing."""
     out: list[Violation] = []
     for pattern, allowed in policy.importable_by:
@@ -378,13 +325,14 @@ def _sibling_index(known: Collection[str]) -> dict[str, list[str]]:
 
 
 def _external_imports(
-    policy: Policy, name: str, ring: str, line: int, tops: Collection[str], third_party: ThirdParty,
+    context: RuleContext, name: str, ring: str, line: int, tops: Collection[str], third_party: ThirdParty,
     siblings: Mapping[str, list[str]],
 ) -> list[Violation]:
+    policy = context.require_policy(name)  # the scope's rules; the target Python (`stdlib`) is the root's
     rule = policy.ring(ring)
     out: list[Violation] = []
     for top in tops:
-        is_stdlib = top in policy.stdlib
+        is_stdlib = top in context.policy.stdlib
         if not is_stdlib:
             third_party.setdefault(dist_name(policy.dependencies.get(top, top)), set()).add(name)
         if ALL not in rule.external and top not in rule.external and policy.restricts_external(top, is_stdlib):
@@ -399,7 +347,7 @@ def _external_imports(
     return out
 
 
-def _os_branching(policy: Policy, name: str, ring: str, rule: RingRule, info: ModuleInfo) -> list[Violation]:
+def _os_branching(policy: ArchitecturePolicy, name: str, ring: str, rule: RingRule, info: ModuleInfo) -> list[Violation]:
     if not policy.preset.os_branching or rule.os_branching:
         return []
     return [
@@ -418,8 +366,9 @@ def _target_ring(context: RuleContext, target: str, known: Collection[str]) -> s
 
 
 def _patch_violation(context: RuleContext, name: str, info: ModuleInfo, known: Collection[str], use: EffectUse) -> list[Violation]:
-    policy = context.require_policy(name)
-    tests_folder = policy.practices.get("effect-patch", policy.practices.get("secrets-guard"))
+    policy = context.require_policy(name)  # the test module's scope rules; `practices` is whole-run configuration
+    practices = context.policy.practices
+    tests_folder = practices.get("effect-patch", practices.get("secrets-guard"))
     package_names = {module.split(".", 1)[0] for module in known}
     if not isinstance(tests_folder, str) or not tests_folder.strip("/"):
         return []
@@ -498,7 +447,7 @@ def _reexport_findings(name: str, ring: str, rule: RingRule, info: ModuleInfo, p
 
 
 def _entry_dependencies(
-    policy: Policy, known: Collection[str], entry_deps: Mapping[str, tuple[str, ...] | None], third_party: ThirdParty
+    policy: ArchitecturePolicy, known: Collection[str], entry_deps: Mapping[str, tuple[str, ...] | None], third_party: ThirdParty
 ) -> list[Violation]:
     out: list[Violation] = []
     for script in policy.entry_scripts:
@@ -664,7 +613,7 @@ def check_modules(
     third_party_by_scope: dict[str | None, ThirdParty] = {}
     import_graph: dict[str, set[str]] = {name: set() for name in modules}
     effect_graph: dict[str, set[str]] = {name: set() for name in modules}
-    pending_effect_edges: list[_EffectEdge] = []
+    pending_effect_edges: list[EffectEdge] = []
     for name, info in sorted(modules.items()):
         local_policy = context.policy_for(name)
         is_tool = name in context.tool_modules  # developer tooling: no ring, may import product code
@@ -694,15 +643,15 @@ def check_modules(
                 target for target in internal
                 if target in modules and context.scope_name(target) == context.scope_name(name)
             )
-            _record_effect_edge(context, effect_graph, pending_effect_edges, _EffectImport(local_policy, name, ring, imp, internal))
+            record_effect_edge(context, effect_graph, pending_effect_edges, EffectImport(local_policy, name, ring, imp, internal))
             if error is not None:
                 out.append(Violation(Rule.BAD_IMPORT, name, error, imp.line))
             out += (
                 _scope_imports(context, name, imp.line, internal) + _scope_effect_leaks(context, modules, name, imp.line, internal)
-                + _unsanctioned_effect_imports(context, modules, _EffectImport(local_policy, name, ring, imp, internal))
+                + unsanctioned_effect_imports(context, modules, EffectImport(local_policy, name, ring, imp, internal))
             )
             out += _internal_imports(context, name, ring, imp.line, internal) + _forwarded_imports(context, name, imp, _ImportEnv(modules, known, tops, import_graph))
-            out += _external_imports(local_policy, name, ring, imp.line, external, third_party, siblings)
+            out += _external_imports(context, name, ring, imp.line, external, third_party, siblings)
         out += _os_branching(local_policy, name, ring, rule, info)
         out += _effect_uses(context, name, ring, info, known)
         out += (
@@ -710,258 +659,9 @@ def check_modules(
             + _typed_port_violations(name, ring, rule, info)
             + _reexport_findings(name, ring, rule, info, (known, tops))
         )
-    out += _effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
-    out = _with_move_closures(out, context, modules, known, tops)
-    return out + _mixed_purity_findings(context, modules, known, import_graph) + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
-
-
-def _mixed_purity_findings(
-    context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], import_graph: Mapping[str, Collection[str]],
-) -> list[Violation]:
-    """A module holding substantial pure logic next to effectful code, in any ring (#173), plus stale allowlist entries.
-
-    The detail carries no names or counts, so the baseline key stays stable as functions come and go; the effect kinds,
-    the definitions on each side and the importer count (the blast radius) are in the hint."""
-    importers = importer_counts(import_graph)
-    followed = Followed(modules)
-    out: list[Violation] = []
-    mixed: set[str] = set()
-    for name, info in sorted(modules.items()):
-        local_policy, ring = context.policy_for(name), context.resolve_ring(name)
-        report = assess_in_ring(info, local_policy, ring, followed) if local_policy is not None and ring is not None and name not in context.tool_modules else None
-        if local_policy is None or ring is None or report is None:
-            continue
-        mixed.add(name)
-        if not is_allowed(local_policy.mixed_purity, name):
-            found = replace(report, importers=importers.get(name, 0))
-            out.append(_purity_violation(ring, found))
-    return out + _stale_purity_allow(context, modules, known, mixed)
-
-
-def _purity_violation(ring: str, report: ModulePurity) -> Violation:
-    if report.weak:
-        detail = f"[{ring}] mixes substantial pure logic with code whose only effects are weak kinds"
-        return Violation(Rule.MIXED_PURITY_WEAK, report.module, detail, report.line, hint=summarize(report))
-    detail = f"[{ring}] mixes substantial pure logic with effectful code"
-    return Violation(Rule.MIXED_PURITY, report.module, detail, report.line, hint=summarize(report))
-
-
-def _stale_purity_allow(
-    context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], mixed: Collection[str],
-) -> list[Violation]:
-    """An allowlist entry that matches no module, or only modules that are not mixed: it would hide nothing, or hide a future regression."""
-    out: list[Violation] = []
-    policies = [(scope.policy, [n for n in known if context.scope_name(n) == scope.name]) for scope in context.policy.scopes] or [(context.policy, list(known))]
-    for policy, scope_known in policies:
-        if not policy.mixed_purity.enabled:
-            continue
-        for entry in policy.mixed_purity.allow:
-            matches = [name for name in scope_known if in_unit(name, entry.module)]
-            if not matches:
-                out.append(Violation(Rule.MIXED_PURITY, entry.module, f"`mixed_purity.allow` {entry.module!r}: matches no module"))
-            elif all(name in modules for name in matches) and not any(name in mixed for name in matches):
-                out.append(Violation(
-                    Rule.MIXED_PURITY, entry.module, f"`mixed_purity.allow` {entry.module!r}: no module it matches is mixed any more; remove the entry",
-                ))
-    return out
-
-
-def _with_move_closures(
-    found: list[Violation], context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], tops: Collection[str],
-) -> list[Violation]:
-    """Ring-mismatch ``internal-import`` findings gain the whole closure of what a move would drag along (#133)."""
-    return [
-        replace(v, hint=hint) if v.rule == Rule.INTERNAL_IMPORT and v.target and (hint := _move_closure(context, modules, known, tops, v)) else v
-        for v in found
-    ]
-
-
-def _move_closure(context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str], tops: Collection[str], violation: Violation) -> str:
-    name = violation.subject
-    ring, policy = context.resolve_ring(name), context.policy_for(name)
-    if ring is None or policy is None or " may import only " not in violation.detail:
-        return ""
-    move: list[str] = []
-    externals: set[str] = set()
-    seen, queue = {name}, [name]
-    while queue:
-        current = queue.pop()
-        for imp in modules[current].facts.imports if current in modules else ():
-            internal, external, _ = resolve_targets(current, modules[current].is_package, imp, known, tops)
-            externals.update(_restricted_externals(policy, ring, external))
-            for target in _outside_ring(context, modules, name, ring, internal):
-                if target not in seen:
-                    seen.add(target)
-                    move.append(target)
-                    queue.append(target)
-    return _closure_text(name, ring, move, externals)
-
-
-def _closure_text(name: str, ring: str, move: list[str], externals: set[str]) -> str:
-    if not move and not externals:
-        return ""
-    parts = [f"to make {name} live in {ring}, also move: {sorted(move) or 'nothing'}"]
-    if externals:
-        parts.append(f"and allow externals: {sorted(externals)}")
-    return " (" + "; ".join(parts) + ")"
-
-
-def _restricted_externals(policy: Policy, ring: str, tops: Collection[str]) -> list[str]:
-    allowed = policy.ring(ring).external
-    return [top for top in tops if ALL not in allowed and top not in allowed and policy.restricts_external(top, top in policy.stdlib)]
-
-
-def _outside_ring(context: RuleContext, modules: Mapping[str, ModuleInfo], name: str, ring: str, targets: Collection[str]) -> list[str]:
-    allowed = context.require_policy(name).allowed_rings(ring)
-    return [
-        t for t in targets
-        if t in modules and context.scope_name(t) == context.scope_name(name) and context.resolve_ring(t) not in allowed
-    ]
-
-
-_NON_PROPAGATING_EFFECTS = frozenset({"os-branching", "patch"})  # not a ring effect, or meaningless once removed from its own module
-
-
-class _EffectEdge(NamedTuple):
-    """One import edge a forbidden effect could propagate along: ``name``'s policy forbidding it in ``ring``."""
-
-    policy: Policy
-    name: str
-    ring: str
-    line: int
-    targets: list[str]
-
-
-class _EffectImport(NamedTuple):
-    policy: Policy
-    name: str
-    ring: str
-    imp: RawImport
-    internal: list[str]
-
-
-def _record_effect_edge(
-    context: RuleContext, effect_graph: dict[str, set[str]], pending: list[_EffectEdge], edge: _EffectImport,
-) -> None:
-    """A type-only import never runs, so it carries no effect; everything else, within the same scope, does."""
-    if edge.imp.type_only:
-        return
-    targets = [
-        target for target in edge.internal
-        if target in effect_graph and target != edge.name and context.scope_name(target) == context.scope_name(edge.name)
-    ]
-    effect_graph[edge.name].update(targets)
-    pending.append(_EffectEdge(edge.policy, edge.name, edge.ring, edge.imp.line, targets))
-
-
-def is_sanctioned(policy: Policy, module: str) -> bool:
-    """Whether ``effects.sanctioned`` names this module as a capability seam: its own direct uses stop at it."""
-    return any(in_unit(module, pattern) for pattern in policy.effects.sanctioned)
-
-
-def _unsanctioned_effect_imports(context: RuleContext, modules: Mapping[str, ModuleInfo], edge: _EffectImport) -> list[Violation]:
-    """The guard that makes ``effects.sanctioned`` safe: a ring that forbids effects imports a provider-ring module only if it is a listed seam.
-
-    Off unless the policy sets ``effects.sanctioned``. Type-only imports never run and are not checked. A target with no measured
-    direct effects of its own (a pure module that ``admit`` steers into the effects ring) is not a seam and needs no listing (#202);
-    what it imports still reaches the importer through ``effect-via-import``."""
-    policy = edge.policy
-    if not policy.effects.configured or edge.imp.type_only or not policy.forbidden_effects(edge.ring):
-        return []
-    out: list[Violation] = []
-    for target in sorted(set(edge.internal)):
-        target_ring = context.resolve_ring(target)
-        if target_ring not in policy.effects.rings or context.scope_name(target) != context.scope_name(edge.name) or is_sanctioned(policy, target):
-            continue
-        target_policy = context.policy_for(target)
-        if target in modules and target_policy is not None and not _direct_propagating_effects(target_policy, modules[target]):
-            continue
-        detail = (
-            f"[{edge.ring}] imports {target!r}, a module of the {target_ring!r} ring that is not listed in `effects.sanctioned`; "
-            "reach the effect through a sanctioned seam, or list the module if it is one"
-        )
-        out.append(Violation(Rule.EFFECT_UNSANCTIONED_IMPORT, edge.name, detail, edge.imp.line, root_cause=f"{Rule.EFFECT_UNSANCTIONED_IMPORT}|{target}"))
-    return out
-
-
-def _direct_propagating_effects(policy: Policy, info: ModuleInfo) -> frozenset[str]:
-    if is_sanctioned(policy, info.name):
-        return frozenset[str]()
-    return frozenset(
-        use.category for use in info.facts.effect_uses
-        if use.category not in _NON_PROPAGATING_EFFECTS and policy.counts_effect_seam(use.seam)
-    )
-
-
-def _effect_via_import_violations(
-    context: RuleContext, modules: Mapping[str, ModuleInfo], effect_graph: Mapping[str, Collection[str]], edges: Collection[_EffectEdge],
-) -> list[Violation]:
-    reachable = _effect_reachable(context, modules, effect_graph)
-    out: list[Violation] = []
-    constraints = context.policy.package_constraints
-    for edge in edges:
-        out += _effect_via_import(edge, reachable)
-        if constraints.must_be_pure and not is_exempt_path(modules[edge.name].path):
-            out += reach_violations(constraints, edge.name, edge.line, edge.targets, reachable)
-    return out
-
-
-def _effect_reachable(
-    context: RuleContext, modules: Mapping[str, ModuleInfo], effect_graph: Mapping[str, Collection[str]],
-) -> dict[str, dict[str, tuple[str, ...]]]:
-    """module -> {effect category: the chain of modules, starting with itself, down to the one that directly uses it}.
-
-    Only edges in ``effect_graph`` (first-party, non-type-only, same scope) propagate. A cycle stops recursion rather
-    than looping; the modules on it still get whatever their own direct effects and acyclic imports contribute."""
-    memo: dict[str, dict[str, tuple[str, ...]]] = {}
-    visiting: set[str] = set()
-
-    def compute(name: str) -> dict[str, tuple[str, ...]]:
-        if name in memo:
-            return memo[name]
-        if name in visiting:
-            return {}
-        visiting.add(name)
-        info = modules.get(name)
-        local_policy = context.policy_for(name)
-        result: dict[str, tuple[str, ...]] = (
-            dict.fromkeys(_direct_propagating_effects(local_policy, info), (name,))
-            if local_policy is not None and info is not None else {}
-        )
-        for target in sorted(effect_graph.get(name, ())):
-            for category, chain in compute(target).items():
-                if category not in result:
-                    result[category] = (name, *chain)
-        visiting.discard(name)
-        memo[name] = result
-        return result
-
-    return {name: compute(name) for name in modules}
-
-
-def _via_import_cause(category: str, chain: tuple[str, ...]) -> str:
-    """The root cause of one reaching effect (#198): its kind and the last edge of the chain, ``importer->origin``.
-
-    ``chain`` starts at the imported module and ends at the one that uses the effect directly, so every module that
-    reaches the effect through the same final edge shares one cause. A chain of one has no edge: the cause is the origin."""
-    edge = f"{chain[-2]}->{chain[-1]}" if len(chain) > 1 else chain[-1]
-    return f"{Rule.EFFECT_VIA_IMPORT}|{category}|{edge}"
-
-
-def _effect_via_import(edge: _EffectEdge, reachable: Mapping[str, Mapping[str, tuple[str, ...]]]) -> list[Violation]:
-    forbidden = edge.policy.forbidden_effects(edge.ring)
-    if not forbidden:
-        return []
-    out: list[Violation] = []
-    for target in edge.targets:
-        seen: set[str] = set()
-        for category, chain in reachable.get(target, {}).items():
-            if category not in forbidden or category in seen:
-                continue
-            seen.add(category)
-            detail = f"[{edge.ring}] imports {target!r}; effect {category} reaches it via {' -> '.join(chain)}; inject a port instead"
-            out.append(Violation(Rule.EFFECT_VIA_IMPORT, edge.name, detail, edge.line, root_cause=_via_import_cause(category, chain)))
-    return out
+    out += effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
+    out = with_move_closures(out, context, modules, known, tops)
+    return out + mixed_purity_findings(context, modules, known, import_graph) + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
 
 
 def fits_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, known: Collection[str]) -> bool:
@@ -979,7 +679,7 @@ def fits_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, know
         if error is not None:
             return False
         found += _internal_imports(context, name, ring, imp.line, internal)
-        found += _external_imports(policy, name, ring, imp.line, external, {}, {})
+        found += _external_imports(context, name, ring, imp.line, external, {}, {})
     found += _os_branching(policy, name, ring, policy.ring(ring), info)
     found += _effect_uses(context, name, ring, info, known)
     found += _abstraction_violations(name, ring, policy.ring(ring), info)

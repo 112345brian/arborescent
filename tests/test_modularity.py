@@ -8,9 +8,10 @@ import pytest
 from arborescent_helpers import mini_policy, services
 from test_package_gaps import repo
 
+from arborescent.check_runner import run_check
 from arborescent.cli import main
 from arborescent.domain import PolicyError, Rule
-from arborescent.engine import Options, child_arbor_command, run_check, run_own
+from arborescent.engine import Options, child_arbor_command, run_own
 
 OPTS = Options(tools=False, use_baseline=False)
 REQUIRE = Options(tools=False, use_baseline=False, require_modularity=True)

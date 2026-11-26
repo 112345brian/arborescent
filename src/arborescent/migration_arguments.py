@@ -17,8 +17,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from .domain import INFORMATIONAL_RULES
-from .package_assignment import RepositoryFacts, assignment_violations, owners_of
+from .findings import INFORMATIONAL_RULES
+from .package_assignment import WorkspaceFacts, assignment_violations, owners_of
 from .package_fields import extraction_target, within
 from .package_model import (
     CatalogDocument,
@@ -133,7 +133,7 @@ class PackageArguments:
 @dataclass(frozen=True, slots=True)
 class _Inputs:
     catalog: CatalogDocument
-    facts: RepositoryFacts
+    facts: WorkspaceFacts
     sole: Mapping[str, str]  # module -> its only owning package
 
 
@@ -148,7 +148,7 @@ class MigrationArguments:
         return not any(gap.severity == ERROR for gap in self.gaps)
 
 
-def build_migration_arguments(catalog: CatalogDocument, facts: RepositoryFacts) -> MigrationArguments:
+def build_migration_arguments(catalog: CatalogDocument, facts: WorkspaceFacts) -> MigrationArguments:
     gaps: list[Gap] = [
         Gap(str(v.rule), v.subject, v.detail, INFO if v.rule in INFORMATIONAL_RULES else ERROR)
         for v in [*assignment_violations(catalog, facts), *policy_violations(catalog)]
@@ -168,7 +168,7 @@ def build_migration_arguments(catalog: CatalogDocument, facts: RepositoryFacts) 
     )
 
 
-def _sole_owners(catalog: CatalogDocument, facts: RepositoryFacts) -> dict[str, str]:
+def _sole_owners(catalog: CatalogDocument, facts: WorkspaceFacts) -> dict[str, str]:
     return {
         module: owners[0]
         for module, path in facts.modules.items()
@@ -177,7 +177,7 @@ def _sole_owners(catalog: CatalogDocument, facts: RepositoryFacts) -> dict[str, 
 
 
 def _observed_edges(
-    facts: RepositoryFacts, sole: Mapping[str, str]
+    facts: WorkspaceFacts, sole: Mapping[str, str]
 ) -> tuple[set[tuple[str, str]], dict[str, dict[str, list[tuple[str, str]]]]]:
     """Package-level imports, and for each imported package the (importing module, imported module) pairs by package."""
     edges: set[tuple[str, str]] = set()
@@ -331,7 +331,7 @@ def _module_below(path: PurePosixPath, root: PurePosixPath) -> str | None:
 
 
 def _external_gaps(
-    package: PackageDescriptor, facts: RepositoryFacts, mine: Sequence[str], gaps: list[Gap]
+    package: PackageDescriptor, facts: WorkspaceFacts, mine: Sequence[str], gaps: list[Gap]
 ) -> tuple[str, ...] | None:
     observed = sorted({name for module in mine for name in facts.externals.get(module, ())})
     declared = set(package.externals or ())

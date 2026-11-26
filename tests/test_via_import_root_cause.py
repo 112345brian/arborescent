@@ -71,7 +71,7 @@ def test_a_workspace_baselined_by_root_cause_holds_one_entry_per_cause(repo: Pat
     found = _chain(repo)
     fs, path = FakeFileSystem(), Path("/repo/baseline.json")
     fs.mkdir(Path("/repo"))
-    baseline.record(fs, path, found, adopt="effects", by_root_cause=True)
+    baseline.record(fs, path, found, baseline.RecordOptions(adopt="effects", by_root_cause=True))
     doc = fs.read_json(path)
     assert doc["violations"] == []
     assert doc["root_causes"] == {DOMAIN: ["app.ports"], PORTS_DOMAIN: ["app.adapters", "app.main"]}

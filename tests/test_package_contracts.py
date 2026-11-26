@@ -26,7 +26,7 @@ from arborescent.config import policy_from_mapping
 from arborescent.domain import Policy, Rule
 from arborescent.engine import drift, run_own, write_generated
 from arborescent.generated_config import IMPORT_LINTER_FILE, TACH_FILE
-from arborescent.package_assignment import RepositoryFacts, assignment_violations
+from arborescent.package_assignment import WorkspaceFacts, assignment_violations
 from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_contracts import PackageLayout, layout_of
 from arborescent.package_gaps import package_layout
@@ -114,7 +114,7 @@ def test_the_own_rules_and_the_layout_never_disagree() -> None:
         for imported in modules:
             if importer == imported:
                 continue
-            facts = RepositoryFacts(paths, {}, {importer: (imported,)}, ())
+            facts = WorkspaceFacts(paths, {}, {importer: (imported,)}, ())
             found = assignment_violations(catalog(), facts) + preservation_violations(catalog(), facts, [])
             flagged = [v for v in found if v.rule in {Rule.PACKAGE_UNDECLARED_DEPENDENCY, Rule.PACKAGE_PRIVATE_IMPORT}]
             assert bool(flagged) is (not layout().allows(importer, imported)), (importer, imported)

@@ -5,11 +5,9 @@ from __future__ import annotations
 import ast
 import io
 import tokenize
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-
-from .ports import FileSystem
 
 __all__ = ["Suggestion", "file_size_suggestions", "logical_code_lines"]
 
@@ -72,7 +70,7 @@ def logical_code_lines(source: str) -> int:
 
 
 def file_size_suggestions(
-    fs: FileSystem,
+    read_text: Callable[[Path], str],
     root: Path,
     modules: Mapping[str, str],
     *,
@@ -82,7 +80,7 @@ def file_size_suggestions(
     return [
         Suggestion(path, count, threshold)
         for _, path in sorted(modules.items())
-        if (count := logical_code_lines(fs.read_text(root / path))) > threshold
+        if (count := logical_code_lines(read_text(root / path))) > threshold
     ]
 
 

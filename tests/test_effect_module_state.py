@@ -118,7 +118,7 @@ def test_classify_evidence_ignores_container_mutation() -> None:
 
 
 def test_mixed_purity_still_sees_the_same_kinds() -> None:
-    report = assess(ModuleInfo("m", "m.py", False, extract(STATE_MODULE)), mini_policy())
+    report = assess(ModuleInfo("m", "m.py", False, extract(STATE_MODULE)), mini_policy(), mini_policy().mixed_purity)
     assert report is not None and set(report.kinds) == {"state", "memo"}
 
 
@@ -199,6 +199,21 @@ def test_a_cache_named_container_is_a_cache_not_a_registry() -> None:
     assert seen("_MEMO = {}\n\n\ndef f(k):\n    _MEMO[k] = 1\n") == {("cache", "f._MEMO")}
 
 
+@pytest.mark.parametrize(("forbid", "expected"), [(["env"], []), (["env", "cache"], ["effect-unsanctioned-import", "effect-via-import"])])
+def test_the_unsanctioned_guard_counts_module_state_only_where_the_importer_forbids_it(repo: Path, forbid: list[str], expected: list[str]) -> None:
+    """A provider-ring module whose only "effect" is a memoised loader is still pure (#202) until a ring opts in to `cache` (#194)."""
+    write_files(repo, {
+        "app/ports.py": "import functools\n\n\n@functools.cache\ndef load() -> int:\n    return 1\n",
+        "app/adapters.py": "from . import ports\n",
+    })
+    rings = ring_with(
+        ports={"may_import": ["domain"], "external": ["functools"], "forbid": []},
+        adapters={"may_import": ["domain", "ports"], "external": [], "forbid": forbid},
+    )
+    found = effect_rules(repo, ring=rings, effects={"sanctioned": [], "rings": ["ports"]})
+    assert [rule for rule, _ in found] == expected
+
+
 # --- policy: opt in by listing the category ---------------------------------------------------------------------------------
 
 
@@ -264,11 +279,12 @@ def test_every_reader_of_effect_uses_is_known() -> None:
     assert readers == [
         "classify_audit.py",  # skips MODULE_STATE_CATEGORIES: it describes a module's I/O
         "coupling.py",  # skips MODULE_STATE_CATEGORIES: accessors are I/O or ambient reads
+        "effect_import_rules.py",  # via-import reports forbidden categories only; the unsanctioned guard skips opt-in ones not forbidden
         "facts.py",  # produces them
         "package_constraint_rules.py",  # forbidden set only, opt in through `forbid_effects`
         "purity.py",  # filtered by `mixed_purity.kinds`, which cannot name them
         "rules.py",  # filtered by the ring's `forbid`
-        "scanner.py",  # serialises every category
+        "scan_cache_codec.py",  # serialises every category
         "selftest.py",  # filtered by the ring's `forbid`
         "tach_visibility.py",  # dynamic-import only
     ]

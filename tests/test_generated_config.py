@@ -14,7 +14,8 @@ import pytest
 from arborescent_helpers import mini_policy, services, write_files
 
 from arborescent.adapters import LocalFileSystem
-from arborescent.engine import Options, run_check, write_generated
+from arborescent.check_runner import run_check
+from arborescent.engine import Options, write_generated
 from arborescent.engines import ImportLinter
 from arborescent.generated_config import (
     GENERATED_MARKER,

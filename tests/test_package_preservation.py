@@ -10,8 +10,9 @@ from extracted_tree import extract_tree
 
 import arborescent.package_gaps as package_gaps
 from arborescent.adapters import FsScanner, LocalFileSystem
+from arborescent.check_runner import run_check
 from arborescent.domain import INFORMATIONAL_RULES, PolicyError, Rule
-from arborescent.engine import Options, run_check, run_own
+from arborescent.engine import Options, run_own
 from arborescent.package_checks import AnnotationPackageChecks
 from arborescent.package_model import CatalogError
 from arborescent.packages import PackageCatalog, load_extracted_package
