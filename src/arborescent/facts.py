@@ -13,10 +13,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from .call_facts import (
+    CallShape,
     FunctionCalls,
     FunctionSpan,
     bare_calls,
     call_aliases,
+    call_shapes,
     call_sites,
     discard_call_lines,
     dotted_name,
@@ -31,7 +33,9 @@ from .declaration_facts import (
     script_deps,
 )
 from .definition_facts import (
+    ClassShape,
     TopLevelDef,
+    class_shapes,
     main_guard_line,
     purity_helpers,
     result_defs,
@@ -91,6 +95,8 @@ class SourceFacts:
     seams: SeamFacts = field(default_factory=SeamFacts)  # real injectable effects inside functions, with the parameters around them (#233)
     function_spans: tuple[FunctionSpan, ...] = ()  # every function and method with its line span, to place `calls` inside them (#229)
     companion_exempt: tuple[tuple[int, str], ...] = ()  # (code line, reason) of `# companion-exempt:` comments (#231)
+    call_shapes: tuple[CallShape, ...] = ()  # the arguments of each call on an imported or module-level name (#234)
+    class_shapes: tuple[ClassShape, ...] = ()  # what each module-level class's constructor accepts (#234)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -146,6 +152,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         seam_facts(tree, sites, running, aliases, dotted_name),
         function_spans(tree, nodes, calls_aliases),
         exemption_comments(source),
+        call_shapes(tree, nodes, calls_aliases),
+        class_shapes(tree, calls_aliases),
     )
 
 

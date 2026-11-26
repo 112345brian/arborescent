@@ -55,6 +55,8 @@ class Rule(StrEnum):
     CALL_OUTSIDE_ALLOWLIST = "call-outside-allowlist"
     HAND_ROLLED_IDIOM = "hand-rolled-idiom"
     MISSING_COMPANION_CALL = "missing-companion-call"
+    CONSTRUCTION_FORBIDDEN_ARGUMENT = "construction-forbidden-argument"
+    CONSTRUCTION_MISSING_ARGUMENT = "construction-missing-argument"
     MISSING_MODULE_DOCSTRING = "missing-module-docstring"
     DOCSTRING_RING_MISMATCH = "docstring-ring-mismatch"
     NON_ABSTRACT_PORT = "non-abstract-port"

@@ -20,6 +20,7 @@ from .construct_only_probes import (
     call_allowlist_mutations,
     companion_mutations,
     construct_only_mutations,
+    construction_mutations,
 )
 from .domain import (
     NOISE_DIRS,
@@ -209,6 +210,7 @@ def _local_mutations(
     steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(call_allowlist_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(companion_mutations(local_policy, local_paths, local_known, arbor_index))
+    steps.append(construction_mutations(local_policy, local_paths, arbor_index, scan.modules))
     steps.append(mixed_purity_mutations(local_policy, purity, local_paths, arbor_index, scan.modules))
     steps.append(_seam_bypass_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(_docs_mutations(local_policy, local_paths, local_known, arbor_index))

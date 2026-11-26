@@ -26,6 +26,8 @@ from arborescent.testing import FakeToolRunner
 
 PACKAGE_RULES = {rule for rule in Rule if rule.startswith("package-")}
 DOCS_RULES = {Rule.MISSING_MODULE_DOCSTRING, Rule.DOCSTRING_RING_MISMATCH}
+# arborescent declares no `[[construction]]` entry; tests/test_construction.py runs these probes and checks each one fires
+CONSTRUCTION_ARGUMENT_RULES = {Rule.CONSTRUCTION_FORBIDDEN_ARGUMENT, Rule.CONSTRUCTION_MISSING_ARGUMENT}
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY: dict[str, Any] = {"sources": ["app", "run.py"], "entry_scripts": ["run"], "classify": {**CLASSIFY, "run": "composition"}}
 
@@ -77,6 +79,8 @@ def test_rule_id_strings_never_change() -> None:
             "call-outside-allowlist",
             "hand-rolled-idiom",
             "missing-companion-call",
+            "construction-forbidden-argument",
+            "construction-missing-argument",
             "missing-module-docstring",
             "docstring-ring-mismatch",
             "non-abstract-port",
@@ -151,7 +155,7 @@ def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     # The policy declares no `call_allowlist` idiom and no `companion` pair (it has no wrapper or recorder to name): their probes are run
     # by tests/test_call_allowlist.py and tests/test_companion.py
     old_tokenizer = {Rule.UNTOKENIZABLE_SOURCE} if sys.version_info < (3, 12) else set()  # 3.11 tokenizes a doubled CR: no probe (reported as skipped)
-    assert set(NO_MUTATION) | mutated | old_tokenizer | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, Rule.EFFECT_AT_IMPORT, Rule.EFFECT_SEAM_BYPASSED, Rule.HAND_ROLLED_IDIOM, Rule.MISSING_COMPANION_CALL, *DOCS_RULES, *PACKAGE_RULES} >= set(Rule)
+    assert set(NO_MUTATION) | mutated | old_tokenizer | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, Rule.EFFECT_AT_IMPORT, Rule.EFFECT_SEAM_BYPASSED, Rule.HAND_ROLLED_IDIOM, Rule.MISSING_COMPANION_CALL, *DOCS_RULES, *PACKAGE_RULES, *CONSTRUCTION_ARGUMENT_RULES} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
 
