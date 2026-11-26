@@ -12,7 +12,6 @@ import json
 import subprocess
 import sys
 import time
-import unicodedata
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TypedDict, cast
@@ -23,8 +22,8 @@ from arborescent.declaration_facts import arbor_annotation, script_deps
 from arborescent.domain import Policy, Rule, Violation
 from arborescent.effect_categories import effect_category_of
 from arborescent.engine import discovery_findings
-from arborescent.facts import ModuleInfo, SourceFacts
-from arborescent.import_syntax import RawImport, raw_imports
+from arborescent.facts import SourceFacts
+from arborescent.import_syntax import raw_imports
 from arborescent.rules import RuleContext, check_modules
 
 # The rules decided by file discovery, module names, imports, `__arbor__` and PEP 723 metadata alone. Every other rule
@@ -59,17 +58,7 @@ class Source(TypedDict):
     is_package: bool
 
 
-class Import(TypedDict):
-    level: int
-    module: str
-    names: list[str]
-    line: int
-    lazy: bool
-    type_only: bool
-
-
 class ModuleEvidence(TypedDict):
-    imports: list[Import]
     syntax_error: bool
 
 
@@ -125,13 +114,13 @@ class Result:
     parsed: int
     violations: tuple[Finding, ...]
     syntax_errors: tuple[str, ...]
-    # Valid Python the worker's grammar rejects: imports come from Python, call evidence from these files is missing.
+    # Valid Python the worker's grammar rejects: call evidence from these files is missing.
     incomplete: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class _Headline:
-    """What CPython decides for a file: whether it parses, and the metadata that selects modules and rings."""
+    """What CPython decides for a file: whether it parses, its imports, and the metadata that selects modules and rings."""
 
     source: str
     facts: SourceFacts
@@ -145,7 +134,7 @@ def _headline(source: str) -> _Headline:
         return _Headline(source, SourceFacts((), (), None), True)
     ring, error, role, reason = arbor_annotation(tree)
     facts = SourceFacts(
-        (),
+        raw_imports(tree),
         (),
         script_deps(source),
         arbor_ring=ring,
@@ -154,24 +143,6 @@ def _headline(source: str) -> _Headline:
         arbor_reason=reason,
     )
     return _Headline(source, facts, False)
-
-
-def _identifier(name: str) -> str:
-    return unicodedata.normalize("NFKC", name)  # as CPython reads identifiers
-
-
-def _imports(evidence: ModuleEvidence) -> tuple[RawImport, ...]:
-    return tuple(
-        RawImport(
-            imp["level"],
-            _identifier(imp["module"]),
-            tuple(_identifier(name) for name in imp["names"]),
-            imp["line"],
-            imp["lazy"],
-            imp["type_only"],
-        )
-        for imp in evidence["imports"]
-    )
 
 
 def _effect_findings(evidence: Evidence, context: RuleContext) -> list[Finding]:
@@ -201,32 +172,12 @@ def _effect_findings(evidence: Evidence, context: RuleContext) -> list[Finding]:
     return findings
 
 
-def _module_facts(
-    evidence: Evidence, scan: ScanData, headlines: dict[str, _Headline]
-) -> tuple[dict[str, ModuleInfo], tuple[str, ...]]:
-    """The scanned modules with their imports filled in, and the paths the worker could not parse."""
-    modules: dict[str, ModuleInfo] = {}
-    incomplete: list[str] = []
-    for name, info in scan.modules.items():
-        headline = headlines[info.path]
-        facts = evidence["modules"][name]
-        imports: tuple[RawImport, ...] = ()
-        if not headline.syntax_error and facts["syntax_error"]:
-            imports = raw_imports(ast.parse(headline.source))
-            incomplete.append(info.path)
-        elif not headline.syntax_error:
-            imports = _imports(facts)
-        modules[name] = replace(info, facts=replace(info.facts, imports=imports))
-    return modules, tuple(sorted(incomplete))
-
-
 @dataclass(frozen=True)
 class _Checked:
     """Everything the parity rules read, so a save that leaves it alone reuses their findings."""
 
     policy: Policy
     scan: ScanData
-    modules: dict[str, ModuleInfo]
 
 
 def _context(checked: _Checked) -> RuleContext:
@@ -243,7 +194,7 @@ def _parity_findings(checked: _Checked) -> list[Finding]:
     context = _context(checked)
     scan = checked.scan
     found = check_modules(
-        checked.policy, checked.modules, scan.known, scan.entry_deps, context
+        checked.policy, scan.modules, scan.known, scan.entry_deps, context
     )
     found += discovery_findings(context, scan)
     return [
@@ -335,8 +286,15 @@ class Analysis:
         self, evidence: Evidence, policy: Policy, scan: ScanData
     ) -> tuple[tuple[Finding, ...], tuple[str, ...]]:
         """The findings, and the paths whose calls are missing."""
-        modules, incomplete = _module_facts(evidence, scan, self._seen)
-        checked = _Checked(policy, scan, modules)
+        # The worker is never sent what CPython rejects, so these are valid Python its grammar cannot parse.
+        incomplete = tuple(
+            sorted(
+                info.path
+                for name, info in scan.modules.items()
+                if evidence["modules"][name]["syntax_error"]
+            )
+        )
+        checked = _Checked(policy, scan)
         if checked != self._checked:
             self._parity = _parity_findings(checked)
             self._checked = checked

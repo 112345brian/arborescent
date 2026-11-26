@@ -2,11 +2,12 @@
 
 The Python driver watches the project that holds an Arborescent policy file. It uses the
 full scan's own file discovery, module selection and `check_modules`. The Rust worker keeps
-each module's imports and reverse call edges between saves, parses only changed modules,
-and walks backwards from the requested effect targets to provide call evidence.
+reverse call edges between saves, parses only changed modules, and walks backwards from the
+requested effect targets to provide call evidence.
 
-CPython also parses each changed file in the driver. It decides what is a syntax error and
-reads `__arbor__` and PEP 723 metadata, because tree-sitter accepts much that Python rejects.
+CPython also parses each changed file in the driver. It decides what is a syntax error, because
+tree-sitter accepts much that Python rejects, and reads imports (with the full scan's own
+`raw_imports`), `__arbor__` and PEP 723 metadata.
 
 From the repository root, with Arborescent installed in the active Python environment:
 
@@ -36,7 +37,7 @@ baseline, child policy, engine or practice runs.
 - A full scan stops at the first syntax error. The driver lists the broken files in
   `syntax_errors` and reports the rest.
 - Some valid Python is rejected by the tree-sitter grammar. Those files appear in
-  `incomplete`: their imports are read by Python, but their calls are missing.
+  `incomplete`: the rules above still cover them, but their calls are missing.
 
 ## Worker-only evidence
 
@@ -55,3 +56,7 @@ Run the tests from the repository root (they need Cargo and Git):
 ```sh
 python -m pytest -p no:tach tools/incremental_worker/test_parity.py tools/incremental_worker/test_save.py
 ```
+
+Without `ARBORESCENT_WORKER` the tests build a debug worker themselves, and skip when Cargo is
+missing. Set it to a built binary (relative paths start at the repository root) to test that one;
+a missing file then fails the run. CI does this with the release build.
