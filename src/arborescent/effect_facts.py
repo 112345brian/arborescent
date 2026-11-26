@@ -1,5 +1,7 @@
 """Effect facts: the table of effectful APIs by category, and every direct use of one in a module.
 
+The same pass also lists the writes to module-level mutable state that no lock of the module encloses (``StateWrite``, #232).
+
 A use is a name or attribute chain that resolves (through the import alias table) to an effectful target, a method
 called on a path-valued name, a ``global`` mutation, or a static ``patch(...)`` target. A reference held in a parameter
 default is recorded as an injection seam, a type annotation is not a use, and ``random.Random(<seed>)`` is deterministic."""
@@ -10,6 +12,7 @@ import ast
 import re
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from .call_facts import dotted_name
 from .effect_categories import (
@@ -20,7 +23,7 @@ from .effect_categories import (
 )
 from .purity_facts import local_names, module_containers, mutated_container
 
-__all__ = ["EffectUse", "effect_uses"]
+__all__ = ["EffectUse", "ModuleEffects", "StateWrite", "module_effects"]
 
 
 _PATH_IO_METHODS = frozenset({
@@ -50,6 +53,25 @@ class EffectUse:
     def is_module_state(self) -> bool:
         """A `registry`/`cache` use (#194): shared state, not I/O, so the readers that describe a module's I/O skip it."""
         return self.category in MODULE_STATE_CATEGORIES
+
+
+@dataclass(frozen=True, order=True)
+class StateWrite:
+    """A write inside a function to a module-level container or ``global`` name that no lock of its own module encloses (#232).
+
+    Whether another module's lock or a guard decorator covers it is the rule's question, so both travel with the write."""
+
+    line: int
+    name: str  # the module-level name written
+    function: str  # the innermost function around the write
+    held: tuple[str, ...] = ()  # dotted names of the `with` contexts around it inside that function (a call names its callee)
+    decorators: tuple[str, ...] = ()  # dotted names of the decorators of the functions around it; relative imports keep their dots
+
+
+class ModuleEffects(NamedTuple):
+    uses: tuple[EffectUse, ...]
+    state_writes: tuple[StateWrite, ...]
+    locks: tuple[str, ...]  # module-level names bound to a thread or process lock
 
 
 _SEAM_ANNOTATIONS = frozenset({"Callable", "Mapping", "MutableMapping"})
@@ -284,69 +306,167 @@ def _own_scope_nodes(func: ast.AST) -> Iterable[ast.AST]:
             stack.extend(ast.iter_child_nodes(node))
 
 
-def _global_effect_uses(nodes: Sequence[ast.AST]) -> list[EffectUse]:
-    """A function that both declares ``global x`` and assigns ``x`` (plain, augmented or in a ``for``/``with``
-    target) mutates module state from inside a call; one that only reads a global is not a use."""
-    uses: list[EffectUse] = []
-    for func in (n for n in nodes if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
+def _global_writes(
+    functions: Sequence[ast.FunctionDef | ast.AsyncFunctionDef],
+) -> list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str, ast.Name]]:
+    """(function, name, node) for each assignment or ``del`` of a name its own function declares ``global``."""
+    found: list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str, ast.Name]] = []
+    for func in functions:
         declared: set[str] = set()
-        assigned: dict[str, int] = {}
+        bound: list[ast.Name] = []
         for node in _own_scope_nodes(func):
             if isinstance(node, ast.Global):
                 declared.update(node.names)
-            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                assigned.setdefault(node.id, node.lineno)
-        uses.extend(EffectUse(assigned[name], "global", f"{func.name}.{name}") for name in sorted(declared & assigned.keys()))
-    return uses
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+                bound.append(node)
+        found.extend((func, node.id, node) for node in bound if node.id in declared)
+    return found
+
+
+def _global_effect_uses(writes: Sequence[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str, ast.Name]]) -> list[EffectUse]:
+    """A function that both declares ``global x`` and assigns ``x`` (plain, augmented or in a ``for``/``with``
+    target) mutates module state from inside a call; one that only reads a global is not a use."""
+    first: dict[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str], int] = {}  # by node: two methods may share a name
+    for func, name, node in writes:
+        if isinstance(node.ctx, ast.Store):
+            first.setdefault((func, name), node.lineno)
+    return [EffectUse(line, "global", f"{func.name}.{name}") for (func, name), line in first.items()]
 
 
 _CACHE_DECORATORS = frozenset({"functools.cache", "functools.lru_cache"})  # not `cached_property`: that cache is per instance
 _CACHE_NAME = re.compile(r"cache|memo", re.IGNORECASE)
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)  # a tuple: a `|` union is rebuilt at every check, and these run once per node
 _WRITE_NODES = frozenset({ast.Call, ast.Subscript})  # the only node types `mutated_container` can answer for
+# Not a semaphore (it can admit more than one writer) and not `asyncio.Lock` (it excludes tasks, not threads).
+_LOCK_FACTORIES = frozenset({
+    "threading.Lock", "threading.RLock", "threading.Condition", "multiprocessing.Lock", "multiprocessing.RLock",
+})
 
 
-def _module_state_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> list[EffectUse]:
-    """#194, module state that is not a ``global`` rebinding. A function that writes a module-level ``dict``/``list``/``set`` (item
-    assignment, ``del`` or a mutating method call) is a ``registry`` use, or a ``cache`` use when the container's name says cache or
-    memo; a ``functools.cache``/``lru_cache`` decorator is a ``cache`` use. A name the function (or one around it) binds itself is a
-    local, not the module's container; import-time fills and reads are not uses. Recorded in every module, failing only where a ring
-    lists the category in ``forbid`` (see ``MODULE_STATE_CATEGORIES``)."""
-    functions = [node for node in nodes if isinstance(node, _DEFS)]
-    uses = [
+_Function = ast.FunctionDef | ast.AsyncFunctionDef
+_Span = tuple[int, int, int, _Function]  # (first line, last line, column, function)
+
+
+def _spans(functions: Sequence[_Function]) -> list[_Span]:
+    return sorted(
+        ((min([f.lineno, *(d.lineno for d in f.decorator_list)]), f.end_lineno or f.lineno, f.col_offset, f) for f in functions),
+        key=lambda span: span[:3],
+    )
+
+
+def _around(spans: Sequence[_Span], node: ast.AST) -> list[_Function]:
+    """The functions around ``node``, outermost first, found by source position so the tree is not walked again."""
+    line, column = getattr(node, "lineno", 0), getattr(node, "col_offset", 0)
+    return [f for start, end, indent, f in spans if start <= line <= end and (line > start or column >= indent)]
+
+
+def _cache_loader_uses(functions: Sequence[_Function], aliases: dict[str, str]) -> list[EffectUse]:
+    return [
         EffectUse(decorator.lineno, "cache", target)
         for func in functions
         for decorator in func.decorator_list
         if (target := dotted_name(decorator.func if isinstance(decorator, ast.Call) else decorator, aliases)) in _CACHE_DECORATORS
     ]
-    if not isinstance(tree, ast.Module) or not (containers := module_containers(tree, aliases, dotted_name)):
-        return uses
-    return uses + _container_writes(nodes, functions, containers)
 
 
 def _container_writes(
-    nodes: Sequence[ast.AST], functions: Sequence[ast.FunctionDef | ast.AsyncFunctionDef], containers: set[str],
-) -> list[EffectUse]:
-    """The function-level writes to ``containers``. The functions around a write are found by source position, so the tree is not
-    walked again, and a function's local names are computed only when a write is found inside it."""
-    spans = sorted(
-        ((min([f.lineno, *(d.lineno for d in f.decorator_list)]), f.end_lineno or f.lineno, f.col_offset, f) for f in functions),
-        key=lambda span: span[:3],
-    )
+    nodes: Sequence[ast.AST], spans: Sequence[_Span], containers: set[str],
+) -> list[tuple[str, ast.AST, list[_Function]]]:
+    """(name, node, functions around it) for the function-level writes to ``containers``. A name one of those functions binds
+    itself is a local, not the module's container; local names are computed only when a write is found inside a function."""
     bound: dict[ast.AST, set[str]] = {}
-    uses: list[EffectUse] = []
+    found: list[tuple[str, ast.AST, list[_Function]]] = []
     for node in [n for n in nodes if n.__class__ in _WRITE_NODES]:  # nearly every module has `__all__`, so this runs over most: filter first
         if (name := mutated_container(node, containers)) is None:
             continue
-        line, column = getattr(node, "lineno", 0), getattr(node, "col_offset", 0)
-        scopes = [f for start, end, indent, f in spans if start <= line <= end and (line > start or column >= indent)]
+        scopes = _around(spans, node)
         for scope in scopes:
             if scope not in bound:
                 bound[scope] = local_names(scope)
         if scopes and not any(name in bound[scope] for scope in scopes):
-            category = "cache" if _CACHE_NAME.search(name) else "registry"
-            uses.append(EffectUse(line, category, f"{scopes[-1].name}.{name}"))
-    return uses
+            found.append((name, node, scopes))
+    return found
+
+
+def _module_level_locks(body: Sequence[ast.stmt], aliases: dict[str, str]) -> set[str]:
+    """Names bound to a lock at module level, ``if``/``try``/``with`` blocks included."""
+    locks: set[str] = set()
+    for stmt in body:
+        if isinstance(stmt, ast.Assign | ast.AnnAssign):
+            if isinstance(stmt.value, ast.Call) and dotted_name(stmt.value.func, aliases) in _LOCK_FACTORIES:
+                targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+                locks.update(t.id for t in targets if isinstance(t, ast.Name))
+        elif isinstance(stmt, ast.If | ast.With):
+            locks |= _module_level_locks([*stmt.body, *getattr(stmt, "orelse", [])], aliases)
+        elif isinstance(stmt, ast.Try | ast.TryStar):
+            nested = [*stmt.body, *stmt.orelse, *stmt.finalbody, *(s for h in stmt.handlers for s in h.body)]
+            locks |= _module_level_locks(nested, aliases)
+    return locks
+
+
+def _held(withs: Sequence[ast.With], node: ast.AST, function: _Function, aliases: dict[str, str]) -> tuple[str, ...]:
+    """The contexts of the ``with`` blocks inside ``function`` whose body contains ``node``: a block around the ``def``
+    itself holds nothing when the function is later called."""
+    at = (getattr(node, "lineno", 0), getattr(node, "col_offset", 0))
+    names: set[str] = set()
+    for block in withs:
+        first = block.body[0]
+        inside = (block.lineno, block.col_offset) > (function.lineno, function.col_offset)
+        if not (inside and (first.lineno, first.col_offset) <= at < (block.end_lineno or 0, block.end_col_offset or 0)):
+            continue
+        for item in block.items:
+            context = item.context_expr
+            name = dotted_name(context.func if isinstance(context, ast.Call) else context, aliases)
+            if name is not None:
+                names.add(name)
+    return tuple(sorted(names))
+
+
+def _unguarded_writes(
+    nodes: Sequence[ast.AST], writes: Sequence[tuple[str, ast.AST, list[_Function]]], locks: set[str], aliases: dict[str, str],
+) -> tuple[StateWrite, ...]:
+    """The writes no lock of this module encloses. ``aliases`` keep a relative import's dots, for the rule to resolve."""
+    if not writes:
+        return ()
+    withs = [n for n in nodes if n.__class__ is ast.With]
+    found: set[StateWrite] = set()
+    for name, node, scopes in writes:
+        held = _held(withs, node, scopes[-1], aliases)
+        if locks.isdisjoint(held):
+            decorators = {
+                target for scope in scopes for d in scope.decorator_list
+                if (target := dotted_name(d.func if isinstance(d, ast.Call) else d, aliases)) is not None
+            }
+            found.add(StateWrite(getattr(node, "lineno", 0), name, scopes[-1].name, held, tuple(sorted(decorators))))
+    return tuple(sorted(found))
+
+
+def _module_state(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str], call_names: dict[str, str]) -> ModuleEffects:
+    """Module state written from functions.
+
+    As effect uses (#194): a ``global`` rebinding is ``global``; a function that writes a module-level ``dict``/``list``/``set``
+    (item assignment, ``del`` or a mutating method call) is a ``registry`` use, or a ``cache`` use when the container's name says
+    cache or memo; a ``functools.cache``/``lru_cache`` decorator is a ``cache`` use. Import-time fills and reads are not uses.
+    Recorded in every module, failing only where a ring lists the category in ``forbid`` (see ``MODULE_STATE_CATEGORIES``).
+
+    As ``StateWrite``s (#232): the same container and ``global`` writes, minus those inside a ``with <module lock>``."""
+    functions = [node for node in nodes if isinstance(node, _DEFS)]
+    rebinds = _global_writes(functions)
+    uses = _global_effect_uses(rebinds) + _cache_loader_uses(functions, aliases)
+    if not isinstance(tree, ast.Module):
+        return ModuleEffects(tuple(uses), (), ())
+    locks = _module_level_locks(tree.body, aliases)
+    containers = module_containers(tree, aliases, dotted_name)
+    if not (containers or rebinds):
+        return ModuleEffects(tuple(uses), (), tuple(sorted(locks)))
+    spans = _spans(functions)
+    contained = _container_writes(nodes, spans, containers) if containers else []
+    uses += [
+        EffectUse(getattr(node, "lineno", 0), "cache" if _CACHE_NAME.search(name) else "registry", f"{scopes[-1].name}.{name}")
+        for name, node, scopes in contained
+    ]
+    writes = contained + [(name, node, _around(spans, node)) for _, name, node in rebinds]
+    return ModuleEffects(tuple(uses), _unguarded_writes(nodes, writes, locks, call_names), tuple(sorted(locks)))
 
 
 def _annotation_node_ids(nodes: Sequence[ast.AST]) -> set[int]:
@@ -377,14 +497,17 @@ def _seeded_random_ids(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> set
     return seeded
 
 
-def effect_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[EffectUse, ...]:
+def module_effects(
+    tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str], call_names: dict[str, str] | None = None,
+) -> ModuleEffects:
+    """``nodes`` is the walk of ``tree``; ``call_names`` is ``aliases`` with relative imports kept (defaults to ``aliases``)."""
     seams = _injection_defaults(nodes)
     rebound = _rebound_names(nodes)
     hints = _annotation_node_ids(nodes)
     seeded = _seeded_random_ids(nodes, aliases)
-    uses: set[EffectUse] = set(_global_effect_uses(nodes))
+    state = _module_state(tree, nodes, aliases, aliases if call_names is None else call_names)
+    uses: set[EffectUse] = set(state.uses)
     uses.update(_path_receiver_uses(tree, nodes, aliases))
-    uses.update(_module_state_uses(tree, nodes, aliases))
     imported_os_names: set[str] = set()
     for node in nodes:
         if isinstance(node, ast.ImportFrom):
@@ -395,7 +518,7 @@ def effect_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]
         if isinstance(node, ast.Attribute | ast.Name) and id(node) not in hints and not _is_shadowed(node, imported_os_names, rebound):
             found.append(None if id(node) in seeded else _reference_use(node, aliases, seams))
         uses.update(use for use in found if use is not None)
-    return tuple(sorted(uses))
+    return state._replace(uses=tuple(sorted(uses)))
 
 
 _SHADOWABLE_BUILTINS = frozenset({"open", "print", "input"})

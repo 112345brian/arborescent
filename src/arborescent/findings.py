@@ -58,6 +58,8 @@ class Rule(StrEnum):
     MIXED_PURITY_EXCLUDED = "mixed-purity-excluded"
     MIXED_PURITY_WEAK = "mixed-purity-weak"
     UNTOKENIZABLE_SOURCE = "untokenizable-source"
+    UNGUARDED_MODULE_STATE = "unguarded-module-state"
+    UNGUARDED_MODULE_STATE_NOTE = "unguarded-module-state-note"
     SCOPE_IMPORT = "scope-import"
     SCOPE_EFFECT_LEAK = "scope-effect-leak"
     CIRCULAR_IMPORT = "circular-import"
@@ -137,7 +139,7 @@ CONSTRAINT_RULES: frozenset[Rule] = frozenset({Rule.PACKAGE_CONSTRAINT_FACTS, Ru
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
     Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE, Rule.MIXED_PURITY_EXCLUDED, Rule.MIXED_PURITY_WEAK,
-    Rule.ADAPTER_EQUIVALENCE_REPORT,
+    Rule.ADAPTER_EQUIVALENCE_REPORT, Rule.UNGUARDED_MODULE_STATE_NOTE,
 })
 
 
@@ -192,7 +194,11 @@ def root_cause_hint(cause: str, findings: int) -> str:
     return ""
 
 
+_STATE_HINT = " (hold a module-level threading.Lock/RLock around every write, or see `unguarded_module_state` for guard decorators and `allow`)"
+
 _RENDER_HINTS = {
+    Rule.UNGUARDED_MODULE_STATE: _STATE_HINT,
+    Rule.UNGUARDED_MODULE_STATE_NOTE: _STATE_HINT,
     Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on or above the line)",
     Rule.VENDOR_FOLDER: (
         " (folder excluded from the scan; to govern it list it under `vendor_roots` or set `scan_vendors = true`,"

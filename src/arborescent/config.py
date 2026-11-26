@@ -22,7 +22,12 @@ from .domain import (
     ResultDiscard,
     RingRule,
 )
-from .effects_policy import DEFAULT_PROVIDER_RINGS, EffectsPolicy
+from .effects_policy import (
+    DEFAULT_PROVIDER_RINGS,
+    EffectsPolicy,
+    ModuleStatePolicy,
+    StateAllow,
+)
 from .package_constraints import (
     ConstraintError,
     PackageConstraints,
@@ -292,6 +297,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         coupling=_coupling(raw),
         mixed_purity=_mixed_purity(raw),
         lazy_import_rings=_lazy_import_rings(raw, {rule.name for rule in core.rings}),
+        module_state=_module_state(raw, {rule.name for rule in core.rings}),
         effects=_effects(raw),
         package_constraints=_package_constraints(raw),
         ratchets=ratchet_specs(raw.get("ratchet", {})),
@@ -420,6 +426,40 @@ def _lazy_import_rings(raw: Mapping[str, Any], known: Collection[str]) -> tuple[
     return rings
 
 
+def _module_state(raw: Mapping[str, Any], known: Collection[str]) -> ModuleStatePolicy | None:
+    """``[unguarded_module_state]`` (#232): absent means off. A typo in a ring or key is an error, not a silent no-op."""
+    if "unguarded_module_state" not in raw:
+        return None
+    table = raw["unguarded_module_state"]
+    if not isinstance(table, Mapping):
+        raise PolicyError("`unguarded_module_state` must be a table")
+    table = cast("Mapping[str, Any]", table)
+    unknown_keys = set(table) - {"rings", "locks", "guard_decorators", "allow"}
+    if unknown_keys:
+        raise PolicyError(f"unknown key in `unguarded_module_state`: {sorted(unknown_keys)}")
+    rings = _string_list(table, "rings")
+    if "rings" in table and not rings:
+        raise PolicyError("`unguarded_module_state.rings` must name at least one ring; omit it to cover every ring")
+    unknown = sorted(set(rings) - set(known))
+    if unknown:
+        raise PolicyError(f"unknown ring in `unguarded_module_state.rings`: {unknown}; known: {sorted(known)}")
+    return ModuleStatePolicy(rings, _string_list(table, "locks"), _string_list(table, "guard_decorators"), _state_allow(table))
+
+
+def _state_allow(table: Mapping[str, Any]) -> tuple[StateAllow, ...]:
+    entries = table.get("allow", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
+        raise PolicyError("`unguarded_module_state.allow` must be an array of tables: [[tool.arborescent.unguarded_module_state.allow]]")
+    out: list[StateAllow] = []
+    for entry in cast("list[Mapping[str, Any]]", entries):
+        values = [entry.get(key) for key in ("module", "name", "reason")]
+        if set(entry) != {"module", "name", "reason"} or not all(isinstance(v, str) and v.strip() for v in values):
+            raise PolicyError("each `unguarded_module_state.allow` entry needs a `module`, a `name` and a written `reason`, and nothing else")
+        module, name, reason = (str(v).strip() for v in values)
+        out.append(StateAllow(module, name, reason))
+    return tuple(out)
+
+
 def _effects(raw: Mapping[str, Any]) -> EffectsPolicy:
     table = raw.get("effects", {})
     if not isinstance(table, Mapping):
@@ -504,6 +544,7 @@ def _scoped_policy(raw: Mapping[str, Any]) -> Policy:
         coupling=_coupling(raw),
         package_constraints=_package_constraints(raw),
         lazy_import_rings=_lazy_import_rings(raw, {ring.name for scope in scopes for ring in scope.policy.rings}),
+        module_state=_module_state(raw, {ring.name for scope in scopes for ring in scope.policy.rings}),
         rings=(),
         classify=(),
         sources=tuple(path for scope in scopes for path in scope.policy.sources),

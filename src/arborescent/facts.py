@@ -31,7 +31,7 @@ from .definition_facts import (
     top_level_defs,
     weak_port_returns,
 )
-from .effect_facts import EffectUse, effect_uses
+from .effect_facts import EffectUse, StateWrite, module_effects
 from .forwarder_facts import Forwarder, forwarders
 from .import_syntax import RawImport, import_aliases, raw_imports
 from .purity_facts import PurityFacts, PurityUnit, purity_facts
@@ -68,6 +68,8 @@ class SourceFacts:
     dynamic_imports: tuple[tuple[int, str], ...] = ()  # (line, literal module name, or "" when the target is not a plain absolute string literal) (#161)
     purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
     untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
+    state_writes: tuple[StateWrite, ...] = ()  # writes to module-level mutable state outside the module's own locks (#232)
+    module_locks: tuple[str, ...] = ()  # module-level names bound to a lock, so another module's `with locks.L:` can be believed (#232)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -90,9 +92,10 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     nodes = list(ast.walk(tree))  # one walk, shared by every fact below
     aliases = import_aliases(nodes)  # computed once: each fact below reads it
     calls_aliases = call_aliases(nodes, aliases)
+    effects = module_effects(tree, nodes, aliases, calls_aliases)
     return SourceFacts(
         raw_imports(tree),
-        effect_uses(tree, nodes, aliases),
+        effects.uses,
         script_deps(source),
         suppressions,
         discard_call_lines(nodes),
@@ -116,6 +119,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         dynamic_imports(nodes, aliases),
         purity_facts(tree, nodes, aliases, purity_helpers(aliases), calls_aliases),
         untokenizable,
+        effects.state_writes,
+        effects.locks,
     )
 
 

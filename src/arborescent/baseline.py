@@ -18,7 +18,7 @@ __all__ = [
 ]
 
 VERSION = 2
-OWN_ADOPTION_FAMILIES = frozenset({"coverage", "effects", "suppressions", "discard", "lazy-import"})  # `--adopt` families that need no external engine
+OWN_ADOPTION_FAMILIES = frozenset({"coverage", "effects", "suppressions", "discard", "lazy-import", "unguarded-module-state"})  # `--adopt` families that need no external engine
 
 
 class BaselineError(PolicyError):

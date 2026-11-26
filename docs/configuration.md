@@ -843,6 +843,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `reexport-ratio` | a ring with `max_reexport_ratio` has a module whose public surface (a static `__all__`, else its public top-level bindings; at least 5 names) is mostly first-party imports. Moving an import into such a pass-through module clears the `internal-import` edge without changing the dependency. Third-party and stdlib re-exports do not count, and the detail carries no counts so the baseline key stays stable |
 | `mixed-purity` | a module holds at least `min_pure_units` (default 2) substantial pure top-level functions or classes (a body of at least `min_body_lines`, default 4, lines) and at least one effectful one, or an effect that runs at import time. Enforced in every ring; see [Mixed purity](#mixed-purity-toolarborescentmixed_purity). The detail names only the ring, so the baseline key survives renaming functions; the hint lists the effect kinds, the effectful and pure definitions and the importer count. Also an `allow` entry that matches no module or no mixed module |
 | `untokenizable-source` | a file Python's `ast` accepts but `tokenize` rejects (a doubled carriage return `\r\r\n` is the usual cause, #181). Its `# noqa`, `# type: ignore` and `# deferred:` comments cannot be read, so the file gets no comment facts and this finding instead of aborting the run. A violation, so it can be baselined; the detail is fixed text (the tokenizer's line and message ride in the hint), and the fix is to remove the stray byte |
+| `unguarded-module-state` | with `[unguarded_module_state]` set, a function writes a module-level container or `global` name outside a module-level lock, in a ring the table covers; also an `allow` entry that matches nothing. See [Unguarded module state](#unguarded-module-state-toolarborescentunguarded_module_state-232) |
+| `unguarded-module-state-note` | informational: the same write in a ring that `unguarded_module_state.rings` does not list. Never fails a check and never enters the baseline |
 | `mixed-purity-weak` | informational: a module that is mixed only because of `mixed_purity.weak_kinds` (for example it prints or logs). Never fails a check and never enters the baseline. Off until `weak_kinds` is set |
 | `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
@@ -1188,6 +1190,44 @@ them. A policy that does not list them in a `forbid` keeps every finding and bas
 `mixed-purity` is unchanged: it keeps its own `state` and `memo` kinds for the same writes and decorators, and a `mixed_purity.kinds` list cannot
 name `registry` or `cache`. Every detected category, for a `forbid` list: `clock`, `monotonic`, `env`, `host`, `identity`, `randomness`, `sleep`,
 `threads`, `state`, `process`, `filesystem`, `fs-query`, `network`, `database`, `dynamic-import`, `console`, `global`, `registry`, `cache`, `patch`.
+
+### Unguarded module state: `[tool.arborescent.unguarded_module_state]` (#232)
+
+`registry`, `cache` and `global` say whether a ring may hold shared module state at all. This opt-in rule asks the narrower question: where such
+state exists, is every write guarded by a lock? Without the table it is off; an empty table turns it on for every ring.
+
+```toml
+[tool.arborescent.unguarded_module_state]
+rings = ["adapters"]                            # fail here; a note in other rings. Omit to fail in every ring
+locks = ["app.sync.registry_lock"]              # extra `with` contexts that guard (dotted names or globs)
+guard_decorators = ["app.sync.synchronized"]    # decorators that guard the whole function
+
+[[tool.arborescent.unguarded_module_state.allow]]
+module = "app.cli"                              # module, package prefix or glob
+name = "_handlers"                              # the module-level name, or a glob
+reason = "filled before any thread starts"      # required
+```
+
+**What is a write.** Inside a function or method: `REG[k] = v`, `REG[k] += 1`, `del REG[k]` and the mutating calls listed under
+[Module-level state](#module-level-state-registry-and-cache-194) on a module-level `dict`/`list`/`set` (cache-named ones included), and any
+assignment, augmented assignment or `del` of a name the function declares `global`. Import-time fills, reads and locals of the same name are not.
+
+**What guards it.** The write is lexically inside a `with` block, within the same function, naming a module-level `threading.Lock`, `RLock` or
+`Condition` (or `multiprocessing.Lock`/`RLock`), defined in this module or imported from another scanned one; or naming an entry of `locks` (for
+`with factory(key):`, the factory); or the function, or one around it, has a decorator listed in `guard_decorators`. A `with` around a nested
+`def` does not guard the nested function. There is one finding per module, name and writing function.
+
+`arborescent baseline --adopt unguarded-module-state` records the current findings once. A stale `allow` entry is reported under the same rule.
+`--changed` reads only the changed files, so it trusts a `with` on a name from a module it did not read.
+
+**Blind spots (a clean run is not proof of thread safety).** Not reported although they may race: containers imported from another module, writes
+through an alias, `self.attr` or a class attribute, nested containers (`REG[k].append(v)`), object attributes (`STATE.x = 1`), functions that
+mutate an argument (`heapq.heappush(REG, v)`, `|=` on an alias), containers bound inside `if`/`try`, and containers built by anything other than
+the listed literals and constructors. Reads are never checked, so check-then-act outside the lock passes, and so do two writers that hold
+*different* locks. Reported although they may be safe (use `locks`, `guard_decorators` or `allow`): `lock.acquire()`/`release()` pairs, a helper
+documented as "caller holds the lock", an instance or class lock (`with self._lock:`), semaphores, a lock re-exported through a third module or
+created lazily, a registry filled only by import-time decorators, `deque.append` and other single operations that CPython happens to make atomic,
+and `asyncio` code whose state only one event loop touches.
 
 ### `[tool.arborescent.effects]`: sanctioned seams
 

@@ -21,6 +21,7 @@ from .domain import (
     NOISE_DIRS,
     ArchitecturePolicy,
     ArchitectureScope,
+    ModuleStatePolicy,
     Mutation,
     Policy,
     Rule,
@@ -67,6 +68,7 @@ _PRACTICE = "repository practice: selftest mutates source files only and runs no
 # Rules with no mutation, and why. A test fails when a rule is in neither this table nor ``plan``'s output.
 NO_MUTATION: dict[Rule, str] = {
     Rule.MIXED_PURITY_WEAK: "informational note: a module whose only effects are `mixed_purity.weak_kinds`; covered by tests/test_purity_rings.py",
+    Rule.UNGUARDED_MODULE_STATE_NOTE: "informational note outside `unguarded_module_state.rings`; covered by tests/test_unguarded_module_state.py",
     Rule.MIXED_PURITY_EXCLUDED: "informational note about files the policy excludes; the scan does not read them as modules; covered by tests/test_mixed_purity.py",
     Rule.REEXPORT_RATIO: "needs a module whose whole public surface is first-party imports, which one appended statement cannot make; covered by tests/test_reexport_ratio.py",
     Rule.FORBIDDEN_MODULE: "fires on a module name the policy forbids; selftest probes use fixed names no `forbidden_modules` pattern is written for",
@@ -146,6 +148,9 @@ def plan(
         found, local_skipped = _local_mutations(local_policy, policy.mixed_purity, local_paths, local_known, scan)
         out.extend(found)
         skipped.extend(local_skipped)
+        found, local_skipped = _module_state_mutations(policy.module_state, local_policy, local_paths, arbor_index)
+        out.extend(found)
+        skipped.extend(local_skipped)
     anchor = next(iter(sorted(known)), None)
     circular_anchor = next((
         name
@@ -209,6 +214,25 @@ def _local_mutations(
         skipped.extend(step_skipped)
     out.extend(_entry_dependency_mutations(local_policy, local_paths, local_known, arbor_index))
     return out, skipped
+
+
+def _module_state_mutations(
+    setting: ModuleStatePolicy | None, policy: ArchitecturePolicy, paths: Mapping[str, str],
+    arbor_index: Mapping[str, tuple[str | None, str | None]],
+) -> tuple[list[Mutation], list[str]]:
+    """Probe ``unguarded-module-state`` (#232), when it is on: a new dict written without a lock in a ring where that fails."""
+    if setting is None:
+        return [], []
+    host = next((
+        name for name in sorted(paths)
+        if not paths[name].endswith("__init__.py")
+        and (ring := policy.resolve_ring(arbor_index, name)) is not None and setting.fails_in(ring)
+        and not setting.allowing(name, "_arborescent_probe_state")
+    ), None)
+    if host is None:
+        return [], [f"{Rule.UNGUARDED_MODULE_STATE}: no module in a checked ring that `allow` does not cover"]
+    probe = "_arborescent_probe_state = {}\n\n\ndef _arborescent_probe_unguarded():\n    _arborescent_probe_state['k'] = 1"
+    return [Mutation(Rule.UNGUARDED_MODULE_STATE, f"an unlocked write to module state in {host}", paths[host], probe)], []
 
 
 def _docs_mutations(
