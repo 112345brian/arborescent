@@ -173,6 +173,8 @@ class PortBinding:
     max_implementors: int = 1
     exclude: tuple[str, ...] = ()  # module globs or `module.Class` names that are not production bindings
     reason: str = ""
+    shadow: tuple[str, ...] = ()  # effect categories the one implementation owns; other functions using them are noted
+    shadow_allow: tuple[str, ...] = ()  # module globs or `module.function` names that are not noted
 
     @property
     def port_module(self) -> str:

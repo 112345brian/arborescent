@@ -1016,7 +1016,7 @@ def _port_bindings(raw: Mapping[str, Any]) -> tuple[PortBinding, ...]:
 
 
 def _port_binding(entry: Mapping[str, Any]) -> PortBinding:
-    unknown = set(entry) - {"port", "max", "exclude", "reason"}
+    unknown = set(entry) - {"port", "max", "exclude", "reason", "shadow", "shadow_allow"}
     if unknown:
         raise PolicyError(f"unknown key in `port_binding`: {sorted(unknown)}")
     port, limit, reason = entry.get("port"), entry.get("max", 1), entry.get("reason", "")
@@ -1029,7 +1029,27 @@ def _port_binding(entry: Mapping[str, Any]) -> PortBinding:
         isinstance(item, str) and item for item in cast("list[object]", exclude)
     ):
         raise PolicyError(f"`port_binding` {port!r}: `exclude` is a list of non-empty strings, `reason` a string")
-    return PortBinding(port, limit, tuple(cast("list[str]", exclude)), reason)
+    return PortBinding(port, limit, tuple(cast("list[str]", exclude)), reason, *_port_shadow(entry, port, limit))
+
+
+def _port_shadow(entry: Mapping[str, Any], port: str, limit: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """``shadow`` and ``shadow_allow`` of one ``port_binding`` entry (#219)."""
+    values: list[tuple[str, ...]] = []
+    for key in ("shadow", "shadow_allow"):
+        value = entry.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
+            raise PolicyError(f"`port_binding` {port!r}: `{key}` is a list of non-empty strings")
+        values.append(tuple(cast("list[str]", value)))
+    shadow, allow = values
+    # module state and test patches are not a resource an adapter owns
+    owned = EFFECT_CATEGORIES - {"cache", "global", "patch", "registry", "state"}
+    if unknown := sorted(set(shadow) - owned):
+        raise PolicyError(f"`port_binding` {port!r}: unknown category in `shadow`: {unknown}; known: {sorted(owned)}")
+    if shadow and limit != 1:
+        raise PolicyError(f"`port_binding` {port!r}: `shadow` needs a single implementation, so `max` must be 1")
+    if allow and not shadow:
+        raise PolicyError(f"`port_binding` {port!r}: `shadow_allow` does nothing without `shadow`")
+    return shadow, allow
 
 
 def _result_discard(raw: Mapping[str, Any]) -> ResultDiscard | None:

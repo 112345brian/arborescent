@@ -102,8 +102,12 @@
 - `[[port_binding]]` (#219): opt-in rule `port-binding` for a declared Protocol or abstract class with no production
   implementor, or more than `max` (default 1). Implementors are subclasses and, for a Protocol, classes that define all of its
   member names; test doubles are not counted.
+- `port_binding.shadow` (#219): opt-in observation `port-shadow` (a `NOTE`, never failing) for code that uses a listed
+  effect category, such as `monotonic` or `process`, outside the port's one implementation; `shadow_allow` exempts.
 - `[name_collisions]` (#221): opt-in observation `name-collision` (a `NOTE`, never failing) for a class field or local that
-  reuses the name of a type from another module while its annotation or literal value shows it is something else.
+  reuses the name of a type from another module while its annotation or literal value shows it is something else. For
+  declared `words`, annotated parameters and function names (`_in_scope`) are read too. `str` values are not noted: they
+  refer to the thing by name.
 - `duplicate-logic` (#228), opt-in through `[tool.arborescent.duplicate_logic]`: reports functions whose bodies are the same
   once local names, docstrings, comments and annotations are erased (literals and called names kept), within and across
   modules; first-party copies of functions under `reference_paths` such as `vendor/`; and, with `branch_skeletons`, the same

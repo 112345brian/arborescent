@@ -83,6 +83,7 @@ def test_rule_id_strings_never_change() -> None:
             "construction-forbidden-argument",
             "construction-missing-argument",
             "port-binding",
+            "port-shadow",
             "name-collision",
             "missing-module-docstring",
             "docstring-ring-mismatch",

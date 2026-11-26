@@ -35,11 +35,12 @@ def details(found: list[Violation]) -> list[str]:
     ("body", "what"),
     [
         ("class A:\n    ratchet: int = 0\n", "field 'A.ratchet'"),
-        ("class A:\n    _Ratchet: str\n", "field 'A._Ratchet'"),
-        ("class A:\n    def __init__(self) -> None:\n        self.ratchet = 'x'\n", "field 'A.ratchet'"),
+        ("class A:\n    _Ratchet: int\n", "field 'A._Ratchet'"),
+        ("class A:\n    def __init__(self) -> None:\n        self.ratchet = 1\n", "field 'A.ratchet'"),
         ("class A:\n    def go(self) -> None:\n        self.ratchet: int = 1\n", "field 'A.ratchet'"),
         ("def f() -> None:\n    ratchet = []\n", "local 'f.ratchet'"),
-        ("def f() -> None:\n    ratchet = f'{1}'\n", "local 'f.ratchet'"),
+        ("def f() -> None:\n    ratchet = (1,)\n", "local 'f.ratchet'"),
+        ("class A:\n    ratchet: list[str]\n", "field 'A.ratchet'"),
         ("def f() -> None:\n    ratchet = {k for k in ()}\n", "local 'f.ratchet'"),
         ("def f() -> None:\n    ratchet: tuple[str, ...]\n", "local 'f.ratchet'"),
         ("async def f() -> None:\n    if True:\n        ratchet = 3\n", "local 'f.ratchet'"),
@@ -70,7 +71,17 @@ def test_a_name_that_is_evidently_something_else_is_noted(repo: Path, body: str,
         # not a field or a local
         "ratchet = 1\n",
         "def ratchet() -> None:\n    pass\n",
-        "def f(ratchet: int) -> None:\n    pass\n",
+        # a str-typed value is a reference to the thing by its name
+        "class A:\n    ratchet: str\n",
+        "class A:\n    ratchet: str | None = None\n",
+        "class A:\n    ratchet: Optional['str'] = None\n",
+        "def f(ratchet: str) -> None:\n    pass\n",
+        "def f() -> None:\n    ratchet = 'by-name'\n",
+        "def f() -> None:\n    ratchet = f'{1}'\n",
+        "def ratchet(x: int) -> str:\n    return ''\n",
+        "def f(ratchet: int) -> None:\n    pass\n",  # parameters and functions are read for declared words only
+        "def ratchet(x: int) -> bool:\n    pass\n",
+        "class A:\n    def __ratchet__(self, x: int) -> bool:\n        pass\n",
         "class A:\n    RATCHET = 'ratchet'\n",
         "class A:\n    ratchet = 'an enum member or class constant'\n",
         "def f() -> None:\n    RATCHET = 1\n",
@@ -85,7 +96,7 @@ def test_the_narrow_definition_stays_quiet(repo: Path, body: str) -> None:
 
 
 def test_underscores_and_case_are_ignored_for_compound_names(repo: Path) -> None:
-    write_files(repo, files("class A:\n    architecture_scope: str\n"))
+    write_files(repo, files("class A:\n    architecture_scope: int\n"))
     assert details(run(repo)) == ["field 'A.architecture_scope' shares its name with the type app.domain.ArchitectureScope"]
 
 
@@ -95,6 +106,54 @@ def test_a_declared_word_matches_the_last_word_of_a_type(repo: Path) -> None:
     assert details(run(repo, {"words": ["scope"]})) == ["field 'RatchetSpec.scope' shares its name with the type app.domain.ArchitectureScope"]
     write_files(repo, files("class RatchetSpec:\n    scope: ArchitectureScope\n"))
     assert run(repo, {"words": ["scope"]}) == []
+
+
+@pytest.mark.parametrize(
+    ("body", "what"),
+    [
+        ("def f(ratchet: int) -> None:\n    pass\n", "parameter 'f.ratchet'"),
+        ("class A:\n    def go(self, *, ratchet: list[str]) -> None:\n        pass\n", "parameter 'A.go.ratchet'"),
+        ("def ratchet(x: int) -> bool:\n    return True\n", "function 'ratchet'"),
+        ("class A:\n    def _in_ratchet(self) -> tuple[str, ...]:\n        return ()\n", "function 'A._in_ratchet'"),
+    ],
+)
+def test_parameters_and_functions_are_noted_for_a_declared_word(repo: Path, body: str, what: str) -> None:
+    write_files(repo, files(body))
+    assert run(repo) == []
+    assert details(run(repo, {"words": ["ratchet"]})) == [f"{what} shares its name with the type app.domain.Ratchet"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def f(ratchet: str) -> None:\n    pass\n",
+        "def f(ratchet) -> None:\n    pass\n",
+        "def f(ratchet: Any, *ratchets: int, **kw: int) -> None:\n    pass\n",
+        "def f(ratchet: Ratchet) -> None:\n    pass\n",
+        "def ratchet(x) -> None:\n    pass\n",
+        "def ratchet(x: int) -> str:\n    return ''\n",
+        "def ratchet(x: int) -> Ratchet:\n    pass\n",
+        "def ratchet(spec: NamedRatchet) -> bool:\n    pass\n",
+        "class A:\n    def __ratchet__(self, x: int) -> bool:\n        pass\n",
+    ],
+)
+def test_a_declared_word_stays_quiet_without_evidence_of_another_concept(repo: Path, body: str) -> None:
+    write_files(repo, files(body))
+    assert run(repo, {"words": ["ratchet"]}) == []
+
+
+def test_a_declared_word_matches_the_last_word_of_a_function_name(repo: Path) -> None:
+    """The issue's second case: a helper and a parameter still saying `scope` after the field was renamed."""
+    write_files(repo, files("def _in_scope(spec: RatchetSpec, module: str) -> bool:\n    return True\n"))
+    assert run(repo) == []
+    assert details(run(repo, {"words": ["scope"]})) == ["function '_in_scope' shares its name with the type app.domain.ArchitectureScope"]
+    write_files(repo, files("def measure(scope: tuple[str, ...]) -> int:\n    return 0\n"))
+    assert details(run(repo, {"words": ["scope"]})) == ["parameter 'measure.scope' shares its name with the type app.domain.ArchitectureScope"]
+    concept = "def _in_scope(scope: ArchitectureScope) -> bool:\n    pass\n\n\ndef make_scope(x: int) -> ArchitectureScope:\n    pass\n"
+    write_files(repo, files(concept))
+    assert run(repo, {"words": ["scope"]}) == []
+    write_files(repo, files("def _in_scope(spec: RatchetSpec) -> bool:\n    return True\n"))
+    assert run(repo, {"words": ["scope"], "allow": [{"name": "in_scope", "reason": "on purpose"}]}) == []
 
 
 def test_the_module_that_defines_the_type_is_left_alone(repo: Path) -> None:
