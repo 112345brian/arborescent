@@ -8,15 +8,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from .call_facts import FunctionCalls
-from .definition_facts import TopLevelDef
+from .call_facts import CallShape, FunctionCalls
+from .definition_facts import ClassShape, Parameter, TopLevelDef
 from .effect_facts import EffectUse
 from .facts import Forwarder, PurityFacts, PurityUnit, SourceFacts
 from .import_syntax import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 
-CACHE_VERSION = 24
+CACHE_VERSION = 25
 
 
 def _purity_to_json(p: PurityFacts) -> list[Any]:
@@ -32,6 +32,40 @@ def _purity_from_json(raw: list[Any]) -> PurityFacts:
         PurityUnit(u[0], u[1], u[2], u[3], u[4], u[5], tuple((item[0], item[1]) for item in u[6]), tuple(u[7])) for u in raw[0]
     )
     return PurityFacts(units, tuple((item[0], item[1]) for item in raw[1]))
+
+
+def _parameters_to_json(items: tuple[Parameter, ...]) -> list[Any]:
+    return [[p.name, p.positional] for p in items]
+
+
+def _parameters_from_json(raw: list[Any]) -> tuple[Parameter, ...]:
+    return tuple(Parameter(p[0], p[1]) for p in raw)
+
+
+def _calls_to_json(shapes: tuple[CallShape, ...]) -> list[Any]:
+    return [[s.line, s.callee, s.positional, list(s.keywords), s.open_keywords, list(s.replaced)] for s in shapes]
+
+
+def _calls_from_json(raw: list[Any]) -> tuple[CallShape, ...]:
+    return tuple(CallShape(s[0], s[1], s[2], tuple(s[3]), s[4], tuple(s[5])) for s in raw)
+
+
+def _classes_to_json(shapes: tuple[ClassShape, ...]) -> list[Any]:
+    return [
+        [c.name, list(c.bases), _parameters_to_json(c.fields), None if c.init is None else _parameters_to_json(c.init),
+         c.is_dataclass, c.opaque, c.open_keywords, list(c.derived)]
+        for c in shapes
+    ]
+
+
+def _classes_from_json(raw: list[Any]) -> tuple[ClassShape, ...]:
+    return tuple(
+        ClassShape(
+            c[0], tuple(c[1]), _parameters_from_json(c[2]), None if c[3] is None else _parameters_from_json(c[3]),
+            c[4], c[5], c[6], tuple(c[7]),
+        )
+        for c in raw
+    )
 
 
 def facts_to_json(f: SourceFacts) -> list[Any]:
@@ -52,7 +86,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         [[c.name, c.line, list(c.calls)] for c in f.function_calls],
         f.module_doc,
         f.arbor_reason, [[line, target] for line, target in f.dynamic_imports],
-        _purity_to_json(f.purity), f.untokenizable,
+        _purity_to_json(f.purity), f.untokenizable, _calls_to_json(f.call_shapes), _classes_to_json(f.class_shapes),
     ]
 
 
@@ -83,5 +117,5 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple(raw[19]), tuple((item[0], item[1]) for item in raw[20]),
         tuple(FunctionCalls(c[0], c[1], tuple(c[2])) for c in raw[21]),
         raw[22], raw[23], tuple((item[0], item[1]) for item in raw[24]),
-        _purity_from_json(raw[25]), raw[26],
+        _purity_from_json(raw[25]), raw[26], _calls_from_json(raw[27]), _classes_from_json(raw[28]),
     )

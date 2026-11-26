@@ -72,12 +72,16 @@ class OwnedLiteral:
 
 @dataclass(frozen=True)
 class ConstructionSite:
-    """A class or factory only some modules and rings may call (the composition root builds it, nothing else does): #85."""
+    """A class or factory only some modules and rings may call (the composition root builds it, nothing else does): #85.
+
+    A ``[[construction]]`` entry (#234) is the same restriction on a class, plus the keywords a caller may or must pass."""
 
     target: str  # dotted name of the callable, e.g. "app.queries.UnfilteredQueries"
     modules: tuple[str, ...] = ()  # module globs; empty means any module
     rings: tuple[str, ...] = ()  # ring names; empty means any ring
     reason: str = ""
+    forbid_kwargs: tuple[str, ...] = ()  # fields no caller may supply, by keyword or position (#234)
+    require_kwargs: tuple[str, ...] = ()  # keywords every caller must pass by name (#234)
 
     @property
     def target_module(self) -> str:
@@ -124,6 +128,7 @@ class ArchitectureFields:
     module_forbid_imports: tuple[tuple[str, tuple[str, ...]], ...] = ()
     owned_literals: tuple[OwnedLiteral, ...] = ()
     construct_only: tuple[ConstructionSite, ...] = ()  # #85
+    construction: tuple[ConstructionSite, ...] = ()  # #234; ``modules`` is the entry's ``only_from``
     result_discard: ResultDiscard | None = None
     docs: DocsPolicy = DocsPolicy()
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it

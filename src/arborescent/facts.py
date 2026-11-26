@@ -13,9 +13,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from .call_facts import (
+    CallShape,
     FunctionCalls,
     bare_calls,
     call_aliases,
+    call_shapes,
     call_sites,
     discard_call_lines,
     dynamic_imports,
@@ -23,7 +25,9 @@ from .call_facts import (
 )
 from .declaration_facts import arbor_annotation, comment_facts, script_deps
 from .definition_facts import (
+    ClassShape,
     TopLevelDef,
+    class_shapes,
     main_guard_line,
     purity_helpers,
     result_defs,
@@ -68,6 +72,8 @@ class SourceFacts:
     dynamic_imports: tuple[tuple[int, str], ...] = ()  # (line, literal module name, or "" when the target is not a plain absolute string literal) (#161)
     purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
     untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
+    call_shapes: tuple[CallShape, ...] = ()  # the arguments of each call on an imported or module-level name (#234)
+    class_shapes: tuple[ClassShape, ...] = ()  # what each module-level class's constructor accepts (#234)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -116,6 +122,8 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         dynamic_imports(nodes, aliases),
         purity_facts(tree, nodes, aliases, purity_helpers(aliases)),
         untokenizable,
+        call_shapes(tree, nodes, calls_aliases),
+        class_shapes(tree, calls_aliases),
     )
 
 

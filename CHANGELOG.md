@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+### Added
+- `[[tool.arborescent.construction]]` (#234): `forbid_kwargs`, `require_kwargs` and `only_from` for a class, checked at call sites
+  resolved through imports, aliases and re-exports, including positional arguments that land on a field and `dataclasses.replace` on
+  a value whose type the module states. New rules `construction-forbidden-argument` and `construction-missing-argument`; `only_from`
+  reports `construction-outside-site`. Off unless declared, with a `selftest` probe per restriction; the blind spots are listed in
+  docs/configuration.md.
+- A dataclass field marked `field(metadata={"arbor": "derived"})` may not be supplied by any caller, with no policy entry. A
+  repository that already uses that exact metadata starts getting findings.
+- The scan cache layout changed, so the first run after upgrading re-parses every file.
+
 ## 0.9.0 — 2026-11-12
 
 ### Fixed

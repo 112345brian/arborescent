@@ -257,6 +257,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         importable_by=_importable_by(raw),
         owned_literals=_owned_literals(raw),
         construct_only=_construct_only(raw),
+        construction=_construction(raw),
         result_discard=_result_discard(raw),
         docs=_docs(raw),
         entry_scripts=tuple(raw.get("entry_scripts", [])),
@@ -412,7 +413,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
-    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "result_discard", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
+    "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "construction", "result_discard", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
 })
@@ -678,6 +679,44 @@ def _construct_only(raw: Mapping[str, Any]) -> tuple[ConstructionSite, ...]:
             raise PolicyError(f"`construct_only` {target!r} needs `modules` or `rings`, or it restricts nothing")
         sites.append(ConstructionSite(target, tuple(names["modules"]), tuple(names["rings"]), reason))
     return tuple(sites)
+
+
+_CONSTRUCTION_LISTS = ("forbid_kwargs", "require_kwargs", "only_from")
+
+
+def _construction(raw: Mapping[str, Any]) -> tuple[ConstructionSite, ...]:
+    entries = raw.get("construction", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
+        raise PolicyError("`construction` must be an array of tables: [[tool.arborescent.construction]]")
+    return tuple(_construction_entry(entry) for entry in cast("list[Mapping[str, Any]]", entries))
+
+
+def _construction_entry(entry: Mapping[str, Any]) -> ConstructionSite:
+    target, reason = entry.get("type"), entry.get("reason", "")
+    if not isinstance(target, str) or not _DOTTED_NAME.fullmatch(target):
+        raise PolicyError("`construction` needs a `type` that is the dotted name of a class, e.g. \"app.models.Progress\"")
+    unknown = set(entry) - {"type", "reason", *_CONSTRUCTION_LISTS}
+    if unknown or not isinstance(reason, str):
+        raise PolicyError(f"`construction` {target!r} takes {list(_CONSTRUCTION_LISTS)} and a string `reason`; unknown: {sorted(unknown)}")
+    forbid, require, only_from = (_construction_names(entry, target, key) for key in _CONSTRUCTION_LISTS)
+    if not (forbid or require or only_from):
+        raise PolicyError(f"`construction` {target!r} needs one of {list(_CONSTRUCTION_LISTS)}, or it restricts nothing")
+    if set(forbid) & set(require):
+        raise PolicyError(f"`construction` {target!r} both forbids and requires {sorted(set(forbid) & set(require))}")
+    return ConstructionSite(target, only_from, reason=reason, forbid_kwargs=forbid, require_kwargs=require)
+
+
+def _construction_names(entry: Mapping[str, Any], target: str, key: str) -> tuple[str, ...]:
+    """One list of an entry: absent is empty, but a written list must say something (``only_from = []`` would read as nobody)."""
+    if key not in entry:
+        return ()
+    value: object = entry[key]
+    names = cast("list[object]", value) if isinstance(value, list) else []
+    valid = [n for n in names if isinstance(n, str) and (n.strip() != "" if key == "only_from" else n.isidentifier())]
+    if not names or len(valid) != len(names):
+        kind = "module globs" if key == "only_from" else "parameter names"
+        raise PolicyError(f"`construction` {target!r}: `{key}` is a non-empty list of {kind}")
+    return tuple(valid)
 
 
 def _result_discard(raw: Mapping[str, Any]) -> ResultDiscard | None:

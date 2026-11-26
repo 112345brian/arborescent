@@ -12,7 +12,8 @@ import re
 from collections.abc import Collection, Mapping
 from typing import NamedTuple
 
-from .call_facts import absolute_callee
+from .call_facts import REPLACE_CALLS, CallShape, absolute_callee
+from .definition_facts import ClassIndex, Signature
 from .domain import (
     ALL,
     EFFECT_RULES,
@@ -286,6 +287,123 @@ def _construction_findings(context: RuleContext, name: str, info: ModuleInfo) ->
 def _site_text(item: ConstructionSite) -> str:
     parts = [f"modules {list(item.modules)}"] if item.modules else []
     return " in ".join(parts + ([f"rings {list(item.rings)}"] if item.rings else [])) or "no module"
+
+
+class _Construction(NamedTuple):
+    """One constructing call in one module: what it passes, and the class it builds."""
+
+    module: str
+    ring: str | None
+    shape: CallShape
+    target: str  # the canonical class
+    replacing: bool
+
+
+def _constructed(index: ClassIndex, name: str, shape: CallShape) -> tuple[list[str], bool]:
+    """The classes a call may build: its callee, or for ``replace`` the types its first argument may have."""
+    callee = index.absolute(name, shape.callee)
+    replacing = callee in REPLACE_CALLS
+    found = [index.absolute(name, item) for item in shape.replaced] if replacing else [callee]
+    return sorted({item for item in found if item is not None}), replacing
+
+
+def _argument_findings(context: RuleContext, name: str, info: ModuleInfo, index: ClassIndex) -> list[Violation]:
+    """``[[construction]]`` entries and derived-field markers against every call in one module (#234)."""
+    local_policy = context.policy_for(name)
+    entries = local_policy.construction if local_policy is not None else ()
+    if not entries and not index.has_markers:
+        return []
+    by_target: dict[str, list[ConstructionSite]] = {}
+    for item in entries:
+        by_target.setdefault(index.canonical(item.target), []).append(item)
+    out: list[Violation] = []
+    for shape in info.facts.call_shapes:
+        targets, replacing = _constructed(index, name, shape)
+        for target in targets:
+            found = _Construction(name, context.resolve_ring(name), shape, target, replacing)
+            rules = by_target.get(target, [])
+            out += _forbidden_arguments(found, index.signature(target), rules)
+            for item in rules:
+                out += _missing_arguments(found, item) + _outside_only_from(found, item)
+    return out
+
+
+def _forbidden_arguments(found: _Construction, signature: Signature, rules: list[ConstructionSite]) -> list[Violation]:
+    reasons = dict.fromkeys(signature.derived, "marked derived")
+    for item in rules:
+        reasons.update(dict.fromkeys(item.forbid_kwargs, item.reason or "listed in `forbid_kwargs`"))
+    shape = found.shape
+    by_position = () if found.replacing else signature.positional[: shape.positional]  # replace takes no field by position
+    call = f"replace() on {found.target} sets" if found.replacing else f"constructing {found.target} passes"
+    return [
+        Violation(
+            Rule.CONSTRUCTION_FORBIDDEN_ARGUMENT, found.module,
+            f"[{found.module}] {call} `{field}` by {'keyword' if field in shape.keywords else 'position'};"
+            f" a caller must never supply it: {reason}",
+            shape.line,
+        )
+        for field, reason in sorted(reasons.items())
+        if field in shape.keywords or field in by_position
+    ]
+
+
+def _missing_arguments(found: _Construction, item: ConstructionSite) -> list[Violation]:
+    """``replace`` copies the other fields, and an unknown ``**value`` may carry the keyword: neither is reported."""
+    if found.replacing or found.shape.open_keywords:
+        return []
+    return [
+        Violation(
+            Rule.CONSTRUCTION_MISSING_ARGUMENT, found.module,
+            f"[{found.module}] constructs {item.target} without passing `{field}` by name" + (f": {item.reason}" if item.reason else ""),
+            found.shape.line,
+        )
+        for field in item.require_kwargs
+        if field not in found.shape.keywords
+    ]
+
+
+def _outside_only_from(found: _Construction, item: ConstructionSite) -> list[Violation]:
+    if item.permits(found.module, found.ring):
+        return []
+    how = " through replace()" if found.replacing else ""
+    return [Violation(
+        Rule.CONSTRUCTION_OUTSIDE_SITE, found.module,
+        f"[{found.module}] (ring {found.ring or 'none'}) constructs {item.target}{how}, which only {_site_text(item)} may construct"
+        + (f": {item.reason}" if item.reason else ""),
+        found.shape.line,
+    )]
+
+
+def _stale_construction_entries(policy: ArchitecturePolicy, modules: Collection[str], index: ClassIndex) -> list[Violation]:
+    """A ``[[construction]]`` class, field or glob that no longer exists: after a rename the entry would restrict nothing."""
+    out: list[Violation] = []
+    for item in policy.construction:
+        rule = (
+            Rule.CONSTRUCTION_FORBIDDEN_ARGUMENT if item.forbid_kwargs
+            else Rule.CONSTRUCTION_MISSING_ARGUMENT if item.require_kwargs
+            else Rule.CONSTRUCTION_OUTSIDE_SITE
+        )
+        out += [Violation(rule, item.target, f"`construction` {item.target!r}: {problem}") for problem in _stale_type(item, modules, index)]
+        out += [
+            Violation(Rule.CONSTRUCTION_OUTSIDE_SITE, item.target, f"`construction` {item.target!r}: only_from glob {glob!r} matches no module")
+            for glob in item.modules if not any(in_unit(module, glob) for module in modules)
+        ]
+    return out
+
+
+def _stale_type(item: ConstructionSite, modules: Collection[str], index: ClassIndex) -> list[str]:
+    """Only what the parsed modules can prove: a module a partial scan did not read says nothing."""
+    if item.target_module not in modules:
+        return [f"module {item.target_module!r} does not exist"]
+    target = index.canonical(item.target)
+    module, _, name = target.rpartition(".")
+    if target not in index.classes:
+        return [f"module {module!r} defines no class {name!r}"] if module in index.modules else []
+    signature = index.signature(target)
+    return [
+        f"the constructor of {target} has no parameter `{field}`"
+        for field in (*item.forbid_kwargs, *item.require_kwargs) if signature.lacks(field)
+    ]
 
 
 def _stale_construction_sites(policy: ArchitecturePolicy, modules: Collection[str]) -> list[Violation]:
@@ -661,7 +779,20 @@ def check_modules(
         )
     out += effect_via_import_violations(context, modules, effect_graph, pending_effect_edges)
     out = with_move_closures(out, context, modules, known, tops)
-    return out + mixed_purity_findings(context, modules, known, import_graph) + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
+    out += mixed_purity_findings(context, modules, known, import_graph) + _argument_restrictions(context, modules, known)
+    return out + _finalize_checks(context, known, entry_deps, import_graph, third_party_by_scope)
+
+
+def _argument_restrictions(context: RuleContext, modules: Mapping[str, ModuleInfo], known: Collection[str]) -> list[Violation]:
+    """Every ``[[construction]]`` and derived-marker finding: each module's calls, then the entries that went stale (#234)."""
+    classes = ClassIndex(modules)
+    out = [violation for name, info in sorted(modules.items()) for violation in _argument_findings(context, name, info, classes)]
+    policy = context.policy
+    if not policy.scopes:
+        return out + _stale_construction_entries(policy, known, classes)
+    for scope in policy.scopes:
+        out += _stale_construction_entries(scope.policy, [n for n in known if context.scope_name(n) == scope.name], classes)
+    return out
 
 
 def fits_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, known: Collection[str]) -> bool:

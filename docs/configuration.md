@@ -25,6 +25,7 @@ settings. The two forms cannot be mixed.
 | `library_roots` | `[]` | Same expansion for editable in-repo libraries (for example `libs`); the folders are scanned normally. Not allowed with `scopes`. |
 | `module_forbid_imports` | `{}` | Module glob -> internal module/package names this module may not import, in addition to ring rules. |
 | `importable_by` | `{}` | Module glob -> importer globs: the inverse of `module_forbid_imports` (see below). A listed module, and its submodules, may be imported only by modules matching one of the globs. |
+| `construction` | `[]` | Array of tables: what a caller may not or must pass to a class, and which modules may construct it (see below). |
 | `preset` | `"strict"` | How much of the external and OS rules applies: `strict`, `standard` or `relaxed` (see below). |
 | `middle_forbid` | the preset's | Effect categories middle rings may not use, replacing the preset default (see below). |
 | `git_hook` | the preset's | Whether `generate` and `check` manage the `pre-push` hook, replacing the preset default (see below). `true` installs it under any preset; `false` removes an Arborescent-managed one. A hook Arborescent did not write is never touched either way. |
@@ -72,7 +73,7 @@ repository component. Each scope requires non-empty `sources`, `source_roots` an
 | `public` | `[]` | Dotted module patterns consumers may import from this scope. |
 | `depends_on` | `[]` | Scope names this scope may import. Each cross-scope import must target a declared dependency and match its `public` patterns. |
 | `preset`, `middle_forbid`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
-| `module_forbid_imports`, `importable_by`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbidden_modules`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
+| `module_forbid_imports`, `importable_by`, `construction`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbidden_modules`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
 
 Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
 `ruff`, `practices`, `exclude` and `children` apply to the composed repository. Root-level architecture keys (`rings`, `sources`,
@@ -307,6 +308,55 @@ baseline like any rule, so existing violations can only shrink. A `modules` glob
 and `selftest` calls each target from a module that may not. What it does not see: a name re-exported by another module (list the
 path callers import, or one entry per spelling), `partial(X)` or `make = X; make()`, `getattr`, a subclass, and an argument passed to a
 constructor (it checks who builds, not what is passed in). A parameter named like an imported class would be mistaken for it.
+
+`[[tool.arborescent.construction]]` goes one step further and says what a caller may pass (#234), for a field that is derived from the
+others and must never be supplied, which no type annotation can say. Off unless an entry or a field marker exists.
+
+```toml
+[[tool.arborescent.construction]]
+type = "app.models.OnboardingProgress"   # dotted name of a class
+forbid_kwargs = ["tier"]                 # no caller may supply it, by keyword or by position
+require_kwargs = ["user_id"]             # every constructing call must pass it by name
+only_from = ["app.onboarding.*"]         # module globs that may construct the class at all
+reason = "tier is derived from the answers"
+```
+
+At least one of the three lists is needed, and a written list must not be empty. A field can carry the first restriction itself, so
+that it travels with the type and needs no policy entry:
+
+```python
+tier: Tier = field(default=Tier.NEW, metadata={"arbor": "derived"})
+```
+
+- `construction-forbidden-argument`: a call passes a forbidden or derived field by keyword, in a literal `**{...}`, by a positional
+  argument that lands on it, or through `dataclasses.replace` / `copy.replace`.
+- `construction-missing-argument`: a call does not pass a `require_kwargs` name by keyword (a positional argument does not count;
+  `replace` is not asked).
+- `construction-outside-site`: a module outside `only_from` calls the class, or `replace`s an instance of it. This includes the
+  module that defines the class, so list it if its own factories or methods build one.
+
+The class is resolved through imports, aliases and re-exports (a package `__init__` importing it). Positional arguments are mapped for
+dataclasses (inheritance, `kw_only`, `KW_ONLY`, `init=False`, `ClassVar`), `NamedTuple`, an explicit `__init__` and subclasses of
+those. A marker is inherited by subclasses; a policy entry names one class and does not cover its subclasses. Entries are checked
+against the call sites in their own scope; markers apply everywhere. A class, field or `only_from` glob that no longer exists is
+reported, findings go into the baseline like any rule, and `selftest` breaks each restriction on purpose.
+
+For `replace`, the type of the first argument is read from the same module only: a parameter or variable annotation, a constructor
+call, `self` / `cls`, `self.attribute` annotated in the class body, or a name assigned from one of these. It is flow-insensitive.
+
+What it does not see (a clean run is not proof):
+
+- `replace` on a value whose type comes from elsewhere: a function's return value, an unannotated parameter, a loop or
+  tuple-unpacking target, a container element, `a.b.c`.
+- A `**value` that is not a literal dict; a `*value` of unknown length, or anything positional after it.
+- `partial(X, ...)`, `make = X; make(...)`, `getattr`, `X.__new__`, `__replace__`, `cls(...)` and `super().__init__(...)` inside the
+  class, deserialisers that build the object from data, and assigning the attribute after construction.
+- Positional arguments of a class whose constructor cannot be read: an `attrs` or other unknown decorator, a metaclass, an own
+  `__new__`, a base
+  outside the scanned sources, `pydantic.BaseModel`.
+- A class made by a call (`namedtuple(...)`) or nested in another class, a star re-export, or a re-export left out of `__all__`.
+- A marker whose `metadata` is not a literal dict or whose `field` is not `dataclasses.field`.
+- In a check of selected paths, a class defined in a file that was not selected (keyword checks from policy entries still work).
 
 `result_discard` is an opt-in check that a caller reads the outcome of a function it calls (a new "refused" or "skipped" outcome
 is otherwise silently ignored). It reports `result-discard` for a call written as a whole statement:
@@ -845,7 +895,9 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `untokenizable-source` | a file Python's `ast` accepts but `tokenize` rejects (a doubled carriage return `\r\r\n` is the usual cause, #181). Its `# noqa`, `# type: ignore` and `# deferred:` comments cannot be read, so the file gets no comment facts and this finding instead of aborting the run. A violation, so it can be baselined; the detail is fixed text (the tokenizer's line and message ride in the hint), and the fix is to remove the stray byte |
 | `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
-| `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
+| `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build, or builds a `construction` class outside its `only_from`; also an owner glob or target module that does not exist |
+| `construction-forbidden-argument` | a call or `replace` supplies a field that a `construction` entry forbids or a `metadata={"arbor": "derived"}` marker marks; also an entry whose class or field does not exist |
+| `construction-missing-argument` | a call constructs a `construction` class without passing a `require_kwargs` name by keyword; also an entry whose class or field does not exist |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |

@@ -1,16 +1,40 @@
 """Call facts: the calls a module makes, resolved through its import alias table.
 
 Call sites on an imported or module-level name, calls used as whole statements (a discarded result), the imported
-callables each function or method calls, ``discard(value, reason=...)`` lines, and ``absolute_callee``, which turns a
-recorded call (relative imports keep their dots) back into an absolute dotted name."""
+callables each function or method calls, ``discard(value, reason=...)`` lines, the arguments each such call passes
+(``call_shapes``, with the statically known type of a ``dataclasses.replace`` subject), and ``absolute_callee``, which
+turns a recorded call (relative imports keep their dots) back into an absolute dotted name."""
 
 from __future__ import annotations
 
 import ast
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-__all__ = ["FunctionCalls", "absolute_callee", "bare_calls", "call_aliases", "call_sites", "discard_call_lines", "dotted_name", "dynamic_imports", "function_calls"]
+__all__ = [
+    "REPLACE_CALLS", "CallShape", "FunctionCalls", "absolute_callee", "annotation_types", "bare_calls", "call_aliases", "call_shapes",
+    "call_sites", "discard_call_lines", "dotted_name", "dynamic_imports", "function_calls",
+]
+
+REPLACE_CALLS = frozenset({"dataclasses.replace", "copy.replace"})  # build a new instance of their first argument's type
+_WRAPPERS = frozenset({"Optional", "Union", "Annotated"})
+_MAX_ALIASES = 50  # ``b = a; c = b; ...``: how far a ``replace`` subject's type is traced
+
+
+@dataclass(frozen=True)
+class CallShape:
+    """What one call passes, as far as it can be read statically (#234).
+
+    ``positional`` counts the leading positional arguments whose position is certain; a ``*value`` of unknown length ends
+    the count. A literal ``*(a, b)`` or ``**{"k": v}`` is expanded; any other ``**value`` sets ``open_keywords``.
+    """
+
+    line: int
+    callee: str  # like ``calls``: a relative import keeps its leading dots
+    positional: int
+    keywords: tuple[str, ...]  # sorted, unique
+    open_keywords: bool = False
+    replaced: tuple[str, ...] = ()  # for ``replace``: the dotted types its first argument may statically have
 
 
 @dataclass(frozen=True)
@@ -89,6 +113,204 @@ def call_sites(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, st
         if isinstance(head, ast.Name) and head.id in heads and (name := dotted_name(node.func, aliases)) is not None:
             out.add((node.lineno, name))
     return tuple(sorted(out))
+
+
+def annotation_types(node: ast.expr | None, aliases: dict[str, str]) -> set[str]:
+    """The dotted classes a value annotated ``node`` may be: through strings, ``X | Y``, ``Optional``, ``Annotated`` and ``X[T]``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            return annotation_types(ast.parse(node.value.strip(), mode="eval").body, aliases)
+        except (SyntaxError, ValueError):
+            return set()
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return annotation_types(node.left, aliases) | annotation_types(node.right, aliases)
+    if isinstance(node, ast.Subscript):
+        return _subscript_types(node, aliases)
+    name = dotted_name(node, aliases) if node is not None else None
+    return {name} if name is not None else set()
+
+
+def _subscript_types(node: ast.Subscript, aliases: dict[str, str]) -> set[str]:
+    outer = (dotted_name(node.value, aliases) or "").rpartition(".")[2]
+    if outer not in _WRAPPERS:
+        return annotation_types(node.value, aliases)  # a generic class: ``Box[int]`` is a ``Box``
+    items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+    return {name for item in (items[:1] if outer == "Annotated" else items) for name in annotation_types(item, aliases)}
+
+
+@dataclass
+class _Scope:
+    """What each name bound in one function, class body or module may be. A bound name with no entry is unknown."""
+
+    parent: _Scope | None
+    bindings: dict[str, list[tuple[str, ast.expr | str | None]]] = field(default_factory=lambda: {})
+    attributes: dict[str, ast.expr] = field(default_factory=lambda: {})  # the enclosing class's annotated attributes
+
+    def bind(self, name: str, kind: str = "", value: ast.expr | str | None = None) -> None:
+        entries = self.bindings.setdefault(name, [])
+        if kind:
+            entries.append((kind, value))
+
+    def owner(self, name: str) -> _Scope | None:
+        scope: _Scope | None = self
+        while scope is not None and name not in scope.bindings:
+            scope = scope.parent
+        return scope
+
+
+class _ReplaceTypes:
+    """Flow-insensitive, one-module type guess for each ``replace`` subject: annotations, constructor calls and ``self``."""
+
+    def __init__(self, tree: ast.Module, aliases: dict[str, str]) -> None:
+        self.aliases = aliases
+        self.calls: list[tuple[ast.Call, _Scope]] = []
+        module = _Scope(None)
+        self.pending: list[tuple[ast.AST, _Scope]] = [(stmt, module) for stmt in tree.body]
+        while self.pending:  # a stack, not recursion: a long ``a + b + ...`` is a very deep tree
+            self._collect(*self.pending.pop())
+
+    def types(self) -> dict[int, tuple[str, ...]]:
+        return {id(call): tuple(sorted(self._value(call.args[0], scope, set()))) for call, scope in self.calls if call.args}
+
+    def _collect(self, node: ast.AST, scope: _Scope) -> None:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+            self._function(node, scope, None)
+            return
+        if isinstance(node, ast.ClassDef):
+            self._class(node, scope)
+            return
+        self._record(node, scope)
+        self.pending.extend((child, scope) for child in ast.iter_child_nodes(node))
+
+    def _record(self, node: ast.AST, scope: _Scope) -> None:
+        if isinstance(node, ast.Call) and dotted_name(node.func, self.aliases) in REPLACE_CALLS:
+            self.calls.append((node, scope))
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    scope.bind(target.id, "value", node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            scope.bind(node.target.id, "annotation", node.annotation)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            scope.bind(node.id)
+
+    def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, outer: _Scope, owner: ast.ClassDef | None) -> None:
+        scope = _Scope(outer, attributes=outer.attributes if owner is None else _class_annotations(owner))
+        args = node.args
+        ordered = [*args.posonlyargs, *args.args]
+        for arg in [*ordered, *args.kwonlyargs, *(a for a in (args.vararg, args.kwarg) if a is not None)]:
+            scope.bind(arg.arg, "annotation" if arg.annotation is not None else "", arg.annotation)
+        if owner is not None and ordered and not _is_static(node, self.aliases):
+            scope.bind(ordered[0].arg, "class", owner.name)
+        self.pending.extend((child, scope) for child in (node.body if isinstance(node.body, list) else [node.body]))
+
+    def _class(self, node: ast.ClassDef, outer: _Scope) -> None:
+        body = _Scope(outer)
+        for stmt in node.body:
+            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+                self._function(stmt, outer, node)  # a method does not see the class body's names
+            else:
+                self.pending.append((stmt, body))
+
+    def _value(self, node: ast.expr, scope: _Scope, seen: set[tuple[int, str]]) -> set[str]:
+        if isinstance(node, ast.Name):
+            return self._name(node.id, scope, seen)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and self._is_instance(node.value.id, scope):
+            return annotation_types(scope.attributes.get(node.attr), self.aliases)
+        if not isinstance(node, ast.Call):
+            return set()
+        target = dotted_name(node.func, self.aliases)
+        if target in REPLACE_CALLS:
+            return self._value(node.args[0], scope, seen) if node.args else set()
+        if isinstance(node.func, ast.Name) and self._is_instance(node.func.id, scope):
+            return self._name(node.func.id, scope, seen)  # ``cls(...)``
+        return {target} if target is not None else set()
+
+    def _name(self, name: str, scope: _Scope, seen: set[tuple[int, str]]) -> set[str]:
+        owner = scope.owner(name)
+        if owner is None or (id(owner), name) in seen or len(seen) >= _MAX_ALIASES:
+            return set()
+        seen.add((id(owner), name))
+        found: set[str] = set()
+        for kind, value in owner.bindings[name]:
+            if isinstance(value, str) and kind == "class":
+                found.add(value)
+            elif isinstance(value, ast.expr):
+                found |= annotation_types(value, self.aliases) if kind == "annotation" else self._value(value, owner, seen)
+        return found
+
+    def _is_instance(self, name: str, scope: _Scope) -> bool:
+        owner = scope.owner(name)
+        return owner is not None and any(kind == "class" for kind, _ in owner.bindings[name])
+
+
+def _class_annotations(node: ast.ClassDef) -> dict[str, ast.expr]:
+    return {s.target.id: s.annotation for s in node.body if isinstance(s, ast.AnnAssign) and isinstance(s.target, ast.Name)}
+
+
+def _is_static(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, aliases: dict[str, str]) -> bool:
+    return not isinstance(node, ast.Lambda) and any(dotted_name(d, aliases) == "staticmethod" for d in node.decorator_list)
+
+
+def _positional_count(args: Sequence[ast.expr]) -> int:
+    count = 0
+    for arg in args:
+        if not isinstance(arg, ast.Starred):
+            count += 1
+        elif isinstance(arg.value, ast.Tuple | ast.List) and not any(isinstance(item, ast.Starred) for item in arg.value.elts):
+            count += len(arg.value.elts)
+        else:
+            break
+    return count
+
+
+def _splat_keys(value: ast.expr) -> tuple[set[str], bool]:
+    """The keys a ``**value`` certainly passes, and whether it may pass others."""
+    if not isinstance(value, ast.Dict):
+        return set(), True
+    keys: set[str] = set()
+    unknown = False
+    for key, item in zip(value.keys, value.values, strict=True):
+        if key is None:
+            nested, open_nested = _splat_keys(item)
+            keys |= nested
+            unknown = unknown or open_nested
+        elif isinstance(key, ast.Constant) and isinstance(key.value, str):
+            keys.add(key.value)
+        else:
+            unknown = True
+    return keys, unknown
+
+
+def _keywords(node: ast.Call) -> tuple[tuple[str, ...], bool]:
+    names: set[str] = set()
+    unknown = False
+    for keyword in node.keywords:
+        if keyword.arg is not None:
+            names.add(keyword.arg)
+            continue
+        keys, open_splat = _splat_keys(keyword.value)
+        names |= keys
+        unknown = unknown or open_splat
+    return tuple(sorted(names)), unknown
+
+
+def call_shapes(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[CallShape, ...]:
+    """The arguments of every call ``call_sites`` would record (and of ``Name[T](...)``), for the construction rule (#234)."""
+    heads = set(aliases) | {stmt.name for stmt in tree.body if isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+    calls = [node for node in nodes if isinstance(node, ast.Call)]
+    replaces = any(dotted_name(node.func, aliases) in REPLACE_CALLS for node in calls)
+    subjects = _ReplaceTypes(tree, aliases).types() if replaces else {}
+    out: set[CallShape] = set()
+    for node in calls:
+        function = node.func.value if isinstance(node.func, ast.Subscript) else node.func
+        head = function
+        while isinstance(head, ast.Attribute):
+            head = head.value
+        if isinstance(head, ast.Name) and head.id in heads and (name := dotted_name(function, aliases)) is not None:
+            keywords, unknown = _keywords(node)
+            out.add(CallShape(node.lineno, name, _positional_count(node.args), keywords, unknown, subjects.get(id(node), ())))
+    return tuple(sorted(out, key=lambda s: (s.line, s.callee, s.positional, s.keywords, s.open_keywords, s.replaced)))
 
 
 def bare_calls(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[tuple[int, str], ...]:
