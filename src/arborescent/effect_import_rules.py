@@ -1,25 +1,26 @@
-"""The ``effect-unsanctioned-import`` and ``effect-via-import`` rules: whether a forbidden effect reaches a module
-through its imports, directly or transitively, and whether an import of a provider-ring module is through a listed
-seam.
+"""The ``effect-unsanctioned-import``, ``effect-via-import`` and ``effect-at-import`` rules: whether a forbidden effect
+reaches a module through what it imports, directly or transitively, whether an import of a provider-ring module is through
+a listed seam, and whether importing a module runs an effect its ring bans at import.
 
-Split out of ``rules`` as its own cohesive concern: everything here builds and walks the per-scope effect-propagation
-graph for one of these two rules.
+Split out of ``rules`` as its own cohesive concern. ``effect-at-import`` (#230) takes its direct uses from the effect facts
+(``EffectUse.at_import``) and follows a call made at import one hop, to what that function runs itself, never what it calls
+in turn.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from typing import NamedTuple
 
 from .domain import ArchitecturePolicy, Rule, Violation, in_unit
 from .effects_policy import EffectsPolicy
-from .facts import ModuleInfo
+from .facts import ImportCall, ModuleInfo
 from .import_syntax import RawImport
 from .package_constraint_rules import is_exempt_path, reach_violations
 from .rule_context import RuleContext
 
 __all__ = [
-    "EffectEdge", "EffectImport", "direct_propagating_effects", "effect_via_import_violations", "is_sanctioned",
+    "EffectEdge", "EffectImport", "direct_propagating_effects", "effect_at_import_findings", "effect_via_import_violations", "is_sanctioned",
     "record_effect_edge", "unsanctioned_effect_imports",
 ]
 
@@ -157,3 +158,72 @@ def _effect_via_import(edge: EffectEdge, reachable: Mapping[str, Mapping[str, tu
             detail = f"[{edge.ring}] imports {target!r}; effect {category} reaches it via {' -> '.join(chain)}; inject a port instead"
             out.append(Violation(Rule.EFFECT_VIA_IMPORT, edge.name, detail, edge.line))
     return out
+
+
+# Calling a class runs these.
+_CONSTRUCTORS = ("__new__", "__init__", "__post_init__")
+_REEXPORT_DEPTH = 5  # a chain of package re-exports is not a function hop, but it has to end
+
+# What a one-hop call may be followed into, and `call_facts.absolute_callee`, handed in by `rules`, which already imports it.
+Followable = tuple[Mapping[str, ModuleInfo], Callable[[str, bool, str], str | None]]
+_Reached = tuple[str, list[tuple[str, str]]]  # (dotted callee, the (category, target) it runs itself)
+
+
+def effect_at_import_findings(context: RuleContext, ring: str, info: ModuleInfo, followable: Followable) -> list[Violation]:
+    """``effect-at-import`` (#230): a category ``ring`` lists in ``forbid_at_import`` runs while ``info`` is imported."""
+    name = info.name
+    forbidden = context.require_policy(name).ring(ring).forbid_at_import
+    if not forbidden:
+        return []
+    out = [
+        Violation(Rule.EFFECT_AT_IMPORT, name, f"[{ring}] effect {use.category} uses {use.target} at import time; move it into a function", use.line)
+        for use in info.facts.effect_uses
+        if use.at_import and use.category in forbidden
+    ]
+    for call in info.facts.import_time.calls:
+        found = _resolve_call(info, call, followable)
+        if found is None:
+            continue
+        callee, effects = found
+        for category in sorted({category for category, _ in effects if category in forbidden}):
+            targets = ", ".join(sorted({target for kind, target in effects if kind == category}))
+            detail = f"[{ring}] import-time call of {callee} runs effect {category}; move it into a function"
+            out.append(Violation(Rule.EFFECT_AT_IMPORT, name, detail, call.line, hint=f" (it uses {targets})"))
+    return out
+
+
+def _resolve_call(info: ModuleInfo, call: ImportCall, followable: Followable) -> _Reached | None:
+    """What a call into a scanned module runs; ``None`` when it runs nothing we can see."""
+    if call.local:
+        effects = _own_effects(info, call.callee)
+        return (f"{info.name}.{call.callee}", effects) if effects else None
+    dotted = followable[1](info.name, info.is_package, call.callee)
+    return None if dotted is None else _follow(dotted, followable, _REEXPORT_DEPTH)
+
+
+def _follow(dotted: str, followable: Followable, depth: int) -> _Reached | None:
+    modules, absolute = followable
+    parts = dotted.split(".")
+    cut = next((end for end in range(len(parts) - 1, 0, -1) if ".".join(parts[:end]) in modules), None)
+    if cut is None:
+        return None
+    module = modules[".".join(parts[:cut])]
+    head, rest = parts[cut], parts[cut + 1:]
+    effects = _own_effects(module, ".".join(parts[cut:]))
+    if effects:
+        return dotted, effects
+    if depth == 0 or any(member.name == head for member in module.facts.top_level_defs):
+        return None
+    for surface, level, source, imported in module.facts.reexports:
+        if surface == head:
+            origin = "." * level + ".".join(part for part in (source, imported, *rest) if part)
+            target = absolute(module.name, module.is_package, origin)
+            return None if target is None else _follow(target, followable, depth - 1)
+    return None
+
+
+def _own_effects(info: ModuleInfo, qualname: str) -> list[tuple[str, str]]:
+    names = {qualname}
+    if "." not in qualname:
+        names.update(f"{qualname}.{method}" for method in _CONSTRUCTORS)
+    return [(category, target) for function, category, target in info.facts.import_time.function_effects if function in names]

@@ -233,7 +233,7 @@ def result_defs(tree: ast.AST) -> tuple[str, ...]:
     )
 
 
-def _is_main_guard(test: ast.expr) -> bool:
+def is_main_guard(test: ast.expr) -> bool:
     if not (isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq)):
         return False
     sides = (test.left, test.comparators[0])
@@ -242,4 +242,4 @@ def _is_main_guard(test: ast.expr) -> bool:
 
 
 def main_guard_line(tree: ast.Module) -> int:
-    return next((stmt.lineno for stmt in tree.body if isinstance(stmt, ast.If) and _is_main_guard(stmt.test)), 0)
+    return next((stmt.lineno for stmt in tree.body if isinstance(stmt, ast.If) and is_main_guard(stmt.test)), 0)

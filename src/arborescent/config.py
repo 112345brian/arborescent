@@ -800,7 +800,17 @@ def _ring_from_mapping(
         bool(table.get("require_abstract", False)),
         bool(table.get("require_typed_ports", False)),
         _reexport_ratio(table, name),
+        _forbid_at_import(table, name, expand),
     )
+
+
+def _forbid_at_import(table: Mapping[str, Any], ring: str, expand: Callable[[Sequence[str]], frozenset[str]]) -> frozenset[str]:
+    value: object = table.get("forbid_at_import", [])
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
+        raise PolicyError(f"`forbid_at_import` in [ring.{ring}] must be a list of non-empty effect categories")
+    categories = expand(cast("list[str]", value))
+    _validate_effect_categories(categories, f"[ring.{ring}].forbid_at_import")
+    return categories
 
 
 def _reexport_ratio(table: Mapping[str, Any], ring: str) -> float | None:

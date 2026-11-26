@@ -31,6 +31,7 @@ from .effect_facts import EffectUse
 from .effect_import_rules import (
     EffectEdge,
     EffectImport,
+    effect_at_import_findings,
     effect_via_import_violations,
     record_effect_edge,
     unsanctioned_effect_imports,
@@ -653,7 +654,7 @@ def check_modules(
             out += _internal_imports(context, name, ring, imp.line, internal) + _forwarded_imports(context, name, imp, _ImportEnv(modules, known, tops, import_graph))
             out += _external_imports(context, name, ring, imp.line, external, third_party, siblings)
         out += _os_branching(local_policy, name, ring, rule, info)
-        out += _effect_uses(context, name, ring, info, known)
+        out += _effect_uses(context, name, ring, info, known) + effect_at_import_findings(context, ring, info, (modules, absolute_callee))
         out += (
             _abstraction_violations(name, ring, rule, info)
             + _typed_port_violations(name, ring, rule, info)
@@ -682,6 +683,7 @@ def fits_ring(context: RuleContext, name: str, info: ModuleInfo, ring: str, know
         found += _external_imports(context, name, ring, imp.line, external, {}, {})
     found += _os_branching(policy, name, ring, policy.ring(ring), info)
     found += _effect_uses(context, name, ring, info, known)
+    found += effect_at_import_findings(context, ring, info, ({name: info}, absolute_callee))  # direct and same-module only: other modules are not at hand
     found += _abstraction_violations(name, ring, policy.ring(ring), info)
     found += _typed_port_violations(name, ring, policy.ring(ring), info)
     return not found

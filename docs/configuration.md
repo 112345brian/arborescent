@@ -759,6 +759,7 @@ Migrating an existing classify-only project:
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
 | `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
 | `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`, and, since 0.8.0, `state`, `monotonic`, `host` and `fs-query` (see *Effect categories*). The positional and preset defaults never include the four new ones: name them to opt in. |
+| `forbid_at_import` | `[]` | Effect categories (the same names as `forbid`) that may not run while a module of this ring is imported; fires `effect-at-import`. Opt-in, independent of `forbid`: a ring may use an effect inside functions and still ban it at import. See "Effects at import time". |
 | `max_reexport_ratio` | unset | A number from 0 to 1: the share of a module's public surface (a static `__all__`, else public top-level bindings; modules with fewer than 5 names are not judged) that may be first-party imports before `reexport-ratio` fires. Leave it unset on rings that legitimately aggregate (a composition root); the exemption is then visible in config. A dynamic `__all__` is ignored in favour of the bindings. Wrapping each name in a forwarding function evades it; that is the forwarded-import rule's job. |
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 | `require_typed_ports` | `false` | Every method of a `typing.Protocol` class in this ring must name its return type. A missing return annotation, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set`/`frozenset` or `Mapping[str, Any]` (also inside `Optional`, `\|` unions and string annotations) fires `weakly-typed-port`; `None`, named classes and parameterised containers pass. `__init__` is skipped. Parameters are not checked. |
@@ -832,6 +833,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-host` | a ring that forbids `host` reads `sys.argv`, `sys.stdin`, `locale`, `platform`, the process id, the CPU count or the host name (0.8.0) |
 | `effect-fs-query` | a ring that forbids `fs-query` asks the filesystem a question: `os.path.exists`, `os.getcwd`, `Path.cwd`, `p.exists()`, `shutil.which`... (0.8.0) |
 | `effect-unsanctioned-import` | with `[effects] sanctioned` set, a ring that forbids effects imports a module of an `effects.rings` ring that is not listed as a sanctioned seam and has effects of its own (0.8.0) |
+| `effect-at-import` | a category in a ring's `forbid_at_import` runs while a module of the ring is imported, directly or through one call into a function of a scanned module. See "Effects at import time" |
 | `effect-via-import` | a ring forbids an effect that a module it imports (directly or through that module's own imports, same scope, not an `if TYPE_CHECKING` import) uses directly; the message names the import chain |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
 | `forwarded-import` | a module imports a pass-through function (`def f(a): return other.f(a)`: one call to an imported name, arguments exactly the parameters, no default, decorator or other statement) whose target `module_forbid_imports` forbids it: the dependency one hop away. Chains of forwarders are followed. Only `from B import f` is seen, not `B.f` attribute use; wrappers that add logic are real boundaries and are not flagged. Counts against the importing module and takes its own baseline key |
@@ -894,6 +896,37 @@ cannot tell what `helper.do_it()` does when `helper`'s type is not known statica
 boundaries (that is `scope-effect-leak`, one hop, checked separately) or an `if TYPE_CHECKING` import (nothing runs
 there to inherit from). The function-level taint pass below (#98) is the sharper, same-granularity complement: it
 names which function actually calls the effectful code, instead of flagging every importer of the module that holds it.
+
+### Effects at import time
+
+An effect that runs at import time (reading a file, the environment or the clock into a module-level value) makes importing
+the module order-dependent and hard to test, and bakes in whatever was configured when the process started. The `effect-*`
+rules count a use at module level and one inside a function the same way; `effect-at-import` tells them apart:
+
+```toml
+[tool.arborescent.ring.application]
+forbid = []                                                    # functions may use effects
+forbid_at_import = ["filesystem", "env", "network", "process", "clock", "randomness"]   # importing may not
+```
+
+**What counts as import time:** module-level statements (including under `if`, `try` and `with`), class bodies, parameter
+defaults, decorator expressions and comprehensions, and the body of a lambda called on the spot. **What does not:** function
+and lambda bodies, annotations, `if TYPE_CHECKING:` and `if __name__ == "__main__":` blocks (their `else` branches do).
+
+**What counts as running:** a call, a decorator, or reading `os.environ`, `sys.argv` or `sys.stdin`. Naming a function
+without calling it (`NOW = time.time`, `now=time.time`, `field(default_factory=time.time)`) runs nothing.
+
+**One hop:** a call made at import into a module-level function or a method of a scanned module (imported, re-exported by a
+package, or defined in the same module; a class call runs `__new__`, `__init__` and `__post_init__`; a decorator is a call)
+is reported when that function itself runs a forbidden effect. The fix is to move the call into a function.
+
+**Not seen:** a second hop; a method on a value (`loader.read()` where `loader = Loader()`); a function passed as an argument
+and called by the receiver (`map(os.getenv, names)`); the function a decorator factory returns; an inherited constructor.
+Calling an `async` or generator function counts as running its body. `arborescent admit` and the `classify-facts` signals
+judge only direct and same-module effects. `check --changed` follows calls only into the files it checks.
+
+The finding is reported per module, category and target (or callee), so several lines share one baseline key. Record
+existing ones with `arborescent baseline --adopt effect-at-import`.
 
 ### Function-level imports and import cycles
 

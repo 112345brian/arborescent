@@ -55,6 +55,7 @@ class RingRule:
     require_abstract: bool = False  # every public class/function in this ring must be an abc.ABC/typing.Protocol shape
     require_typed_ports: bool = False  # every typing.Protocol method in this ring must name its return type (no Any/object/bare container)
     max_reexport_ratio: float | None = None  # share of a module's public surface that may be first-party imports; None = unchecked (#136)
+    forbid_at_import: frozenset[str] = frozenset()  # effect categories that may not run while a module of this ring is imported (#230)
 
 
 @dataclass(frozen=True)

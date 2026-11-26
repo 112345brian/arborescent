@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Added
+- `effect-at-import` (#230), opt-in per ring with `forbid_at_import = [...]`: an effect that runs while a module is imported
+  (module-level statement, class body, parameter default, decorator) fails, including one call into a first-party function
+  (`X = load_thing()` where `load_thing` reads a file). The scan cache is re-built once after upgrading.
+
 ## 0.9.0 — 2026-11-12
 
 ### Fixed

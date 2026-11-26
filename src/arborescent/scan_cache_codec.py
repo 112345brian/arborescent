@@ -11,12 +11,19 @@ from typing import Any
 from .call_facts import FunctionCalls
 from .definition_facts import TopLevelDef
 from .effect_facts import EffectUse
-from .facts import Forwarder, PurityFacts, PurityUnit, SourceFacts
+from .facts import (
+    Forwarder,
+    ImportCall,
+    ImportTimeFacts,
+    PurityFacts,
+    PurityUnit,
+    SourceFacts,
+)
 from .import_syntax import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 
-CACHE_VERSION = 24
+CACHE_VERSION = 26  # 25 is used by a parallel branch
 
 
 def _purity_to_json(p: PurityFacts) -> list[Any]:
@@ -34,9 +41,14 @@ def _purity_from_json(raw: list[Any]) -> PurityFacts:
     return PurityFacts(units, tuple((item[0], item[1]) for item in raw[1]))
 
 
+def _import_time_from_json(raw: list[Any]) -> ImportTimeFacts:
+    calls = tuple(ImportCall(c[0], c[1], c[2]) for c in raw[0])
+    return ImportTimeFacts(calls, tuple((item[0], item[1], item[2]) for item in raw[1]))
+
+
 def facts_to_json(f: SourceFacts) -> list[Any]:
     imports = [[i.level, i.module, list(i.names), i.line, i.lazy, i.type_only] for i in f.imports]
-    effects = [[u.line, u.category, u.target, u.seam] for u in f.effect_uses]
+    effects = [[u.line, u.category, u.target, u.seam, u.at_import] for u in f.effect_uses]
     suppressions = [[line, kind] for line, kind in f.suppressions]
     top_level_defs = [[d.name, d.line, d.is_class, d.is_abstract] for d in f.top_level_defs]
     return [
@@ -53,6 +65,7 @@ def facts_to_json(f: SourceFacts) -> list[Any]:
         f.module_doc,
         f.arbor_reason, [[line, target] for line, target in f.dynamic_imports],
         _purity_to_json(f.purity), f.untokenizable,
+        [[[c.line, c.callee, c.local] for c in f.import_time.calls], [list(item) for item in f.import_time.function_effects]],
     ]
 
 
@@ -68,7 +81,7 @@ def cached_facts(hit: list[Any]) -> SourceFacts | None:
 
 def facts_from_json(raw: list[Any]) -> SourceFacts:
     imports = tuple(RawImport(i[0], i[1], tuple(i[2]), i[3], i[4], i[5]) for i in raw[0])
-    effects = tuple(EffectUse(u[0], u[1], u[2], u[3]) for u in raw[1])
+    effects = tuple(EffectUse(u[0], u[1], u[2], u[3], u[4]) for u in raw[1])
     suppressions = tuple((item[0], item[1]) for item in raw[3])
     top_level_defs = tuple(TopLevelDef(d[0], d[1], d[2], d[3]) for d in raw[5])
     return SourceFacts(
@@ -83,5 +96,5 @@ def facts_from_json(raw: list[Any]) -> SourceFacts:
         tuple(raw[19]), tuple((item[0], item[1]) for item in raw[20]),
         tuple(FunctionCalls(c[0], c[1], tuple(c[2])) for c in raw[21]),
         raw[22], raw[23], tuple((item[0], item[1]) for item in raw[24]),
-        _purity_from_json(raw[25]), raw[26],
+        _purity_from_json(raw[25]), raw[26], _import_time_from_json(raw[27]),
     )

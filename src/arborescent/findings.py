@@ -44,6 +44,7 @@ class Rule(StrEnum):
     EFFECT_FS_QUERY = "effect-fs-query"
     EFFECT_UNSANCTIONED_IMPORT = "effect-unsanctioned-import"
     EFFECT_VIA_IMPORT = "effect-via-import"
+    EFFECT_AT_IMPORT = "effect-at-import"
     INTERNAL_IMPORT = "internal-import"
     FORWARDED_IMPORT = "forwarded-import"
     RESTRICTED_IMPORT = "restricted-import"

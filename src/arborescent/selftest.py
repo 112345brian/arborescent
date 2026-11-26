@@ -553,7 +553,38 @@ def _effect_mutations(policy: ArchitecturePolicy, ring: str, host: str) -> list[
             "_arborescent_probe_value = None\n\n\ndef _arborescent_probe_global() -> None:\n    "
             "global _arborescent_probe_value\n    _arborescent_probe_value = 1",
         ))
-    return out
+    return out + _at_import_mutations(policy, ring, host)
+
+
+# category -> (import line, an expression that runs an effect of it), for the `effect-at-import` probe
+_AT_IMPORT_SNIPPETS: Mapping[str, tuple[str, str]] = {
+    "clock": ("import time", "time.time()"),
+    "console": ("", "print()"),
+    "database": ("import sqlite3", "sqlite3.connect(':memory:')"),
+    "dynamic-import": ("import importlib", "importlib.import_module('json')"),
+    "env": ("import os", "os.getenv('ARBORESCENT_PROBE')"),
+    "filesystem": ("", "open('arborescent_probe')"),
+    "fs-query": ("import os", "os.getcwd()"),
+    "host": ("import os", "os.getpid()"),
+    "identity": ("import uuid", "uuid.uuid4()"),
+    "monotonic": ("import time", "time.monotonic()"),
+    "network": ("import urllib.request", "urllib.request.urlopen('http://localhost')"),
+    "process": ("import subprocess", "subprocess.run(['true'])"),
+    "randomness": ("import random", "random.random()"),
+    "sleep": ("import time", "time.sleep(0)"),
+    "state": ("import threading", "threading.Lock()"),
+    "threads": ("import threading", "threading.Thread()"),
+}
+
+
+def _at_import_mutations(policy: ArchitecturePolicy, ring: str, host: str) -> list[Mutation]:
+    """Probe ``effect-at-import`` through its one-hop path: a new function no module has, called at import."""
+    category = next(iter(sorted(policy.ring(ring).forbid_at_import & _AT_IMPORT_SNIPPETS.keys())), None)
+    if category is None:
+        return []  # nothing listed, or only `global`/`patch`, which an import-time call cannot stand for
+    imported, expression = _AT_IMPORT_SNIPPETS[category]
+    append = f"{imported}\ndef _arborescent_probe_load():\n    return {expression}\n\n\n_arborescent_probe_loaded = _arborescent_probe_load()"
+    return [Mutation(Rule.EFFECT_AT_IMPORT, f"{ring}: {category} effect through an import-time call", host, append)]
 
 
 def _abstraction_mutations(policy: ArchitecturePolicy, ring: str, host: str) -> list[Mutation]:

@@ -2,7 +2,7 @@
 
 The result is plain data (``SourceFacts``) so it can be cached by content hash and reused by every check. Each family of
 facts is extracted by its own module (``import_syntax``, ``effect_facts``, ``declaration_facts``, ``definition_facts``,
-``call_facts``, ``forwarder_facts``, ``purity_facts``); this one holds the result types and the one pass that fills them.
+``call_facts``, ``forwarder_facts``, ``purity_facts``, ``import_time_facts``); this one holds the result types and the one pass that fills them.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from .call_facts import (
     call_aliases,
     call_sites,
     discard_call_lines,
+    dotted_name,
     dynamic_imports,
     function_calls,
 )
@@ -31,12 +32,19 @@ from .definition_facts import (
     top_level_defs,
     weak_port_returns,
 )
-from .effect_facts import EffectUse, effect_uses
+from .effect_facts import EffectUse, effect_sites, merge_sites, running_ids
 from .forwarder_facts import Forwarder, forwarders
 from .import_syntax import RawImport, import_aliases, raw_imports
+from .import_time_facts import (
+    ImportCall,
+    ImportTimeFacts,
+    Walked,
+    evaluated,
+    import_time_facts,
+)
 from .purity_facts import PurityFacts, PurityUnit, purity_facts
 
-__all__ = ["Forwarder", "ModuleInfo", "PurityFacts", "PurityUnit", "SourceFacts", "extract"]
+__all__ = ["Forwarder", "ImportCall", "ImportTimeFacts", "ModuleInfo", "PurityFacts", "PurityUnit", "SourceFacts", "extract"]
 
 
 @dataclass(frozen=True)
@@ -68,6 +76,7 @@ class SourceFacts:
     dynamic_imports: tuple[tuple[int, str], ...] = ()  # (line, literal module name, or "" when the target is not a plain absolute string literal) (#161)
     purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
     untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
+    import_time: ImportTimeFacts = field(default_factory=ImportTimeFacts)  # calls made at import and what each function runs (#230)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -90,9 +99,12 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     nodes = list(ast.walk(tree))  # one walk, shared by every fact below
     aliases = import_aliases(nodes)  # computed once: each fact below reads it
     calls_aliases = call_aliases(nodes, aliases)
+    sites = effect_sites(tree, nodes, aliases)
+    running = running_ids(nodes)
+    at_import = list(evaluated(tree.body))
     return SourceFacts(
         raw_imports(tree),
-        effect_uses(tree, nodes, aliases),
+        merge_sites(sites, {id(node) for node in at_import}, running),
         script_deps(source),
         suppressions,
         discard_call_lines(nodes),
@@ -116,6 +128,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         dynamic_imports(nodes, aliases),
         purity_facts(tree, nodes, aliases, purity_helpers(aliases)),
         untokenizable,
+        import_time_facts(Walked(tree, at_import, sites, running), calls_aliases, dotted_name),
     )
 
 
