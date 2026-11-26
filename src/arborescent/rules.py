@@ -12,7 +12,7 @@ import re
 from collections.abc import Collection, Mapping
 from typing import NamedTuple
 
-from .call_facts import absolute_callee
+from .call_facts import absolute_callee, is_private_name
 from .domain import (
     ALL,
     EFFECT_RULES,
@@ -226,6 +226,52 @@ def _result_discard_findings(context: RuleContext, name: str, info: ModuleInfo, 
             line,
         ))
     return out
+
+
+def _imported_paths(name: str, info: ModuleInfo) -> list[tuple[int, str]]:
+    """``(line, dotted)`` of everything a module imports by name or reaches as ``module._name``, relative forms resolved."""
+    found: list[tuple[int, str]] = []
+    for imp in info.facts.imports:
+        if not imp.names:  # plain `import a.b`
+            found.append((imp.line, imp.module))
+            continue
+        prefix = "." * imp.level + imp.module + ("." if imp.module else "")
+        found += [(imp.line, dotted) for item in imp.names if (dotted := absolute_callee(name, info.is_package, prefix + item)) is not None]
+    found += [(line, dotted) for line, target in info.facts.private_attrs if (dotted := absolute_callee(name, info.is_package, target)) is not None]
+    return found
+
+
+def _private_crossings(importer: str, dotted: str, known: Collection[str]) -> list[tuple[str, str]]:
+    """``(owner, private target)`` for each private segment of ``dotted`` whose owner ``importer`` is outside of.
+
+    The owner is a first-party module (or the namespace parent of a private module); an attribute of a class or object is not one.
+    A top-level private module has no owner, so only the names inside it are private."""
+    parts = dotted.split(".")
+    out: list[tuple[str, str]] = []
+    for end in range(1, len(parts)):
+        owner, target = ".".join(parts[:end]), ".".join(parts[: end + 1])
+        if not is_private_name(parts[end]) or (owner not in known and target not in known):
+            continue
+        if importer != owner and not importer.startswith(owner + "."):
+            out.append((owner, target))
+    return out
+
+
+def _private_access_findings(context: RuleContext, name: str, info: ModuleInfo, known: Collection[str]) -> list[Violation]:
+    """Another module's leading-underscore name or submodule, imported or reached as an attribute (#218); once per target."""
+    local_policy = context.policy_for(name)
+    setting = local_policy.private_access if local_policy is not None else None
+    if setting is None or any(in_unit(name, glob) for glob in setting.exempt):
+        return []
+    if setting.rings and context.resolve_ring(name) not in setting.rings:
+        return []
+    seen: dict[str, Violation] = {}
+    for line, dotted in sorted(_imported_paths(name, info)):
+        for owner, target in _private_crossings(name, dotted, known):
+            if target not in seen and not any(in_unit(target, glob) for glob in setting.allow):
+                detail = f"[{name}] uses {target}, which is private to {owner}; make it public, or move this code inside {owner}"
+                seen[target] = Violation(Rule.PRIVATE_ACCESS, name, detail, line)
+    return list(seen.values())
 
 
 def _docs_findings(context: RuleContext, name: str, info: ModuleInfo) -> list[Violation]:
@@ -622,6 +668,7 @@ def check_modules(
             _owned_literal_findings(context, name, info)
             + _construction_findings(context, name, info)
             + _result_discard_findings(context, name, info, modules)
+            + _private_access_findings(context, name, info, known)
         )
         if is_tool:
             out += _dev_tool_findings(context, name, info, _ImportEnv(modules, known, tops, import_graph))

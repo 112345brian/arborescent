@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Added
+- `[tool.arborescent.private_access]` (opt-in, #218): `private-cross-module-access` reports a module that imports or reaches
+  another module's leading-underscore name, or a private submodule of a package it is not in. Test modules are exempt by default.
+
 ## 0.9.0 — 2026-11-12
 
 ### Fixed

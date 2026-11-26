@@ -27,7 +27,10 @@ from .domain import (
 )
 from .engine import Services, package_checks, run_own
 from .facts import ModuleInfo
-from .importable_by_probes import importable_by_mutations
+from .importable_by_probes import (
+    importable_by_mutations,
+    private_access_mutations,
+)
 from .module_forbid_probes import module_forbid_mutations
 from .owned_literal_probes import owned_literal_mutations
 from .package_constraint_probes import constraint_mutations
@@ -199,6 +202,7 @@ def _local_mutations(
     steps.append(_require_annotation_plan(local_policy, local_known, local_paths, arbor_index))
     steps.append(module_forbid_mutations(local_policy, local_paths, local_known))
     steps.append(importable_by_mutations(local_policy, local_paths, local_known))
+    steps.append(private_access_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(owned_literal_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(construct_only_mutations(local_policy, local_paths, local_known, arbor_index))
     steps.append(mixed_purity_mutations(local_policy, purity, local_paths, arbor_index, scan.modules))

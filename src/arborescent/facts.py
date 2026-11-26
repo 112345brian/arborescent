@@ -20,6 +20,7 @@ from .call_facts import (
     discard_call_lines,
     dynamic_imports,
     function_calls,
+    private_attributes,
 )
 from .declaration_facts import arbor_annotation, comment_facts, script_deps
 from .definition_facts import (
@@ -31,7 +32,7 @@ from .definition_facts import (
     top_level_defs,
     weak_port_returns,
 )
-from .effect_facts import EffectUse, effect_uses
+from .effect_facts import EffectUse, effect_uses, rebound_names
 from .forwarder_facts import Forwarder, forwarders
 from .import_syntax import RawImport, import_aliases, raw_imports
 from .purity_facts import PurityFacts, PurityUnit, purity_facts
@@ -68,6 +69,7 @@ class SourceFacts:
     dynamic_imports: tuple[tuple[int, str], ...] = ()  # (line, literal module name, or "" when the target is not a plain absolute string literal) (#161)
     purity: PurityFacts = field(default_factory=PurityFacts)  # top-level definition spans plus logging, memo and module-state facts (#173)
     untokenizable: str = ""  # "<line>: <message>" when `ast` accepted the source but `tokenize` did not, so `suppressions` and `deferred` are unknown (#181)
+    private_attrs: tuple[tuple[int, str], ...] = ()  # (line, dotted) of ``._name`` reached through an import; relative targets keep leading dots (#218)
 
     @property
     def os_uses(self) -> tuple[tuple[int, str], ...]:
@@ -116,6 +118,7 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
         dynamic_imports(nodes, aliases),
         purity_facts(tree, nodes, aliases, purity_helpers(aliases)),
         untokenizable,
+        private_attributes(nodes, calls_aliases, rebound_names(nodes)),
     )
 
 

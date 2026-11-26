@@ -13,7 +13,7 @@ from pathlib import PurePosixPath
 from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
-    "ALL", "ArchitectureFields", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError", "ResultDiscard", "RingRule",
+    "ALL", "ArchitectureFields", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError", "PrivateAccess", "ResultDiscard", "RingRule",
     "in_unit", "normalized_source_path", "path_under", "unit_permits",
 ]
 
@@ -96,6 +96,19 @@ class ResultDiscard:
     convention: bool = True  # a module-level `-> *Result` / `-> *Outcome` function is result-bearing
 
 
+# Test code reaching into a helper's private name to unit-test it is ordinary, so the default `exempt` skips test modules.
+TEST_MODULES = ("tests", "*.tests", "*.tests.*", "test_*", "*.test_*", "conftest", "*.conftest")
+
+
+@dataclass(frozen=True)
+class PrivateAccess:
+    """Opt-in ``private_access`` (#218): another module's leading-underscore name or submodule is not part of its contract."""
+
+    rings: tuple[str, ...] = ()  # rings whose modules are checked; empty means every module
+    exempt: tuple[str, ...] = TEST_MODULES  # globs of accessing modules that are not checked
+    allow: tuple[str, ...] = ()  # globs of private targets ("pkg.mod._name") anyone may use
+
+
 @dataclass(frozen=True)
 class DocsPolicy:
     """``[tool.arborescent.docs]``: which module documentation rules are on (#110)."""
@@ -125,6 +138,7 @@ class ArchitectureFields:
     owned_literals: tuple[OwnedLiteral, ...] = ()
     construct_only: tuple[ConstructionSite, ...] = ()  # #85
     result_discard: ResultDiscard | None = None
+    private_access: PrivateAccess | None = None  # #218
     docs: DocsPolicy = DocsPolicy()
     importable_by: tuple[tuple[str, tuple[str, ...]], ...] = ()  # module glob -> globs of the only modules that may import it
     entry_scripts: tuple[str, ...] = ()  # dotted module names that are PEP 723 scripts

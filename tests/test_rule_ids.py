@@ -43,6 +43,7 @@ def test_rule_id_strings_never_change() -> None:
             "discard",
             "lazy-import",
             "result-discard",
+            "private-cross-module-access",
             "effect-clock",
             "effect-env",
             "effect-identity",
@@ -140,8 +141,9 @@ def test_every_rule_has_a_selftest_mutation_or_a_documented_reason() -> None:
     # is not fully annotated yet); those rules' mutations are covered by the next two tests instead. The package rules'
     # probes are only built with the catalog in view (`selftest`), so they are asserted by
     # `test_arborescent_probes_its_own_package_rules` below and, on synthetic catalogs, by tests/test_package_gaps.py.
+    # `private_access` is opt-in and this repository does not enable it: its probe is covered by tests/test_private_access.py.
     old_tokenizer = {Rule.UNTOKENIZABLE_SOURCE} if sys.version_info < (3, 12) else set()  # 3.11 tokenizes a doubled CR: no probe (reported as skipped)
-    assert set(NO_MUTATION) | mutated | old_tokenizer | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, *DOCS_RULES, *PACKAGE_RULES} >= set(Rule)
+    assert set(NO_MUTATION) | mutated | old_tokenizer | {Rule.UNDECLARED_ENTRY_DEPENDENCY, Rule.UNANNOTATED_MODULE, Rule.PRIVATE_ACCESS, *DOCS_RULES, *PACKAGE_RULES} >= set(Rule)
     assert not set(NO_MUTATION) & mutated, "a rule with a mutation needs no excuse"
     assert all(reason.strip() for reason in NO_MUTATION.values())
 

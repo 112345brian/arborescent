@@ -21,6 +21,7 @@ class Rule(StrEnum):
     DISCARD = "discard"
     LAZY_IMPORT = "lazy-import"
     RESULT_DISCARD = "result-discard"
+    PRIVATE_ACCESS = "private-cross-module-access"
     EFFECT_CLOCK = "effect-clock"
     EFFECT_ENV = "effect-env"
     EFFECT_IDENTITY = "effect-identity"

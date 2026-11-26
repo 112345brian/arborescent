@@ -10,7 +10,7 @@ import ast
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-__all__ = ["FunctionCalls", "absolute_callee", "bare_calls", "call_aliases", "call_sites", "discard_call_lines", "dotted_name", "dynamic_imports", "function_calls"]
+__all__ = ["FunctionCalls", "absolute_callee", "bare_calls", "call_aliases", "call_sites", "discard_call_lines", "dotted_name", "dynamic_imports", "function_calls", "is_private_name", "private_attributes"]
 
 
 @dataclass(frozen=True)
@@ -107,6 +107,23 @@ def _root_name(node: ast.expr) -> str | None:
     while isinstance(node, ast.Attribute):
         node = node.value
     return node.id if isinstance(node, ast.Name) else None
+
+
+def is_private_name(name: str) -> bool:
+    """A leading underscore that is neither a dunder nor the bare ``_`` (gettext's alias, a throwaway)."""
+    return name.startswith("_") and name != "_" and not (name.startswith("__") and name.endswith("__"))
+
+
+def private_attributes(nodes: Sequence[ast.AST], aliases: dict[str, str], rebound: set[str]) -> tuple[tuple[int, str], ...]:
+    """``(line, dotted)`` of every ``._name`` attribute reached through an import the module does not rebind (#218)."""
+    found: set[tuple[int, str]] = set()
+    for node in nodes:
+        if not (isinstance(node, ast.Attribute) and is_private_name(node.attr)):
+            continue
+        root = _root_name(node)
+        if root in aliases and root not in rebound and (target := dotted_name(node, aliases)) is not None:
+            found.add((node.lineno, target))
+    return tuple(sorted(found))
 
 
 def _imported_calls(func: ast.FunctionDef | ast.AsyncFunctionDef, aliases: dict[str, str]) -> tuple[str, ...]:

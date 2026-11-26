@@ -326,6 +326,26 @@ aliased or relative import, and a call inside the defining module. Dynamic calls
 (`obj.f()`), callbacks and variables, `getattr`, `functools.partial`, `*` imports, re-exports and shadowed names. Use a type
 checker's unused-result check for those. This is separate from the `discard(value, reason=...)` inventory above.
 
+`private_access` is an opt-in check that Python's leading underscore is respected across modules. Rings and
+`importable_by` cannot see it: two modules of one ring may import each other's `_name` freely. It reports
+`private-cross-module-access`:
+
+```toml
+[tool.arborescent.private_access]
+rings = ["application", "adapters"]   # only modules in these rings are checked (leave out for every module)
+exempt = ["tests", "*.test_*"]        # accessing modules not checked; replaces the default (test modules and conftest)
+allow = ["app.engine._registry"]      # private targets anyone may use
+```
+
+An empty table turns it on. A module may not `from m import _x`, nor reach `m._x` through an import (`import m`, `from p import m`,
+an alias or a relative import), unless it is `m` itself or below it. A private submodule (`pkg._impl`) belongs to its package, so
+anything inside `pkg` may import it and nothing outside may. Only first-party modules are checked, lazy and `TYPE_CHECKING`
+imports count, and there is one finding per module and private name, at its first line. By default `tests`, `*.tests`,
+`*.tests.*`, `test_*`, `*.test_*`, `conftest` and `*.conftest` modules are exempt, since unit-testing a helper through its private
+name is ordinary. Never reported: dunders and a bare `_`, attributes of classes and objects (`self._x`, `Class._x`, a
+namedtuple's `_replace`), `getattr`, `*` imports, and an attribute chain whose first name the module also assigns or takes as a
+parameter. Findings join the baseline ratchet, and `selftest` reaches into a private name when the table is present.
+
 `[tool.arborescent.docs]` makes a module say what it is, and says it in the ring the policy enforces:
 
 ```toml
@@ -837,6 +857,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `forwarded-import` | a module imports a pass-through function (`def f(a): return other.f(a)`: one call to an imported name, arguments exactly the parameters, no default, decorator or other statement) whose target `module_forbid_imports` forbids it: the dependency one hop away. Chains of forwarders are followed. Only `from B import f` is seen, not `B.f` attribute use; wrappers that add logic are real boundaries and are not flagged. Counts against the importing module and takes its own baseline key |
 | `restricted-import` | a module outside a restriction's `importable_by` globs imports the restricted module; also a key or importer glob that matches no module |
 | `result-discard` | a call used as a whole statement drops the value of a result-bearing function (`result_discard`); `_ = f()` is a deliberate discard and is not reported |
+| `private-cross-module-access` | with `private_access` set, a module imports or reaches another module's `_name`, or a `_submodule` of a package it is not in |
 | `missing-module-docstring` | `docs.module_docstring` is on and a module has no, or a blank, docstring |
 | `docstring-ring-mismatch` | `docs.module_names_ring` is on and a module's docstring does not name the ring that `classify` or `__arbor__` gives it (it says which other rings it names) |
 | `literal-outside-owner` | a module or ring spells an `owned_literal` string that belongs to other modules or rings; also an owner glob that matches no module |

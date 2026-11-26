@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .call_facts import dotted_name
 from .effect_categories import INJECTABLE_EFFECTS, OS_BRANCH_ATTRS, effect_category_of
 
-__all__ = ["EffectUse", "effect_uses"]
+__all__ = ["EffectUse", "effect_uses", "rebound_names"]
 
 
 _PATH_IO_METHODS = frozenset({
@@ -105,7 +105,7 @@ def _seam_expression(default: ast.expr | None) -> ast.expr | None:
     return None
 
 
-def _rebound_names(nodes: Sequence[ast.AST]) -> set[str]:
+def rebound_names(nodes: Sequence[ast.AST]) -> set[str]:
     """Names the module assigns, defines or takes as parameters (imports are resolved by `import_aliases`): a bare builtin name among them is not the builtin."""
     bound: set[str] = set()
     for node in nodes:
@@ -318,7 +318,7 @@ def _seeded_random_ids(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> set
 
 def effect_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tuple[EffectUse, ...]:
     seams = _injection_defaults(nodes)
-    rebound = _rebound_names(nodes)
+    rebound = rebound_names(nodes)
     hints = _annotation_node_ids(nodes)
     seeded = _seeded_random_ids(nodes, aliases)
     uses: set[EffectUse] = set(_global_effect_uses(nodes))
