@@ -58,7 +58,7 @@ import h
 
 
 def test_a_very_long_attribute_chain_is_named_without_recursion() -> None:
-    chain = ".".join(["a"] * 3000)
+    chain = ".".join(["a"] * _DEPTH)
     assert extract(f"import a\n\ndef f():\n    return {chain}()\n").imports[0].module == "a"
     node = ast.parse(chain, mode="eval").body
     assert dotted_name(node, {}) == chain
@@ -66,7 +66,7 @@ def test_a_very_long_attribute_chain_is_named_without_recursion() -> None:
     assert dotted_name(ast.parse("f()." + chain, mode="eval").body, {}) is None  # not rooted in a name
 
 
-_CHAIN = ".".join(["os"] * 3000)
+_CHAIN = ".".join(["os"] * _DEPTH)
 _CHAINED = {
     "call returned": f"def f():\n    return {_CHAIN}()\n",
     "name returned": f"def f():\n    return {_CHAIN}\n",
