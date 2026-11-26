@@ -141,7 +141,7 @@ def _store_cache(
     if cache_file and (parsed > 0 or (only is None and len(fresh) != len(cache))):
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         merged = fresh if only is None else {**cache, **fresh}
-        _ = cache_file.write_text(json.dumps({"v": CACHE_VERSION, "files": merged}), encoding="utf-8")
+        _ = cache_file.write_text(json.dumps({"v": CACHE_VERSION, "files": merged}, separators=(",", ":")), encoding="utf-8")
 
 
 class FsScanner:
@@ -261,8 +261,9 @@ class FsScanner:
         found: dict[str, tuple[str, bool, str]] = {}
         unclassified: list[tuple[str, str]] = []
         for rel in kept:
+            before = len(found)
             add_discovered(found, policy, rel)
-            module = next((name for name, _, path in found.values() if path == rel), None)
+            module = next(reversed(found)) if len(found) > before else None  # the entry this file just added
             if module is not None and is_unclassified(policy, module, rel):
                 unclassified.append((module, rel))
 

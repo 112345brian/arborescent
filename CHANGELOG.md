@@ -12,6 +12,8 @@
   `./libs/*/src`. The `tach` and `tach-external` engines now fail instead of running, and name the spelling to write (from
   `tach.toml`, else `[tool.tach]` in `pyproject.toml`). Spellings tach does read (`./src`, `src/`) are left alone, and
   generated `tach.toml` files no longer carry `./` or doubled separators. Windows keeps normalising a temporary copy.
+- A cold run is faster: the fact passes share one cached tree traversal, module discovery is no longer quadratic in the
+  number of files, and `scan.json` is written without padding. Findings are unchanged.
 - Generated code with a very long expression or `elif` ladder no longer stops `check` with `RecursionError` while its
   facts are extracted.
 - The taint pass no longer stops `check` with `RecursionError` on a very long `elif` ladder inside a function, or on a very

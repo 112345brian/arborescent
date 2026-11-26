@@ -22,6 +22,7 @@ from .effect_categories import (
     OS_BRANCH_ATTRS,
     effect_category_of,
 )
+from .import_syntax import child_nodes, walk_nodes
 from .purity_facts import (
     is_container,
     local_names,
@@ -110,6 +111,10 @@ class ModuleEffects(NamedTuple):
     foreign_runs: tuple[tuple[ast.AST, str], ...]
 
 _SEAM_ANNOTATIONS = frozenset({"Callable", "Mapping", "MutableMapping"})
+# Node classes picked out of the walk by identity: a parsed tree holds exactly these, and these loops run once per node.
+_CALLABLES = frozenset({ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef})
+_ANNOTATED = frozenset({ast.arg, ast.AnnAssign, ast.FunctionDef, ast.AsyncFunctionDef})
+_SITE_NODES = frozenset({ast.ImportFrom, ast.Attribute, ast.Name, ast.Call})
 
 
 def _is_seam_annotation(node: ast.expr | None) -> bool:
@@ -144,10 +149,10 @@ def _is_seam_subscript(node: ast.Subscript) -> bool:
 def _injection_defaults(nodes: Sequence[ast.AST]) -> dict[int, int]:
     """Node id -> seam kind for every node inside a bare Name/Attribute parameter default: a reference there is the injection seam."""
     seams: dict[int, int] = {}
-    for node in nodes:
+    for node in [n for n in nodes if n.__class__ in _CALLABLES]:
         if isinstance(node, ast.Lambda):
             pairs = [(None, d) for d in [*node.args.defaults, *node.args.kw_defaults]]
-        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        elif isinstance(node, _DEFS):
             positional = [*node.args.posonlyargs, *node.args.args]
             pairs = [*zip(positional[len(positional) - len(node.args.defaults):], node.args.defaults, strict=True),
                      *zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True)]
@@ -158,7 +163,7 @@ def _injection_defaults(nodes: Sequence[ast.AST]) -> dict[int, int]:
             held = _seam_expression(default)
             if held is not None:
                 kind = 1 if _is_seam_annotation(annotation) else 2
-                seams.update((id(inner), kind) for inner in ast.walk(held))  # `os.environ.get` also holds `os.environ`
+                seams.update((id(inner), kind) for inner in walk_nodes(held))  # `os.environ.get` also holds `os.environ`
     return seams
 
 
@@ -178,9 +183,10 @@ def rebound_names(nodes: Sequence[ast.AST]) -> set[str]:
     """Names the module assigns, defines or takes as parameters (imports are resolved by `import_aliases`): a bare builtin name among them is not the builtin."""
     bound: set[str] = set()
     for node in nodes:
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
-            bound.add(node.id)
-        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        if isinstance(node, ast.Name):
+            if node.ctx.__class__ is not ast.Load:
+                bound.add(node.id)
+        elif isinstance(node, _NAMED_DEFS):
             bound.add(node.name)
         elif isinstance(node, ast.arg):
             bound.add(node.arg)
@@ -333,12 +339,12 @@ _SCOPE_BOUNDARIES = (
 def _own_scope_nodes(func: ast.AST) -> Iterable[ast.AST]:
     """Every node directly in ``func``'s own scope: its body, but not a nested function/lambda/class/comprehension's
     (each of those is its own scope, so a ``global`` declared in ``func`` cannot reach an assignment inside one)."""
-    stack = list(ast.iter_child_nodes(func))
+    stack = list(child_nodes(func))
     while stack:
         node = stack.pop()
         yield node
         if not isinstance(node, _SCOPE_BOUNDARIES):
-            stack.extend(ast.iter_child_nodes(node))
+            stack.extend(child_nodes(node))
 
 
 def _global_writes(
@@ -375,6 +381,7 @@ def _global_effect_uses(writes: Sequence[tuple[ast.FunctionDef | ast.AsyncFuncti
 _CACHE_DECORATORS = frozenset({"functools.cache", "functools.lru_cache"})  # not `cached_property`: that cache is per instance
 _CACHE_NAME = re.compile(r"cache|memo", re.IGNORECASE)
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)  # a tuple: a `|` union is rebuilt at every check, and these run once per node
+_NAMED_DEFS = (*_DEFS, ast.ClassDef)
 _WRITE_NODES = frozenset({ast.Call, ast.Subscript})  # the only node types `mutated_container` can answer for
 # Not a semaphore (it can admit more than one writer) and not `asyncio.Lock` (it excludes tasks, not threads).
 _LOCK_FACTORIES = frozenset({
@@ -758,22 +765,22 @@ def _module_state(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, st
 def _annotation_node_ids(nodes: Sequence[ast.AST]) -> set[int]:
     """Ids of every node inside a type annotation (parameter, return, variable): a hint names a type, it does not use it."""
     ids: set[int] = set()
-    for node in nodes:
+    for node in [n for n in nodes if n.__class__ in _ANNOTATED]:
         annotation: ast.expr | None = None
         if isinstance(node, ast.arg | ast.AnnAssign):
             annotation = node.annotation
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             annotation = node.returns
         if annotation is not None:
-            ids.update(id(inner) for inner in ast.walk(annotation))
+            ids.update(id(inner) for inner in walk_nodes(annotation))
     return ids
 
 
 def _seeded_random_ids(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> set[int]:
     """Ids of the callee in ``random.Random(<seed>)``: a generator built from a seed is deterministic, so it is no randomness use."""
     seeded: set[int] = set()
-    for node in nodes:
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name | ast.Attribute)):
+    for node in [n for n in nodes if isinstance(n, ast.Call)]:
+        if not isinstance(node.func, ast.Name | ast.Attribute):
             continue
         if dotted_name(node.func, aliases) != "random.Random":
             continue
@@ -781,6 +788,45 @@ def _seeded_random_ids(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> set
         if any(not (isinstance(arg, ast.Constant) and arg.value is None) for arg in args):
             seeded.add(id(node.func))
     return seeded
+
+
+class _Context(NamedTuple):
+    """What the module says about its names and nodes, for reading one node."""
+
+    rebound: set[str]
+    not_references: set[int]  # nodes inside a type annotation, and the callee of a seeded ``random.Random``
+    seams: dict[int, int]
+
+
+def _node_uses(nodes: Sequence[ast.AST], aliases: dict[str, str], context: _Context) -> list[EffectSite]:
+    """The uses a node is by itself, in walk order: an OS-branching import shadows the names read after it."""
+    sites: list[EffectSite] = []
+    imported_os_names: set[str] = set()
+    for node in [n for n in nodes if n.__class__ in _SITE_NODES]:
+        if isinstance(node, ast.ImportFrom):
+            for use, bound_name in _os_branch_imports(node):
+                sites.append((node, use))
+                imported_os_names.add(bound_name)
+        elif isinstance(node, ast.Call):
+            if (use := _patch_use(node, aliases)) is not None:
+                sites.append((node, use))
+        elif isinstance(node, ast.Attribute | ast.Name):
+            sites += [(node, use) for use in _expression_uses(node, aliases, context, imported_os_names)]
+    return sites
+
+
+def _expression_uses(
+    node: ast.Attribute | ast.Name, aliases: dict[str, str], context: _Context, imported_os_names: set[str],
+) -> list[EffectUse]:
+    """A method on a ``Path(...)`` call, and a name or attribute chain that resolves to an effectful target."""
+    found: list[EffectUse] = []
+    if node.__class__ is ast.Attribute and (use := _path_io_use(node, aliases)) is not None:
+        found.append(use)
+    if id(node) in context.not_references or _is_shadowed(node, imported_os_names, context.rebound):
+        return found
+    if (use := _reference_use(node, aliases, context.seams)) is not None:
+        found.append(use)
+    return found
 
 
 def module_effects(
@@ -795,16 +841,7 @@ def module_effects(
     state = _module_state(tree, nodes, aliases, call_names)
     sites: list[EffectSite] = [(None, use) for use in state.uses]
     sites += _path_receiver_uses(tree, nodes, aliases)
-    imported_os_names: set[str] = set()
-    for node in nodes:
-        if isinstance(node, ast.ImportFrom):
-            for use, bound_name in _os_branch_imports(node):
-                sites.append((node, use))
-                imported_os_names.add(bound_name)
-        found = [_path_io_use(node, aliases), _patch_use(node, aliases)]
-        if isinstance(node, ast.Attribute | ast.Name) and id(node) not in hints and not _is_shadowed(node, imported_os_names, rebound):
-            found.append(None if id(node) in seeded else _reference_use(node, aliases, seams))
-        sites += [(node, use) for use in found if use is not None]
+    sites += _node_uses(nodes, aliases, _Context(rebound, hints | seeded, seams))
     return ModuleEffects(sites, state.writes, state.locks, state.shared, state.runs, state.foreign)
 
 

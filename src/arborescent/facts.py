@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import re
+from collections import defaultdict
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
@@ -63,7 +64,7 @@ from .effect_facts import (
     state_category,
 )
 from .forwarder_facts import Forwarder, forwarders
-from .import_syntax import RawImport, import_aliases, raw_imports
+from .import_syntax import RawImport, import_aliases, raw_imports, walk_nodes
 from .import_time_facts import (
     ImportCall,
     ImportTimeFacts,
@@ -226,56 +227,70 @@ def extract(source: str, filename: str = "<source>") -> SourceFacts:
     tree = ast.parse(source, filename=filename)
     arbor_ring, arbor_error, arbor_role, arbor_reason = arbor_annotation(tree)
     suppressions, deferred, untokenizable = comment_facts(source)
-    nodes = list(ast.walk(tree))  # one walk, shared by every fact below
-    aliases = import_aliases(nodes)  # computed once: each fact below reads it
-    calls_aliases = call_aliases(nodes, aliases)
-    rebound = rebound_names(nodes)
+    nodes = walk_nodes(tree)  # one walk, shared by every fact below
+    of = _by_class(nodes)  # a fact that only looks at some node classes is handed those, not the whole walk
+    calls = of[ast.Call]
+    functions = [*of[ast.FunctionDef], *of[ast.AsyncFunctionDef]]
+    definitions = [*functions, *of[ast.ClassDef]]
+    imports = [node for node in nodes if node.__class__ is ast.Import or node.__class__ is ast.ImportFrom]  # a later binding wins
+    aliases = import_aliases(imports)  # computed once: each fact below reads it
+    calls_aliases = call_aliases(of[ast.ImportFrom], aliases)
+    rebound = rebound_names([*of[ast.Name], *definitions, *of[ast.arg]])
     effects = module_effects(tree, nodes, aliases, rebound, calls_aliases)
     sites = effects.sites
-    running = running_ids(nodes)
+    running = running_ids([*calls, *definitions])
     at_import = list(evaluated(tree.body))
-    on_paths = path_calls(tree, nodes, aliases)
+    on_paths = path_calls(tree, calls, aliases)
+    branches = [*of[ast.If], *of[ast.Try], *of[ast.TryStar], *of[ast.Match]]  # with a function's calls, they give it paths
     return SourceFacts(
         raw_imports(tree),
         merge_sites(sites, {id(node) for node in at_import}, running),
         script_deps(source),
         suppressions,
-        discard_call_lines(nodes),
+        discard_call_lines(calls),
         top_level_defs(tree, aliases),
         arbor_ring,
         arbor_error,
         arbor_role,
-        _file_ref_lines(nodes),
+        _file_ref_lines(of[ast.Name]),
         main_guard_line(tree),
-        _string_literals(nodes),
+        _string_literals([tree, *definitions, *of[ast.Constant]]),
         forwarders(tree),
-        weak_port_returns(nodes, aliases),
+        weak_port_returns(of[ast.ClassDef], aliases),
         *surface(tree),
         deferred,
-        call_sites(tree, nodes, calls_aliases),
+        call_sites(tree, calls, calls_aliases),
         result_defs(tree),
-        bare_calls(nodes, calls_aliases),
+        bare_calls(of[ast.Expr], calls_aliases),
         function_calls(tree, aliases),
         ast.get_docstring(tree),
         arbor_reason,
-        dynamic_imports(nodes, aliases),
-        purity_facts(tree, nodes, aliases, purity_helpers(aliases), calls_aliases),
+        dynamic_imports(calls, aliases),
+        purity_facts(tree, [*calls, *of[ast.Subscript], *functions, *of[ast.Name]], aliases, purity_helpers(aliases), calls_aliases),
         untokenizable,
         import_time_facts(Walked(tree, at_import, sites, running, effects.state_runs, effects.foreign_runs), calls_aliases, dotted_name),
         seam_facts(tree, sites, running, aliases, dotted_name),
-        function_spans(tree, nodes, calls_aliases, on_paths),
+        function_spans(tree, [*calls, *branches], calls_aliases, on_paths),
         exemption_comments(source),
-        call_shapes(tree, nodes, calls_aliases),
+        call_shapes(tree, calls, calls_aliases),
         class_shapes(tree, calls_aliases),
-        private_attributes(nodes, calls_aliases, rebound),
-        patch_targets(nodes, calls_aliases, rebound),
-        unqualified_from_calls(tree, nodes, rebound),
+        private_attributes(of[ast.Attribute], calls_aliases, rebound),
+        patch_targets([*of[ast.withitem], *calls], calls_aliases, rebound),
+        unqualified_from_calls(tree, [*calls, *functions, *of[ast.Lambda], *imports], rebound),
         member_shapes(tree, calls_aliases),
         effects.state_writes,
         effects.locks,
         effects.shared,
         on_paths,
     )
+
+
+def _by_class(nodes: Sequence[ast.AST]) -> defaultdict[type, list[ast.AST]]:
+    """The nodes of each concrete class, each list in walk order."""
+    found: defaultdict[type, list[ast.AST]] = defaultdict(list)
+    for node in nodes:
+        found[node.__class__].append(node)
+    return found
 
 
 _LITERAL_NAME = re.compile(r"[A-Za-z_][\w.\-]{0,79}")

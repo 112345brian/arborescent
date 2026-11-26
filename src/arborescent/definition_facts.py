@@ -179,7 +179,7 @@ def member_shapes(tree: ast.Module, aliases: dict[str, str]) -> tuple[ClassMembe
                 visit(stmt.body, f"{prefix}{stmt.name}.")
             elif isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
                 visit(stmt.body, f"{prefix}{stmt.name}.")
-            else:
+            elif "body" in stmt._fields or "cases" in stmt._fields:  # only a compound statement holds statements
                 visit(_blocks(stmt), prefix)
 
     visit(tree.body, "")
