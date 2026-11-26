@@ -138,12 +138,13 @@ def call_aliases(nodes: Sequence[ast.AST], imported: dict[str, str]) -> dict[str
 
 
 def dotted_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
-    if isinstance(node, ast.Name):
-        return aliases.get(node.id, node.id)
-    if isinstance(node, ast.Attribute):
-        parent = dotted_name(node.value, aliases)
-        return f"{parent}.{node.attr}" if parent is not None else None
-    return None
+    attributes: list[str] = []
+    while isinstance(node, ast.Attribute):  # a loop: generated code chains thousands of attributes
+        attributes.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    return ".".join([aliases.get(node.id, node.id), *reversed(attributes)])
 
 
 _DYNAMIC_IMPORT_CALLS = frozenset({"importlib.import_module", "importlib.__import__", "__import__", "builtins.__import__"})

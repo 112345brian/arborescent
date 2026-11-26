@@ -50,12 +50,11 @@ def _bindings(tree: ast.Module) -> dict[str, _Binding]:
 
 
 def _path(node: ast.expr) -> list[str] | None:
-    if isinstance(node, ast.Name):
-        return [node.id]
-    if isinstance(node, ast.Attribute):
-        parent = _path(node.value)
-        return None if parent is None else [*parent, node.attr]
-    return None
+    attributes: list[str] = []
+    while isinstance(node, ast.Attribute):
+        attributes.append(node.attr)
+        node = node.value
+    return [node.id, *reversed(attributes)] if isinstance(node, ast.Name) else None
 
 
 def _parameters(args: ast.arguments) -> tuple[list[str], str | None, list[str], str | None] | None:

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
-from collections.abc import Generator, Sequence
+from collections.abc import Collection, Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -48,6 +49,17 @@ class LocalFileSystem:
 
     def rglob(self, root: Path, pattern: str) -> list[Path]:
         return sorted(root.rglob(pattern))
+
+    def walk_files(self, root: Path, prune: Collection[str]) -> list[Path]:
+        found: list[Path] = []
+        for folder, folders, files in os.walk(root):
+            here = Path(folder)
+            if here != root and (".git" in folders or ".git" in files):  # a nested clone, linked worktree or submodule
+                folders.clear()
+                continue
+            folders[:] = [name for name in folders if name not in prune]
+            found.extend(here / name for name in files)
+        return sorted(found)
 
     def mkdir(self, path: Path) -> None:
         path.mkdir(parents=True, exist_ok=True)

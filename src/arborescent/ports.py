@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Protocol, TypeVar, runtime_checkable
@@ -81,6 +81,9 @@ class FileSystem(Protocol):
     def glob(self, root: Path, pattern: str) -> list[Path]: ...  # sorted; ``**`` spans folders
 
     def rglob(self, root: Path, pattern: str) -> list[Path]: ...  # sorted; files and folders at any depth
+
+    # sorted; files only. Never enters a folder named in ``prune``, nor one below ``root`` that holds its own ``.git``.
+    def walk_files(self, root: Path, prune: Collection[str]) -> list[Path]: ...
 
     def mkdir(self, path: Path) -> None: ...  # with parents; existing is fine
 

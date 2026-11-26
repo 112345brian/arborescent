@@ -75,12 +75,11 @@ def _call_count(callee: str, text: str) -> int:
 
 def _dotted(node: ast.expr) -> str | None:
     """``a.b.c`` for a chain of attribute accesses ending in a plain name; ``None`` for anything else (a call result, a subscript)."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        head = _dotted(node.value)
-        return None if head is None else f"{head}.{node.attr}"
-    return None
+    attributes: list[str] = []
+    while isinstance(node, ast.Attribute):
+        attributes.append(node.attr)
+        node = node.value
+    return ".".join([node.id, *reversed(attributes)]) if isinstance(node, ast.Name) else None
 
 
 def _by_command(spec: RatchetSpec, subject: Subject) -> dict[str, int]:

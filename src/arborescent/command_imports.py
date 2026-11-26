@@ -32,11 +32,14 @@ class EagerShare:
 
 
 def _dotted(node: ast.expr) -> str:
-    if isinstance(node, ast.Call):
-        return _dotted(node.func)
-    if isinstance(node, ast.Attribute):
-        return f"{_dotted(node.value)}.{node.attr}"
-    return node.id if isinstance(node, ast.Name) else ""
+    attributes: list[str] = []
+    while isinstance(node, ast.Call | ast.Attribute):
+        if isinstance(node, ast.Attribute):
+            attributes.append(node.attr)
+            node = node.value
+        else:
+            node = node.func
+    return ".".join([node.id if isinstance(node, ast.Name) else "", *reversed(attributes)])
 
 
 def _registers(node: ast.expr, decorators: Collection[str]) -> bool:

@@ -63,27 +63,24 @@ def _io_category(target: str, seeds: frozenset[str]) -> str | None:
 
 
 def _dotted(node: ast.expr, aliases: Mapping[str, str]) -> str | None:
-    if isinstance(node, ast.Name):
-        return aliases.get(node.id, node.id)
-    if isinstance(node, ast.Attribute):
-        parent = _dotted(node.value, aliases)
-        return f"{parent}.{node.attr}" if parent is not None else None
-    return None
+    attributes: list[str] = []
+    while isinstance(node, ast.Attribute):
+        attributes.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    return ".".join([aliases.get(node.id, node.id), *reversed(attributes)])
 
 
 def _body_nodes(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
     """Every node in ``func``'s own scope, in source order, not descending into a nested def/class/lambda."""
     out: list[ast.AST] = []
-
-    def walk(node: ast.AST) -> None:
+    pending: list[ast.AST] = list(reversed(func.body))  # a stack, not recursion: an expression can nest thousands deep
+    while pending:
+        node = pending.pop()
         out.append(node)
-        if isinstance(node, _SCOPE_BOUNDARIES):
-            return
-        for child in ast.iter_child_nodes(node):
-            walk(child)
-
-    for stmt in func.body:
-        walk(stmt)
+        if not isinstance(node, _SCOPE_BOUNDARIES):
+            pending.extend(reversed(list(ast.iter_child_nodes(node))))
     return out
 
 

@@ -6,6 +6,7 @@ CRLF, non-UTF-8, a directory where a file should be) pin the behaviour the port 
 from __future__ import annotations
 
 import json
+import os
 import tomllib
 from pathlib import Path
 
@@ -193,6 +194,34 @@ def test_crlf_ignores_noise_directories_and_non_matching_names(env: Env) -> None
     fs, root = env
     put(fs, root, {"node_modules/x.sh": b"a\r\n", "x.txt": b"a\r\n", "ok.sh": b"a\n", "sub/bad.sh": b"a\r\nb"})
     assert [v.subject for v in crlf(fs, root, ["*.sh"])] == ["sub/bad.sh"]
+
+
+def test_crlf_leaves_nested_worktrees_and_clones_to_their_own_checks(env: Env) -> None:
+    fs, root = env
+    put(fs, root, {
+        ".git/HEAD": b"ref", "bad.sh": b"a\r\n",
+        ".claude/worktrees/agent/.git": b"gitdir: elsewhere", ".claude/worktrees/agent/bad.sh": b"a\r\n",
+        "clone/.git/HEAD": b"ref", "clone/deep/bad.sh": b"a\r\n",
+    })
+    assert [v.subject for v in crlf(fs, root, ["*.sh"])] == ["bad.sh"]
+
+
+def test_crlf_does_not_list_what_it_would_skip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cost is the point: filtering after a full walk read environments and dozens of nested worktrees (~40 s)."""
+    put(LocalFileSystem(), tmp_path, {
+        "keep/ok.sh": b"a\n", "node_modules/pkg/x.sh": b"a\n", ".venv/lib/x.sh": b"a\n",
+        "wt/one/.git": b"gitdir: elsewhere", "wt/one/src/pkg/x.sh": b"a\n",
+    })
+    listed: list[str] = []
+    scandir = os.scandir
+
+    def spy(path: str = ".") -> object:
+        listed.append(Path(path).relative_to(tmp_path).as_posix())
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", spy)
+    assert crlf(LocalFileSystem(), tmp_path, ["*.sh"]) == []
+    assert sorted(listed) == [".", "keep", "wt", "wt/one"]  # the nested checkout is listed once, to find its .git
 
 
 def test_undeclared_imports_with_a_missing_or_crlf_manifest(env: Env) -> None:

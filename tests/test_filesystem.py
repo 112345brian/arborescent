@@ -123,7 +123,7 @@ def test_application_and_composition_code_touches_files_only_through_the_port() 
 
     io_methods = {
         "read_text", "read_bytes", "write_text", "write_bytes", "open", "mkdir", "unlink", "rmdir", "rename",
-        "exists", "is_file", "is_dir", "iterdir", "glob", "rglob", "stat", "touch", "rmtree", "copytree",
+        "exists", "is_file", "is_dir", "iterdir", "glob", "rglob", "stat", "touch", "rmtree", "copytree", "walk_files",
     }  # fmt: skip  (not `replace`: str.replace; not `resolve`: path normalisation, no content is read or written)
     repo = Path(__file__).resolve().parents[1]
     policy, _ = load_policy(LocalFileSystem(), repo / "pyproject.toml")
@@ -172,3 +172,16 @@ def test_make_executable_keeps_content_and_rejects_a_missing_file(env: tuple[Fil
     assert fs.read_text(root / "hook") == "#!/bin/sh\n"
     with pytest.raises(FileNotFoundError):
         fs.make_executable(root / "nope")
+
+
+def test_walk_files_lists_files_only_and_never_enters_pruned_folders_or_nested_checkouts(env: tuple[FileSystem, Path]) -> None:
+    fs, root = env
+    put(fs, root, {
+        ".git/HEAD": "ref", "b.sh": "", "a/z.txt": "", "a/deep/y.sh": "", "node_modules/x.sh": "", "a/node_modules/x.sh": "",
+        "wt/linked/.git": "gitdir: elsewhere", "wt/linked/run.sh": "", "wt/linked/sub/run.sh": "",
+        "clone/.git/HEAD": "ref", "clone/run.sh": "", "wt/plain.sh": "",
+    })
+    found = [path.relative_to(root).as_posix() for path in fs.walk_files(root, {".git", "node_modules"})]
+    assert found == ["a/deep/y.sh", "a/z.txt", "b.sh", "wt/plain.sh"]  # the root's own .git does not stop the walk
+    assert fs.walk_files(root / "missing", ()) == []
+    assert [path.name for path in fs.walk_files(root / "clone", {".git"})] == ["run.sh"]  # a checkout asked for directly is walked
