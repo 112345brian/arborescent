@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Added
+- `arborescent purity --path PATH...` and `--module MODULE...` list only the mixed modules in a subset (a diff's changed files,
+  say); importer counts and ordering still come from the whole scan (#217).
+
 ## 0.9.0 — 2026-11-12
 
 ### Fixed

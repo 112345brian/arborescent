@@ -11,7 +11,7 @@ from test_mixed_purity import HYDRATION, RINGS, allow
 
 from arborescent.adapters import FsScanner
 from arborescent.cli import main
-from arborescent.cli_purity import run_purity
+from arborescent.cli_purity import Listing, run_purity
 from arborescent.rules import check_modules
 
 LEAF = HYDRATION
@@ -26,7 +26,7 @@ def _fixture(repo: Path) -> None:
 
 
 def _json(repo: Path, capsys: pytest.CaptureFixture[str], top: int | None = None, **overrides: object) -> list[dict[str, object]]:
-    extra = {} if top is None else {"top": top}  # the pins run without `top`
+    extra = {} if top is None else {"listing": Listing(top=top)}  # the pins run without a listing
     assert run_purity(mini_policy(ring=RINGS, **overrides), repo, services(), as_json=True, **extra) == 0
     rows: list[dict[str, object]] = json.loads(capsys.readouterr().out)
     return rows
@@ -86,7 +86,7 @@ def test_ties_break_on_pure_units_then_module_name(repo: Path, capsys: pytest.Ca
 def test_top_limits_the_listing_but_not_the_count(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _fixture(repo)
     assert [r["module"] for r in _json(repo, capsys, top=1)] == ["app.domain"]
-    assert run_purity(mini_policy(ring=RINGS), repo, services(), as_json=False, top=1) == 0
+    assert run_purity(mini_policy(ring=RINGS), repo, services(), as_json=False, listing=Listing(top=1)) == 0
     out = capsys.readouterr().out
     assert "app.domain" in out and "app.adapters" not in out
     assert "showing 1 of 2 mixed module(s)" in out
@@ -95,21 +95,21 @@ def test_top_limits_the_listing_but_not_the_count(repo: Path, capsys: pytest.Cap
 def test_top_larger_than_the_count_shows_everything(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _fixture(repo)
     assert len(_json(repo, capsys, top=500)) == 2
-    assert run_purity(mini_policy(ring=RINGS), repo, services(), as_json=False, top=500) == 0
+    assert run_purity(mini_policy(ring=RINGS), repo, services(), as_json=False, listing=Listing(top=500)) == 0
     assert capsys.readouterr().out.splitlines()[-1] == "2 mixed module(s)"
 
 
 def test_zero_findings_with_top(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_files(repo, {"app/__init__.py": "", "app/domain.py": "from __future__ import annotations\n"})
     assert _json(repo, capsys, top=3) == []
-    assert run_purity(mini_policy(ring=RINGS), repo, services(), as_json=False, top=3) == 0
+    assert run_purity(mini_policy(ring=RINGS), repo, services(), as_json=False, listing=Listing(top=3)) == 0
     assert capsys.readouterr().out.strip() == "no mixed modules"
 
 
 @pytest.mark.parametrize("top", [0, -1])
 def test_a_non_positive_top_is_an_error(repo: Path, capsys: pytest.CaptureFixture[str], top: int) -> None:
     _fixture(repo)
-    assert run_purity(mini_policy(ring=RINGS), repo, services(), as_json=False, top=top) == 2
+    assert run_purity(mini_policy(ring=RINGS), repo, services(), as_json=False, listing=Listing(top=top)) == 2
     captured = capsys.readouterr()
     assert captured.out == "" and "--top" in captured.err
 

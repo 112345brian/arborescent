@@ -18,7 +18,7 @@ from .cli_ratchet import add_ratchet_parser
 from .domain import PolicyError, Rule
 from .typecheckers import all_checkers
 
-__all__ = ["build_parser", "catalog_root", "core_mode_conflict", "growth_approver", "validate_rule_selection"]
+__all__ = ["build_parser", "catalog_root", "core_mode_conflict", "growth_approver", "usage_error", "validate_rule_selection"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -174,6 +174,8 @@ def _add_maintenance_parsers(add_parser: Callable[..., argparse.ArgumentParser])
     purity = add_parser("purity", help="rank the modules that mix substantial pure logic with effectful code by how many modules import them")
     purity.add_argument("--json", action="store_true", help="print the ranked modules as JSON")
     purity.add_argument("--top", type=_positive_int, metavar="N", help="list only the N most imported mixed modules (the findings of `check` are unchanged)")
+    purity.add_argument("--path", action="extend", nargs="+", default=[], metavar="PATH", help="list only mixed modules in these files or folders (repeatable; importer counts still cover the whole scan)")
+    purity.add_argument("--module", action="extend", nargs="+", default=[], metavar="MODULE", help="list only these modules, their submodules or glob matches (repeatable)")
     purity.add_argument("--explain", metavar="MODULE", help="print, for each definition of MODULE, the call that made it effectful or `no effect found`")
     add_ratchet_parser(add_parser)
 
@@ -246,6 +248,17 @@ def catalog_root(is_file: Callable[[Path], bool], start: Path, catalog_path: str
         if is_file(folder / candidate):
             return folder
     raise PolicyError(f"no {catalog_path!r} found from {start}")
+
+
+def usage_error(args: argparse.Namespace) -> str | None:
+    """A flag combination argparse cannot express; the message, or ``None`` when the arguments are fine."""
+    if args.command == "check" and args.yes and not args.install_tools:
+        return "--yes requires --install-tools"
+    if args.command == "purity" and args.explain and (args.path or args.module):
+        return "--explain already names one module: it takes no --path or --module"
+    if getattr(args, "with_dependencies", False):
+        return "--with-dependencies was removed: a dependency is a separate package, so extract each one on its own"
+    return None
 
 
 def core_mode_conflict(args: argparse.Namespace) -> str | None:

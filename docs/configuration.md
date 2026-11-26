@@ -1341,6 +1341,23 @@ intentional baseline growth, its reason and its approver.
 Lists every module `mixed-purity` finds (allowed ones marked), most imported first, with its effect kinds, effectful and pure
 definitions and importer count. `--json` prints the same as JSON. Report only: `check` is what fails.
 
+`--path PATH` and `--module MODULE` list only a subset, for reviewing a diff or checking changed files. Both take several values
+and can be repeated; everything named is one union. Only the listed rows change: importer counts, classification and ordering still
+come from the whole scan, and `--top` applies to what is left.
+
+- `--path` takes a file or a folder, relative to the working directory or absolute.
+- `--module` takes a dotted name (its submodules included) or a glob such as `app.*_service`.
+- A path that does not exist or lies outside the policy root, a blank value, or a `--module` that matches no scanned module
+  exits 2, so a typo never reads as a clean result. An existing path with no scanned module in it (a README, an excluded test) is
+  noted on stderr and skipped. A deleted file does not exist, so filter it out: `git diff --name-only --diff-filter=d main`.
+- Neither combines with `--explain`, which already names one module.
+
+```console
+arborescent purity --path $(git diff --name-only --relative --diff-filter=d main -- '*.py')
+```
+
+When that file list is empty, `--path` has no value and the command exits 2, so guard the call.
+
 ### `arborescent ratchet`
 
 Record or lower the `[ratchet.<name>]` baselines (`--name NAME` for one). A rise needs
