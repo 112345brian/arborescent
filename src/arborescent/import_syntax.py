@@ -19,6 +19,7 @@ class RawImport:
     line: int
     lazy: bool  # inside a function body
     type_only: bool  # under ``if TYPE_CHECKING``
+    end_line: int = 0  # last line of the statement when parsed from source; 0 for an import built from other facts
 
 
 def _is_type_checking(test: ast.expr) -> bool:
@@ -30,10 +31,12 @@ def _is_type_checking(test: ast.expr) -> bool:
 def _walk(node: ast.AST, lazy: bool, type_only: bool, imports: list[RawImport]) -> None:
     for child in ast.iter_child_nodes(node):
         if isinstance(child, ast.Import):
-            imports += [RawImport(0, a.name, (), child.lineno, lazy, type_only) for a in child.names]
+            end = child.end_lineno or child.lineno
+            imports += [RawImport(0, a.name, (), child.lineno, lazy, type_only, end) for a in child.names]
         elif isinstance(child, ast.ImportFrom):
             names = tuple(a.name for a in child.names)
-            imports.append(RawImport(child.level, child.module or "", names, child.lineno, lazy, type_only))
+            end = child.end_lineno or child.lineno
+            imports.append(RawImport(child.level, child.module or "", names, child.lineno, lazy, type_only, end))
         if isinstance(child, ast.If) and _is_type_checking(child.test):
             _walk(child.test, lazy, type_only, imports)
             for stmt in child.body:

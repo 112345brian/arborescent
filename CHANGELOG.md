@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Fixed
+- `lazy-import` accepts a `# deferred: <reason>` comment on any line of the import statement, not only its first, so a
+  formatter that wraps `from x import y  # deferred: ...` no longer turns a recorded decision back into a finding
+  (#213). A baseline that holds such an import now has a stale entry; delete it with `arborescent baseline`.
+
 ## 0.9.0 — 2026-11-12
 
 ### Fixed

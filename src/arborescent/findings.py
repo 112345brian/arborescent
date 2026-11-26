@@ -160,7 +160,7 @@ class Violation:
 
 
 _RENDER_HINTS = {
-    Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on or above the line)",
+    Rule.LAZY_IMPORT: " (put it at module level, or record why it stays with `# deferred: <reason>` on the statement or above it)",
     Rule.VENDOR_FOLDER: (
         " (folder excluded from the scan; to govern it list it under `vendor_roots` or set `scan_vendors = true`,"
         " otherwise first-party imports of it are reported as external)"
