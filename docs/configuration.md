@@ -1065,6 +1065,9 @@ Migrating an existing classify-only project:
 | `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
 | `require_typed_ports` | `false` | Every method of a `typing.Protocol` class in this ring must name its return type. A missing return annotation, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set`/`frozenset` or `Mapping[str, Any]` (also inside `Optional`, `\|` unions and string annotations) fires `weakly-typed-port`; `None`, named classes and parameterised containers pass. `__init__` is skipped. Parameters are not checked. |
 
+Any other key in a ring table is a policy error, as is a ring entry that is not a table: a misspelt `forbidd` would
+otherwise be ignored and enforce less. The error suggests the closest known key.
+
 A ring that is not given a table has no inner imports, no external imports and no OS branching. If `forbid` is omitted,
 the innermost ring forbids every effect, the outermost allows every effect, and middle rings use the preset default.
 Custom ring names follow the same positional defaults. An explicit `forbid = []` allows every effect in that ring; if a
