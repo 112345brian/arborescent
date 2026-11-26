@@ -312,7 +312,7 @@ def _duplicate_findings(policy: Policy, root: Path, services: Services, scan: Sc
     cache_dir = services.scanner.cache_dir
     store = _CacheFile(services.fs, cache_dir / "duplicates.json") if cache_dir else None
     return [
-        Violation(Rule.DUPLICATE_LOGIC, item.subject, item.detail, item.line, hint=item.hint)
+        Violation(Rule.DUPLICATE_LOGIC, item.subject, item.detail, item.line, hint=item.hint, root_cause="")  # one finding per function: no shared cause
         for item in find_duplicates(modules, references, policy.duplicate_logic, store)
     ]
 
