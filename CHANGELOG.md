@@ -11,6 +11,8 @@
   `forbid_at_import` ends the note; note that a ring's own `forbid` replaces its default list (#194).
 
 ### Fixed
+- `urllib.request.Request` is no longer a `network` use: it only builds an object. `urlopen` and every other
+  `urllib.request` call still count. Fewer findings; stale baseline entries can be deleted.
 - With a nested `output_dir`, `generate` wrote a `tach.toml` there whose source roots tach never read, so running it
   checked nothing and passed. `tach.toml` is now written at the project root (never over an existing one, and not while
   `tach` is disabled or configured in `pyproject.toml`), and `check` notes a generated nested one so it can be deleted.

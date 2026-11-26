@@ -1125,7 +1125,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-sleep` | a ring that forbids `sleep` calls `time.sleep` or `asyncio.sleep` |
 | `effect-threads` | a ring that forbids `threads` starts a `threading.Thread`/`Timer` or constructs a `ThreadPoolExecutor` (locks and events are `state`) |
 | `effect-process` | a ring that forbids `process` starts a process or shell command through `subprocess`, `multiprocessing`, `ProcessPoolExecutor`, or direct `os` spawn/exec APIs |
-| `effect-network` | a ring that forbids `network` calls `urllib.request`, `http.client`, `http.server`, `socket`, `requests`, `httpx`, `aiohttp` or `urllib3` (a call probe, not an import ban) |
+| `effect-network` | a ring that forbids `network` calls `urllib.request` (not just constructing a `Request`), `http.client`, `http.server`, `socket`, `requests`, `httpx`, `aiohttp` or `urllib3` (a call probe, not an import ban) |
 | `effect-database` | a ring that forbids `database` uses `sqlite3`, `psycopg`, `psycopg2`, `asyncpg`, `pymysql`, `mysql.connector`, `sqlalchemy`, `pymongo`, `redis` or `aiosqlite` |
 | `effect-filesystem` | a ring that forbids `filesystem` calls `open`, `os` file operations (`os.remove`, `os.listdir`, `os.walk`, ...), `shutil`, `tempfile`, `glob`, or reads/writes through `Path(...)` or through a name bound to a path (`read_text`, `write_text`, `mkdir`, `glob`, ...). A call routed through a wrapper, or a path stored on `self`, is not seen |
 | `effect-dynamic-import` | a ring that forbids any effect loads a module at run time (`importlib.import_module`, `__import__`, `spec_from_file_location`/`module_from_spec`, `exec_module`); `find_spec`, `importlib.resources` and `importlib.metadata` do not |
@@ -1681,7 +1681,7 @@ Every direct use of an effectful API is classified into a category; a ring's `fo
 | `process` | `subprocess`, `multiprocessing`, `ProcessPoolExecutor`, `os.system`/`spawn*`/`exec*` |
 | `filesystem` | `open`, `os` file operations, `shutil`, `tempfile`, `glob`, and read/write/`mkdir`/`glob`/`stat`... methods on `Path(...)` **or on a name bound to a path** (0.8.0: a parameter or variable annotated `Path`, or assigned `Path(...)`, `a / b`, `p.parent`, `p.resolve()`; resolved per function, so a `str` of the same name elsewhere is not a path; needs `import pathlib`) |
 | `fs-query` | questions asked of the filesystem: `exists`/`is_file`/`is_dir`/`resolve`/`expanduser`/`samefile` on a path, `Path.cwd`/`home`, `os.path.exists`/`isfile`/`getsize`/`getmtime`/`abspath`/`realpath`/`expanduser`, `os.getcwd`, `os.access`, `shutil.which`, `tempfile.gettempdir` (0.8.0) |
-| `network` | `urllib.request`, `http.client`, `http.server`, `socket` (bar `gethostname`/`getfqdn`), and `requests`/`httpx`/`aiohttp`/`urllib3` calls |
+| `network` | `urllib.request` (bar `Request`, which only builds an object), `http.client`, `http.server`, `socket` (bar `gethostname`/`getfqdn`), and `requests`/`httpx`/`aiohttp`/`urllib3` calls |
 | `database` | `sqlite3`, `psycopg`, `sqlalchemy`, ... |
 | `dynamic-import` | **only** run-time module loading: `importlib.import_module`, `importlib.__import__`, `importlib.reload`, `importlib.util.spec_from_file_location`/`spec_from_loader`/`module_from_spec`, `*.exec_module`, `__import__`. `importlib.resources`, `importlib.metadata` and `importlib.util.find_spec` import nothing and do not count (0.8.0) |
 | `console` | `print`, `input`, `sys.stdout.write`, `sys.stderr.write` |

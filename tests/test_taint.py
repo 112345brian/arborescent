@@ -132,6 +132,11 @@ def test_urllib_request_is_a_network_seed() -> None:
     assert result.by_module["app"] == ("caller",)
 
 
+def test_constructing_a_urllib_request_object_is_not_a_network_seed() -> None:
+    source = "import urllib.request\n\n\ndef build() -> None:\n    urllib.request.Request('http://x')\n"
+    assert run({"app": source}).tainted == {}
+
+
 def test_output_ordering_is_deterministic_regardless_of_input_order() -> None:
     sources = {
         "z_mod": "def z() -> None:\n    open('f')\n",

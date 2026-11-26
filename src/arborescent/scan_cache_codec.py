@@ -36,7 +36,7 @@ from .import_syntax import RawImport
 
 __all__ = ["CACHE_VERSION", "cached_facts", "facts_from_json", "facts_to_json"]
 
-CACHE_VERSION = 30
+CACHE_VERSION = 31
 
 
 def _purity_to_json(p: PurityFacts) -> list[Any]:
