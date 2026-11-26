@@ -81,6 +81,7 @@ NO_MUTATION: dict[Rule, str] = {
     Rule.WEAKLY_TYPED_PORT: "needs `require_typed_ports` on a ring and a Protocol with an untyped return; covered by focused rule tests",
     Rule.TACH_INVISIBLE_IMPORT: "informational and never baselined; focused tests cover it",
     Rule.RESULT_DISCARD: "opt-in and resolved through imports; focused tests cover each call form, the convention and ring scoping",
+    Rule.NAME_COLLISION: "informational and never baselined; focused tests cover each kind of declaration and each exemption",
     Rule.CLASSIFY_FACTS: "informational and never baselined; a mutation cannot make a ring wrong, focused tests cover each signal",
     Rule.VENDOR_FOLDER: "tracks whole-tree fingerprints; focused tests cover file additions, edits and removals",
     Rule.WILDCARD_RING: "a policy-level rule; selftest mutations only edit copied source files",

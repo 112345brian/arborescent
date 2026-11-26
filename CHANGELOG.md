@@ -8,6 +8,8 @@
 - `[[port_binding]]` (#219): opt-in rule `port-binding` for a declared Protocol or abstract class with no production
   implementor, or more than `max` (default 1). Implementors are subclasses and, for a Protocol, classes that define all of its
   member names; test doubles are not counted. The scan cache is rebuilt once (new class facts).
+- `[name_collisions]` (#221): opt-in observation `name-collision` (a `NOTE`, never failing) for a class field or local that
+  reuses the name of a type from another module while its annotation or literal value shows it is something else.
 
 ## 0.9.0 — 2026-11-12
 

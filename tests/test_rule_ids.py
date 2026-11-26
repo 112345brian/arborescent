@@ -72,6 +72,7 @@ def test_rule_id_strings_never_change() -> None:
             "literal-outside-owner",
             "construction-outside-site",
             "port-binding",
+            "name-collision",
             "missing-module-docstring",
             "docstring-ring-mismatch",
             "non-abstract-port",

@@ -50,6 +50,7 @@ class Rule(StrEnum):
     LITERAL_OUTSIDE_OWNER = "literal-outside-owner"
     CONSTRUCTION_OUTSIDE_SITE = "construction-outside-site"
     PORT_BINDING = "port-binding"
+    NAME_COLLISION = "name-collision"
     MISSING_MODULE_DOCSTRING = "missing-module-docstring"
     DOCSTRING_RING_MISMATCH = "docstring-ring-mismatch"
     NON_ABSTRACT_PORT = "non-abstract-port"
@@ -135,7 +136,7 @@ CONSTRAINT_RULES: frozenset[Rule] = frozenset({Rule.PACKAGE_CONSTRAINT_FACTS, Ru
 INFORMATIONAL_RULES: frozenset[Rule] = frozenset({
     Rule.PACKAGE_SPANS_RINGS, Rule.PACKAGE_PYPROJECT_DRIFT, Rule.PACKAGE_UNUSED_DEPENDENCY, Rule.PACKAGE_OWNS_EVERYTHING, Rule.PACKAGE_NEVER_DEPENDED_ON,
     Rule.TACH_INVISIBLE_IMPORT, Rule.CLASSIFY_FACTS, Rule.TEST_REFERENCE, Rule.MIXED_PURITY_EXCLUDED,
-    Rule.ADAPTER_EQUIVALENCE_REPORT,
+    Rule.ADAPTER_EQUIVALENCE_REPORT, Rule.NAME_COLLISION,
 })
 
 

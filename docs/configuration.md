@@ -331,6 +331,32 @@ see (a third-party base class, `setattr`, `__getattr__`) is not followed. The ta
 across all scopes. `check --changed` skips the rule. A function that reaches a port's resource by another route is not
 detected.
 
+`name_collisions` is an opt-in observation (a `NOTE` line; it never fails `check` and never enters the baseline) for one
+word used for two concepts: a field or local called `ratchet` that is not a `Ratchet`.
+
+```toml
+[tool.arborescent.name_collisions]  # the table alone turns it on
+# min_length = 5                    # shorter names are too generic
+# words = ["scope"]                 # words that mean one thing: `scope` also matches a type ending in `...Scope`
+
+[[tool.arborescent.name_collisions.allow]]
+name = "baseline"
+reason = "the file and the object are the same concept here"
+```
+
+The definition is deliberately narrow, to stay quiet:
+
+- Vocabulary: public module-level classes of the same scope. Names are compared ignoring case and underscores
+  (`architecture_scope` matches `ArchitectureScope`); `scope` matches `ArchitectureScope` only when listed in `words`.
+- Looked at: annotated class fields, `self.x` assignments and function locals. Not parameters, function names,
+  module-level variables, unannotated class attributes (enum members) or `UPPER_CASE` names.
+- Reported only with evidence that the value is something else: an annotation that does not name a type ending in that
+  word (`ratchet: tuple[str, ...]`, but not `ratchet: NamedRatchet` or `ratchet: Any`), or, unannotated, a literal or a
+  comprehension. `ratchet = load()` says nothing and is left alone.
+- A module that defines the type itself is left alone, and `check --changed` skips the observation.
+
+The table is a whole-run setting: with `scopes`, set it at the root.
+
 `result_discard` is an opt-in check that a caller reads the outcome of a function it calls (a new "refused" or "skipped" outcome
 is otherwise silently ignored). It reports `result-discard` for a call written as a whole statement:
 
@@ -869,6 +895,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `mixed-purity-excluded` | informational: a file under `exclude` (not a vendor folder, a noise folder or a child package) would be reported by `mixed-purity`. Never fails a check and never enters the baseline, but the exclusion no longer hides it |
 
 | `port-binding` | a `port_binding` port has no production implementor, or more than its `max` (default 1); also a port that does not exist or is not a Protocol or abstract class. Whole-repository runs only |
+| `name-collision` | information only (never fails, never baselined): `name_collisions` is set and a field or local reuses the name of a type defined in another module. Whole-repository runs only |
 | `construction-outside-site` | a module or ring calls a `construct_only` class or factory that only other modules or rings may build; also an owner glob or target module that does not exist |
 | `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
 | `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |

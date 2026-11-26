@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 from .presets import DEFAULT_PRESET, IO_MODULES, PRESETS, Preset
 
 __all__ = [
-    "ALL", "ArchitectureFields", "ConstructionSite", "DocsPolicy", "OwnedLiteral", "PolicyError", "PortBinding", "ResultDiscard", "RingRule",
+    "ALL", "ArchitectureFields", "ConstructionSite", "DocsPolicy", "NameCollisionPolicy", "OwnedLiteral", "PolicyError", "PortBinding", "ResultDiscard", "RingRule",
     "in_unit", "normalized_source_path", "path_under", "unit_permits",
 ]
 
@@ -86,6 +86,15 @@ class ConstructionSite:
 
     def permits(self, module: str, ring: str | None) -> bool:
         return unit_permits(self.modules, self.rings, module, ring)
+
+
+@dataclass(frozen=True)
+class NameCollisionPolicy:
+    """Opt-in ``[name_collisions]`` (#221): note a field or local that reuses the name of an unrelated type."""
+
+    min_length: int = 5  # shorter names are too generic to mean one thing
+    words: tuple[str, ...] = ()  # words that already mean one concept: they match a type by its last word too
+    allow: tuple[tuple[str, str], ...] = ()  # (name, reason): never noted
 
 
 _DOUBLE_MODULES = frozenset({"tests", "testing", "conftest", "fakes"})

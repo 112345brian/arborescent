@@ -1,6 +1,6 @@
 """Definition facts: the shape of what a module defines at its top level.
 
-Module-level classes and functions with whether each is abstract, every class's bases and member names, ``typing.Protocol`` methods whose return type says
+Module-level classes and functions with whether each is abstract, every class's bases and member names, the fields and locals that show what they hold, ``typing.Protocol`` methods whose return type says
 nothing, the public surface (a static ``__all__`` or public bindings) and which of it is re-exported, functions
 annotated to return a ``*Result``/``*Outcome``, and the ``if __name__ == "__main__":`` guard."""
 
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .call_facts import dotted_name
 from .purity_facts import Helpers
 
-__all__ = ["ClassShape", "TopLevelDef", "class_shapes", "main_guard_line", "purity_helpers", "result_defs", "surface", "top_level_defs", "weak_port_returns"]
+__all__ = ["ClassShape", "NameDecl", "TopLevelDef", "class_shapes", "main_guard_line", "name_declarations", "purity_helpers", "result_defs", "surface", "top_level_defs", "weak_port_returns"]
 
 
 _ABSTRACT_BASE_NAMES = frozenset({"ABC", "abc.ABC", "Protocol", "typing.Protocol", "typing_extensions.Protocol"})
@@ -222,6 +222,88 @@ def weak_port_returns(nodes: Sequence[ast.AST], aliases: dict[str, str]) -> tupl
             if why is not None:
                 found.append((stmt.lineno, f"{cls.name}.{stmt.name}", why))
     return tuple(sorted(found))
+
+
+# An annotation made only of these says nothing about what the value is.
+_SILENT_ANNOTATIONS = frozenset({"Any", "object", "Self"})
+_WRAPPING_ANNOTATIONS = frozenset({"Optional", "Union", "Annotated", "ClassVar", "Final", "typing", "None"})
+_LITERAL_VALUES = (ast.JoinedStr, ast.List, ast.Dict, ast.Set, ast.Tuple, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+@dataclass(frozen=True)
+class NameDecl:
+    """A field or local that shows what it holds: by its annotation, or else by a literal value (#221)."""
+
+    line: int
+    kind: str  # "field" | "local"
+    owner: str  # the qualified class (field) or function (local)
+    name: str
+    annotation: tuple[str, ...]  # the identifiers its annotation names; empty when the evidence is a literal value
+
+
+def _identifiers(node: ast.expr) -> Iterator[str]:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name):
+            yield child.id
+        elif isinstance(child, ast.Attribute):
+            yield child.attr
+        elif isinstance(child, ast.Constant) and isinstance(child.value, str):
+            try:
+                yield from _identifiers(ast.parse(child.value.strip(), mode="eval").body)
+            except SyntaxError:
+                yield "Any"  # unreadable: no evidence
+
+
+def _evidence(stmt: ast.Assign | ast.AnnAssign) -> tuple[str, ...] | None:
+    """The annotation's identifiers, ``()`` for an unannotated literal value, None when nothing shows what is held."""
+    if isinstance(stmt, ast.AnnAssign):
+        named = tuple(sorted(set(_identifiers(stmt.annotation)) - _WRAPPING_ANNOTATIONS))
+        return named if set(named) - _SILENT_ANNOTATIONS else None
+    value = stmt.value
+    literal = isinstance(value, _LITERAL_VALUES) or (
+        isinstance(value, ast.Constant) and value.value is not None and value.value is not ...
+    )
+    return () if literal else None
+
+
+_Scope = tuple[str, str, str]  # (enclosing qualified name, "module" | "class" | "function", the method's `self` or "")
+
+
+def _declared(stmt: ast.Assign | ast.AnnAssign, scope: _Scope, class_name: str) -> Iterator[NameDecl]:
+    owner, kind, self_name = scope
+    evidence = _evidence(stmt)
+    if evidence is None:
+        return
+    for target in stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]:
+        if isinstance(target, ast.Name) and kind == "function":
+            yield NameDecl(stmt.lineno, "local", owner, target.id, evidence)
+        elif isinstance(target, ast.Name) and kind == "class" and isinstance(stmt, ast.AnnAssign):
+            yield NameDecl(stmt.lineno, "field", owner, target.id, evidence)  # unannotated: an enum member or a constant
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == self_name:
+            yield NameDecl(stmt.lineno, "field", class_name, target.attr, evidence)
+
+
+def name_declarations(tree: ast.Module) -> tuple[NameDecl, ...]:
+    """Class fields, ``self.x`` assignments and function locals that carry evidence of what they hold, in source order."""
+    out: list[NameDecl] = []
+
+    def visit(body: Iterable[ast.stmt], scope: _Scope, class_name: str) -> None:
+        owner, kind, _ = scope
+        prefix = f"{owner}." if owner else ""
+        for stmt in body:
+            if isinstance(stmt, ast.ClassDef):
+                visit(stmt.body, (prefix + stmt.name, "class", ""), prefix + stmt.name)
+            elif isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+                params = [*stmt.args.posonlyargs, *stmt.args.args]
+                self_name = params[0].arg if kind == "class" and params else ""
+                visit(stmt.body, (prefix + stmt.name, "function", self_name), class_name)
+            else:
+                if isinstance(stmt, ast.Assign | ast.AnnAssign):
+                    out.extend(_declared(stmt, scope, class_name))
+                visit(_blocks(stmt), scope, class_name)
+
+    visit(tree.body, ("", "module", ""), "")
+    return tuple(out)
 
 
 def purity_helpers(aliases: dict[str, str]) -> Helpers:

@@ -16,6 +16,7 @@ from .domain import (
     ChildArbor,
     ConstructionSite,
     DocsPolicy,
+    NameCollisionPolicy,
     OwnedLiteral,
     Policy,
     PolicyError,
@@ -294,6 +295,7 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         coupling=_coupling(raw),
         mixed_purity=_mixed_purity(raw),
         effects=_effects(raw),
+        name_collisions=_name_collisions(raw),
         package_constraints=_package_constraints(raw),
         ratchets=ratchet_specs(raw.get("ratchet", {})),
     )
@@ -380,6 +382,39 @@ def _mixed_purity(raw: Mapping[str, Any]) -> PurityPolicy:
     )
 
 
+def _name_collisions(raw: Mapping[str, Any]) -> NameCollisionPolicy | None:
+    if "name_collisions" not in raw:
+        return None
+    table = raw["name_collisions"]
+    if not isinstance(table, Mapping):
+        raise PolicyError("`name_collisions` must be a table: [tool.arborescent.name_collisions]")
+    table = cast("Mapping[str, Any]", table)
+    unknown = set(table) - {"min_length", "words", "allow"}
+    if unknown:
+        raise PolicyError(f"unknown key in `name_collisions`: {sorted(unknown)}")
+    min_length, words = table.get("min_length", NameCollisionPolicy.min_length), table.get("words", [])
+    if not isinstance(min_length, int) or isinstance(min_length, bool) or min_length < 1:
+        raise PolicyError("`name_collisions.min_length` must be a positive integer")
+    if not isinstance(words, list) or not all(isinstance(word, str) and word for word in cast("list[object]", words)):
+        raise PolicyError("`name_collisions.words` must be a list of non-empty strings")
+    return NameCollisionPolicy(min_length, tuple(cast("list[str]", words)), _allowed_names(table))
+
+
+def _allowed_names(table: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    entries = table.get("allow", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, Mapping) for entry in cast("list[object]", entries)):
+        raise PolicyError("`name_collisions.allow` must be an array of tables: [[tool.arborescent.name_collisions.allow]]")
+    out: list[tuple[str, str]] = []
+    for entry in cast("list[Mapping[str, Any]]", entries):
+        name, reason = entry.get("name"), entry.get("reason")
+        if set(entry) - {"name", "reason"} or not isinstance(name, str) or not name.strip():
+            raise PolicyError("`name_collisions.allow` takes a `name` and a `reason`")
+        if not isinstance(reason, str) or not reason.strip():
+            raise PolicyError(f"`name_collisions.allow` {name!r} needs a written `reason`; an exemption without one is not allowed")
+        out.append((name, reason.strip()))
+    return tuple(out)
+
+
 def _effects(raw: Mapping[str, Any]) -> EffectsPolicy:
     table = raw.get("effects", {})
     if not isinstance(table, Mapping):
@@ -410,7 +445,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
     "modularity", "dev_tools", "dev_tools_forbid", "dev_tools_may_import", "taint_seeds", "coupling", "mixed_purity", "package", "effects",
-    "ratchet",
+    "ratchet", "name_collisions",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",

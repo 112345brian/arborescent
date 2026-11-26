@@ -7,18 +7,21 @@ and OS-branching rules applies is the policy's preset; layering and classificati
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import re
 from collections.abc import Collection, Mapping
 from typing import NamedTuple
 
 from .call_facts import absolute_callee
+from .definition_facts import NameDecl, name_declarations
 from .domain import (
     ALL,
     EFFECT_RULES,
     ArchitecturePolicy,
     ArchitectureScope,
     ConstructionSite,
+    NameCollisionPolicy,
     OwnedLiteral,
     Policy,
     PortBinding,
@@ -44,7 +47,7 @@ from .package_constraints import PackageConstraints
 from .purity_rules import mixed_purity_findings, with_move_closures
 from .rule_context import RuleContext
 
-__all__ = ["RuleContext", "check_modules", "fits_ring", "port_binding_findings"]
+__all__ = ["RuleContext", "check_modules", "fits_ring", "name_collision_findings", "port_binding_findings"]
 
 ThirdParty = dict[str, set[str]]  # distribution -> importing modules
 NO_CONSTRAINTS = PackageConstraints()  # a policy that declares none: the constraint rules cost nothing
@@ -420,6 +423,66 @@ def port_binding_findings(context: RuleContext, modules: Mapping[str, ModuleInfo
         Violation(Rule.PORT_BINDING, port, problem)
         for port, binding in sorted(bindings.items())
         if (problem := _binding_problem(binding, classes, known, context.tool_modules)) is not None
+    ]
+
+
+def _folded(name: str) -> str:
+    """How two spellings of one word compare: ``_ratchet_spec`` and ``RatchetSpec`` are the same."""
+    return name.replace("_", "").lower()
+
+
+def _last_word(name: str) -> str:
+    """The head noun of a CamelCase name, lowercased: ``ArchitectureScope`` -> ``scope``."""
+    words = re.findall(r"[A-Z]+(?![a-z0-9])|[A-Z]?[a-z0-9]+", name)
+    return str(words[-1]).lower() if words else ""
+
+
+_Types = list[tuple[str, str]]  # (module, public module-level class name)
+
+
+def _named_types(setting: NameCollisionPolicy, types: _Types, decl: NameDecl) -> _Types:
+    """The types ``decl`` reuses the name of; none when its annotation says it holds that concept after all."""
+    key = _folded(decl.name)
+    if decl.name.strip("_").isupper() or key in {_folded(name) for name, _ in setting.allow}:
+        return []
+    if any(_folded(identifier).endswith(key) for identifier in decl.annotation):
+        return []
+    declared_word = key in {_folded(word) for word in setting.words}
+    return [
+        (module, name) for module, name in types
+        if (_folded(name) == key and (declared_word or len(key) >= setting.min_length)) or (declared_word and _last_word(name) == key)
+    ]
+
+
+def _module_collisions(setting: NameCollisionPolicy, types: _Types, module: str, source: str) -> list[Violation]:
+    out: dict[str, Violation] = {}  # one note per name and owner: the first declaration
+    for decl in name_declarations(ast.parse(source.removeprefix("\ufeff"))):
+        found = _named_types(setting, types, decl)
+        if not found or any(owner == module for owner, _ in found):
+            continue
+        names = ", ".join(sorted(f"{owner}.{name}" for owner, name in found))
+        detail = f"{decl.kind} '{decl.owner}.{decl.name}' shares its name with the type {names}"
+        hint = " (rename it, or give the name a reason in `name_collisions.allow`)"
+        _ = out.setdefault(detail, Violation(Rule.NAME_COLLISION, module, detail, decl.line, hint=hint))
+    return list(out.values())
+
+
+def name_collision_findings(context: RuleContext, modules: Mapping[str, ModuleInfo], sources: Mapping[str, str]) -> list[Violation]:
+    """``name-collision`` (#221), an observation. The vocabulary is every scanned public class of the same scope, so ``modules``
+    must be a whole-repository scan; ``sources`` holds the text of the modules to look at."""
+    setting = context.policy.name_collisions
+    if setting is None:
+        return []
+    vocabulary: dict[str | None, _Types] = {}
+    for module, info in sorted(modules.items()):
+        if module not in context.tool_modules:
+            vocabulary.setdefault(context.scope_name(module), []).extend(
+                (module, item.name) for item in info.facts.top_level_defs if item.is_class and not item.name.startswith("_")
+            )
+    return [
+        found
+        for module, source in sorted(sources.items())
+        for found in _module_collisions(setting, vocabulary.get(context.scope_name(module), []), module, source)
     ]
 
 
