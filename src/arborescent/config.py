@@ -278,6 +278,8 @@ def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
         baseline=str(raw.get("baseline", "arborescent-baseline.json")),
         ratchet_files=_string_list(raw, "ratchet_files"),
         suggestion_threshold=suggestion_threshold,
+        class_field_threshold=_class_threshold(raw, "class_field_threshold"),
+        class_method_threshold=_class_threshold(raw, "class_method_threshold"),
         ruff_overrides=ruff_overrides,
         customization_labels=customizations,
         practices=dict(raw.get("practices", {})),
@@ -403,7 +405,8 @@ def _taint_seeds(raw: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 _SCOPED_ROOT_GLOBALS = frozenset({
-    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "ratchet_files", "suggestion_threshold", "children",
+    "python", "type_checkers", "disabled_tools", "output_dir", "baseline", "ratchet_files", "suggestion_threshold", "class_field_threshold",
+    "class_method_threshold", "children",
     "scan_vendors",
     "child_policy_mode",
     "ruff", "practices", "exclude", "package_catalog", "package_parts", "package_pyproject",
@@ -717,7 +720,8 @@ def _customization_labels(
         customizations.append("ruff")
     if "middle_forbid" in raw or any("forbid" in table for table in ring_tables.values()):
         customizations.append("forbid")
-    if suggestion_threshold != 300 or any(key.startswith("max-") for key in ruff_overrides):
+    classes_changed = any(raw.get(key, 20) != 20 for key in ("class_field_threshold", "class_method_threshold"))
+    if suggestion_threshold != 300 or classes_changed or any(key.startswith("max-") for key in ruff_overrides):
         customizations.append("thresholds")
     if raw.get("preset", DEFAULT_PRESET) != DEFAULT_PRESET:
         customizations.append("preset")
@@ -816,6 +820,13 @@ def _suggestion_threshold(raw: Mapping[str, Any]) -> int:
     value = raw.get("suggestion_threshold", 300)
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise PolicyError("`suggestion_threshold` must be a positive integer")
+    return value
+
+
+def _class_threshold(raw: Mapping[str, Any], key: str) -> int:
+    value = raw.get(key, 20)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise PolicyError(f"`{key}` must be a positive integer, or 0 to switch it off")
     return value
 
 

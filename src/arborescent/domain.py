@@ -139,6 +139,8 @@ class Policy(ArchitecturePolicy):
     baseline: str = "arborescent-baseline.json"
     ratchet_files: tuple[str, ...] = ()  # numeric ratchets checked by `check --growth-against`
     suggestion_threshold: int = 300
+    class_field_threshold: int = 20  # #220: report-only; 0 is off
+    class_method_threshold: int = 20  # #220: report-only; 0 is off
     ruff_overrides: Mapping[str, Any] = field(default_factory=lambda: {})
     customization_labels: tuple[str, ...] = ()
     practices: Mapping[str, Any] = field(default_factory=lambda: {})
@@ -168,6 +170,8 @@ class Policy(ArchitecturePolicy):
         if self.python not in SUPPORTED_PYTHONS:
             raise PolicyError(f"`python` {self.python!r} is not supported; choose one of {list(SUPPORTED_PYTHONS)}")
         _validate_suggestion_threshold(self.suggestion_threshold)
+        _validate_class_threshold("class_field_threshold", self.class_field_threshold)
+        _validate_class_threshold("class_method_threshold", self.class_method_threshold)
         if self.scopes:
             _validate_scopes(self.scopes)
 
@@ -258,6 +262,11 @@ def _validate_package_parts(parts: tuple[str, ...], catalog: str | None) -> None
 def _validate_suggestion_threshold(value: int) -> None:
     if value < 1:
         raise PolicyError("`suggestion_threshold` must be a positive number of logical code lines")
+
+
+def _validate_class_threshold(key: str, value: int) -> None:
+    if value < 0:
+        raise PolicyError(f"`{key}` must be a positive number, or 0 to switch it off")
 
 
 def _validate_scopes(scopes: tuple[ArchitectureScope, ...]) -> None:

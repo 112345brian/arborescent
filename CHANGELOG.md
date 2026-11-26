@@ -7,6 +7,11 @@
 ### Added
 - `arborescent purity --path PATH...` and `--module MODULE...` list only the mixed modules in a subset (a diff's changed files,
   say); importer counts and ordering still come from the whole scan (#217).
+- `check` prints a report-only `SUGGEST` line for a class with more than `class_field_threshold` fields or
+  `class_method_threshold` methods (both default 20, `0` switches one off). It never fails a check and is never baselined (#220).
+
+### Fixed
+- `check` no longer crashes with `SyntaxError` on a source file that starts with a UTF-8 byte order mark.
 
 ## 0.9.0 — 2026-11-12
 
