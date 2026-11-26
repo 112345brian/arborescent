@@ -33,3 +33,19 @@ jobs:
         run: python -m arborescent coupling check
       - name: Mutation self-test
         run: python -m arborescent selftest
+
+  # The opt-in Rust worker's tests are outside `testpaths`, so the matrix above never runs them.
+  incremental-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[pytest]"
+      - run: cargo build --release --locked --manifest-path tools/incremental_worker/Cargo.toml
+      - name: Parity and save tests
+        env:
+          # Test the binary built above; the fixture fails, never skips, when it is missing.
+          ARBORESCENT_WORKER: tools/incremental_worker/target/release/arborescent-incremental-worker
+        run: python -m pytest -p no:tach tools/incremental_worker/test_parity.py tools/incremental_worker/test_save.py

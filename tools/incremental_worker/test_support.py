@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.fixture(scope="session")
 def worker_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    built = os.environ.get("ARBORESCENT_WORKER")
+    if built is not None:  # CI names the binary it built, so nothing here may skip
+        binary = ROOT / built
+        if not binary.is_file():
+            pytest.fail(f"ARBORESCENT_WORKER is not a built worker: {binary}")
+        return binary
     cargo = shutil.which("cargo")
     if cargo is None:
         pytest.skip("the optional Rust prototype needs Cargo")

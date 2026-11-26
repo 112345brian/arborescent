@@ -55,3 +55,7 @@ Run the tests from the repository root (they need Cargo and Git):
 ```sh
 python -m pytest -p no:tach tools/incremental_worker/test_parity.py tools/incremental_worker/test_save.py
 ```
+
+Without `ARBORESCENT_WORKER` the tests build a debug worker themselves, and skip when Cargo is
+missing. Set it to a built binary (relative paths start at the repository root) to test that one;
+a missing file then fails the run. CI does this with the release build.
