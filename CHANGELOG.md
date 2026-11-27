@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+The save watcher in `tools/` is now Python only: its Rust crate, `--worker` flag and advisory `effect-via-call` output
+(`call_paths`, `unresolved_calls`, `incomplete`) are gone. Run `python -m tools.incremental_analysis --policy ...`.
+
 ### Upgrading from 0.9
 
 **Breaking.** Ring `traits` replace `forbid`, `forbid_at_import`, `require_abstract`, `require_typed_ports`,

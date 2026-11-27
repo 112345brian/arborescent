@@ -1,13 +1,12 @@
-"""Equivalence of the incremental driver and worker with a fresh full scan."""
+"""Equivalence of the incremental watcher (tools/incremental_analysis.py) with a fresh full scan."""
 
 from __future__ import annotations
 
-import ast
 import shutil
 import subprocess
 import sys
 import tomllib
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,10 +25,9 @@ from tools.incremental_analysis import (
     PARITY_RULES,
     Analysis,
     Result,
-    Worker,
 )
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 # Valid Python that differs from the common forms the repository itself uses.
 SYNTAX = {
@@ -51,28 +49,6 @@ SYNTAX = {
     "compatibility identifier": "import \ufb01le\nfrom \ufb01le import \ufb01x\n",
     "form feed": "\x0cimport a\nif x:\n\timport b\n",
 }
-
-
-def _update(worker: Worker, text: str):
-    evidence = worker.update({"m": {"text": text, "is_package": False}}, [])
-    facts = evidence["modules"]["m"]
-    worker.update({}, ["m"])
-    return facts
-
-
-def test_the_worker_parses_every_file_of_this_repository(worker_binary: Path) -> None:
-    """A file the grammar rejects loses its call evidence."""
-    files = sorted(
-        path
-        for folder in ("src", "tests", "tools")
-        for path in (ROOT / folder).rglob("*.py")
-        if "target" not in path.parts
-    )
-    assert len(files) > 200
-    with Worker(worker_binary) as worker:
-        for path in files:
-            text = path.read_text(encoding="utf-8-sig")
-            assert not _update(worker, text)["syntax_error"], path
 
 
 SMALL = {
@@ -107,7 +83,6 @@ def _assert_parity(analysis: Analysis, policy: Policy, root: Path) -> Result:
         v for v in full if v.rule in INFORMATIONAL_RULES
     )
     assert {v.rule for v in (*result.violations, *result.notes)} <= PARITY_RULES
-    assert {v.rule for v in result.call_paths} <= {"effect-via-call"}
     return result
 
 
@@ -201,63 +176,63 @@ def _policy(root: Path) -> Policy:
     return load_policy(LocalFileSystem(), root / "arborescent.toml")[0]
 
 
+# Python 3.11 rejects these, so there is no full scan to match there.
+NEEDS_312 = {"generics", "nested quotes"}
+
+
 @pytest.mark.parametrize("label", SYNTAX)
-def test_unusual_syntax_matches_a_full_scan(
-    worker_binary: Path, tmp_path: Path, label: str
-) -> None:
+def test_unusual_syntax_matches_a_full_scan(tmp_path: Path, label: str) -> None:
+    if label in NEEDS_312 and sys.version_info < (3, 12):
+        pytest.skip("syntax added in Python 3.12")
     (tmp_path / "domain.py").write_text(SYNTAX[label], encoding="utf-8", newline="\n")
     policy = policy_from_mapping(
         {**SMALL, "ring": {"domain": {"external": []}, "adapters": {}}}
     )
-    with Worker(worker_binary) as worker:
-        result = _assert_parity(Analysis(worker, tmp_path), policy, tmp_path)
-    assert result.incomplete == result.syntax_errors == ()
+    assert _assert_parity(Analysis(tmp_path), policy, tmp_path).syntax_errors == ()
 
 
-def test_findings_match_a_full_scan_across_edits(
-    worker_binary: Path, tmp_path: Path
+def test_findings_match_a_full_scan_across_edits(tmp_path: Path
 ) -> None:
     _write(tmp_path, FILES)
     _repository(tmp_path)
     policy = _policy(tmp_path)
     scopes_only = {"scope-import"}  # needs `scopes`; covered below
 
-    with Worker(worker_binary) as worker:
-        analysis = Analysis(worker, tmp_path)
-        initial = _assert_parity(analysis, policy, tmp_path)
-        # Every claimed rule really occurs, so equality above is not two empty lists.
-        assert _rules(initial) == _IMPORT_RULES - scopes_only
-        assert initial.syntax_errors == initial.incomplete == ()
-        again = _assert_parity(analysis, policy, tmp_path)
-        assert again == replace(initial, parsed=0)
+    analysis = Analysis(tmp_path)
+    initial = _assert_parity(analysis, policy, tmp_path)
+    # Every claimed rule really occurs, so equality above is not two empty lists.
+    assert _rules(initial) == _IMPORT_RULES - scopes_only
+    assert initial.syntax_errors == ()
+    again = _assert_parity(analysis, policy, tmp_path)
+    assert again == replace(initial, parsed=0)
 
-        for edit in (
-            {"app/domain.py": "VALUE = 1\n"},  # clear findings
-            {
-                "app/domain.py": "def late():\n    from app import adapters\n"
-            },  # lazy import
-            {"app/orphan.py": "__arbor__ = {'ring': 'domain'}\n"},  # annotation only
-            {"app/script.py": "import requests\n"},  # metadata only
-            {"app/added.py": "from app import b\n"},  # addition
-            {"app/domain/__init__.py": ""},  # replaced below
-        ):
-            if "app/domain/__init__.py" in edit:
-                (tmp_path / "app/domain.py").unlink()  # module becomes a package
-            _write(tmp_path, edit)
-            _assert_parity(analysis, policy, tmp_path)
-
-        (tmp_path / "app/b.py").unlink()  # deletion breaks the cycle
+    for edit in (
+        {"app/domain.py": "VALUE = 1\n"},  # clear findings
+        {
+            "app/domain.py": "def late():\n    from app import adapters\n"
+        },  # lazy import
+        {"app/orphan.py": "__arbor__ = {'ring': 'domain'}\n"},  # annotation only
+        {"app/script.py": "import requests\n"},  # metadata only
+        {"app/added.py": "from app import b\n"},  # addition
+        {"app/domain/__init__.py": ""},  # replaced below
+    ):
+        if "app/domain/__init__.py" in edit:
+            (tmp_path / "app/domain.py").unlink()  # module becomes a package
+        _write(tmp_path, edit)
         _assert_parity(analysis, policy, tmp_path)
-        (tmp_path / "app/a.py").rename(tmp_path / "app/renamed.py")
-        _assert_parity(analysis, policy, tmp_path)
-        # A vendor-folder change touches no module the worker holds.
-        _write(tmp_path, {"vendor/dependency.py": "x = 2\n"})
-        assert _assert_parity(analysis, policy, tmp_path).parsed == 0
-        changed = replace(policy, forbid_circular_imports=False, entry_scripts=())
-        assert _assert_parity(analysis, changed, tmp_path).parsed == 0
+
+    (tmp_path / "app/b.py").unlink()  # deletion breaks the cycle
+    _assert_parity(analysis, policy, tmp_path)
+    (tmp_path / "app/a.py").rename(tmp_path / "app/renamed.py")
+    _assert_parity(analysis, policy, tmp_path)
+    # A vendor-folder change touches no scanned module.
+    _write(tmp_path, {"vendor/dependency.py": "x = 2\n"})
+    assert _assert_parity(analysis, policy, tmp_path).parsed == 0
+    changed = replace(policy, forbid_circular_imports=False, entry_scripts=())
+    assert _assert_parity(analysis, changed, tmp_path).parsed == 0
 
 
-def test_scoped_findings_match_a_full_scan(worker_binary: Path, tmp_path: Path) -> None:
+def test_scoped_findings_match_a_full_scan(tmp_path: Path) -> None:
     ring = {"rings": ["domain"], "ring": {"domain": {"traits": ["no-env"]}}}
     policy = policy_from_mapping(
         {
@@ -286,32 +261,31 @@ def test_scoped_findings_match_a_full_scan(worker_binary: Path, tmp_path: Path) 
             "two/private.py": "",
         },
     )
-    with Worker(worker_binary) as worker:
-        analysis = Analysis(worker, tmp_path)
-        result = _assert_parity(analysis, policy, tmp_path)
-        assert _rules(result) == {"scope-import"}
-        # A public module of another scope starts using an effect: the leak appears in the untouched importer.
-        _write(
-            tmp_path,
-            {
-                "two/private.py": "",
-                "two/api.py": "import os\n\ndef f():\n    os.getenv('A')\n",
-                "one/user.py": "from two import api\n",
-            },
-        )
-        public = replace(
-            policy,
-            scopes=tuple(
-                replace(scope, public=("two.api",)) if scope.name == "two" else scope
-                for scope in policy.scopes
-            ),
-        )
-        leaked = _assert_parity(analysis, public, tmp_path)
-        assert "scope-effect-leak" in _rules(leaked)
-        _write(tmp_path, {"two/api.py": "def f():\n    pass\n"})
-        assert "scope-effect-leak" not in _rules(
-            _assert_parity(analysis, public, tmp_path)
-        )
+    analysis = Analysis(tmp_path)
+    result = _assert_parity(analysis, policy, tmp_path)
+    assert _rules(result) == {"scope-import"}
+    # A public module of another scope starts using an effect: the leak appears in the untouched importer.
+    _write(
+        tmp_path,
+        {
+            "two/private.py": "",
+            "two/api.py": "import os\n\ndef f():\n    os.getenv('A')\n",
+            "one/user.py": "from two import api\n",
+        },
+    )
+    public = replace(
+        policy,
+        scopes=tuple(
+            replace(scope, public=("two.api",)) if scope.name == "two" else scope
+            for scope in policy.scopes
+        ),
+    )
+    leaked = _assert_parity(analysis, public, tmp_path)
+    assert "scope-effect-leak" in _rules(leaked)
+    _write(tmp_path, {"two/api.py": "def f():\n    pass\n"})
+    assert "scope-effect-leak" not in _rules(
+        _assert_parity(analysis, public, tmp_path)
+    )
 
 
 # One use of every effect category, and one finding of every effect rule.
@@ -453,10 +427,9 @@ class _Edits:
 
 
 @pytest.fixture
-def effects(worker_binary: Path, tmp_path: Path) -> Iterator[_Edits]:
+def effects(tmp_path: Path) -> _Edits:
     _write(tmp_path, EFFECT_FILES)
-    with Worker(worker_binary) as worker:
-        yield _Edits(Analysis(worker, tmp_path), _policy(tmp_path), tmp_path)
+    return _Edits(Analysis(tmp_path), _policy(tmp_path), tmp_path)
 
 
 def _of(result: Result, subject: str) -> set[str]:
@@ -471,7 +444,7 @@ def test_every_effect_rule_matches_a_full_scan(effects: _Edits) -> None:
         "unguarded-module-state-note",
         "effect-unlisted-category",
     }
-    assert initial.syntax_errors == initial.incomplete == ()
+    assert initial.syntax_errors == ()
     assert effects.check() == replace(initial, parsed=0)
     policy = effects.policy
     # Policy only: nothing is parsed again.
@@ -557,7 +530,7 @@ def _own_policy_table() -> dict:
     return data["tool"]["arborescent"]
 
 
-def test_this_repository_matches_a_full_scan(worker_binary: Path) -> None:
+def test_this_repository_matches_a_full_scan() -> None:
     policy, root = load_policy(LocalFileSystem(), ROOT / "pyproject.toml")
     raw = _own_policy_table()
     # The same code under a policy that forbids every dependency, so there is plenty to disagree about.
@@ -570,11 +543,10 @@ def test_this_repository_matches_a_full_scan(worker_binary: Path) -> None:
             },
         }
     )
-    with Worker(worker_binary) as worker:
-        analysis = Analysis(worker, root)
-        assert _assert_parity(analysis, policy, root).incomplete == ()
-        assert len(_assert_parity(analysis, sealed, root).violations) > 200
-        strict = _assert_parity(analysis, _strictest(raw), root)
+    analysis = Analysis(root)
+    assert _assert_parity(analysis, policy, root).syntax_errors == ()
+    assert len(_assert_parity(analysis, sealed, root).violations) > 200
+    strict = _assert_parity(analysis, _strictest(raw), root)
     # Real code, not only fixtures, produces effect findings to disagree about.
     assert _rules(strict) >= {
         "effect-at-import",
@@ -611,8 +583,7 @@ def _strictest(raw: dict) -> Policy:
     )
 
 
-def test_edits_to_a_copy_of_this_repository_match_a_full_scan(
-    worker_binary: Path, tmp_path: Path
+def test_edits_to_a_copy_of_this_repository_match_a_full_scan(tmp_path: Path
 ) -> None:
     shutil.copytree(
         ROOT / "src/arborescent",
@@ -624,45 +595,44 @@ def test_edits_to_a_copy_of_this_repository_match_a_full_scan(
     policy = policy_from_mapping(_own_policy_table())
     domain = tmp_path / "src/arborescent/domain.py"
     original = domain.read_text(encoding="utf-8")
-    with Worker(worker_binary) as worker:
-        analysis = Analysis(worker, tmp_path)
-        clean = _assert_parity(analysis, policy, tmp_path)
-        domain.write_text(
-            original + "\nimport subprocess\nfrom . import cli\n", encoding="utf-8"
-        )
-        broken = _assert_parity(analysis, policy, tmp_path)
-        assert broken.parsed == 1
-        assert {"internal-import", "external-import", "circular-import"} <= {
-            v.rule for v in broken.violations
-        }
-        domain.write_text(original, encoding="utf-8")
-        assert _assert_parity(analysis, policy, tmp_path).violations == clean.violations
-        (tmp_path / "src/arborescent/rules.py").unlink()
-        _assert_parity(analysis, policy, tmp_path)
+    analysis = Analysis(tmp_path)
+    clean = _assert_parity(analysis, policy, tmp_path)
+    domain.write_text(
+        original + "\nimport subprocess\nfrom . import cli\n", encoding="utf-8"
+    )
+    broken = _assert_parity(analysis, policy, tmp_path)
+    assert broken.parsed == 1
+    assert {"internal-import", "external-import", "circular-import"} <= {
+        v.rule for v in broken.violations
+    }
+    domain.write_text(original, encoding="utf-8")
+    assert _assert_parity(analysis, policy, tmp_path).violations == clean.violations
+    (tmp_path / "src/arborescent/rules.py").unlink()
+    _assert_parity(analysis, policy, tmp_path)
 
-        # Effect edits deep in the import graph, with every effect rule on.
-        strict = _strictest(_own_policy_table())
-        before = _assert_parity(analysis, strict, tmp_path)
-        domain.write_text(
-            original
-            + "\nimport os, time\nSEEN = {}\nSTARTED = time.time()\n"
-            + "def remember(key):\n    SEEN[key] = os.getenv(key)\n",
-            encoding="utf-8",
-        )
-        effects = _assert_parity(analysis, strict, tmp_path)
-        assert effects.parsed == 1
-        added = set(_found(effects)) - set(_found(before))
-        assert {
-            "effect-at-import",
-            "effect-clock",
-            "effect-env",
-            "effect-via-import",
-            "unguarded-module-state",
-        } <= {v.rule for v in added}
-        # Importers that were not edited gained findings.
-        assert {v.subject for v in added} - {"arborescent.domain"}
-        domain.write_text(original, encoding="utf-8")
-        assert _found(_assert_parity(analysis, strict, tmp_path)) == _found(before)
+    # Effect edits deep in the import graph, with every effect rule on.
+    strict = _strictest(_own_policy_table())
+    before = _assert_parity(analysis, strict, tmp_path)
+    domain.write_text(
+        original
+        + "\nimport os, time\nSEEN = {}\nSTARTED = time.time()\n"
+        + "def remember(key):\n    SEEN[key] = os.getenv(key)\n",
+        encoding="utf-8",
+    )
+    effects = _assert_parity(analysis, strict, tmp_path)
+    assert effects.parsed == 1
+    added = set(_found(effects)) - set(_found(before))
+    assert {
+        "effect-at-import",
+        "effect-clock",
+        "effect-env",
+        "effect-via-import",
+        "unguarded-module-state",
+    } <= {v.rule for v in added}
+    # Importers that were not edited gained findings.
+    assert {v.subject for v in added} - {"arborescent.domain"}
+    domain.write_text(original, encoding="utf-8")
+    assert _found(_assert_parity(analysis, strict, tmp_path)) == _found(before)
 
 
 @pytest.mark.parametrize(
@@ -674,15 +644,13 @@ def test_edits_to_a_copy_of_this_repository_match_a_full_scan(
     ],
     ids=["crlf", "lone carriage return", "byte order mark"],
 )
-def test_line_numbers_match_for_other_encodings(
-    worker_binary: Path, tmp_path: Path, source: bytes
+def test_line_numbers_match_for_other_encodings(tmp_path: Path, source: bytes
 ) -> None:
     (tmp_path / "domain.py").write_bytes(source)
     (tmp_path / "adapters.py").write_bytes(b"x = 1\n")
-    with Worker(worker_binary) as worker:
-        result = _assert_parity(
-            Analysis(worker, tmp_path), policy_from_mapping(SMALL), tmp_path
-        )
+    result = _assert_parity(
+        Analysis(tmp_path), policy_from_mapping(SMALL), tmp_path
+    )
     assert result.violations
 
 
@@ -693,63 +661,41 @@ def test_line_numbers_match_for_other_encodings(
         "return 1\nbreak = 2\n",
         "def f():\n  x\n y\n",
         "x = '\0'\n",
-        # Deep enough to overflow the worker's stack if it were ever sent there.
+        # Deep enough that CPython refuses it.
         "def f():\n    return " + "1+" * 200_000 + "1\n",
     ],
     ids=["python 2", "keyword", "indentation", "nul", "very deep"],
 )
-def test_python_decides_what_is_a_syntax_error(
-    worker_binary: Path, tmp_path: Path, source: str
+def test_python_decides_what_is_a_syntax_error(tmp_path: Path, source: str
 ) -> None:
     policy = policy_from_mapping(SMALL)
     _write(tmp_path, {"domain.py": "import adapters\n", "adapters.py": source})
     with pytest.raises((SyntaxError, ValueError, RecursionError)):
         _full_scan(policy, tmp_path)
-    with Worker(worker_binary) as worker:
-        analysis = Analysis(worker, tmp_path)
-        broken = analysis.refresh(policy)
-        assert broken.syntax_errors == ("adapters.py",)
-        assert [v.rule for v in _found(broken)] == ["internal-import"]
-        _write(tmp_path, {"adapters.py": "x = 1\n"})
-        assert _assert_parity(analysis, policy, tmp_path).syntax_errors == ()
+    analysis = Analysis(tmp_path)
+    broken = analysis.refresh(policy)
+    assert broken.syntax_errors == ("adapters.py",)
+    assert [v.rule for v in _found(broken)] == ["internal-import"]
+    _write(tmp_path, {"adapters.py": "x = 1\n"})
+    assert _assert_parity(analysis, policy, tmp_path).syntax_errors == ()
 
 
-def test_a_file_outside_enforcement_that_breaks_is_not_hidden_by_the_cache(
-    worker_binary: Path, tmp_path: Path
+def test_a_file_outside_enforcement_that_breaks_is_not_hidden_by_the_cache(tmp_path: Path
 ) -> None:
     # Annotation discovery parses it, so a full scan fails on it, yet no scanned module changes.
     policy = policy_from_mapping({**SMALL, "sources": ["domain.py"]})
     _write(tmp_path, {"domain.py": "", "loose.py": "x = 1\n"})
-    with Worker(worker_binary) as worker:
-        analysis = Analysis(worker, tmp_path)
-        assert analysis.refresh(policy).syntax_errors == ()
-        _write(tmp_path, {"loose.py": "def broken(:\n"})
-        with pytest.raises(SyntaxError):
-            _full_scan(policy, tmp_path)
-        assert analysis.refresh(policy).syntax_errors == ("loose.py",)
-        _write(tmp_path, {"loose.py": "x = 1\n"})
-        assert analysis.refresh(policy).syntax_errors == ()
+    analysis = Analysis(tmp_path)
+    assert analysis.refresh(policy).syntax_errors == ()
+    _write(tmp_path, {"loose.py": "def broken(:\n"})
+    with pytest.raises(SyntaxError):
+        _full_scan(policy, tmp_path)
+    assert analysis.refresh(policy).syntax_errors == ("loose.py",)
+    _write(tmp_path, {"loose.py": "x = 1\n"})
+    assert analysis.refresh(policy).syntax_errors == ()
 
 
-def test_valid_python_the_worker_cannot_parse_keeps_imports_and_is_reported(
-    worker_binary: Path, tmp_path: Path
-) -> None:
-    source = "import adapters\ndef f():\n    (bar.\nbaz)\n"
-    ast.parse(source)
-    _write(tmp_path, {"domain.py": source, "adapters.py": ""})
-    with Worker(worker_binary) as worker:
-        # If a grammar update accepts this, pick another construct.
-        assert _update(worker, source)["syntax_error"]
-        result = _assert_parity(
-            Analysis(worker, tmp_path), policy_from_mapping(SMALL), tmp_path
-        )
-    assert result.incomplete == ("domain.py",)
-    assert result.syntax_errors == ()
-    assert [v.rule for v in result.violations] == ["internal-import"]
-
-
-def test_import_rules_rerun_only_when_something_they_read_changes(
-    worker_binary: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_import_rules_rerun_only_when_something_they_read_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runs: list[int] = []
     real = incremental_analysis.check_modules
@@ -761,101 +707,33 @@ def test_import_rules_rerun_only_when_something_they_read_changes(
     policy = policy_from_mapping(SMALL)
     domain = "import adapters\n\ndef f():\n    return 1\n"
     _write(tmp_path, {"domain.py": domain, "adapters.py": ""})
-    with Worker(worker_binary) as worker:
-        analysis = Analysis(worker, tmp_path)
-        first = analysis.refresh(policy)
-        _write(tmp_path, {"domain.py": domain.replace("return 1", "return 2")})
-        body = analysis.refresh(policy)
-        assert (body.parsed, body.violations, len(runs)) == (1, first.violations, 1)
-        _write(tmp_path, {"domain.py": "\n" + domain})
-        moved = _assert_parity(analysis, policy, tmp_path)
+    analysis = Analysis(tmp_path)
+    first = analysis.refresh(policy)
+    _write(tmp_path, {"domain.py": domain.replace("return 1", "return 2")})
+    body = analysis.refresh(policy)
+    assert (body.parsed, body.violations, len(runs)) == (1, first.violations, 1)
+    _write(tmp_path, {"domain.py": "\n" + domain})
+    moved = _assert_parity(analysis, policy, tmp_path)
     assert [v.line for v in moved.violations] == [2]
     # `_assert_parity` runs the real full scan, which does not go through the patched name.
     assert len(runs) == 2
-
-
-def test_developer_tools_get_no_ring_call_paths(
-    worker_binary: Path, tmp_path: Path
-) -> None:
-    policy = policy_from_mapping(
-        {**SMALL, "sources": ["."], "dev_tools": ["domain.py"]}
-    )
-    _write(
-        tmp_path,
-        {"domain.py": "import os\ndef load():\n    return os.getenv('X')\n"},
-    )
-    with Worker(worker_binary) as worker:
-        result = Analysis(worker, tmp_path).refresh(policy)
-    assert result.call_paths == ()
-    assert result.unresolved_calls == {}
-
-
-def test_call_paths_say_what_they_could_not_follow_and_keep_their_identity(
-    worker_binary: Path, tmp_path: Path
-) -> None:
-    policy = policy_from_mapping(
-        {
-            **SMALL,
-            "ring": {
-                "domain": {"external": ["os"], "traits": ["no-env"]},
-                "adapters": {"traits": ["permits-effects"]},
-            },
-        }
-    )
-    route = "import os\n\ndef load():\n    return os.getenv('X')\n\ndef quote():\n    return load()\n"
-    _write(tmp_path, {"domain.py": route, "adapters.py": "def f(x):\n    x.go()\n"})
-    with Worker(worker_binary) as worker:
-        analysis = Analysis(worker, tmp_path)
-        first = _assert_parity(analysis, policy, tmp_path)
-        # `adapters` forbids no traced effect, so its unfollowed call is not worth reporting.
-        assert first.unresolved_calls == {}
-        keys = {path.key for path in first.call_paths}
-        assert keys == {
-            "effect-via-call|domain|[domain] domain.load reaches forbidden env effect",
-            "effect-via-call|domain|[domain] domain.quote reaches forbidden env effect",
-        }
-        # Lines move and `quote` takes a longer route: the same identities, plus the new function.
-        longer = (
-            "\n\n"
-            + route.replace("return load()", "return middle()")
-            + "\ndef middle():\n    return load()\n"
-        )
-        _write(tmp_path, {"domain.py": longer})
-        second = _assert_parity(analysis, policy, tmp_path)
-        assert keys < {path.key for path in second.call_paths}
-        quote = [path for path in second.call_paths if "domain.quote" in path.detail]
-        assert [path.chain for path in quote] == [
-            ("domain.quote", "domain.middle", "domain.load", "os.getenv")
-        ]
-        # A method call, a call in an async function and one on a shadowed name are not followed.
-        _write(
-            tmp_path,
-            {
-                "domain.py": route + "\ndef f(x):\n    x.go()\n    load.me()\n"
-                "\nasync def g():\n    load()\n"
-            },
-        )
-        assert _assert_parity(analysis, policy, tmp_path).unresolved_calls == {
-            "domain": 3
-        }
 
 
 @pytest.mark.parametrize(
     ("domain", "code", "printed"),
     [
         ("import adapters\n", 1, '"rule": "internal-import"'),
-        # Neither a note nor a call path fails `check`, and both are still printed.
+        # A note does not fail `check`, and is still printed.
         (
             "import os\nX = 1\n\ndef f():\n    print(os.getpid())\n",
             0,
             '"rule": "effect-unlisted-category"',
         ),
-        ("", 0, '"call_paths": []'),
+        ("", 0, '"violations": []'),
     ],
     ids=["violation", "note only", "clean"],
 )
-def test_command_line_fails_only_on_what_check_fails_on(
-    worker_binary: Path, tmp_path: Path, domain: str, code: int, printed: str
+def test_command_line_fails_only_on_what_check_fails_on(tmp_path: Path, domain: str, code: int, printed: str
 ) -> None:
     _write(
         tmp_path,
@@ -867,19 +745,17 @@ def test_command_line_fails_only_on_what_check_fails_on(
             "adapters.py": "",
         },
     )
-    done = _command_line(worker_binary, tmp_path)
+    done = _command_line(tmp_path)
     assert done.returncode == code, done.stdout + done.stderr
     assert printed in done.stdout
 
 
-def _command_line(worker_binary: Path, root: Path) -> subprocess.CompletedProcess[str]:
+def _command_line(root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
             "-m",
             "tools.incremental_analysis",
-            "--worker",
-            str(worker_binary),
             "--policy",
             str(root / "arborescent.toml"),
         ],
@@ -889,7 +765,7 @@ def _command_line(worker_binary: Path, root: Path) -> subprocess.CompletedProces
     )
 
 
-def test_command_line_reports_a_full_scan(worker_binary: Path, tmp_path: Path) -> None:
+def test_command_line_reports_a_full_scan(tmp_path: Path) -> None:
     _write(
         tmp_path,
         {
@@ -899,7 +775,7 @@ def test_command_line_reports_a_full_scan(worker_binary: Path, tmp_path: Path) -
             "adapters.py": "",
         },
     )
-    done = _command_line(worker_binary, tmp_path)
+    done = _command_line(tmp_path)
     assert done.returncode == 1, done.stderr
     assert '"rule": "internal-import"' in done.stdout
-    assert '"incomplete": []' in done.stdout
+    assert '"syntax_errors": []' in done.stdout
