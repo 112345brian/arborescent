@@ -51,6 +51,8 @@ Details in `docs/configuration.md`, "Traits".
   names the missing traits; add them to that ring's `traits`, or remove its effect traits. Every other ring may be
   loosened (an adapters ring has to allow effects), so a middle ring that lacks `dynamic-import` no longer fails.
   `check` without `--require-profile` is unchanged.
+- With several `[ring.<name>]` tables that name no ring, which one the error named changed with `PYTHONHASHSEED`. It is
+  now always the first by name.
 - The order of `effect-via-import` findings (and the `must_be_pure` reach form of `package-constraint-facts`) changed
   from run to run with `PYTHONHASHSEED` when several effect categories reached a module. Reports are now the same on every
   run. Only the order varied: the chains, root causes and baselines were already stable, so no baseline changes.

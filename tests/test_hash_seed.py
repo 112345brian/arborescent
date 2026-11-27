@@ -89,3 +89,24 @@ def test_check_report_and_baselines_are_the_same_under_every_hash_seed(tmp_path:
     assert len({report for report, _, _ in seen}) == 1, "report order depends on PYTHONHASHSEED"
     assert len({plain for _, plain, _ in seen}) == 1, "baseline depends on PYTHONHASHSEED"
     assert len({grouped for _, _, grouped in seen}) == 1, "root-cause baseline depends on PYTHONHASHSEED"
+
+
+_STRAY_TABLES = (
+    "from arborescent.config import policy_from_mapping\n"
+    "names = ['zeta', 'delta', 'alpha', 'omega', 'beta']\n"
+    "try:\n"
+    "    policy_from_mapping({'rings': ['domain'], 'ring': {name: {} for name in names}, 'classify': {'*': 'domain'}})\n"
+    "except Exception as error:\n"
+    "    print(error)\n"
+)
+
+
+def test_the_unknown_ring_table_named_in_the_error_is_the_same_under_every_hash_seed() -> None:
+    seen = {
+        subprocess.run(
+            [sys.executable, "-c", _STRAY_TABLES], env={**os.environ, "PYTHONHASHSEED": str(seed), "PYTHONPATH": str(_SRC)},
+            capture_output=True, text=True, check=True, timeout=120,
+        ).stdout.strip()
+        for seed in _SEEDS
+    }
+    assert seen == {"[ring.alpha] is not in `rings`"}

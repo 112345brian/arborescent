@@ -898,7 +898,7 @@ def _ring_tables(raw: Mapping[str, Any], names: Sequence[str]) -> Mapping[str, M
     if not isinstance(value, Mapping):
         raise PolicyError("`ring` must hold one table per ring: [ring.<name>]")
     tables = cast("Mapping[str, object]", value)
-    for unknown in set(tables) - set(names):
+    for unknown in sorted(set(tables) - set(names), key=repr):  # sorted: the error must not depend on PYTHONHASHSEED
         raise PolicyError(f"[ring.{unknown}] is not in `rings`")
     for name, table in tables.items():
         if not isinstance(table, Mapping):
