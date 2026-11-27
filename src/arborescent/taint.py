@@ -54,7 +54,8 @@ __all__ = ["DEFAULT_TAINT_SEEDS", "TaintCacheStore", "TaintResult", "TaintedFunc
 
 _CACHE_VERSION = 3
 
-_SCOPE_BOUNDARIES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+# Other scopes, then the nodes with no call or assignment below them (a name, the commonest node, holds only its context).
+_NOT_ENTERED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef, ast.Name, ast.Constant)
 
 
 def _io_category(target: str, seeds: frozenset[str]) -> str | None:
@@ -71,7 +72,7 @@ def _body_nodes(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
     while pending:
         node = pending.pop()
         out.append(node)
-        if not isinstance(node, _SCOPE_BOUNDARIES):
+        if not isinstance(node, _NOT_ENTERED):
             pending.extend(reversed(list(ast.iter_child_nodes(node))))
     return out
 

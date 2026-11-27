@@ -133,16 +133,16 @@ def _import_calls(nodes: Sequence[ast.AST], tree: ast.Module, aliases: dict[str,
     return tuple(sorted(calls))
 
 
-def _in_functions(tree: ast.Module, by_node: dict[int, list[tuple[str, str]]]) -> set[tuple[str, str, str]]:
+_Runs = Sequence[tuple[str, Sequence[ast.AST]]]  # (qualified name, the function and every node a call of it evaluates)
+
+
+def _function_runs(tree: ast.Module) -> _Runs:
+    return [(name, [function, *evaluated(function.body)]) for name, function in _functions(tree.body)]
+
+
+def _in_functions(functions: _Runs, by_node: dict[int, list[tuple[str, str]]]) -> set[tuple[str, str, str]]:
     """``(function, *entry)`` for each entry whose node a module-level function or method evaluates when called, or is that function."""
-    if not by_node:
-        return set()
-    return {
-        (name, *entry)
-        for name, function in _functions(tree.body)
-        for node in (function, *evaluated(function.body))
-        for entry in by_node.get(id(node), ())
-    }
+    return {(name, *entry) for name, nodes in functions for node in nodes for entry in by_node.get(id(node), ())}
 
 
 class Walked(NamedTuple):
@@ -168,8 +168,9 @@ def import_time_facts(walked: Walked, aliases: dict[str, str], dotted: Dotted) -
     writes: dict[int, list[tuple[str, str]]] = {}
     for node, target in walked.foreign_runs:
         writes.setdefault(id(node), []).append((target, ""))
+    functions = _function_runs(walked.tree) if effects or writes else ()  # walked once, read by both
     return ImportTimeFacts(
         _import_calls(walked.at_import, walked.tree, aliases, dotted),
-        tuple(sorted(_in_functions(walked.tree, effects))),
-        tuple(sorted((name, target) for name, target, _ in _in_functions(walked.tree, writes))),
+        tuple(sorted(_in_functions(functions, effects))),
+        tuple(sorted((name, target) for name, target, _ in _in_functions(functions, writes))),
     )
