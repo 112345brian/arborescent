@@ -8,6 +8,8 @@
   while they run and restore the previous one afterwards, also after an error: on macOS a cold run of this repository took
   about 16% less time on Python 3.11 and 7% less on 3.14, with at most 1 MB more peak memory. A library caller passes
   `run_scope=arborescent.adapters.raised_gc_threshold` to `Services` for the same; without it the collector is untouched.
+- The save watcher in `tools/` is now Python only: its Rust crate, `--worker` flag and advisory `effect-via-call` output
+  (`call_paths`, `unresolved_calls`, `incomplete`) are gone. Run `python -m tools.incremental_analysis --policy ...`.
 
 ### Upgrading from 0.9
 

@@ -150,7 +150,7 @@ def _store_cache(
 class FsScanner:
     """Walk the policy's sources, parse each file once, reuse facts for unchanged content.
 
-    ``extractor`` replaces ``facts.extract`` for a caller that gets facts another way (the incremental worker) and must
+    ``extractor`` replaces ``facts.extract`` for a caller that gets facts another way (the incremental watcher) and must
     keep the same discovery and module selection. Its facts may be partial, so it cannot share the on-disk cache."""
 
     def __init__(self, cache_dir: Path | None = None, runner: ToolRunner | None = None, extractor: Extractor | None = None) -> None:

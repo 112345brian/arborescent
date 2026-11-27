@@ -196,7 +196,7 @@ def changed_files(runner: ToolRunner, root: Path, ref: str) -> frozenset[str] | 
 
 
 def discovery_findings(indexes: RuleContext, scan: ScanResult) -> list[Violation]:
-    """What discovery alone shows, with no module facts beyond ``__arbor__``: shared with the incremental worker."""
+    """What discovery alone shows, with no module facts beyond ``__arbor__``: shared with the incremental watcher."""
     policy = indexes.policy
     found = [
         Violation(Rule.INVALID_ARBOR_ANNOTATION, module, detail)
@@ -304,7 +304,7 @@ def _unresolved_patch_findings(policy: Policy, root: Path, fs: FileSystem, scan:
 
 def patch_findings(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> list[Violation]:
     """``unreachable-patch`` and ``unresolved-patch-target`` (empty when neither practice is set): shared with the incremental
-    worker. The second also reads patched modules from disk, so an unchanged ``scan`` does not mean unchanged findings."""
+    watcher. The second also reads patched modules from disk, so an unchanged ``scan`` does not mean unchanged findings."""
     return _unreachable_patch_findings(policy, scan) + _unresolved_patch_findings(policy, root, fs, scan)
 
 

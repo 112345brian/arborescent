@@ -101,7 +101,6 @@ ignore = ["PIE807"]
 "src/arborescent/cli_purity.py" = ["T20"]
 "src/arborescent/cli_report.py" = ["T20"]
 "src/arborescent/tool_runner.py" = ["S404", "S603"]
-"tools/incremental_analysis.py" = ["S404", "S603"]
 
 [lint.mccabe]
 max-complexity = 8
