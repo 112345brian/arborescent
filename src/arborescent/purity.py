@@ -39,7 +39,7 @@ class ModulePurity:
 
 def ring_scanned(local: ArchitecturePolicy, rule: PurityPolicy, ring: str) -> bool:
     """Whether ``mixed-purity`` looks at modules of ``ring``: not in ``exclude_rings``, in ``rings`` when that is set, and (with
-    ``skip_unrestricted_rings``) in a ring whose effective ``forbid`` is not empty."""
+    ``skip_unrestricted_rings``) in a ring that forbids some effect."""
     if ring in rule.exclude_rings or (rule.rings and ring not in rule.rings):
         return False
     return not (rule.skip_unrestricted_rings and not local.forbidden_effects(ring))

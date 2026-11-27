@@ -15,7 +15,7 @@ from arborescent.config import policy_from_mapping
 from arborescent.domain import PolicyError, Rule
 from arborescent.engine import run_own
 from arborescent.facts import extract
-from arborescent.presets import EFFECT_CATEGORIES
+from arborescent.presets import CATEGORY_TRAITS, EFFECT_CATEGORIES
 from arborescent.rules import RuleContext, check_modules, fits_ring
 from arborescent.scan_cache_codec import CACHE_VERSION, facts_from_json, facts_to_json
 from arborescent.selftest import plan, selftest
@@ -24,7 +24,8 @@ CATEGORIES = ["clock", "env", "filesystem", "network", "process", "randomness"]
 
 
 def policy_for(*categories: str, **overrides: Any) -> Any:
-    ring = {"may_import": ["domain"], "external": ["*"], "forbid": [], "forbid_at_import": list(categories or CATEGORIES)}
+    traits = ["permits-effects", *(f"{CATEGORY_TRAITS[category]}-at-import" for category in categories or CATEGORIES)]
+    ring = {"may_import": ["domain"], "external": ["*"], "traits": traits}
     return mini_policy(ring=ring_with(ports=ring), **overrides)
 
 
@@ -102,18 +103,18 @@ def test_only_the_listed_categories_fail_and_the_ring_keeps_using_them_in_functi
     assert [(v.line, v.detail) for v in found] == [(2, "[ports] effect env uses os.getenv at import time; move it into a function")]
 
 
-def test_the_rule_is_off_without_forbid_at_import(repo: Path) -> None:
+def test_the_rule_is_off_without_an_at_import_trait(repo: Path) -> None:
     write_files(repo, {"app/ports.py": "import time\nX = time.time()\n"})
-    policy = mini_policy(ring=ring_with(ports={"may_import": ["domain"], "external": ["*"], "forbid": []}))
+    policy = mini_policy(ring=ring_with(ports={"may_import": ["domain"], "external": ["*"], "traits": ["permits-effects"]}))
     scan = FsScanner().scan(policy, repo)
     found = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
     assert [v for v in found if v.rule == Rule.EFFECT_AT_IMPORT] == []
 
 
-@pytest.mark.parametrize("value", ["clock", ["clok"], ["random"], [""], [1]])
-def test_forbid_at_import_is_validated(value: object) -> None:
-    with pytest.raises(PolicyError, match="forbid_at_import"):
-        mini_policy(ring=ring_with(domain={"forbid_at_import": value}))
+@pytest.mark.parametrize("value", ["no-clock-at-import", ["no-clok-at-import"], ["random-at-import"], [""], [1]])
+def test_at_import_traits_are_validated(value: object) -> None:
+    with pytest.raises(PolicyError, match="traits"):
+        mini_policy(ring=ring_with(domain={"traits": value}))
 
 
 LOADER = "from pathlib import Path\n\ndef load_thing():\n    return Path('a').read_text()\n\ndef pure():\n    return 1\n"
@@ -186,7 +187,7 @@ def test_one_hop_follows_a_name_re_exported_by_a_package(repo: Path) -> None:
     source = "from .pkg import load\nX = load()\n"
     write_files(repo, {**files, "app/ports.py": source})
     policy = mini_policy(
-        ring=ring_with(ports={"may_import": ["domain"], "external": ["*"], "forbid": [], "forbid_at_import": ["filesystem"]}),
+        ring=ring_with(ports={"may_import": ["domain"], "external": ["*"], "traits": ["permits-effects", "no-filesystem-at-import"]}),
         classify={"app": "domain", "app.pkg*": "ports", "app.ports": "ports", "app.*": "composition"},
     )
     scan = FsScanner().scan(policy, repo)
@@ -243,8 +244,8 @@ def test_a_cache_written_before_import_time_facts_is_parsed_again(repo: Path, tm
 
 def test_fits_ring_counts_import_time_effects(repo: Path) -> None:
     write_files(repo, {"app/domain.py": "import os\nX = os.getenv('A')\n"})
-    ring = {"may_import": ["domain"], "external": ["*"], "forbid": [], "forbid_at_import": ["env"]}
-    policy = mini_policy(ring=ring_with(domain={"external": ["*"], "forbid": []}, ports=ring))
+    ring = {"may_import": ["domain"], "external": ["*"], "traits": ["permits-effects", "no-env-at-import"]}
+    policy = mini_policy(ring=ring_with(domain={"external": ["*"], "traits": ["permits-effects"]}, ports=ring))
     scan = FsScanner().scan(policy, repo)
     context = RuleContext(policy, scan.arbor_index, scan.scope_by_module)
     info = scan.modules["app.domain"]
@@ -338,7 +339,7 @@ def test_selftest_probes_the_rule_when_a_ring_enables_it(repo: Path) -> None:
     assert not [item for item in report.survived if "effect-at-import" in item]
 
 
-def test_forbid_at_import_is_set_per_scope() -> None:
-    ring = {"forbid_at_import": ["env"]}
+def test_at_import_traits_are_set_per_scope() -> None:
+    ring = {"traits": ["no-env-at-import"]}
     policy = policy_from_mapping({"scopes": {"a": {"sources": ["a"], "source_roots": ["."], "rings": ["domain"], "ring": {"domain": ring}}}})
     assert policy.scope("a").policy.ring("domain").forbid_at_import == frozenset({"env"})

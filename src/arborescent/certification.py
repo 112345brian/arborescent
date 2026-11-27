@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from .facts import ModuleInfo
     from .ports import FileSystem, ScanResult, ToolRunner
 
-from .domain import NOISE_DIRS, ToolResult
+from .domain import NOISE_DIRS, ToolResult, trait_of
 from .generated_config import has_own_importlinter_config, is_generated
 
 PROFILE = "v1"
@@ -102,7 +102,7 @@ def _native_scope_minimum(scope_name: str, policy: ArchitecturePolicy) -> list[s
 
 
 def _innermost_effects(scope_name: str, policy: ArchitecturePolicy) -> list[str]:
-    """The innermost ring must forbid at least what it would with `forbid` omitted.
+    """The innermost ring must forbid at least what it would with no effect trait.
 
     Only that ring: an outer one exists to hold effects (an adapters ring must be allowed to use them).
     """
@@ -115,9 +115,10 @@ def _innermost_effects(scope_name: str, policy: ArchitecturePolicy) -> list[str]
         return []
     prefix = f"scope {scope_name} " if scope_name else ""
     table = f"[scopes.{scope_name}.ring.{ring.name}]" if scope_name else f"[ring.{ring.name}]"
+    traits = ", ".join(trait_of(category) for category in missing)
     return [
-        f"{prefix}ring {ring.name} weakens positional effect defaults: its `forbid` is missing {', '.join(missing)}; "
-        f"add them to `forbid` in {table}, or remove that `forbid` to take the default"
+        f"{prefix}ring {ring.name} weakens positional effect defaults: its `traits` is missing {traits}; "
+        f"add them to `traits` in {table}, or remove its effect traits to take the default"
     ]
 
 

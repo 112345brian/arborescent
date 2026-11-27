@@ -84,7 +84,7 @@ class RingRule:
     may_import: frozenset[str]  # internal rings (its own is implicit); ALL = every inner ring
     external: frozenset[str]  # top-level third-party/stdlib names; ALL = unrestricted
     os_branching: bool = False
-    forbid: frozenset[str] | None = None  # None means the positional preset default; [] explicitly allows all effects
+    forbid: frozenset[str] | None = None  # from the effect traits: None is the positional preset default; empty (`permits-effects`) allows all
     require_abstract: bool = False  # every public class/function in this ring must be an abc.ABC/typing.Protocol shape
     require_typed_ports: bool = False  # every typing.Protocol method in this ring must name its return type (no Any/object/bare container)
     max_reexport_ratio: float | None = None  # share of a module's public surface that may be first-party imports; None = unchecked (#136)
@@ -261,8 +261,7 @@ class DocsPolicy:
 class ArchitectureFields:
     """The data half of `architecture_policy.ArchitecturePolicy`: what one module or ring obeys, settable per scope.
 
-    The fields are `config._LEGACY_ARCHITECTURE_KEYS` as parsed (`ring`, `groups` and `middle_forbid` fold into `rings` and
-    `preset`; `git_hook` is read off the raw table), plus `disabled_tools`: a root global every scope inherits unchanged,
+    The fields are `config._LEGACY_ARCHITECTURE_KEYS` as parsed (`ring` and `groups` fold into `rings`; `git_hook` is read off the raw table), plus `disabled_tools`: a root global every scope inherits unchanged,
     kept here because the annotation queries consult it. Pure data, so `policy_rings`/`policy_imports` can type against
     it without importing the class whose methods delegate to them (that import would be a cycle)."""
 

@@ -158,7 +158,7 @@ def _validate_rings(rings: tuple[RingRule, ...], classify: tuple[tuple[str, str]
         if rule.forbid is not None and (unknown := rule.forbid - EFFECT_CATEGORIES):
             raise PolicyError(f"ring {rule.name!r} forbids unknown effect categories {sorted(unknown)}")
         if unknown := rule.forbid_at_import - EFFECT_CATEGORIES:
-            raise PolicyError(f"ring {rule.name!r} `forbid_at_import` names unknown effect categories {sorted(unknown)}")
+            raise PolicyError(f"ring {rule.name!r} forbids unknown effect categories at import {sorted(unknown)}")
     for pattern, ring in classify:
         if ring not in names:
             raise PolicyError(f"classify {pattern!r} names unknown ring {ring!r}")

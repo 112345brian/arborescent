@@ -20,7 +20,7 @@ from arborescent.rules import check_modules
 from arborescent.scan_cache_codec import cached_facts, facts_to_json
 from arborescent.selftest import plan, selftest
 
-OPEN = ring_with(domain={"external": ["*"], "forbid": []}, adapters={"may_import": ["domain", "ports"], "external": ["*"], "forbid": []})
+OPEN = ring_with(domain={"external": ["*"], "traits": ["permits-effects"]}, adapters={"may_import": ["domain", "ports"], "external": ["*"], "traits": ["permits-effects"]})
 PAIR = {"when_calls": "app.ports.submit", "must_also_call": "app.ports.record", "reason": "every submission is recorded"}
 PORTS = "def submit() -> None:\n    pass\n\n\ndef record() -> None:\n    pass\n"
 

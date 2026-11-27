@@ -21,7 +21,7 @@ from arborescent.selftest import plan, selftest
 REPLACE = {"calls": ["os.replace"], "modules": ["app.adapters"], "reason": "use save_text_atomic"}
 ATOMIC = {"calls": ["tempfile.mkstemp", "tempfile.NamedTemporaryFile"], "and_calls": ["os.replace"], "modules": ["app.adapters"]}
 HEAD = "from __future__ import annotations\n\n"
-OPEN = ring_with(domain={"external": ["*"], "forbid": []})
+OPEN = ring_with(domain={"external": ["*"], "traits": ["permits-effects"]})
 
 
 def run(root: Path, *entries: dict[str, Any]) -> list[Violation]:

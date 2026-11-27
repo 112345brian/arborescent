@@ -23,7 +23,7 @@ forbid_everywhere = ["telnetlib"]
 
 [ring.all]
 external = ["*"]
-os_branching = true
+traits = ["permits-os-branching"]
 
 [classify]
 "*" = "all"

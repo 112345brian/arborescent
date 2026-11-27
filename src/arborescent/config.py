@@ -48,13 +48,21 @@ from .package_constraints import (
 )
 from .ports import FileSystem
 from .presets import (
+    AT_IMPORT_TRAITS,
+    CATEGORY_TRAITS,
     DEFAULT_PRESET,
     DEFAULT_TAINT_SEEDS,
     EFFECT_CATEGORIES,
+    EFFECT_TRAITS,
     INJECTABLE_EFFECTS,
     IO_MODULES,
+    PERMITS_EFFECTS,
+    PERMITS_OS_BRANCHING,
     PRESETS,
+    REQUIRE_ABSTRACT,
+    REQUIRE_TYPED_PORTS,
     TAINT_SEED_CATEGORIES,
+    TRAITS,
     Preset,
 )
 from .purity_policy import (
@@ -193,7 +201,7 @@ def _with_tach_rings(raw: dict[str, Any], order: Sequence[str]) -> dict[str, Any
     """Without `rings`, take them from tach's `layers` (innermost first) and let each ring import every ring inside it.
 
     An explicit `rings` list is the author's and is left alone, so is an explicit `may_import`; a `[ring.<name>]` table that only
-    sets other keys (`external`, `forbid`) still gets the derived `may_import`."""
+    sets other keys (`external`, `traits`) still gets the derived `may_import`."""
     if not order or "rings" in raw:
         return raw
     rings = list(reversed(order))
@@ -254,7 +262,8 @@ def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Pat
 
 
 def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
-    """Translate the raw TOML table (``@group`` references, ``preset``, ``io_modules``, defaults) into a ``Policy``."""
+    """Translate the raw TOML table (``@group`` references, ``traits``, ``preset``, ``io_modules``, defaults) into a ``Policy``."""
+    _reject_removed_keys(raw)  # first: the replacement is more use than "unknown key"
     _reject_unknown_keys("the policy root", raw, _ROOT_TABLE_KEYS)
     if "scopes" in raw:
         return _scoped_policy(raw)
@@ -637,7 +646,7 @@ _SCOPED_ROOT_GLOBALS = frozenset({
     "package", "effects", "ratchet", "name_collisions",
 })
 _LEGACY_ARCHITECTURE_KEYS = frozenset({
-    "sources", "source_roots", "rings", "classify", "ring", "preset", "middle_forbid", "git_hook", "io_modules", "groups",
+    "sources", "source_roots", "rings", "classify", "ring", "preset", "git_hook", "io_modules", "groups",
     "module_forbid_imports", "importable_by", "owned_literal", "docs", "construct_only", "call_allowlist", "companion", "construction", "result_discard", "port_binding", "private_access", "effect_seam_bypassed", "entry_scripts", "dependencies", "forbid_everywhere", "forbid_circular_imports",
     "forbidden_modules", "tach_external_exclude", "require_arbor_annotations", "require_arbor_annotations_exclude",
     "effect_defaults",
@@ -767,11 +776,120 @@ def _core_policy(raw: Mapping[str, Any]) -> tuple[Policy, Mapping[str, Mapping[s
     return Policy(rings=rings, classify=classify), ring_tables
 
 
-# Every key `_ring_from_mapping` and its helpers read. Any other is an error: a misspelt `forbid` would enforce less.
-_RING_KEYS = (
-    "may_import", "external", "os_branching", "forbid", "forbid_at_import", "require_abstract", "require_typed_ports",
-    "max_reexport_ratio",
-)
+# Every key `_ring_from_mapping` and its helpers read. Any other is an error: a misspelt `traits` would enforce less.
+_RING_KEYS = ("may_import", "external", "traits", "max_reexport_ratio")
+
+# What `traits` replaced (#222). They still fail by name, with the line to write instead (`_reject_removed_keys`).
+_REMOVED_FLAG_KEYS = {"require_abstract": REQUIRE_ABSTRACT, "require_typed_ports": REQUIRE_TYPED_PORTS, "os_branching": PERMITS_OS_BRANCHING}
+_REMOVED_RING_KEYS = ("forbid", "forbid_at_import", *_REMOVED_FLAG_KEYS)
+
+
+def _reject_removed_keys(raw: Mapping[str, Any]) -> None:
+    """One error naming every removed key of the flat policy and of each scope, with the ``traits`` line that means the same."""
+    lines = _removed_in(raw, "")
+    scopes: object = raw.get("scopes")
+    if isinstance(scopes, Mapping):
+        for name, scope in cast("Mapping[object, object]", scopes).items():
+            if isinstance(scope, Mapping):
+                lines += _removed_in(cast("Mapping[str, Any]", scope), f"scopes.{name}.")
+    if lines:
+        heading = "ring `traits` replaced these keys; make these changes (docs/configuration.md, 'Traits'):"
+        raise PolicyError("\n  ".join([heading, *lines]))
+
+
+def _removed_in(raw: Mapping[str, Any], prefix: str) -> list[str]:
+    """The changes one table of architecture settings (the root or a scope) needs."""
+    value: object = raw.get("ring", {})
+    tables = cast("Mapping[object, object]", value) if isinstance(value, Mapping) else {}
+    has_middle = "middle_forbid" in list(raw)  # not `in raw`: a removed key is not one a reader asks for
+    if not has_middle and not any(
+        isinstance(table, Mapping) and any(key in _REMOVED_RING_KEYS for key in cast("Mapping[object, object]", table))
+        for table in tables.values()
+    ):
+        return []
+    declared: object = raw.get("rings", [])
+    rings = [str(name) for name in cast("list[object]", declared)] if isinstance(declared, list) else []
+    groups_value: object = raw.get("groups", {})
+    groups = cast("Mapping[str, object]", groups_value) if isinstance(groups_value, Mapping) else {}
+    out = [f"delete `middle_forbid` from {f'[{prefix[:-1]}]' if prefix else 'the policy root'}"] if has_middle else []
+    for name in dict.fromkeys([*rings, *(str(key) for key in tables)]):
+        found: object = tables.get(name, {})
+        table = cast("Mapping[str, Any]", found) if isinstance(found, Mapping) else {}
+        removed = [key for key in _REMOVED_RING_KEYS if key in table]
+        # `middle_forbid` was the effect default of every ring but the innermost and outermost that wrote no `forbid`.
+        inherits = has_middle and name in rings[1:-1] and "forbid" not in table and not _has_effect_trait(table)
+        if not removed and not inherits:
+            continue
+        sources = {key: table[key] for key in removed}
+        if inherits:
+            sources["forbid"] = raw.get("middle_forbid")
+        traits, unconverted = _replacement_traits(table.get("traits", []), sources, groups)
+        change = f"remove {', '.join(f'`{key}`' for key in removed)} and set" if removed else "add"
+        listed = ", ".join(f'"{trait}"' for trait in traits)
+        note = f"  # by hand, no trait for: {', '.join(unconverted)}" if unconverted else ""
+        out.append(f"[{prefix}ring.{name}] {change}: traits = [{listed}]{note}")
+    return out
+
+
+def _has_effect_trait(table: Mapping[str, Any]) -> bool:
+    value: object = table.get("traits", [])
+    return isinstance(value, list) and any(isinstance(item, str) and item in EFFECT_TRAITS for item in cast("list[object]", value))
+
+
+def _replacement_traits(existing: object, sources: Mapping[str, object], groups: Mapping[str, object]) -> tuple[list[str], list[str]]:
+    """The ``traits`` list that means what a ring's removed keys (``sources``) meant, and the entries no trait stands for."""
+    unconverted: list[str] = []
+    traits = [str(item) for item in cast("list[object]", existing)] if isinstance(existing, list) else []
+    if "forbid" in sources:
+        names = _category_traits("forbid", sources["forbid"], groups, unconverted)
+        traits += names or ([] if unconverted else [PERMITS_EFFECTS])  # an empty list allowed every effect
+    if "forbid_at_import" in sources:
+        traits += [f"{trait}-at-import" for trait in _category_traits("forbid_at_import", sources["forbid_at_import"], groups, unconverted)]
+    traits += [trait for key, trait in _REMOVED_FLAG_KEYS.items() if sources.get(key)]
+    if any(trait in EFFECT_TRAITS and trait != PERMITS_EFFECTS for trait in traits):
+        traits = [trait for trait in traits if trait != PERMITS_EFFECTS]
+    return list(dict.fromkeys(traits)), unconverted
+
+
+def _category_traits(key: str, value: object, groups: Mapping[str, object], unconverted: list[str]) -> list[str]:
+    """A removed category list as single-category traits, ``@group`` references written out in the group's own order."""
+    if not isinstance(value, list):
+        unconverted.append(f"`{key}` (not a list)")
+        return []
+    out: list[str] = []
+    for item in cast("list[object]", value):
+        group: object = groups.get(item[1:]) if isinstance(item, str) and item.startswith("@") else None
+        for member in cast("list[object]", group) if isinstance(group, list) else [item]:
+            if isinstance(member, str) and member in CATEGORY_TRAITS:
+                out.append(CATEGORY_TRAITS[member])
+            else:
+                unconverted.append(repr(member))
+    return out
+
+
+def _ring_traits(table: Mapping[str, Any], ring: str) -> frozenset[str]:
+    """A ring's ``traits``: built-in names only (no ``@group``), and ``permits-effects`` alone among the call-time effect traits."""
+    value: object = table.get("traits", [])
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
+        raise PolicyError(f"`traits` in [ring.{ring}] must be a list of non-empty trait names")
+    names = cast("list[str]", value)
+    for name in names:
+        if name.startswith("@"):
+            raise PolicyError(f"`traits` in [ring.{ring}] holds {name!r}: traits are built in and a group cannot define one; list the trait names")
+        if name not in TRAITS:
+            raise PolicyError(f"unknown trait in [ring.{ring}].traits: {name!r}{_closest_trait(name)}; see docs/configuration.md, 'Traits'")
+    traits = frozenset(names)
+    if PERMITS_EFFECTS in traits and (others := sorted((traits & EFFECT_TRAITS.keys()) - {PERMITS_EFFECTS})):
+        raise PolicyError(f"[ring.{ring}].traits: `{PERMITS_EFFECTS}` allows every effect, so it cannot be combined with {', '.join(others)}")
+    return traits
+
+
+def _closest_trait(name: str) -> str:
+    if name in CATEGORY_TRAITS:  # a category written where its trait belongs
+        return f" (did you mean {CATEGORY_TRAITS[name]!r}?)"
+    spelled = name.lower().replace("_", "-")
+    distance, closest = min((_edit_distance(spelled, trait), trait) for trait in TRAITS)
+    return f" (did you mean {closest!r}?)" if distance <= 2 else ""
 
 
 def _ring_tables(raw: Mapping[str, Any], names: Sequence[str]) -> Mapping[str, Mapping[str, Any]]:
@@ -846,19 +964,11 @@ def _validate_effect_categories(categories: Collection[str], label: str) -> None
 
 
 def _preset_overrides(preset: Preset, raw: Mapping[str, Any]) -> Preset:
-    """The preset, with ``middle_forbid`` and/or ``git_hook`` replaced when the policy sets them explicitly, so
-    either can be chosen independently of the preset name."""
-    overrides: dict[str, Any] = {}
-    if "middle_forbid" in raw:
-        value: object = raw["middle_forbid"]
-        if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
-            raise PolicyError("`middle_forbid` must be a list of non-empty effect categories")
-        categories = frozenset(cast("list[str]", value))
-        _validate_effect_categories(categories, "`middle_forbid`")
-        overrides["middle_forbid"] = categories
-    if "git_hook" in raw:
-        overrides["git_hook"] = _boolean_option(raw, "git_hook", preset.git_hook)
-    return replace(preset, **overrides) if overrides else preset
+    """The preset, with ``git_hook`` replaced when the policy sets it explicitly, so it can be chosen independently of the
+    preset name."""
+    if "git_hook" not in raw:
+        return preset
+    return replace(preset, git_hook=_boolean_option(raw, "git_hook", preset.git_hook))
 
 
 def _boolean_option(raw: Mapping[str, Any], key: str, default: bool) -> bool:
@@ -1198,8 +1308,8 @@ def _customization_labels(
     customizations: list[str] = []
     if ruff_overrides:
         customizations.append("ruff")
-    if "middle_forbid" in raw or any("forbid" in table for table in ring_tables.values()):
-        customizations.append("forbid")
+    if any(_has_effect_trait(table) for table in ring_tables.values()):
+        customizations.append("effect traits")
     classes_changed = any(raw.get(key, 20) != 20 for key in ("class_field_threshold", "class_method_threshold"))
     if suggestion_threshold != 300 or classes_changed or any(key.startswith("max-") for key in ruff_overrides):
         customizations.append("thresholds")
@@ -1265,36 +1375,21 @@ def _ring_from_mapping(
     table: Mapping[str, Any],
     expand: Callable[[Sequence[str]], frozenset[str]],
 ) -> RingRule:
-    has_forbid = "forbid" in table
-    raw_forbid = table.get("forbid")
-    if has_forbid and (
-        not isinstance(raw_forbid, list)
-        or not all(isinstance(item, str) and item for item in cast("list[object]", raw_forbid))
-    ):
-        raise PolicyError(f"`forbid` in [ring.{name}] must be a list of non-empty effect categories")
-    forbid = expand(cast("Sequence[str]", raw_forbid)) if has_forbid else None
-    if forbid is not None:
-        _validate_effect_categories(forbid, f"[ring.{name}].forbid")
+    """One ring table, its ``traits`` compiled into the fields the rules read."""
+    traits = _ring_traits(table, name)
+    effects = [EFFECT_TRAITS[trait] for trait in traits if trait in EFFECT_TRAITS]
+    at_import = [AT_IMPORT_TRAITS[trait] for trait in traits if trait in AT_IMPORT_TRAITS]
     return RingRule(
         name,
         expand(table.get("may_import", [])),
         expand(table.get("external", [])),
-        bool(table.get("os_branching", False)),
-        forbid,
-        bool(table.get("require_abstract", False)),
-        bool(table.get("require_typed_ports", False)),
+        PERMITS_OS_BRANCHING in traits,
+        frozenset[str]().union(*effects) if effects else None,  # no effect trait: the positional default stands
+        REQUIRE_ABSTRACT in traits,
+        REQUIRE_TYPED_PORTS in traits,
         _reexport_ratio(table, name),
-        _forbid_at_import(table, name, expand),
+        frozenset[str]().union(*at_import),
     )
-
-
-def _forbid_at_import(table: Mapping[str, Any], ring: str, expand: Callable[[Sequence[str]], frozenset[str]]) -> frozenset[str]:
-    value: object = table.get("forbid_at_import", [])
-    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in cast("list[object]", value)):
-        raise PolicyError(f"`forbid_at_import` in [ring.{ring}] must be a list of non-empty effect categories")
-    categories = expand(cast("list[str]", value))
-    _validate_effect_categories(categories, f"[ring.{ring}].forbid_at_import")
-    return categories
 
 
 def _reexport_ratio(table: Mapping[str, Any], ring: str) -> float | None:

@@ -46,7 +46,7 @@ from .policy_types import (
     normalized_source_path,
     path_under,
 )
-from .presets import DEFAULT_TAINT_SEEDS, EFFECT_CATEGORIES
+from .presets import DEFAULT_TAINT_SEEDS, EFFECT_CATEGORIES, trait_of
 from .purity_policy import PurityPolicy
 from .stdlib import SUPPORTED_PYTHONS, stdlib_for
 
@@ -92,6 +92,7 @@ __all__ = [
     "in_unit",
     "path_under",
     "root_cause_hint",
+    "trait_of",
 ]
 
 NOISE_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".arborescent", ".mypy_cache", ".ruff_cache", ".tox"})

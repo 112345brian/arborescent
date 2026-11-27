@@ -388,7 +388,7 @@ def test_baseline_command_then_check_end_to_end(repo: Path) -> None:
     policy_text = (
         'sources = ["app"]\nrings = ["domain", "ports", "adapters", "composition"]\n'
         '[ring.domain]\nexternal = ["__future__"]\n[ring.ports]\nmay_import = ["domain"]\nexternal = ["__future__"]\n'
-        '[ring.adapters]\nmay_import = ["domain", "ports"]\nexternal = ["os", "__future__"]\nos_branching = true\n'
+        '[ring.adapters]\nmay_import = ["domain", "ports"]\nexternal = ["os", "__future__"]\ntraits = ["permits-os-branching"]\n'
         '[ring.composition]\nmay_import = ["*"]\nexternal = ["sys"]\n'
         '[classify]\n"app" = "domain"\n"app.domain" = "domain"\n"app.ports" = "ports"\n"app.adapters" = "adapters"\n"app.main" = "composition"\n'
     )

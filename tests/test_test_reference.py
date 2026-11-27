@@ -20,7 +20,7 @@ from arborescent.testing import FakeToolRunner
 
 FS = LocalFileSystem()
 # the adapters ring may do I/O; the domain ring is I/O-free by default
-OPEN_ADAPTERS = {"ring": {**RINGS, "adapters": {**RINGS["adapters"], "forbid": []}}}
+OPEN_ADAPTERS = {"ring": {**RINGS, "adapters": {**RINGS["adapters"], "traits": ["permits-effects"]}}}
 
 
 

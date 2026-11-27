@@ -82,21 +82,20 @@ external = ["@pure", "pathlib", "hashlib", "arborescent"]
 [tool.arborescent.ring.ports]
 may_import = ["domain"]
 external = ["@pure", "pathlib", "contextlib", "arborescent"]
-require_abstract = true
+traits = ["require-abstract"]
 
 [tool.arborescent.ring.application]
 may_import = ["domain", "ports"]
 # pathlib: Path values only (join, relative_to); every disk access goes through FileSystem (tests/test_filesystem.py)
 external = ["@pure", "pathlib", "concurrent", "shlex", "arborescent"]
-# This list replaces the default rather than extending it: of the 14 default categories the application ring also allows
+# Effect traits replace the default rather than extending it: of the 14 default categories the application ring also allows
 # `threads` (it coordinates parallel engines), `database`, `network`, `filesystem`, `console` and `global`.
-forbid = ["clock", "dynamic-import", "env", "identity", "patch", "process", "randomness", "sleep"]
+traits = ["no-clock", "no-dynamic-import", "no-env", "no-identity", "no-patch", "no-process", "no-randomness", "no-sleep"]
 
 [tool.arborescent.ring.adapters]
 may_import = ["domain", "ports"]
 external = ["@pure", "pathlib", "contextlib", "concurrent", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "libcst", "arborescent"]
-os_branching = true
-forbid = ["clock", "dynamic-import", "env", "identity", "patch", "randomness", "sleep", "threads"]
+traits = ["no-clock", "no-dynamic-import", "no-env", "no-identity", "no-patch", "no-randomness", "no-sleep", "no-threads", "permits-os-branching"]
 
 [tool.arborescent.ring.composition]
 may_import = ["*"]

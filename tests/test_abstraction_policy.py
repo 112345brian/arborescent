@@ -49,7 +49,7 @@ def test_mixed_abstract_and_concrete_members_only_flags_the_concrete_ones(repo: 
             )
         },
     )
-    policy_rings = ring_with(ports={"may_import": ["domain"], "external": ["abc"], "require_abstract": True})
+    policy_rings = ring_with(ports={"may_import": ["domain"], "external": ["abc"], "traits": ["require-abstract"]})
 
     found = run(repo, ring=policy_rings)
 
@@ -58,7 +58,7 @@ def test_mixed_abstract_and_concrete_members_only_flags_the_concrete_ones(repo: 
 
 def test_empty_ring_produces_no_violations_and_does_not_crash(repo: Path) -> None:
     write_files(repo, {"app/ports.py": "\n"})
-    policy_rings = ring_with(ports={"may_import": ["domain"], "external": [], "require_abstract": True})
+    policy_rings = ring_with(ports={"may_import": ["domain"], "external": [], "traits": ["require-abstract"]})
 
     found = run(repo, ring=policy_rings)
 
@@ -75,7 +75,7 @@ def test_class_inheriting_a_concrete_base_is_flagged_even_with_stub_methods(repo
             )
         },
     )
-    policy_rings = ring_with(ports={"may_import": ["domain"], "external": [], "require_abstract": True})
+    policy_rings = ring_with(ports={"may_import": ["domain"], "external": [], "traits": ["require-abstract"]})
 
     found = run(repo, ring=policy_rings)
 
@@ -87,7 +87,7 @@ def test_class_inheriting_a_concrete_base_is_flagged_even_with_stub_methods(repo
 
 def test_private_top_level_members_are_never_flagged(repo: Path) -> None:
     write_files(repo, {"app/ports.py": "def _private_concrete() -> int:\n    return 1\n\nclass _PrivateConcrete:\n    pass\n"})
-    policy_rings = ring_with(ports={"may_import": ["domain"], "external": [], "require_abstract": True})
+    policy_rings = ring_with(ports={"may_import": ["domain"], "external": [], "traits": ["require-abstract"]})
 
     found = run(repo, ring=policy_rings)
 
@@ -104,7 +104,7 @@ def test_require_abstract_defaults_to_false_and_parses_as_a_boolean() -> None:
     policy = policy_from_mapping(
         {
             "rings": ["domain", "ports"],
-            "ring": {"ports": {"may_import": ["domain"], "require_abstract": True}},
+            "ring": {"ports": {"may_import": ["domain"], "traits": ["require-abstract"]}},
             "classify": {"app": "domain"},
         }
     )
@@ -129,20 +129,8 @@ def test_require_abstract_is_local_to_each_policy_and_does_not_leak_across_them(
     assert strict.ring("ports").require_abstract is True
 
 
-def test_require_abstract_is_rejected_when_not_a_boolean() -> None:
-    # `bool()` coercion matches the existing `os_branching` parsing; a non-empty value still turns the ring on.
-    policy = policy_from_mapping(
-        {
-            "rings": ["domain", "ports"],
-            "ring": {"ports": {"may_import": ["domain"], "require_abstract": 1}},
-            "classify": {"app": "domain"},
-        }
-    )
-    assert policy.ring("ports").require_abstract is True
-
-
 def test_wildcard_ring_still_flagged_independently_of_require_abstract() -> None:
-    with_wildcard = ring_with(ports={"may_import": ["domain"], "external": [ALL], "require_abstract": True})
+    with_wildcard = ring_with(ports={"may_import": ["domain"], "external": [ALL], "traits": ["require-abstract"]})
     policy = mini_policy(ring=with_wildcard)
     assert policy.ring("ports").require_abstract is True
     assert policy.ring("ports").external == frozenset({ALL})
@@ -160,7 +148,7 @@ def test_require_abstract_is_independent_per_scope() -> None:
                 "source_roots": ["libs/strict/src"],
                 "rings": ["domain", "ports"],
                 "classify": {"strict_lib.ports": "ports", "strict_lib.core": "domain"},
-                "ring": {"ports": {"may_import": ["domain"], "require_abstract": True}},
+                "ring": {"ports": {"may_import": ["domain"], "traits": ["require-abstract"]}},
             },
             "relaxed_lib": {
                 "sources": ["libs/relaxed/src"],
@@ -193,7 +181,7 @@ def test_non_abstract_port_fires_only_in_the_scope_that_requires_it(tmp_path: Pa
                     "source_roots": ["libs/strict/src"],
                     "rings": ["domain", "ports"],
                     "classify": {"strict_ports": "ports"},
-                    "ring": {"ports": {"may_import": ["domain"], "require_abstract": True}},
+                    "ring": {"ports": {"may_import": ["domain"], "traits": ["require-abstract"]}},
                 },
                 "relaxed_lib": {
                     "sources": ["libs/relaxed/src"],

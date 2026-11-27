@@ -100,7 +100,7 @@ def test_off_by_default(repo: Path) -> None:
 
 def test_ring_that_requires_typed_ports_reports_each_weak_method(repo: Path) -> None:
     write_files(repo, {"app/ports.py": SOURCE})
-    rings = ring_with(ports={"may_import": ["domain"], "external": ["typing"], "require_typed_ports": True})
+    rings = ring_with(ports={"may_import": ["domain"], "external": ["typing"], "traits": ["require-typed-ports"]})
 
     found = weak_findings(run(repo, ring=rings))
 
@@ -111,6 +111,6 @@ def test_ring_that_requires_typed_ports_reports_each_weak_method(repo: Path) -> 
 
 def test_other_rings_are_not_checked(repo: Path) -> None:
     write_files(repo, {"app/ports.py": SOURCE})
-    rings = ring_with(domain={"may_import": [], "external": ["typing"], "require_typed_ports": True})
+    rings = ring_with(domain={"may_import": [], "external": ["typing"], "traits": ["require-typed-ports"]})
 
     assert weak_findings(run(repo, ring=rings)) == []

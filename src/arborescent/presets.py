@@ -1,6 +1,6 @@
 """Presets: named bundles of how much Arborescent enforces. ``strict`` is the default and the reference; the others only
 relax it. Pure data; ``Policy`` holds the chosen preset and the rules and generators ask it, so no check hard-codes
-how strict it is."""
+how strict it is. Also the vendored trait catalog: the names a ring's ``traits`` list may use."""
 
 from __future__ import annotations
 
@@ -15,12 +15,66 @@ from .effect_categories import (
 )
 
 __all__ = [
-    "DEFAULT_FORBID_CATEGORIES", "DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES", "INJECTABLE_EFFECTS",
-    "MODULE_STATE_CATEGORIES", "PRESETS", "TAINT_SEED_CATEGORIES", "Preset", "Scope",
+    "AT_IMPORT_TRAITS", "CATEGORY_TRAITS", "DEFAULT_FORBID_CATEGORIES", "DEFAULT_PRESET", "DEFAULT_TAINT_SEEDS", "EFFECT_CATEGORIES",
+    "EFFECT_TRAITS", "INJECTABLE_EFFECTS", "MODULE_STATE_CATEGORIES", "PERMITS_EFFECTS", "PERMITS_OS_BRANCHING", "PRESETS",
+    "REQUIRE_ABSTRACT", "REQUIRE_TYPED_PORTS", "TAINT_SEED_CATEGORIES", "TRAITS", "Preset", "Scope", "trait_of",
 ]
 
+# The trait catalog (#222, #223). Vendored: a project cannot define or redefine a trait, so a name means the same everywhere.
+# Spelled out one category at a time on purpose: a new effect category needs a name chosen here (tests/test_traits.py).
+CATEGORY_TRAITS: Mapping[str, str] = {
+    "clock": "no-clock",
+    "env": "no-env",
+    "identity": "no-identity",
+    "randomness": "no-randomness",
+    "sleep": "no-sleep",
+    "threads": "no-threads",
+    "process": "no-process",
+    "database": "no-database",
+    "network": "no-network",
+    "filesystem": "no-filesystem",
+    "dynamic-import": "no-dynamic-import",
+    "patch": "no-patch",
+    "console": "no-console",
+    "global": "no-global",
+    "state": "no-sync-primitives",  # the category covers `threading` primitives only, so the trait does not say "state"
+    "monotonic": "no-monotonic",
+    "host": "no-host",
+    "fs-query": "no-fs-query",
+    "registry": "no-registry",
+    "cache": "no-cache",
+}
+
+PERMITS_EFFECTS = "permits-effects"  # the explicit "allow all": no call-time `no-*` trait may stand beside it
+PERMITS_OS_BRANCHING = "permits-os-branching"
+REQUIRE_ABSTRACT = "require-abstract"
+REQUIRE_TYPED_PORTS = "require-typed-ports"
+
+# Trait -> the categories it forbids. A ring that holds any of these replaces its positional effect default.
+# `no-effects` is every category, so it grows when a release adds one.
+EFFECT_TRAITS: Mapping[str, frozenset[str]] = {
+    **{trait: frozenset({category}) for category, trait in CATEGORY_TRAITS.items()},
+    "no-module-state": frozenset({"global", "registry", "cache"}),
+    "no-effects": EFFECT_CATEGORIES,
+    PERMITS_EFFECTS: frozenset[str](),
+}
+
+# Trait -> the categories it forbids while a module is imported (#230). These leave the positional effect default alone.
+AT_IMPORT_TRAITS: Mapping[str, frozenset[str]] = {
+    **{f"{trait}-at-import": frozenset({category}) for category, trait in CATEGORY_TRAITS.items()},
+    "no-effects-at-import": EFFECT_CATEGORIES,
+}
+
+TRAITS: frozenset[str] = frozenset({*EFFECT_TRAITS, *AT_IMPORT_TRAITS, PERMITS_OS_BRANCHING, REQUIRE_ABSTRACT, REQUIRE_TYPED_PORTS})
+
+
+def trait_of(category: str) -> str:
+    """The single-category trait that forbids ``category``."""
+    return CATEGORY_TRAITS[category]
+
+
 # What a ring forbids when the policy does not say (the strict preset's middle rings, and the innermost ring): the categories that
-# existed before 0.8.0. Opt in to the rest by listing them in a ring's `forbid`.
+# existed before 0.8.0. Opt in to the rest with their `no-*` traits.
 DEFAULT_FORBID_CATEGORIES: frozenset[str] = EFFECT_CATEGORIES - {"state", "monotonic", "host", "fs-query"} - MODULE_STATE_CATEGORIES
 
 # #98 (function-level taint): which effect categories count as an I/O primitive a function can be seeded with.

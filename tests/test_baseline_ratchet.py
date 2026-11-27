@@ -37,7 +37,7 @@ def write_policy(repo: Path) -> Path:
                 'sources = ["app"]\nrings = ["domain", "ports", "adapters", "composition"]\n'
                 '[groups]\npure = ["__future__"]\n[ring.domain]\nexternal = ["@pure"]\n'
                 '[ring.ports]\nmay_import = ["domain"]\nexternal = ["@pure"]\n'
-                '[ring.adapters]\nmay_import = ["domain", "ports"]\nexternal = ["@pure", "os", "psutil"]\nos_branching = true\n'
+                '[ring.adapters]\nmay_import = ["domain", "ports"]\nexternal = ["@pure", "os", "psutil"]\ntraits = ["permits-os-branching"]\n'
                 '[ring.composition]\nmay_import = ["*"]\nexternal = ["@pure", "sys"]\n'
                 '[classify]\n"app" = "domain"\n"app.domain" = "domain"\n"app.ports" = "ports"\n'
                 '"app.adapters" = "adapters"\n"app.main" = "composition"\n'

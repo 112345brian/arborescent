@@ -1,4 +1,4 @@
-"""A `[ring.<name>]` table holds only ring keys: a typo such as `forbidd` must fail, not silently enforce less (#222)."""
+"""A `[ring.<name>]` table holds only ring keys: a typo such as `trait` must fail, not silently enforce less (#222)."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ TYPO = """\
 rings = ["domain"]
 
 [ring.domain]
-forbidd = ["env"]
+trait = ["no-env"]
 
 [classify]
 "*" = "domain"
@@ -38,15 +38,12 @@ forbidd = ["env"]
 @pytest.mark.parametrize(
     ("typo", "meant"),
     [
-        ("forbidd", "forbid"),
-        ("forbid-at-import", "forbid_at_import"),
+        ("trait", "traits"),
+        ("trait_s", "traits"),
+        ("Traits", "traits"),
         ("may_imports", "may_import"),
         ("externals", "external"),
-        ("os_branch", "os_branching"),
-        ("require_abstarct", "require_abstract"),
-        ("require_typed_port", "require_typed_ports"),
         ("max_reexport_ration", "max_reexport_ratio"),
-        ("Forbid", "forbid"),
     ],
 )
 def test_a_misspelt_key_is_rejected_with_the_closest_one(typo: str, meant: str) -> None:
@@ -72,8 +69,7 @@ def test_odd_keys_are_policy_errors_not_crashes(key: object) -> None:
 
 def test_every_known_key_is_accepted_and_so_is_an_empty_table() -> None:
     full: dict[str, Any] = {
-        "may_import": [], "external": ["sys"], "os_branching": True, "forbid": ["env"], "forbid_at_import": ["env"],
-        "require_abstract": True, "require_typed_ports": True, "max_reexport_ratio": 0.5,
+        "may_import": [], "external": ["sys"], "traits": ["no-env", "no-env-at-import", "require-abstract"], "max_reexport_ratio": 0.5,
     }
 
     mini_policy(ring={**RINGS, "domain": full})
@@ -94,16 +90,16 @@ def test_a_ring_setting_that_is_not_a_table_is_a_policy_error(ring: object) -> N
 
 
 def test_a_scoped_policy_rejects_the_typo_too() -> None:
-    scope = {"sources": ["a"], "source_roots": ["."], "rings": ["domain"], "ring": {"domain": {"forbidd": []}}}
+    scope = {"sources": ["a"], "source_roots": ["."], "rings": ["domain"], "ring": {"domain": {"trait": []}}}
 
-    with pytest.raises(PolicyError, match="did you mean 'forbid'"):
+    with pytest.raises(PolicyError, match="did you mean 'traits'"):
         policy_from_mapping({"scopes": {"alpha": scope}})
 
 
 @pytest.mark.parametrize(
     ("ring_setting", "refusal"),
     [
-        ('[ring.domain]\nforbidd = ["env"]\n', "did you mean 'forbid'"),
+        ('[ring.domain]\ntrait = ["no-env"]\n', "did you mean 'traits'"),
         ("[ring]\ndomain = 3\n", r"\[ring\.domain\] must be a table"),
         ("ring = 3\n", "`ring` must hold one table per ring"),
     ],
@@ -122,12 +118,12 @@ def test_a_scope_with_classify_from_is_checked(tmp_path: Path) -> None:
     write_files(tmp_path, {
         "arborescent.toml": (
             '[scopes.a]\nsources = ["."]\nsource_roots = ["."]\nrings = ["domain"]\nclassify_from = "tach.toml"\n'
-            '[scopes.a.ring.domain]\nforbidd = []\n'
+            '[scopes.a.ring.domain]\ntrait = []\n'
         ),
         "tach.toml": 'layers = ["domain"]\n',
     })
 
-    with pytest.raises(PolicyError, match="did you mean 'forbid'"):
+    with pytest.raises(PolicyError, match="did you mean 'traits'"):
         load_policy(LocalFileSystem(), tmp_path / "arborescent.toml")
 
 
@@ -138,20 +134,20 @@ def test_the_command_line_reports_it_and_exits_2(tmp_path: Path, capsys: pytest.
     write_files(tmp_path, {"arborescent.toml": TYPO})
 
     assert main(["--config", str(tmp_path / "arborescent.toml"), "check"]) == 2
-    assert "did you mean 'forbid'" in capsys.readouterr().err
+    assert "did you mean 'traits'" in capsys.readouterr().err
 
 
 def test_bench_reports_it_and_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_files(tmp_path, {"arborescent.toml": TYPO})
 
     assert main(["bench", str(tmp_path)]) == 2
-    assert "did you mean 'forbid'" in capsys.readouterr().err
+    assert "did you mean 'traits'" in capsys.readouterr().err
 
 
 def test_a_shipped_policy_with_it_is_invalid(tmp_path: Path) -> None:
     write_files(tmp_path, {"arborescent.toml": TYPO})
 
-    with pytest.raises(CatalogError, match="did you mean 'forbid'"):
+    with pytest.raises(CatalogError, match="did you mean 'traits'"):
         shipped_policy(LocalFileSystem(), tmp_path, tmp_path / "arborescent.toml")
 
 
@@ -163,4 +159,4 @@ def test_a_child_arbor_with_it_fails_the_parent_run(tmp_path: Path) -> None:
     (run,) = child_arbor_runs(mini_policy(children=["child"]), tmp_path, services(runner), Options())
 
     assert run.status == "fail"
-    assert "did you mean 'forbid'" in "\n".join(run.lines)
+    assert "did you mean 'traits'" in "\n".join(run.lines)

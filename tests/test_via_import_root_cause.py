@@ -35,9 +35,9 @@ def _chain(repo: Path) -> list[Violation]:
         "app/adapters.py": "from . import ports\n",
         "app/main.py": "from . import adapters\n",
     })
-    forbid = {"external": [], "forbid": ["env"]}
+    forbid = {"external": [], "traits": ["no-env"]}
     ring = ring_with(
-        domain={"external": ["os"], "forbid": ["env"]},
+        domain={"external": ["os"], "traits": ["no-env"]},
         ports={"may_import": ["domain"], **forbid},
         adapters={"may_import": ["domain", "ports"], **forbid},
         composition={"may_import": ["*"], **forbid},
@@ -63,7 +63,7 @@ def test_a_cause_names_the_effect_kind(repo: Path) -> None:
         "app/domain.py": "import os, time\nos.getenv('MODE')\ntime.time()\n",
         "app/ports.py": "from . import domain\n",
     })
-    ring = ring_with(domain={"external": ["os", "time"], "forbid": []}, ports={"may_import": ["domain"], "external": [], "forbid": ["env", "clock"]})
+    ring = ring_with(domain={"external": ["os", "time"], "traits": ["permits-effects"]}, ports={"may_import": ["domain"], "external": [], "traits": ["no-env", "no-clock"]})
     assert sorted(v.root_cause for v in _run(repo, ring=ring) if v.subject == "app.ports") == ["effect-via-import|clock|app.domain", "effect-via-import|env|app.domain"]
 
 

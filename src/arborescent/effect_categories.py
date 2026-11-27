@@ -13,8 +13,8 @@ from collections.abc import Mapping
 __all__ = ["EFFECT_CATEGORIES", "INJECTABLE_EFFECTS", "MODULE_STATE_CATEGORIES", "OS_BRANCH_ATTRS", "dotted_name", "effect_category_of"]
 
 
-# The categories a policy may name in `forbid`. Four were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`); they are valid
-# in every `forbid` list but in no default one (`DEFAULT_FORBID_CATEGORIES`), so a policy that forbids nothing new keeps its findings.
+# The effect categories; each has a `no-*` ring trait (`presets.CATEGORY_TRAITS`). Four were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`); they are valid
+# as traits and in category lists but in no default one (`DEFAULT_FORBID_CATEGORIES`), so a policy that forbids nothing new keeps its findings.
 EFFECT_CATEGORIES: frozenset[str] = frozenset(
     {
         "clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "network", "filesystem", "dynamic-import", "patch",
@@ -24,7 +24,7 @@ EFFECT_CATEGORIES: frozenset[str] = frozenset(
 
 # #194: shared module state that is not I/O. `registry` is a dict/list/set of a module or class written from inside a function; `cache` is
 # a `functools.cache`/`lru_cache` loader or such a container with a cache-like name. Both report as `effect-state`,
-# are in no default `forbid`, taint seed or `must_be_pure`, and are skipped by the readers that describe a module's I/O.
+# are in no default, taint seed or `must_be_pure`, and are skipped by the readers that describe a module's I/O.
 MODULE_STATE_CATEGORIES: frozenset[str] = frozenset({"registry", "cache"})
 
 OS_BRANCH_ATTRS = frozenset({"os.name", "sys.platform", "platform.system"})

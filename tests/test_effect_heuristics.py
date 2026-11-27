@@ -209,7 +209,7 @@ def test_the_new_categories_have_rules_and_are_not_forbidden_by_default() -> Non
 def test_a_ring_can_forbid_each_new_category(repo: Path) -> None:
     write_files(repo, {"app/domain.py": "import os, sys, threading, time\nL = threading.Lock()\nt = time.monotonic()\nh = sys.argv\nq = os.getcwd()\n"})
     default = _effect_rules(_run(repo))
-    forbidding = _effect_rules(_run(repo, ring=ring_with(domain={"external": ["os", "sys", "threading", "time"], "forbid": ["state", "monotonic", "host", "fs-query"]})))
+    forbidding = _effect_rules(_run(repo, ring=ring_with(domain={"external": ["os", "sys", "threading", "time"], "traits": ["no-sync-primitives", "no-monotonic", "no-host", "no-fs-query"]})))
     assert default == set()
     assert forbidding == {"effect-state", "effect-monotonic", "effect-host", "effect-fs-query"}
 
@@ -233,8 +233,8 @@ def _seam_repo(root: Path) -> dict[str, Any]:
     """`ports` is the provider ring (it reads the environment on purpose); `adapters` forbids env and imports it."""
     write_files(root, {"app/ports.py": PORT, "app/adapters.py": "from . import ports\n\n\ndef go():\n    return ports.read('X')\n"})
     return ring_with(
-        ports={"may_import": ["domain"], "external": ["os"], "forbid": []},
-        adapters={"may_import": ["domain", "ports"], "external": [], "forbid": ["env"]},
+        ports={"may_import": ["domain"], "external": ["os"], "traits": ["permits-effects"]},
+        adapters={"may_import": ["domain", "ports"], "external": [], "traits": ["no-env"]},
     )
 
 
@@ -275,7 +275,7 @@ def test_the_guard_does_not_apply_to_a_type_only_import(repo: Path) -> None:
 
 def test_the_guard_only_checks_rings_that_forbid_effects(repo: Path) -> None:
     ring = _seam_repo(repo)
-    ring["adapters"] = {**ring["adapters"], "forbid": []}
+    ring["adapters"] = {**ring["adapters"], "traits": ["permits-effects"]}
     assert _effect_rules(_run(repo, ring=ring, effects={"sanctioned": [], "rings": ["ports"]})) == set()
 
 
@@ -286,9 +286,9 @@ def test_a_sanctioned_seam_that_imports_a_raw_effect_module_still_propagates(rep
         "app/adapters.py": "from . import ports\n",
     })
     ring = ring_with(
-        domain={"external": ["os"], "forbid": []},
-        ports={"may_import": ["domain"], "external": [], "forbid": []},
-        adapters={"may_import": ["domain", "ports"], "external": [], "forbid": ["env"]},
+        domain={"external": ["os"], "traits": ["permits-effects"]},
+        ports={"may_import": ["domain"], "external": [], "traits": ["permits-effects"]},
+        adapters={"may_import": ["domain", "ports"], "external": [], "traits": ["no-env"]},
     )
     found = _run(repo, ring=ring, effects={"sanctioned": ["app.ports"], "rings": ["ports"]})
     assert [f.rule for f in found if f.rule == "effect-via-import"] == ["effect-via-import"]
@@ -297,8 +297,8 @@ def test_a_sanctioned_seam_that_imports_a_raw_effect_module_still_propagates(rep
 def _pure_provider_repo(root: Path, provider: str) -> dict[str, Any]:
     write_files(root, {"app/ports.py": provider, "app/adapters.py": "from . import ports\n\n\ndef go():\n    return ports.VALUE\n"})
     return ring_with(
-        ports={"may_import": ["domain"], "external": ["os"], "forbid": []},
-        adapters={"may_import": ["domain", "ports"], "external": [], "forbid": ["env"]},
+        ports={"may_import": ["domain"], "external": ["os"], "traits": ["permits-effects"]},
+        adapters={"may_import": ["domain", "ports"], "external": [], "traits": ["no-env"]},
     )
 
 
@@ -325,9 +325,9 @@ def test_a_pure_provider_module_that_reaches_a_raw_effect_still_taints_its_impor
         "app/adapters.py": "from . import ports\n",
     })
     ring = ring_with(
-        domain={"external": ["os"], "forbid": []},
-        ports={"may_import": ["domain"], "external": [], "forbid": []},
-        adapters={"may_import": ["ports"], "external": [], "forbid": ["env"]},
+        domain={"external": ["os"], "traits": ["permits-effects"]},
+        ports={"may_import": ["domain"], "external": [], "traits": ["permits-effects"]},
+        adapters={"may_import": ["ports"], "external": [], "traits": ["no-env"]},
     )
     found = _run(repo, ring=ring, effects={"sanctioned": [], "rings": ["domain", "ports"]})
     assert "effect-via-import" in _effect_rules(found)
@@ -359,7 +359,7 @@ MIXED = (
 
 def _mixed(root: Path, **table: Any) -> set[str]:
     write_files(root, {"app/domain.py": MIXED, "app/main.py": MIXED})
-    ring = ring_with(domain={"external": ["os"], "forbid": []}, composition={"may_import": ["*"], "external": ["os"]})
+    ring = ring_with(domain={"external": ["os"], "traits": ["permits-effects"]}, composition={"may_import": ["*"], "external": ["os"]})
     found = _run(root, ring=ring, mixed_purity=table)
     return {f.subject for f in found if f.rule == Rule.MIXED_PURITY}
 
@@ -385,7 +385,7 @@ def test_mixed_purity_accepts_the_new_kinds() -> None:
 def test_a_lock_still_makes_a_module_mixed_by_default(repo: Path) -> None:
     source = MIXED.replace("import os", "import threading").replace("os.getenv('X')", "threading.Lock()")
     write_files(repo, {"app/domain.py": source})
-    ring = ring_with(domain={"external": ["threading"], "forbid": []})
+    ring = ring_with(domain={"external": ["threading"], "traits": ["permits-effects"]})
     found = _run(repo, ring=ring)
     assert {f.subject for f in found if f.rule == Rule.MIXED_PURITY} == {"app.domain"}
 
