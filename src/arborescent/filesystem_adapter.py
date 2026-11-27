@@ -50,14 +50,14 @@ class LocalFileSystem:
     def rglob(self, root: Path, pattern: str) -> list[Path]:
         return sorted(root.rglob(pattern))
 
-    def walk_files(self, root: Path, prune: Collection[str]) -> list[Path]:
+    def walk_files(self, root: Path, prune: Collection[str], *, enter_checkouts: bool = False, enter_packages: bool = False) -> list[Path]:
         found: list[Path] = []
         for folder, folders, files in os.walk(root):
             here = Path(folder)
-            if here != root and (".git" in folders or ".git" in files):  # a nested clone, linked worktree or submodule
+            if not enter_checkouts and here != root and (".git" in folders or ".git" in files):  # a nested clone, linked worktree or submodule
                 folders.clear()
                 continue
-            folders[:] = [name for name in folders if name not in prune]
+            folders[:] = [name for name in folders if name not in prune or (enter_packages and (here / name / "__init__.py").is_file())]
             found.extend(here / name for name in files)
         return sorted(found)
 
@@ -73,8 +73,14 @@ class LocalFileSystem:
     def remove_tree(self, path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
-    def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = ()) -> None:
-        _ = shutil.copytree(src, dst, ignore=shutil.ignore_patterns(*ignore))
+    def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = (), *, skip_checkouts: bool = False) -> None:
+        by_name = shutil.ignore_patterns(*ignore)
+
+        def skipped(folder: str, names: list[str]) -> set[str]:
+            nested = {name for name in names if skip_checkouts and (Path(folder) / name / ".git").exists()}
+            return nested | set(by_name(folder, names))
+
+        _ = shutil.copytree(src, dst, ignore=skipped)
 
     @contextmanager
     def temporary_directory(self, prefix: str, parent: Path | None = None) -> Generator[Path]:

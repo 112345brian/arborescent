@@ -200,15 +200,20 @@ class FakeFileSystem:
     def rglob(self, root: Path, pattern: str) -> list[Path]:
         return self.glob(root, "**/" + pattern)
 
-    def walk_files(self, root: Path, prune: Collection[str]) -> list[Path]:
+    def walk_files(self, root: Path, prune: Collection[str], *, enter_checkouts: bool = False, enter_packages: bool = False) -> list[Path]:
         base = self._key(root).rstrip("/")
         under = list(self._under(base))
-        nested = {self._parent(k) for k in under if k.rsplit("/", 1)[-1] == ".git"} - {self._key(root)}
+        checkouts = {self._parent(k) for k in under if k.rsplit("/", 1)[-1] == ".git"} - {self._key(root)}
+        nested = set[str]() if enter_checkouts else checkouts
         found: list[Path] = []
         for k in under:
             folders = k[len(base) + 1 :].split("/")[:-1]
             inside = ("/".join([base, *folders[: index + 1]]) for index in range(len(folders)))
-            if k in self.files and not any(name in prune for name in folders) and not any(path in nested for path in inside):
+            pruned = any(
+                name in prune and not (enter_packages and "/".join([base, *folders[: index + 1], "__init__.py"]) in self.files)
+                for index, name in enumerate(folders)
+            )
+            if k in self.files and not pruned and not any(path in nested for path in inside):
                 found.append(Path(k))
         return sorted(found)
 
@@ -237,7 +242,7 @@ class FakeFileSystem:
             self.dirs.discard(k)
         self.dirs.discard(key)
 
-    def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = ()) -> None:
+    def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = (), *, skip_checkouts: bool = False) -> None:
         s, d = self._key(src), self._key(dst)
         if s not in self._all_dirs():
             raise FileNotFoundError(s)
@@ -247,7 +252,8 @@ class FakeFileSystem:
         skipped: list[str] = []
         for k in self._under(s):
             name = k.rsplit("/", 1)[-1]
-            if any(fnmatch.fnmatchcase(name, p) for p in ignore) or any(k.startswith(x + "/") for x in skipped):
+            nested = skip_checkouts and (f"{k}/.git" in self.files or f"{k}/.git" in self._all_dirs())
+            if nested or any(fnmatch.fnmatchcase(name, p) for p in ignore) or any(k.startswith(x + "/") for x in skipped):
                 skipped.append(k)
                 continue
             target = d.rstrip("/") + k[len(s.rstrip("/")) :]

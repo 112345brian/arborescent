@@ -51,6 +51,9 @@ def _listed_paths(root: Path, runner: ToolRunner) -> tuple[list[str], bool]:
         return sorted(set(paths)), True
     paths = []
     for directory, dirnames, filenames in os.walk(root):
+        if Path(directory) != root and (".git" in dirnames or ".git" in filenames):  # a nested checkout: git lists nothing in it
+            dirnames.clear()
+            continue
         dirnames[:] = sorted(name for name in dirnames if name not in PRUNE)
         here = Path(directory).relative_to(root).as_posix()
         paths.extend(f"{here}/{name}".removeprefix("./") for name in filenames)

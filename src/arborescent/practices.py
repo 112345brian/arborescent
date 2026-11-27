@@ -413,9 +413,9 @@ def function_references(fs: FileSystem, root: Path, tests_dir: str, scan: ScanRe
         return []
     index = _Index(scan.modules, scan.known, {module.split(".", 1)[0] for module in scan.known})
     out: list[FunctionReferences] = []
-    for path in fs.rglob(folder, "*.py"):
+    for path in fs.walk_files(folder, _NOISE):
         rel = path.relative_to(root).as_posix()
-        if _NOISE & set(rel.split("/")):
+        if path.suffix != ".py" or _NOISE & set(rel.split("/")):
             continue
         try:
             facts = extract(fs.read_text(path), rel)
