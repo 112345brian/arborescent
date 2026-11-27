@@ -37,7 +37,7 @@ _EXEMPT_DIRECTORIES = frozenset({"tests", "test", "docs"})
 
 
 def forbidden_by(constraints: PackageConstraints) -> frozenset[str]:
-    """The effect categories the constraints rule out (every one, bar the test-only ``patch``, for ``must_be_pure``)."""
+    """The effect categories the constraints rule out (``must_be_pure``: the default categories bar the test-only ``patch``)."""
     named = frozenset(constraints.forbid_effects)
     return named | (DEFAULT_FORBID_CATEGORIES - _PURE_EXCLUDES) if constraints.must_be_pure else named
 

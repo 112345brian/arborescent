@@ -21,7 +21,7 @@ class ConstraintError(ValueError):
 
 @dataclass(frozen=True)
 class PackageConstraints:
-    """``must_be_pure``: no effect use at all. ``forbid_effects``: scanner effect categories the package never uses."""
+    """``must_be_pure``: no use of a default effect category (``patch`` aside). ``forbid_effects``: scanner effect categories the package never uses."""
 
     must_be_pure: bool = False
     forbid_effects: tuple[str, ...] = ()

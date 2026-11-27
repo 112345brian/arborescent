@@ -38,6 +38,9 @@
   less. It is now a policy error that suggests the closest known key, in flat, scoped, child and shipped policies, and a
   `ring` or ring entry that is not a table is a policy error rather than a traceback. A config that carries a stray ring
   key now fails to load until the key is removed or corrected.
+- The docs and this repository's policy comment said Arborescent's application ring allows only `threads`; its `forbid`
+  list also leaves `database`, `network`, `filesystem`, `console` and `global` open. `docs/configuration.md` said
+  `must_be_pure` forbids every category; it forbids the 14 defaults except `patch`. Behaviour is unchanged.
 - `docs/configuration.md` said the innermost ring, and middle rings under `strict`, forbid every effect category. They
   forbid 14 of the 20: not `state`, `monotonic`, `host`, `fs-query`, `registry` or `cache`. Behaviour is unchanged.
 - With a nested `output_dir`, `generate` wrote a `tach.toml` there whose source roots tach never read, so running it

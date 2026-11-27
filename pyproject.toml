@@ -88,7 +88,8 @@ require_abstract = true
 may_import = ["domain", "ports"]
 # pathlib: Path values only (join, relative_to); every disk access goes through FileSystem (tests/test_filesystem.py)
 external = ["@pure", "pathlib", "concurrent", "shlex", "arborescent"]
-# The application coordinates parallel engines; all other effect categories keep the strict default.
+# This list replaces the default rather than extending it: of the 14 default categories the application ring also allows
+# `threads` (it coordinates parallel engines), `database`, `network`, `filesystem`, `console` and `global`.
 forbid = ["clock", "dynamic-import", "env", "identity", "patch", "process", "randomness", "sleep"]
 
 [tool.arborescent.ring.adapters]

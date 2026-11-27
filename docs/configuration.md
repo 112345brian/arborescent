@@ -917,13 +917,18 @@ file, `arborescent.toml` or `[tool.arborescent.package.constraints]` in `pyproje
 
 ```toml
 [package.constraints]
-must_be_pure = true              # bool, default false: no effect use of any category
+must_be_pure = true              # bool, default false: no effect use of the 13 categories listed below
 forbid_effects = ["network"]     # effect categories this package never uses, default []
 ```
 
 `forbid_effects` takes the scanner's effect categories (`clock`, `env`, `identity`, `randomness`, `sleep`, `threads`,
-`process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`); duplicates collapse. They
-apply to paths with role `source`; test, docs and asset paths are exempt.
+`process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`, `state`, `monotonic`, `host`,
+`fs-query`, `registry`, `cache`); duplicates collapse. They apply to paths with role `source`; test, docs and asset paths
+are exempt.
+
+`must_be_pure` rules out the 14 default categories except the test-only `patch`: `clock`, `env`, `identity`, `randomness`,
+`sleep`, `threads`, `process`, `database`, `network`, `filesystem`, `dynamic-import`, `console` and `global`. It does not
+cover `state`, `monotonic`, `host`, `fs-query`, `registry` or `cache`; name those in `forbid_effects`, which adds to it.
 
 There is no blind spot in the schema: an unknown key under `package` or `package.constraints`, an unknown effect name
 (`netwrok`), a non-boolean `must_be_pure`, or a `forbid_effects` that is not a list of names is a policy error. With no
@@ -934,7 +939,7 @@ root, so in multi-scope mode one promise covers every scope and each module is c
 
 - `package-constraint-facts`: the module **uses** a forbidden effect, in whatever ring it sits, so a host cannot loosen the
   promise by placement. `forbid_effects` covers the module's own effect uses (the scanner's per-function analysis and
-  category taxonomy; no second detector). `must_be_pure` forbids every category and also: any non-type-only import of
+  category taxonomy; no second detector). `must_be_pure` forbids its 13 categories (above) and also: any non-type-only import of
   something that is neither first-party nor on the pure allow-list (the structural stdlib `__future__`, `typing`,
   `dataclasses`, `collections`, `enum`, `abc`, plus `math`, `re`, `functools`, `itertools`, `operator`, `json` and similar
   computation-only modules; `arborescent.package_constraint_rules.PURE_STDLIB` is the list), and any import of a first-party
@@ -942,7 +947,7 @@ root, so in multi-scope mode one promise covers every scope and each module is c
   type-only imports carry nothing).
 - `package-constraint-placement`: the ring the host put the module in **permits** an effect the package forbids (a ring's
   `forbid` list, or the preset default, leaves it open). Failing here, before any module misbehaves, is the point: tighten the
-  ring or drop the constraint. For `must_be_pure` every effect category counts bar the test-only `patch`.
+  ring or drop the constraint. For `must_be_pure` the same 13 categories count.
 
 Limits: reachability is the file-level import graph, not a call graph, and it does not look inside third-party packages (the
 import itself is refused instead); `must_be_pure` placement compares effects and does not read a ring's `external` list;
@@ -1211,7 +1216,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `package-public-symbol-dropped` | a module on a package's declared public surface lost a public class or function in its part |
 | `package-private-import` | a module imports another package's module outside the `public` surface that package declares (checked in the origin and in each part) |
 
-| `package-constraint-facts` | a module uses an effect `[package.constraints]` forbids (`forbid_effects`, or any effect under `must_be_pure`), or under `must_be_pure` imports a non-pure external package or a first-party module that reaches one, whatever its ring |
+| `package-constraint-facts` | a module uses an effect `[package.constraints]` forbids (`forbid_effects`, or one of the 13 categories of `must_be_pure`), or under `must_be_pure` imports a non-pure external package or a first-party module that reaches one, whatever its ring |
 | `package-constraint-placement` | the ring a module is placed in permits an effect `[package.constraints]` forbids; tighten the ring or drop the constraint |
 | `package-pyproject-drift` | information only (never fails, never baselined): `package_pyproject` is set and a derived field of an existing package `pyproject.toml` disagrees with the annotations |
 
@@ -1728,7 +1733,7 @@ Four categories were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`). 
 `dev_tools_forbid` and `mixed_purity.kinds` list but are in **no default**: a policy that does not name them keeps its findings,
 except that the extended `Path` detection (a path held in a variable) and the narrower `dynamic-import`, `threads`
 and `randomness` definitions change which modules the pre-existing categories report. `must_be_pure` keeps meaning "every
-pre-0.8.0 category"; list the new ones under `forbid_effects` to add them.
+pre-0.8.0 category but `patch`"; list the new ones under `forbid_effects` to add them.
 
 ### Module-level state: `registry` and `cache` (#194)
 
