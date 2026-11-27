@@ -12,6 +12,9 @@
 - The `entrypoint-eager-commands` note now names `arborescent coupling startup --measure` for the time cost (#215).
 
 ### Fixed
+- The order of `effect-via-import` findings (and the `must_be_pure` reach form of `package-constraint-facts`) changed
+  from run to run with `PYTHONHASHSEED` when several effect categories reached a module. Reports are now the same on every
+  run. Only the order varied: the chains, root causes and baselines were already stable, so no baseline changes.
 - **Coupling closure baselines may grow.** The closure of an entrypoint did not count parent packages, so with
   `app/__init__.py` importing `app.heavy`, `app.cli` was reported as 1 module while importing it loads 3, and a
   `closure_max` budget passed. Closure sizes, `closure_max`, the ratchet, `startup` blame and lazy-mount costs,

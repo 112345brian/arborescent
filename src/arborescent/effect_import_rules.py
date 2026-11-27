@@ -138,7 +138,8 @@ def _effect_reachable(
         info = modules.get(name)
         local_policy = context.policy_for(name)
         result: dict[str, tuple[str, ...]] = (
-            dict.fromkeys(direct_propagating_effects(context.policy.effects, local_policy, info), (name,))
+            # sorted: the set's own order follows PYTHONHASHSEED, and this dict's order is the order of the findings
+            dict.fromkeys(sorted(direct_propagating_effects(context.policy.effects, local_policy, info)), (name,))
             if local_policy is not None and info is not None else {}
         )
         for target in sorted(effect_graph.get(name, ())):
