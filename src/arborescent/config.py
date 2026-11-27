@@ -255,6 +255,7 @@ def find_child_policy(fs: FileSystem, parent_root: Path, child_path: str) -> Pat
 
 def policy_from_mapping(raw: Mapping[str, Any]) -> Policy:
     """Translate the raw TOML table (``@group`` references, ``preset``, ``io_modules``, defaults) into a ``Policy``."""
+    _reject_unknown_keys("the policy root", raw, _ROOT_TABLE_KEYS)
     if "scopes" in raw:
         return _scoped_policy(raw)
     core, ring_tables = _core_policy(raw)
@@ -642,6 +643,12 @@ _LEGACY_ARCHITECTURE_KEYS = frozenset({
     "effect_defaults",
 })
 _SCOPE_ARCHITECTURE_KEYS = _LEGACY_ARCHITECTURE_KEYS - {"sources"}
+# Every key the policy root or a `[scopes.<name>]` table may hold. Any other is an error: a misspelt one would enforce less.
+# `load_policy` expands `classify_from`, `vendor_roots` and `library_roots`.
+_ROOT_TABLE_KEYS = _LEGACY_ARCHITECTURE_KEYS | _SCOPED_ROOT_GLOBALS | {
+    "scopes", "lazy_import", "unguarded_module_state", "classify_from", "vendor_roots", "library_roots",
+}
+_SCOPE_TABLE_KEYS = _SCOPE_ARCHITECTURE_KEYS | {"sources", "source_roots", "public", "depends_on", "classify_from"}
 
 
 def _scope_from_raw(name: object, raw_scope: object, raw: Mapping[str, Any]) -> tuple[ArchitectureScope, Policy]:
@@ -653,6 +660,7 @@ def _scope_from_raw(name: object, raw_scope: object, raw: Mapping[str, Any]) -> 
         raise PolicyError("scope names must be non-empty strings")
     if not isinstance(raw_scope, Mapping):
         raise PolicyError(f"scope {name!r} must be a table")
+    _reject_unknown_keys(f"[scopes.{name}]", raw_scope, _SCOPE_TABLE_KEYS, elsewhere=_ROOT_TABLE_KEYS)
     missing = {"sources", "source_roots", "rings"} - raw_scope.keys()
     if missing:
         raise PolicyError(f"scope {name!r} requires {sorted(missing)}")
@@ -782,17 +790,26 @@ def _ring_tables(raw: Mapping[str, Any], names: Sequence[str]) -> Mapping[str, M
 
 
 def _reject_unknown_ring_keys(name: str, table: Mapping[object, object]) -> None:
-    unknown = sorted((key for key in table if key not in _RING_KEYS), key=repr)
+    _reject_unknown_keys(f"[ring.{name}]", table, _RING_KEYS)
+
+
+def _reject_unknown_keys(where: str, table: Collection[object], known: Collection[str], elsewhere: Collection[str] = ()) -> None:
+    """Refuse every key of ``table`` outside ``known``. One that is in ``elsewhere`` is a root setting written in a scope."""
+    unknown = sorted((key for key in table if key not in known), key=repr)
     if not unknown:
         return
-    described = ", ".join(f"{key!r}{_closest_ring_key(str(key))}" for key in unknown)
-    raise PolicyError(f"unknown key in [ring.{name}]: {described}; known keys: {', '.join(_RING_KEYS)}")
+    described = ", ".join(
+        f"{key!r}{' (a root setting: set it outside `scopes`)' if key in elsewhere else _closest_key(str(key), known)}"
+        for key in unknown
+    )
+    listed = known if isinstance(known, tuple) else sorted(known)
+    raise PolicyError(f"unknown key in {where}: {described}; known keys: {', '.join(listed)}")
 
 
-def _closest_ring_key(key: str) -> str:
+def _closest_key(key: str, known: Collection[str]) -> str:
     """A "did you mean" for a near miss: at most two characters, or a third of the known key, may differ."""
     spelled = key.lower().replace("-", "_")
-    distance, closest = min((_edit_distance(spelled, known), known) for known in _RING_KEYS)
+    distance, closest = min((_edit_distance(spelled, candidate), candidate) for candidate in known)
     return f" (did you mean {closest!r}?)" if distance <= max(2, len(closest) // 3) else ""
 
 

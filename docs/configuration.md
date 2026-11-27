@@ -7,6 +7,9 @@ silently.
 
 ## Single-scope top-level keys
 
+An unknown key at the policy root, in a `[scopes.<name>]` table or in a `[ring.<name>]` table is a policy error that
+suggests the closest known one, and a root setting written inside a scope is refused as well.
+
 The keys below define the legacy single-scope form. It remains supported as written. For a repository with independently
 governed libraries, use `[tool.arborescent.scopes.<name>]` instead; the root retains only shared tool and repository
 settings. The two forms cannot be mixed.

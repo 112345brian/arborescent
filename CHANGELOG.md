@@ -12,6 +12,10 @@
 - The `entrypoint-eager-commands` note now names `arborescent coupling startup --measure` for the time cost (#215).
 
 ### Fixed
+- **An unknown key at the policy root or in a `[scopes.<name>]` table now fails to load.** It was silently ignored, so a
+  typo such as `rign` or `excludes` passed while doing nothing. The error suggests the closest known key, in flat, scoped,
+  child and shipped policies. A root setting written inside a scope (`python`, `exclude`, `lazy_import`, ...) was ignored
+  too and is now an error that says to move it out. Remove or correct the key.
 - **`--require-profile` can now fail where it passed.** The "weakens positional effect defaults" check compared a ring's
   `forbid` with itself, so it fired only for a list without `dynamic-import`. It now holds the innermost ring of each
   scope to its default: its effective `forbid` must contain everything it would forbid with `forbid` omitted (14
