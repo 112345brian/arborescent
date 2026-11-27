@@ -260,26 +260,30 @@ def call_sites(tree: ast.Module, nodes: Sequence[ast.AST], aliases: dict[str, st
 
 
 def annotation_types(node: ast.expr | None, aliases: dict[str, str]) -> set[str]:
-    """The dotted classes a value annotated ``node`` may be: through strings, ``X | Y``, ``Optional``, ``Annotated`` and ``X[T]``."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        try:
-            return annotation_types(ast.parse(node.value.strip(), mode="eval").body, aliases)
-        except (SyntaxError, ValueError):
-            return set()
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return annotation_types(node.left, aliases) | annotation_types(node.right, aliases)
-    if isinstance(node, ast.Subscript):
-        return _subscript_types(node, aliases)
-    name = dotted_name(node, aliases) if node is not None else None
-    return {name} if name is not None else set()
+    """The dotted classes a value annotated ``node`` may be: through strings, ``X | Y``, ``Optional``, ``Annotated`` and ``X[T]``.
 
-
-def _subscript_types(node: ast.Subscript, aliases: dict[str, str]) -> set[str]:
-    outer = (dotted_name(node.value, aliases) or "").rpartition(".")[2]
-    if outer not in _WRAPPERS:
-        return annotation_types(node.value, aliases)  # a generic class: ``Box[int]`` is a ``Box``
-    items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
-    return {name for item in (items[:1] if outer == "Annotated" else items) for name in annotation_types(item, aliases)}
+    An explicit stack, so a long ``|`` or subscript chain cannot overflow it."""
+    found: set[str] = set()
+    pending: list[ast.expr | None] = [node]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            try:
+                pending.append(ast.parse(node.value.strip(), mode="eval").body)
+            except (SyntaxError, ValueError, MemoryError, RecursionError):  # MemoryError: too deep for the parser
+                continue
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            pending += (node.left, node.right)
+        elif isinstance(node, ast.Subscript):
+            outer = (dotted_name(node.value, aliases) or "").rpartition(".")[2]
+            if outer not in _WRAPPERS:
+                pending.append(node.value)  # a generic class: ``Box[int]`` is a ``Box``
+                continue
+            items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+            pending += items[:1] if outer == "Annotated" else items
+        elif node is not None and (name := dotted_name(node, aliases)) is not None:
+            found.add(name)
+    return found
 
 
 @dataclass

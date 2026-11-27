@@ -198,39 +198,49 @@ def _last_name(node: ast.expr) -> str:
 
 
 def _weak_annotation(node: ast.expr, aliases: dict[str, str]) -> str | None:
-    """Why a return annotation says nothing, or None when it names a type. Looks through Optional/Union/`|`/Annotated and string forms."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return _weak_string_annotation(node.value, aliases)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return _weak_annotation(node.left, aliases) or _weak_annotation(node.right, aliases)
-    if isinstance(node, ast.Subscript):
-        return _weak_subscript(node, aliases)
+    """Why a return annotation says nothing, or None when it names a type. Looks through Optional/Union/`|`/Annotated and string forms.
+
+    The first reason in source order wins. An explicit stack, so a long ``|`` chain cannot overflow it."""
+    pending: list[ast.expr] = [node]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            try:
+                pending.append(ast.parse(node.value, mode="eval").body)
+            except (SyntaxError, ValueError, MemoryError, RecursionError):  # MemoryError: too deep for the parser
+                continue
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            pending += (node.right, node.left)
+        elif isinstance(node, ast.Subscript):
+            reason, inner = _weak_subscript(node, aliases)
+            if reason is not None:
+                return reason
+            pending += reversed(inner)
+        elif (reason := _weak_name(node, aliases)) is not None:
+            return reason
+    return None
+
+
+def _weak_subscript(node: ast.Subscript, aliases: dict[str, str]) -> tuple[str | None, list[ast.expr]]:
+    """``(why it says nothing, the annotations it wraps that still have to be read)``."""
+    name = _last_name(node.value)
+    items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+    if name in _ANNOTATION_WRAPPERS:
+        return None, items[:1] if name == "Annotated" else items  # Annotated's first item is the type; the rest are metadata
+    if name in _STRING_KEYED_MAPPINGS and len(items) == 2 and _last_name(items[0]) == "str":
+        value = dotted_name(items[1], aliases)
+        if value is not None and value.split(".")[-1] == "Any":
+            return f"returns {name}[str, Any]", []
+    return None, []
+
+
+def _weak_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
     dotted = dotted_name(node, aliases) or ""
     name = _last_name(node)
     if dotted in _ANY_NAMES or dotted.split(".")[-1] == "Any":
         return f"returns {dotted.split('.')[-1]}"
     if name in _BARE_CONTAINERS or (name in _BARE_TYPING_CONTAINERS and dotted.startswith("typing")):
         return f"returns a bare {name.lower()}"
-    return None
-
-
-def _weak_string_annotation(text: str, aliases: dict[str, str]) -> str | None:
-    try:
-        return _weak_annotation(ast.parse(text, mode="eval").body, aliases)
-    except SyntaxError:
-        return None
-
-
-def _weak_subscript(node: ast.Subscript, aliases: dict[str, str]) -> str | None:
-    name = _last_name(node.value)
-    items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
-    if name in _ANNOTATION_WRAPPERS:
-        # Annotated's first item is the type; the rest are metadata
-        return next(filter(None, (_weak_annotation(item, aliases) for item in (items[:1] if name == "Annotated" else items))), None)
-    if name in _STRING_KEYED_MAPPINGS and len(items) == 2 and _last_name(items[0]) == "str":
-        value = dotted_name(items[1], aliases)
-        if value is not None and value.split(".")[-1] == "Any":
-            return f"returns {name}[str, Any]"
     return None
 
 
@@ -276,7 +286,7 @@ def _identifiers(node: ast.expr) -> Iterator[str]:
         elif isinstance(child, ast.Constant) and isinstance(child.value, str):
             try:
                 yield from _identifiers(ast.parse(child.value.strip(), mode="eval").body)
-            except SyntaxError:
+            except (SyntaxError, ValueError, MemoryError, RecursionError):
                 yield "Any"  # unreadable: no evidence
 
 
@@ -425,20 +435,22 @@ _RESULT_SUFFIXES = ("Result", "Outcome")
 
 def _annotation_names(node: ast.expr | None) -> Iterator[str]:
     """The names a return annotation may stand for: ``X``, ``m.X``, ``"X"``, ``X | None``, ``Optional[X]``; never ``list[X]``."""
-    if isinstance(node, ast.Name):
-        yield node.id
-    elif isinstance(node, ast.Attribute):
-        yield node.attr
-    elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-        try:
-            yield from _annotation_names(ast.parse(node.value.strip(), mode="eval").body)
-        except SyntaxError:
-            return
-    elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        yield from _annotation_names(node.left)
-        yield from _annotation_names(node.right)
-    elif isinstance(node, ast.Subscript) and next(_annotation_names(node.value), "") == "Optional":
-        yield from _annotation_names(node.slice)
+    pending: list[ast.expr | None] = [node]
+    while pending:  # an explicit stack, so a long ``|`` or subscript chain cannot overflow it
+        node = pending.pop()
+        if isinstance(node, ast.Name):
+            yield node.id
+        elif isinstance(node, ast.Attribute):
+            yield node.attr
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            try:
+                pending.append(ast.parse(node.value.strip(), mode="eval").body)
+            except (SyntaxError, ValueError, MemoryError, RecursionError):  # MemoryError: too deep for the parser
+                continue
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            pending += (node.right, node.left)
+        elif isinstance(node, ast.Subscript) and _last_name(node.value) == "Optional":
+            pending.append(node.slice)
 
 
 def result_defs(tree: ast.AST) -> tuple[str, ...]:

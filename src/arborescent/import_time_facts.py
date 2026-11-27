@@ -67,17 +67,25 @@ def evaluated(statements: Sequence[ast.AST]) -> Iterator[ast.AST]:
         stack.extend(_children(node))
 
 
-def _functions(body: Sequence[ast.stmt], prefix: str = "") -> Iterator[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]]:
-    """Module-level functions and the methods of module-level classes, including ones defined under ``if``/``try``/``with``."""
-    for stmt in body:
+def _functions(module: Sequence[ast.stmt]) -> Iterator[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]]:
+    """Module-level functions and the methods of module-level classes, including ones defined under ``if``/``try``/``with``.
+
+    In source order, on an explicit stack: every ``elif`` arm nests one level deeper in the tree."""
+    pending = [(stmt, "") for stmt in reversed(module)]
+    while pending:
+        stmt, prefix = pending.pop()
+        inner: Sequence[ast.stmt] = ()
         if isinstance(stmt, _FUNCTIONS):
             yield prefix + stmt.name, stmt
         elif isinstance(stmt, ast.ClassDef) and not prefix:
-            yield from _functions(stmt.body, f"{stmt.name}.")
-        elif isinstance(stmt, ast.If | ast.With | ast.AsyncWith):
-            yield from _functions([*stmt.body, *getattr(stmt, "orelse", [])], prefix)
+            inner, prefix = stmt.body, f"{stmt.name}."
+        elif isinstance(stmt, ast.If):
+            inner = [*stmt.body, *stmt.orelse]
+        elif isinstance(stmt, ast.With | ast.AsyncWith):
+            inner = stmt.body
         elif isinstance(stmt, ast.Try | ast.TryStar):
-            yield from _functions([*stmt.body, *stmt.orelse, *stmt.finalbody, *(s for h in stmt.handlers for s in h.body)], prefix)
+            inner = [*stmt.body, *stmt.orelse, *stmt.finalbody, *(s for h in stmt.handlers for s in h.body)]
+        pending += [(child, prefix) for child in reversed(inner)]
 
 
 def _defined_names(tree: ast.Module) -> set[str]:

@@ -23,6 +23,10 @@
   and the tach copy keeps a nested checkout that a `source_roots` entry other than `.` reaches. Files inside a nested
   checkout are no longer reported as `package-unowned-asset`; a catalog entry that owns files inside one now matches
   nothing.
+- `check` still stopped with `RecursionError` (or `MemoryError`) on Python 3.12 and later on a very long `a / "b" / ...`
+  path expression or method chain, `X | Y | ...` or `X[0][0]...` annotation, `not not ...` test or `elif` ladder at module
+  or class level, on a string annotation too deep for the parser, and on chains of about a thousand modules that import,
+  re-export or forward to one another. A source file that the parser itself cannot take is still an error.
 - **Coupling closure baselines may grow.** The closure of an entrypoint did not count parent packages, so with
   `app/__init__.py` importing `app.heavy`, `app.cli` was reported as 1 module while importing it loads 3, and a
   `closure_max` budget passed. Closure sizes, `closure_max`, the ratchet, `startup` blame and lazy-mount costs,

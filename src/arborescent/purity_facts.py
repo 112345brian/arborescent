@@ -165,17 +165,23 @@ def _class_name(node: ast.Name | ast.Attribute, aliases: dict[str, str], local: 
 
 def _annotation_types(node: ast.expr | None, aliases: dict[str, str], local: set[str], dotted: Dotted) -> list[tuple[str, bool]]:
     """(dotted class name, defined in this module) for the classes an annotation names: ``X``, ``m.X``, ``"X"``, ``X | None``, ``Optional[X]``."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        try:
-            return _annotation_types(ast.parse(node.value.strip(), mode="eval").body, aliases, local, dotted)
-        except SyntaxError:
-            return []
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return _annotation_types(node.left, aliases, local, dotted) + _annotation_types(node.right, aliases, local, dotted)
-    if isinstance(node, ast.Subscript):
-        base = dotted(node.value, aliases) or ""
-        return _annotation_types(node.slice, aliases, local, dotted) if base.rsplit(".", 1)[-1] == "Optional" else []
-    return _class_name(node, aliases, local, dotted) if isinstance(node, ast.Name | ast.Attribute) else []
+    found: list[tuple[str, bool]] = []
+    pending: list[ast.expr | None] = [node]
+    while pending:  # an explicit stack, in source order, so a long ``|`` chain cannot overflow it
+        node = pending.pop()
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            try:
+                pending.append(ast.parse(node.value.strip(), mode="eval").body)
+            except (SyntaxError, ValueError, MemoryError, RecursionError):  # MemoryError: too deep for the parser
+                continue
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            pending += (node.right, node.left)
+        elif isinstance(node, ast.Subscript):
+            if (dotted(node.value, aliases) or "").rsplit(".", 1)[-1] == "Optional":
+                pending.append(node.slice)
+        elif isinstance(node, ast.Name | ast.Attribute):
+            found += _class_name(node, aliases, local, dotted)
+    return found
 
 
 def _typed_params(
