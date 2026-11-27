@@ -17,6 +17,7 @@ from arborescent.adapters import (
     LocalFileSystem,
     SubprocessToolRunner,
     SystemClock,
+    raised_gc_threshold,
 )
 from arborescent.check_runner import run_check
 from arborescent.config import load_policy
@@ -31,7 +32,7 @@ CHECKERS = list(all_checkers().values())
 
 
 def own_services(cache: Path | None = None) -> Services:
-    return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines(), AnnotationPackageChecks())
+    return Services(FsScanner(cache), SubprocessToolRunner(), CHECKERS, LocalFileSystem(), SystemClock(), default_engines(), AnnotationPackageChecks(), run_scope=raised_gc_threshold)
 
 
 def test_arborescent_passes_its_own_policy_and_reports_generated_preset_drift_advisorially() -> None:

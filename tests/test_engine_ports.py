@@ -279,7 +279,7 @@ def test_engine_violation_results_have_a_consuming_call_site() -> None:
     tool = next(n for n in ast.walk(engine_tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "run_tool")
     assert any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "_engine_violations" for n in ast.walk(tool))
     check_runner_tree = trees[source_dir / "check_runner.py"]
-    run_check_node = next(n for n in ast.walk(check_runner_tree) if isinstance(n, ast.FunctionDef) and n.name == "run_check")
+    run_check_node = next(n for n in ast.walk(check_runner_tree) if isinstance(n, ast.FunctionDef) and n.name == "_checked")  # the body of run_check
     report_assignment = next(
         n
         for n in ast.walk(run_check_node)

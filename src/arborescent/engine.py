@@ -55,6 +55,7 @@ from .ports import (
     PackageChecks,
     Parallel,
     RootAwareEngine,
+    RunScope,
     ScanResult,
     ToolRunner,
     TypeChecker,
@@ -98,6 +99,7 @@ class Services:
     engines: Sequence[Engine]  # run beside the chosen type checker (import-linter, tach); see arborescent.engines. No default: a forgotten list used to skip them silently
     packages: PackageChecks | None = None  # the package-annotation layer; needed only when the policy sets `package_catalog`
     parallel: Parallel | None = None  # runs selftest's mutations across cores; None keeps them sequential
+    run_scope: RunScope | None = None  # entered around `run_own` and `run_check`; None leaves the process as it is
 
 
 @dataclass(frozen=True)
@@ -217,6 +219,15 @@ def discovery_findings(indexes: RuleContext, scan: ScanResult) -> list[Violation
 
 def run_own(
     policy: Policy, root: Path, services: Services, only: frozenset[str] | None = None, practices: bool = True
+) -> tuple[list[Violation], ScanResult]:
+    if services.run_scope is None:
+        return _own_findings(policy, root, services, only, practices)
+    with services.run_scope():
+        return _own_findings(policy, root, services, only, practices)
+
+
+def _own_findings(
+    policy: Policy, root: Path, services: Services, only: frozenset[str] | None, practices: bool
 ) -> tuple[list[Violation], ScanResult]:
     scan = services.scanner.scan(policy, root, only)
     indexes = RuleContext(policy, scan.arbor_index, scan.scope_by_module, frozenset(scan.dev_tool_modules))

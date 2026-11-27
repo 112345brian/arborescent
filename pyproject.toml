@@ -94,7 +94,7 @@ traits = ["no-clock", "no-dynamic-import", "no-env", "no-identity", "no-patch", 
 
 [tool.arborescent.ring.adapters]
 may_import = ["domain", "ports"]
-external = ["@pure", "pathlib", "contextlib", "concurrent", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "libcst", "arborescent"]
+external = ["@pure", "pathlib", "contextlib", "concurrent", "gc", "json", "hashlib", "os", "shutil", "subprocess", "tempfile", "time", "sysconfig", "tomllib", "libcst", "arborescent"]
 traits = ["no-clock", "no-dynamic-import", "no-env", "no-identity", "no-patch", "no-randomness", "no-sleep", "no-threads", "permits-os-branching"]
 
 [tool.arborescent.ring.composition]

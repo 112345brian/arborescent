@@ -18,7 +18,7 @@ uses `pathlib.PurePosixPath` only for lexical path validation; it does not acces
 | application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction, package assignment gaps, annotation preservation across extracted parts |
 | application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction, package assignment gaps, derived package pyproject.toml fields |
 | application | domain, ports | `pathlib`, `concurrent`, `tomllib`, `json`, `re` | use cases: generate, check, baseline, annotate, selftest, suggestions, practices, package metadata and extraction, package assignment gaps, the driver's translation of migration arguments into a library request |
-| adapters | domain, ports | `pathlib`, `contextlib`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time`, `sysconfig`, `tomllib` | focused file-system, scanner, clock, subprocess, engine and type-checker adapters |
+| adapters | domain, ports | `pathlib`, `contextlib`, `gc`, `json`, `hashlib`, `os`, `shutil`, `subprocess`, `tempfile`, `time`, `sysconfig`, `tomllib` | focused file-system, scanner, clock, subprocess, engine and type-checker adapters |
 | composition | everything | `argparse`, `pathlib`, `os`, `shlex` | the command line: wires adapters to use cases and presents reports |
 
 The application ring does no file I/O of its own: it reads, writes, lists, copies and creates temporary folders through
@@ -201,7 +201,7 @@ is a second port (`ImportRewriter`); see `docs/migration-driver.md` for why LibC
 ## Data flow of `arborescent check`
 
 1. `cli` loads the policy (`config.policy_from_mapping` -> `domain.Policy`, which validates itself; with its `presets.Preset`) and builds `Services`: a scanner, a tool
-   runner, the file system (`LocalFileSystem`; tests use `testing.FakeFileSystem`), a clock, the engine adapters (`engines`: import-linter, tach) and the type-checker adapters.
+   runner, the file system (`LocalFileSystem`; tests use `testing.FakeFileSystem`), a clock, the engine adapters (`engines`: import-linter, tach), the type-checker adapters and the run scope that raises the garbage collector's threshold while the checks run (`parallel_adapter.raised_gc_threshold`).
 2. `engine.run_check` starts every `Engine` in `Services` (import-linter, tach) and the chosen type checker in parallel. They run as
    subprocesses behind the `ToolRunner` port; a new engine is an adapter, not an edit to `run_check`. An unknown type
    checker name is a `PolicyError`, and the worker pool is always shut down. It then runs each declared child arbor from

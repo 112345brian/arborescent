@@ -64,6 +64,7 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
         ProcessPoolParallel,
         SubprocessToolRunner,
         SystemClock,
+        raised_gc_threshold,
     )
 
     # deferred: default package checks are a service adapter
@@ -80,6 +81,7 @@ def default_services(root: Path, cache: bool = True, output_dir: str = ".") -> S
         default_engines(output_dir),
         AnnotationPackageChecks(),
         ProcessPoolParallel(),
+        raised_gc_threshold,
     )
 
 

@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+- `check`, `selftest` and every other command that runs the checks raise the garbage collector's threshold to 50,000
+  while they run and restore the previous one afterwards, also after an error: on macOS a cold run of this repository took
+  about 16% less time on Python 3.11 and 7% less on 3.14, with at most 1 MB more peak memory. A library caller passes
+  `run_scope=arborescent.adapters.raised_gc_threshold` to `Services` for the same; without it the collector is untouched.
+
 ### Upgrading from 0.9
 
 **Breaking.** Ring `traits` replace `forbid`, `forbid_at_import`, `require_abstract`, `require_typed_ports`,

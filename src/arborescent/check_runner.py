@@ -44,6 +44,13 @@ def _recorded(policy: Policy, root: Path, services: Services, opts: Options) -> 
 
 
 def run_check(policy: Policy, root: Path, services: Services, opts: Options | None = None) -> CheckReport:
+    if services.run_scope is None:
+        return _checked(policy, root, services, opts)
+    with services.run_scope():
+        return _checked(policy, root, services, opts)
+
+
+def _checked(policy: Policy, root: Path, services: Services, opts: Options | None) -> CheckReport:
     opts = opts if opts is not None else Options()
     if opts.require_profile and not opts.require_tools:
         opts = replace(opts, require_tools=True)

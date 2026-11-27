@@ -30,6 +30,7 @@ __all__ = [
     "Parallel",
     "RootAwareEngine",
     "RootBoundRenderer",
+    "RunScope",
     "ScanResult",
     "ToolRunner",
     "TypeChecker",
@@ -105,6 +106,13 @@ class Parallel(Protocol):
     """Runs independent, side-effect-free jobs, in process isolation when that is worth it; order is preserved."""
 
     def map(self, fn: Callable[..., R], jobs: Sequence[tuple[object, ...]]) -> list[R]: ...  # fn(*args) for each args in jobs
+
+
+class RunScope(Protocol):
+    """Entered around each run of the checks, for process-wide tuning that must be undone however the run ends. It may
+    be entered again while already entered."""
+
+    def __call__(self) -> AbstractContextManager[None]: ...
 
 
 class Engine(Protocol):
