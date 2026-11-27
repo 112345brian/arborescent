@@ -335,32 +335,31 @@ def _copy_tach_project(root: Path, source_roots: tuple[str, ...], temp: Path, fs
     roots = sorted({source.strip("/") or "." for source in source_roots}, key=lambda value: (value != ".", value.count("/")))
     if "." in roots:
         _copy_project_root(root, temp, fs)
-    else:
-        _copy_source_roots(root, roots, temp, fs)
+    _copy_source_roots(root, [source for source in roots if source != "."], temp, fs)
     _copy_project_configs(root, temp, fs)
 
 
 def _copy_project_root(root: Path, temp: Path, fs: FileSystem) -> None:
+    """Everything but environments, build output and nested checkouts (clones, worktrees, submodules)."""
     ignored = {*NOISE_DIRS, "dist", "build"}
-    for source in [*fs.glob(root, "*"), *fs.glob(root, ".*")]:
+    for source in sorted({*fs.glob(root, "*"), *fs.glob(root, ".*")}):  # `*` matches dot names too: copy each once
         if source.name in ignored:
             continue
         target = temp / source.name
         if fs.is_dir(source):
-            fs.copy_tree(source, target, ignore=[*ignored, "__pycache__"])
+            if not fs.exists(source / ".git"):
+                fs.copy_tree(source, target, ignore=[*ignored, "__pycache__"], skip_checkouts=True)
         elif fs.is_file(source):
             fs.write_bytes(target, fs.read_bytes(source))
 
 
 def _copy_source_roots(root: Path, roots: list[str], temp: Path, fs: FileSystem) -> None:
-    copied: list[str] = []
+    """Copy each source root not already there. One that is itself a nested checkout was named, so it is copied even when
+    the root above it was copied without it."""
     for source in roots:
-        if any(source == parent or source.startswith(parent + "/") for parent in copied):
-            continue
         source_path = root / source
-        if fs.is_dir(source_path):
-            fs.copy_tree(source_path, temp / source, ignore=[*NOISE_DIRS, ".git", "node_modules"])
-            copied.append(source)
+        if fs.is_dir(source_path) and not fs.exists(temp / source):
+            fs.copy_tree(source_path, temp / source, ignore=[*NOISE_DIRS, ".git", "node_modules"], skip_checkouts=True)
 
 
 def _copy_project_configs(root: Path, temp: Path, fs: FileSystem) -> None:

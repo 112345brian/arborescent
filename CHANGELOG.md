@@ -64,6 +64,11 @@ Details in `docs/configuration.md`, "Traits".
   and the tach copy keeps a nested checkout that a `source_roots` entry other than `.` reaches. Files inside a nested
   checkout are no longer reported as `package-unowned-asset`; a catalog entry that owns files inside one now matches
   nothing.
+- The isolated copy that `--require-profile` runs the tach canaries in still copied nested checkouts, including every
+  `.claude/worktrees/*`. It now leaves them out, and copies one only when a `source_roots` entry names it or a folder
+  inside it.
+- With `"."` among the `source_roots`, `--require-profile` reported "could not create Tach profile canaries" for any
+  project with a folder such as `.github` at its root: the isolated copy tried to copy it twice.
 - `check` still stopped with `RecursionError` (or `MemoryError`) on Python 3.12 and later on a very long `a / "b" / ...`
   path expression or method chain, `X | Y | ...` or `X[0][0]...` annotation, `not not ...` test or `elif` ladder at module
   or class level, on a string annotation too deep for the parser, and on chains of about a thousand modules that import,

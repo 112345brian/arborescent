@@ -15,6 +15,7 @@ from arborescent_helpers import (
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from arborescent.certification import (
+    _copy_tach_project,
     _native_minimum,
     _tach_canary_modules,
     _tach_canary_modules_by_scope,
@@ -305,3 +306,38 @@ def test_require_profile_fails_the_check_and_prints_the_missing_categories(
     out = capsys.readouterr().out
     assert "PROFILE FAIL ring domain weakens positional effect defaults: its `traits` is missing no-clock," in out
     assert "CERTIFIED" not in out
+
+
+# --- the isolated copy tach probes run on ----------------------------------------------------------------------------
+
+_LINKED = "gitdir: ../../.git/worktrees/w\n"
+_CHECKOUTS = {
+    "tach.toml": "", "src/a.py": "", "src/kit/.git": _LINKED, "src/kit/k.py": "",
+    ".claude/settings.json": "{}", ".claude/worktrees/w/.git": _LINKED, ".claude/worktrees/w/src/a.py": "",
+    "clone/.git/HEAD": "ref", "clone/c.py": "",
+}
+
+
+def _tach_copy(tmp_path: Path, *source_roots: str) -> set[str]:
+    project, copy = tmp_path / "project", tmp_path / "copy"
+    write_files(project, _CHECKOUTS)
+    copy.mkdir()
+    _copy_tach_project(project, source_roots, copy, LocalFileSystem())
+    return {path.relative_to(copy).as_posix() for path in copy.rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize(("root", "kept"), [
+    (".", {"tach.toml", "src/a.py", ".claude/settings.json"}),
+    ("src", {"tach.toml", "src/a.py"}),
+], ids=["project root", "source root"])
+def test_the_tach_copy_holds_no_nested_checkout(tmp_path: Path, root: str, kept: set[str]) -> None:
+    assert _tach_copy(tmp_path, root) == kept
+
+
+@pytest.mark.parametrize("roots", [(".", "src/kit"), ("src", "src/kit"), (".", "clone")])
+def test_the_tach_copy_keeps_a_checkout_that_is_a_source_root(tmp_path: Path, roots: tuple[str, str]) -> None:
+    """A source root that is a submodule is code tach was told to read, even below another root that leaves checkouts out."""
+    copied = _tach_copy(tmp_path, *roots)
+    assert ("clone/c.py" if roots[1] == "clone" else "src/kit/k.py") in copied
+    assert "src/a.py" in copied
+    assert not any(path.startswith(".claude/worktrees/") for path in copied)
