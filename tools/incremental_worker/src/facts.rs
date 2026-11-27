@@ -5,6 +5,8 @@ use tree_sitter::{Node, Parser};
 #[derive(Default, Serialize)]
 pub struct ModuleFacts {
     pub syntax_error: bool,
+    /// Calls anywhere in the module that became no edge: an unnamed or shadowed callee, or a scope outside the model.
+    pub unresolved_calls: usize,
     #[serde(skip)]
     pub functions: BTreeMap<String, Vec<Call>>,
 }
@@ -224,6 +226,23 @@ fn function_calls(
     calls
 }
 
+fn count_calls(root: Node<'_>) -> usize {
+    // A cursor, not recursion: this visits every node, however deep an expression is.
+    let mut cursor = root.walk();
+    let mut calls = 0;
+    loop {
+        calls += usize::from(cursor.node().kind() == "call");
+        if cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return calls;
+            }
+        }
+    }
+}
+
 pub fn extract(parser: &mut Parser, source: &str, module: &str, is_package: bool) -> ModuleFacts {
     let tree = parser.parse(source, None).expect("unbounded parse");
     let root = tree.root_node();
@@ -258,5 +277,7 @@ pub fn extract(parser: &mut Parser, source: &str, module: &str, is_package: bool
             );
         }
     }
+    let followed: usize = result.functions.values().map(Vec::len).sum();
+    result.unresolved_calls = count_calls(root) - followed;
     result
 }
