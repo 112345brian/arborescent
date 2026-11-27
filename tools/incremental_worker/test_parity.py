@@ -18,6 +18,7 @@ from arborescent.config import load_policy, policy_from_mapping
 from arborescent.domain import EFFECT_CATEGORIES, INFORMATIONAL_RULES, Policy, Violation
 from arborescent.engine import blocking, run_own
 from arborescent.filesystem_adapter import LocalFileSystem
+from arborescent.presets import trait_of
 from tools import incremental_analysis
 from tools.incremental_analysis import (
     _EFFECT_PARITY_RULES,
@@ -257,7 +258,7 @@ def test_findings_match_a_full_scan_across_edits(
 
 
 def test_scoped_findings_match_a_full_scan(worker_binary: Path, tmp_path: Path) -> None:
-    ring = {"rings": ["domain"], "ring": {"domain": {"forbid": ["env"]}}}
+    ring = {"rings": ["domain"], "ring": {"domain": {"traits": ["no-env"]}}}
     policy = policy_from_mapping(
         {
             "scopes": {
@@ -338,18 +339,17 @@ unresolved-patch-target = "tests"
 [ring.domain]
 external = ["*"]
 may_import = ["*"]
-forbid = [FORBID]
-forbid_at_import = ["env", "filesystem"]
+traits = [FORBID, "no-env-at-import", "no-filesystem-at-import"]
 
 [ring.effects]
 external = ["*"]
 may_import = ["*"]
-forbid = []
+traits = ["permits-effects"]
 
 [ring.adapters]
 external = ["*"]
 may_import = ["*"]
-forbid = []
+traits = ["permits-effects"]
 
 [classify]
 "app" = "domain"
@@ -371,7 +371,7 @@ forbid = []
 "app.elsewhere" = "adapters"
 """.replace(
     "FORBID",
-    ", ".join(f'"{name}"' for name in sorted(EFFECT_CATEGORIES - {"registry"})),
+    ", ".join(f'"{trait_of(name)}"' for name in sorted(EFFECT_CATEGORIES - {"registry"})),
 )
 
 DIRECT = """\
@@ -590,17 +590,14 @@ def test_this_repository_matches_a_full_scan(worker_binary: Path) -> None:
 
 def _strictest(raw: dict) -> Policy:
     """This repository's code under a policy with every effect rule on."""
-    forbidden = sorted(EFFECT_CATEGORIES - {"registry"})  # left unlisted, for the note
+    forbidden = [trait_of(name) for name in sorted(EFFECT_CATEGORIES - {"registry"})]  # one left unlisted, for the note
+    traits = [*forbidden, *(f"{trait}-at-import" for trait in forbidden)]
     return policy_from_mapping(
         {
             **raw,
             "ring": {
-                name: {
-                    **table,
-                    "forbid": forbidden,
-                    "forbid_at_import": forbidden,
-                    "os_branching": False,
-                }
+                # Replaced, so no ring keeps an OS-branching trait; the abstraction requirement is not an effect trait.
+                name: {**table, "traits": [*traits, *({"require-abstract"} & set(table.get("traits", [])))]}
                 for name, table in raw["ring"].items()
             },
             "effects": {"sanctioned": [], "rings": ["adapters"]},
@@ -800,8 +797,8 @@ def test_call_paths_say_what_they_could_not_follow_and_keep_their_identity(
         {
             **SMALL,
             "ring": {
-                "domain": {"external": ["os"], "forbid": ["env"]},
-                "adapters": {"forbid": []},
+                "domain": {"external": ["os"], "traits": ["no-env"]},
+                "adapters": {"traits": ["permits-effects"]},
             },
         }
     )
@@ -864,7 +861,7 @@ def test_command_line_fails_only_on_what_check_fails_on(
         tmp_path,
         {
             "arborescent.toml": 'sources = ["."]\nrings = ["domain", "adapters"]\n'
-            '[ring.domain]\nexternal = ["os"]\nforbid = ["env"]\n'
+            '[ring.domain]\nexternal = ["os"]\ntraits = ["no-env"]\n'
             '[classify]\n"domain" = "domain"\n"adapters" = "adapters"\n',
             "domain.py": domain,
             "adapters.py": "",

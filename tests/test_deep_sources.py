@@ -167,7 +167,7 @@ def test_check_gets_through_a_very_long_chain_of_modules(
     files["pkg/last.py"] = "import os\n\ndef thing(a):\n    os.system(a)\n"
     files["pyproject.toml"] = (
         '[tool.arborescent]\nsources = ["pkg"]\nrings = ["domain"]\n[tool.arborescent.ring.domain]\nexternal = ["os"]\n'
-        'forbid = ["process"]\n[tool.arborescent.classify]\n"pkg*" = "domain"\n'
+        'traits = ["no-process"]\n[tool.arborescent.classify]\n"pkg*" = "domain"\n'
         '[tool.arborescent.module_forbid_imports]\n"pkg.m00000" = ["pkg.last"]\n'
     )
     write_files(tmp_path, files)
@@ -195,7 +195,7 @@ def test_check_reports_an_effect_in_a_module_that_also_holds_a_deep_chain(
     (tmp_path / "pkg" / "m.py").write_text("from pathlib import Path\nimport os\n\nos.system('x')\n" + deep)
     policy = (
         '[tool.arborescent]\nsources = ["pkg"]\nrings = ["domain"]\n[tool.arborescent.ring.domain]\n'
-        'external = ["os", "pathlib"]\nforbid = ["process"]\n[tool.arborescent.classify]\n"pkg*" = "domain"\n'
+        'external = ["os", "pathlib"]\ntraits = ["no-process"]\n[tool.arborescent.classify]\n"pkg*" = "domain"\n'
     )
     (tmp_path / "pyproject.toml").write_text(policy)
     assert main(["--config", str(tmp_path / "pyproject.toml"), "check", "--no-tools", "--no-cache"]) == 1
