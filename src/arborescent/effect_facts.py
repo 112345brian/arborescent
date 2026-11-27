@@ -238,22 +238,22 @@ def _path_binding(node: ast.AST, aliases: dict[str, str]) -> tuple[list[str], as
     return [], None
 
 
-def _scope_local_names(scope: ast.AST) -> set[str]:
+def _scope_local_names(own: Sequence[ast.AST]) -> set[str]:
     """Names one scope binds itself (parameters and plain stores), which hide a module-level name of the same spelling."""
     return {
-        node.arg if isinstance(node, ast.arg) else node.id for node in _own_scope_nodes(scope)
+        node.arg if isinstance(node, ast.arg) else node.id for node in own
         if isinstance(node, ast.arg) or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store))
     }
 
 
-def _scope_path_names(scope: ast.AST, aliases: dict[str, str], inherited: Collection[str] = ()) -> set[str]:
+def _scope_path_names(own: Sequence[ast.AST], aliases: dict[str, str], inherited: Collection[str] = ()) -> set[str]:
     """Names one scope binds to a path: a parameter or variable annotated ``Path``, or assigned a path expression.
 
     ``inherited``: path-valued module-level names the scope can read (``REGISTRY = Path(...)`` then ``REGISTRY.read_text()``
     inside a function), already minus the ones this scope rebinds."""
     bound: set[str] = set(inherited)
     assigns: list[tuple[list[str], ast.expr]] = []
-    for node in _own_scope_nodes(scope):
+    for node in own:
         names, value = _path_binding(node, aliases)
         if value is None:
             bound.update(names)
@@ -278,13 +278,17 @@ def _path_receiver_uses(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[s
         return []
     uses: list[EffectSite] = []
     scopes = [tree, *(n for n in nodes if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef))]
-    module_paths = _scope_path_names(tree, aliases)
-    for scope in scopes:
-        inherited = module_paths - _scope_local_names(scope) if scope is not tree else ()
-        bound = _scope_path_names(scope, aliases, inherited) if scope is not tree else module_paths
+    module_paths: set[str] = set()
+    for scope in scopes:  # the module first: its path names are what the other scopes inherit
+        own = list(_own_scope_nodes(scope))  # walked once, read up to three times
+        if scope is tree:
+            bound = module_paths = _scope_path_names(own, aliases)
+        else:
+            inherited = module_paths - _scope_local_names(own) if module_paths else ()
+            bound = _scope_path_names(own, aliases, inherited)
         if not bound:
             continue
-        for node in _own_scope_nodes(scope):
+        for node in own:
             if isinstance(node, ast.Attribute) and (node.attr in _PATH_IO_METHODS or node.attr in _PATH_QUERY_METHODS) and _is_pathish(node.value, bound, aliases):
                 use = _path_method_use(node, f"pathlib.Path.{node.attr}")
                 if use is not None:
@@ -321,11 +325,19 @@ def _os_branch_imports(node: ast.ImportFrom) -> list[tuple[EffectUse, str]]:
     ]
 
 
-def _reference_use(node: ast.Attribute | ast.Name, aliases: dict[str, str], seams: dict[int, int]) -> EffectUse | None:
-    """A name or attribute chain that resolves to an effectful target, with whether it sits in an injection default."""
+def _reference_use(
+    node: ast.Attribute | ast.Name, aliases: dict[str, str], seams: dict[int, int], categories: dict[str, str | None],
+) -> EffectUse | None:
+    """A name or attribute chain that resolves to an effectful target, with whether it sits in an injection default.
+
+    ``categories`` holds the answers already worked out for this module: a module spells the same few targets many times."""
     target = dotted_name(node, aliases)
-    category = effect_category_of(target) if target is not None else None
-    if target is None or category is None:
+    if target is None:
+        return None
+    if target not in categories:
+        categories[target] = effect_category_of(target)
+    category = categories[target]
+    if category is None:
         return None
     seam = seams.get(id(node), 0) if category in INJECTABLE_EFFECTS else 0
     return EffectUse(node.lineno, category, target, seam)
@@ -572,7 +584,7 @@ def _module_statements(body: Sequence[ast.stmt]) -> Iterable[ast.AST]:
         node = pending.pop()
         if not isinstance(node, _SCOPE_BOUNDARIES):
             yield node
-            pending.extend(ast.iter_child_nodes(node))
+            pending.extend(child_nodes(node))
 
 
 def _type_argument(node: ast.expr) -> ast.expr | None:
@@ -796,6 +808,7 @@ class _Context(NamedTuple):
     rebound: set[str]
     not_references: set[int]  # nodes inside a type annotation, and the callee of a seeded ``random.Random``
     seams: dict[int, int]
+    categories: dict[str, str | None]  # target -> effect category, filled as targets are read
 
 
 def _node_uses(nodes: Sequence[ast.AST], aliases: dict[str, str], context: _Context) -> list[EffectSite]:
@@ -824,7 +837,7 @@ def _expression_uses(
         found.append(use)
     if id(node) in context.not_references or _is_shadowed(node, imported_os_names, context.rebound):
         return found
-    if (use := _reference_use(node, aliases, context.seams)) is not None:
+    if (use := _reference_use(node, aliases, context.seams, context.categories)) is not None:
         found.append(use)
     return found
 
@@ -841,7 +854,7 @@ def module_effects(
     state = _module_state(tree, nodes, aliases, call_names)
     sites: list[EffectSite] = [(None, use) for use in state.uses]
     sites += _path_receiver_uses(tree, nodes, aliases)
-    sites += _node_uses(nodes, aliases, _Context(rebound, hints | seeded, seams))
+    sites += _node_uses(nodes, aliases, _Context(rebound, hints | seeded, seams, {}))
     return ModuleEffects(sites, state.writes, state.locks, state.shared, state.runs, state.foreign)
 
 
