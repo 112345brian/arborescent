@@ -221,7 +221,12 @@ _RENDER_HINTS = {
         " declared in `[coupling.lazy_mounts]`."
         " For the time cost, `arborescent coupling startup --measure` times each `[coupling] entrypoints` module (it runs import-time code)"
     ),
-    Rule.EFFECT_UNLISTED_CATEGORY: " (add it to a ring's `forbid`, which replaces that ring's default list; listing it in any ring ends this note)",
+    Rule.EFFECT_UNLISTED_CATEGORY: (
+        " (add its trait, `no-<category>` (`no-sync-primitives` for `state`), to a ring's `traits`, which replaces that ring's"
+        " default list; listing it in any ring ends this note)"
+    ),
+    # The detail still says "`forbid`" because it is part of the baseline key: this says what to write now.
+    Rule.PACKAGE_CONSTRAINT_PLACEMENT: " (`forbid` is now written as `no-<category>` entries in the ring's `traits`)",
     Rule.UNGUARDED_MODULE_STATE: _STATE_HINT,
     Rule.UNGUARDED_MODULE_STATE_NOTE: _STATE_HINT,
     Rule.VENDOR_FOLDER: (

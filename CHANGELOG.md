@@ -4,14 +4,53 @@
 
 ## Unreleased
 
+### Upgrading from 0.9
+
+**Breaking.** Ring `traits` replace `forbid`, `forbid_at_import`, `require_abstract`, `require_typed_ports`,
+`os_branching` and the root or scope key `middle_forbid` (#222, #223). A policy that uses any of them no longer loads; the
+error names every one, in every scope, with the `traits` line that means the same. Apply those lines, delete the old keys
+and run `check`: findings and baseline keys do not change.
+
+- `forbid = ["clock", "state"]` becomes `traits = ["no-clock", "no-sync-primitives"]` (every other category is
+  `no-<category>`); `forbid = []` becomes `traits = ["permits-effects"]`, **not** `traits = []`, which keeps the default.
+- `forbid_at_import = ["env"]` becomes `"no-env-at-import"`.
+- `require_abstract`, `require_typed_ports` and `os_branching = true` become `"require-abstract"`,
+  `"require-typed-ports"` and `"permits-os-branching"`.
+- `middle_forbid` goes to each ring except the innermost and outermost that had no `forbid`.
+- `@group` references are written out: a group cannot appear in `traits`.
+- Also check scripts and templates that write ring tables, and every child, scoped and shipped policy.
+- Unchanged: `max_reexport_ratio`, `preset`, `forbid_effects`, `dev_tools_forbid`, `taint_seeds`, `port_binding.shadow`.
+
+Details in `docs/configuration.md`, "Traits".
+
 ### Added
+- Ring `traits`, a built-in catalog a project cannot extend (#223, #224, #225): `no-<category>` for every effect category
+  (`no-sync-primitives` for `state`), `no-<category>-at-import`, `no-effects-at-import`, `no-module-state` (`global`,
+  `registry`, `cache`), `no-effects` (every category, growing with releases), `permits-effects`, `require-abstract`,
+  `require-typed-ports` and `permits-os-branching`.
 - `effect-unlisted-category`, an informational note (never fails, never baselined, whole-repository runs only): "N modules
   in restricted rings use X; no ring forbids it" for `console`, `network`, `global`, `registry`, `cache`, `state`,
-  `monotonic`, `host` and `fs-query`. No category became default-on. Listing the category in any ring's `forbid` or
-  `forbid_at_import` ends the note; note that a ring's own `forbid` replaces its default list (#194).
+  `monotonic`, `host` and `fs-query`. No category became default-on. Naming its trait in any ring ends the note; note
+  that a ring's effect traits replace its default (#194).
 - The `entrypoint-eager-commands` note now names `arborescent coupling startup --measure` for the time cost (#215).
 
+### Changed
+- Messages name traits: the `--require-profile` "weakens positional effect defaults" failure lists missing traits, and the
+  `effect-unlisted-category` hint says which trait to add. The `package-constraint-placement` detail still says
+  "tighten the ring's `forbid`" because it is part of the baseline key; its rendered line adds what that is now.
+- The "customised rules" label `forbid` is now `effect traits`.
+
 ### Fixed
+- **An unknown key at the policy root or in a `[scopes.<name>]` table now fails to load.** It was silently ignored, so a
+  typo such as `rign` or `excludes` passed while doing nothing. The error suggests the closest known key, in flat, scoped,
+  child and shipped policies. A root setting written inside a scope (`python`, `exclude`, `lazy_import`, ...) was ignored
+  too and is now an error that says to move it out. Remove or correct the key.
+- **`--require-profile` can now fail where it passed.** The "weakens positional effect defaults" check compared a ring's
+  list with itself, so it fired only for a list without `dynamic-import`. It now holds the innermost ring of each
+  scope to its default: its effect traits must forbid everything it would forbid without any (14 categories). The failure
+  names the missing traits; add them to that ring's `traits`, or remove its effect traits. Every other ring may be
+  loosened (an adapters ring has to allow effects), so a middle ring that lacks `dynamic-import` no longer fails.
+  `check` without `--require-profile` is unchanged.
 - **Coupling closure baselines may grow.** The closure of an entrypoint did not count parent packages, so with
   `app/__init__.py` importing `app.heavy`, `app.cli` was reported as 1 module while importing it loads 3, and a
   `closure_max` budget passed. Closure sizes, `closure_max`, the ratchet, `startup` blame and lazy-mount costs,
@@ -28,12 +67,15 @@
   less. It is now a policy error that suggests the closest known key, in flat, scoped, child and shipped policies, and a
   `ring` or ring entry that is not a table is a policy error rather than a traceback. A config that carries a stray ring
   key now fails to load until the key is removed or corrected.
+- The docs and this repository's policy comment said Arborescent's application ring allows only `threads`; its list
+  also leaves `database`, `network`, `filesystem`, `console` and `global` open. `docs/configuration.md` said
+  `must_be_pure` forbids every category; it forbids the 14 defaults except `patch`. Behaviour is unchanged.
 - `docs/configuration.md` said the innermost ring, and middle rings under `strict`, forbid every effect category. They
   forbid 14 of the 20: not `state`, `monotonic`, `host`, `fs-query`, `registry` or `cache`. Behaviour is unchanged.
 - With a nested `output_dir`, `generate` wrote a `tach.toml` there whose source roots tach never read, so running it
   checked nothing and passed. `tach.toml` is now written at the project root (never over an existing one, and not while
   `tach` is disabled or configured in `pyproject.toml`), and `check` notes a generated nested one so it can be deleted.
-- `forbid_at_import` accepted `global`, `registry` and `cache` but could never report them. They now fire for a call made
+- The import-time ban accepted `global`, `registry` and `cache` but could never report them. They now fire for a call made
   at import into a function that rebinds a global, writes a registry or cache, or is itself `functools.cache`d (one hop, as
   for every other category). A ring that already lists one can gain `effect-at-import` findings.
 - On macOS and Linux tach passed without reading a `source_roots` entry spelled like `./a/b`, `a//b/c`, `a/c/../b` or
@@ -79,9 +121,9 @@
   baselined, prints `lazy-import: N new, 0 baselined; run 'arborescent baseline --adopt lazy-import' to start a ratchet`.
 - Categories `registry` (a function writes a module-level `dict`/`list`/`set`) and `cache` (`functools.cache`/`lru_cache`, or a write to
   a cache- or memo-named module container), both reported as `effect-state` (refs #194). They are detected in every module but are in
-  no default `forbid`, no taint seed and no `must_be_pure`, and `coupling` and `discover --suggest` ignore them, so check and taint
-  output and baselines are unchanged until a ring lists them in `forbid` (or a package in `forbid_effects`). `mixed-purity` is unchanged.
-  The forbid docs now list every detected category. Containers count wherever they are written from: the module's own, one
+  no default, no taint seed and no `must_be_pure`, and `coupling` and `discover --suggest` ignore them, so check and taint
+  output and baselines are unchanged until a ring names `no-registry` or `no-cache` (or a package lists them in `forbid_effects`).
+  `mixed-purity` is unchanged. The category docs now list every detected category. Containers count wherever they are written from: the module's own, one
   imported from another scanned module (re-exports followed), a class-attribute container (through `cls`, the class name or a
   `self` that never rebinds it) and an alias of any of these. `global` slot loaders stay in the existing `global` category.
 - `arborescent purity --path PATH...` and `--module MODULE...` list only the mixed modules in a subset (a diff's changed files,
@@ -104,7 +146,7 @@
 - `practices.unresolved-patch-target = "<tests folder>"` (opt-in, #215): reports each test whose `mock.patch` or
   `monkeypatch.setattr` target names something its first-party module no longer has.
 - `entrypoint-eager-commands` now finds argparse handlers (and call-registered commands) that another module registers.
-- `effect-at-import` (#230), opt-in per ring with `forbid_at_import = [...]`: an effect that runs while a module is imported
+- `effect-at-import` (#230), opt-in per ring with `no-<category>-at-import` traits: an effect that runs while a module is imported
   (module-level statement, class body, parameter default, decorator) fails, including one call into a first-party function
   (`X = load_thing()` where `load_thing` reads a file).
 - `effect-seam-bypassed` (#233), opt-in with `[tool.arborescent.effect_seam_bypassed]`: a function or class given an

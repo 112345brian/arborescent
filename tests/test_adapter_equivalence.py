@@ -14,7 +14,7 @@ from arborescent.practices import run_practices
 from arborescent.testing import FakeToolRunner
 
 FS = LocalFileSystem()
-OPEN_ADAPTERS = {"ring": {**RINGS, "adapters": {**RINGS["adapters"], "forbid": []}}}
+OPEN_ADAPTERS = {"ring": {**RINGS, "adapters": {**RINGS["adapters"], "traits": ["permits-effects"]}}}
 LIB = {
     "app/__init__.py": "",
     "app/facts_a.py": "def lookup(include_pending: bool = False) -> list[str]:\n    return []\n",

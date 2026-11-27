@@ -51,14 +51,14 @@ def test_module_forbid_imports_are_parsed_and_accumulate_for_matching_globs() ->
 def test_custom_rule_configuration_is_named_for_the_check_label() -> None:
     policy = policy_from_mapping({
         **MINI,
-        "ring": ring_with(domain={"external": ["@pure"], "forbid": ["clock"]}),
+        "ring": ring_with(domain={"external": ["@pure"], "traits": ["no-clock"]}),
         "preset": "relaxed",
         "exclude": ["generated/**"],
         "suggestion_threshold": 450,
         "ruff": {"extend-select": ["UP"], "max-complexity": 12},
         "module_forbid_imports": {"app.adapters": ["app.launcher"]},
     })
-    assert policy.customization_labels == ("ruff", "forbid", "thresholds", "preset", "exclude", "module import restrictions")
+    assert policy.customization_labels == ("ruff", "effect traits", "thresholds", "preset", "exclude", "module import restrictions")
 
 
 def test_layers_alone_express_a_policy_where_every_ring_may_import_all_inner_rings() -> None:

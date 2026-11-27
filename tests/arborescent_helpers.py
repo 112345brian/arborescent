@@ -27,7 +27,7 @@ PURE = ["__future__", "dataclasses", "typing", "collections"]
 RINGS: dict[str, Any] = {
     "domain": {"external": ["@pure"]},
     "ports": {"may_import": ["domain"], "external": ["@pure"]},
-    "adapters": {"may_import": ["domain", "ports"], "external": ["@pure", "os", "psutil"], "os_branching": True},
+    "adapters": {"may_import": ["domain", "ports"], "external": ["@pure", "os", "psutil"], "traits": ["permits-os-branching"]},
     "composition": {"may_import": ["*"], "external": ["@pure", "sys"]},
 }
 CLASSIFY: dict[str, str] = {

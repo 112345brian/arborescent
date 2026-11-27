@@ -20,8 +20,8 @@ def test_saved_helper_changes_untouched_caller_and_matches_full_scan(
             "sources": ["."],
             "rings": ["helpers", "domain", "adapters"],
             "ring": {
-                "helpers": {"forbid": [], "external": ["os"]},
-                "domain": {"may_import": ["helpers"], "forbid": ["env"]},
+                "helpers": {"traits": ["permits-effects"], "external": ["os"]},
+                "domain": {"may_import": ["helpers"], "traits": ["no-env"]},
             },
             "classify": {
                 "domain": "domain",
@@ -35,8 +35,8 @@ def test_saved_helper_changes_untouched_caller_and_matches_full_scan(
             "sources": ["."],
             "rings": ["helpers", "domain", "adapters"],
             "ring": {
-                "helpers": {"forbid": [], "external": ["os"]},
-                "domain": {"may_import": ["helpers"], "forbid": []},
+                "helpers": {"traits": ["permits-effects"], "external": ["os"]},
+                "domain": {"may_import": ["helpers"], "traits": ["permits-effects"]},
             },
             "classify": {
                 "domain": "domain",
@@ -99,8 +99,8 @@ def test_deleted_functions_and_syntax_errors_remove_stale_recursive_paths(
             "sources": ["."],
             "rings": ["helpers", "domain", "adapters"],
             "ring": {
-                "helpers": {"forbid": [], "external": ["os"]},
-                "domain": {"may_import": ["helpers"], "forbid": ["env"]},
+                "helpers": {"traits": ["permits-effects"], "external": ["os"]},
+                "domain": {"may_import": ["helpers"], "traits": ["no-env"]},
             },
             "classify": {"domain": "domain", "helper": "helpers"},
         }
@@ -181,8 +181,8 @@ def test_shadowed_import_does_not_create_effect_path(
             "sources": ["."],
             "rings": ["helpers", "domain", "adapters"],
             "ring": {
-                "helpers": {"forbid": [], "external": ["os"]},
-                "domain": {"may_import": ["helpers"], "forbid": ["env"]},
+                "helpers": {"traits": ["permits-effects"], "external": ["os"]},
+                "domain": {"may_import": ["helpers"], "traits": ["no-env"]},
             },
             "classify": {"domain": "domain", "helper": "helpers"},
         }

@@ -104,7 +104,7 @@ def test_facts_fire_whatever_ring_the_module_is_in(repo: Path) -> None:
     """A host cannot loosen the promise by placement: the outer ring allows the clock, the constraint still bites."""
     write_files(repo, {"app/main.py": CLOCK})
     assert subjects(constrained(repo, FACTS, forbid_effects=["clock"])) == {"app.main"}
-    loose = mini_policy(ring=ring_with(composition={"may_import": ["*"], "external": ["time"], "forbid": []}), package={"constraints": {"forbid_effects": ["clock"]}})
+    loose = mini_policy(ring=ring_with(composition={"may_import": ["*"], "external": ["time"], "traits": ["permits-effects"]}), package={"constraints": {"forbid_effects": ["clock"]}})
     assert subjects([v for v in check(repo, loose) if v.rule == FACTS]) == {"app.main"}
 
 
@@ -165,7 +165,7 @@ def test_a_type_only_first_party_import_carries_no_reachability(repo: Path) -> N
 
 
 def test_a_clean_package_passes_both_rules_where_every_ring_forbids(repo: Path) -> None:
-    only_inner = ring_with(composition={"may_import": ["*"], "external": ["sys"], "forbid": ["clock"]})
+    only_inner = ring_with(composition={"may_import": ["*"], "external": ["sys"], "traits": ["no-clock"]})
     policy = mini_policy(ring=only_inner, package={"constraints": {"forbid_effects": ["clock"]}})
     assert not [v for v in check(repo, policy) if v.rule in {FACTS, PLACEMENT}]
 
@@ -205,7 +205,7 @@ def test_loosening_a_ring_fails_placement(repo: Path) -> None:
     """``app.ports`` is in the ports ring. Strict presets forbid every effect there; ``forbid = []`` opens the clock."""
     tight = constrained(repo, PLACEMENT, forbid_effects=["clock"])
     assert subjects(tight) == {"app.main"}  # the outermost ring permits everything and holds app.main
-    loose = mini_policy(ring=ring_with(ports={"may_import": ["domain"], "external": ["@pure"], "forbid": []}), package={"constraints": {"forbid_effects": ["clock"]}})
+    loose = mini_policy(ring=ring_with(ports={"may_import": ["domain"], "external": ["@pure"], "traits": ["permits-effects"]}), package={"constraints": {"forbid_effects": ["clock"]}})
     found = [v for v in check(repo, loose) if v.rule == PLACEMENT]
     assert subjects(found) == {"app.main", "app.ports"}
     ports = next(v for v in found if v.subject == "app.ports")
@@ -219,7 +219,7 @@ def test_placement_fires_before_any_module_misbehaves(repo: Path) -> None:
 
 
 def test_placement_only_names_the_categories_the_ring_permits(repo: Path) -> None:
-    loose = mini_policy(ring=ring_with(ports={"may_import": ["domain"], "external": ["@pure"], "forbid": ["network"]}), package={"constraints": {"forbid_effects": ["clock", "network"]}})
+    loose = mini_policy(ring=ring_with(ports={"may_import": ["domain"], "external": ["@pure"], "traits": ["no-network"]}), package={"constraints": {"forbid_effects": ["clock", "network"]}})
     ports = next(v for v in check(repo, loose) if v.rule == PLACEMENT and v.subject == "app.ports")
     assert "clock" in ports.detail and "network" not in ports.detail
 
@@ -232,7 +232,7 @@ def test_must_be_pure_places_every_module_in_a_ring_that_forbids_every_effect(re
 
 def test_placement_ignores_the_patch_and_os_branching_categories(repo: Path) -> None:
     """``patch`` is a test-only seam and ``os-branching`` is not an effect category: neither makes a ring too loose to be pure."""
-    only_patch_open = ring_with(composition={"may_import": ["*"], "external": ["sys"], "forbid": ["clock", "env", "identity", "randomness", "sleep", "threads", "process", "database", "network", "filesystem", "dynamic-import", "console", "global"]})
+    only_patch_open = ring_with(composition={"may_import": ["*"], "external": ["sys"], "traits": ["no-clock", "no-env", "no-identity", "no-randomness", "no-sleep", "no-threads", "no-process", "no-database", "no-network", "no-filesystem", "no-dynamic-import", "no-console", "no-global"]})
     policy = mini_policy(ring=only_patch_open, package={"constraints": {"must_be_pure": True}})
     assert not [v for v in check(repo, policy) if v.rule == PLACEMENT]
 
@@ -310,7 +310,7 @@ def test_both_rules_get_a_mutation_when_constraints_are_declared(repo: Path) -> 
 
 
 def test_a_probe_is_skipped_with_a_reason_when_it_cannot_be_built(repo: Path) -> None:
-    every_ring_forbids = ring_with(composition={"may_import": ["*"], "external": ["sys"], "forbid": ["clock"]})
+    every_ring_forbids = ring_with(composition={"may_import": ["*"], "external": ["sys"], "traits": ["no-clock"]})
     mutations, skipped = planned(repo, mini_policy(ring=every_ring_forbids, package={"constraints": {"forbid_effects": ["clock"]}}))
     assert PLACEMENT not in {m.rule for m in mutations} and FACTS in {m.rule for m in mutations}
     assert any(reason.startswith("package-constraint-placement:") for reason in skipped)

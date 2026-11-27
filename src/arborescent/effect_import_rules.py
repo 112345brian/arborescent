@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 _NON_PROPAGATING_EFFECTS = frozenset({"os-branching", "patch"})  # not a ring effect, or meaningless once removed from its own module
-# #194: detected, but a policy may well forbid none of them (several are in no default ``forbid``): a note says so, in this order
+# #194: detected, but a policy may well forbid none of them (several are in no default): a note says so, in this order
 _NOTED_WHEN_UNLISTED = ("console", "network", "global", "registry", "cache", "state", "monotonic", "host", "fs-query")
 
 
@@ -187,7 +187,7 @@ _Reached = tuple[str, list[tuple[str, str]]]  # (dotted callee, the (category, t
 
 
 def effect_at_import_findings(context: RuleContext, ring: str, info: ModuleInfo, followable: Followable) -> list[Violation]:
-    """``effect-at-import`` (#230): a category ``ring`` lists in ``forbid_at_import`` runs while ``info`` is imported."""
+    """``effect-at-import`` (#230): a category ``ring`` forbids at import (a ``no-*-at-import`` trait) runs while ``info`` is imported."""
     name = info.name
     forbidden = context.require_policy(name).ring(ring).forbid_at_import
     if not forbidden:
@@ -247,8 +247,8 @@ def _own_effects(info: ModuleInfo, qualname: str) -> list[tuple[str, str]]:
 
 
 def unlisted_category_findings(context: RuleContext, modules: Mapping[str, ModuleInfo]) -> list[Violation]:
-    """``effect-unlisted-category`` (#194, a note): per policy or scope, each category no ring forbids (``forbid`` or
-    ``forbid_at_import``) that modules of restricted rings (those that forbid anything) use directly."""
+    """``effect-unlisted-category`` (#194, a note): per policy or scope, each category no ring forbids (at call time
+    or at import) that modules of restricted rings (those that forbid anything) use directly."""
     policy = context.policy
     local_policies = [(scope.name, scope.policy) for scope in policy.scopes] if policy.scopes else [(None, policy)]
     out: list[Violation] = []

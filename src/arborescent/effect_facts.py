@@ -730,7 +730,7 @@ def _module_state(tree: ast.AST, nodes: Sequence[ast.AST], aliases: dict[str, st
     (item assignment, ``del`` or a mutating method call), directly or through an alias, or a class's container, is a ``registry``
     use, or a ``cache`` use when the container's name says cache or memo; a ``functools.cache``/``lru_cache`` decorator is a
     ``cache`` use. Import-time fills and reads are not uses. A write to an imported name is only noted (``SharedWrite``).
-    Recorded in every module, failing only where a ring lists the category in ``forbid`` (see ``MODULE_STATE_CATEGORIES``).
+    Recorded in every module, failing only where a ring's traits forbid the category (see ``MODULE_STATE_CATEGORIES``).
 
     As ``StateWrite``s (#232): the module's own container and ``global`` writes, minus those inside a ``with <module lock>``."""
     functions = [node for node in nodes if isinstance(node, _DEFS)]

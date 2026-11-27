@@ -25,8 +25,10 @@ The application ring does no file I/O of its own: it reads, writes, lists, copie
 the `FileSystem` port (`Services.fs`), which is why `shutil` and `tempfile` are not on its list. What remains there is
 computation, not I/O: `pathlib` for `Path` values (joining and `relative_to`; never `read_text`, `exists` and the like).
 JSON goes through `FileSystem.read_json`/`write_json` and the stopwatch through the `Clock` port (`Services.clock`).
-The application explicitly allows the `threads` effect because `engine.run_check` runs independent engines in a thread
-pool; it still forbids every other effect category under the strict preset.
+The application ring writes its own effect traits, which replace the default instead of extending it. They forbid
+`clock`, `dynamic-import`, `env`, `identity`, `patch`, `process`, `randomness` and `sleep`, so of the 14 default
+categories it allows `threads` (`engine.run_check` runs independent engines in a thread pool), `database`, `network`,
+`filesystem`, `console` and `global`. The six categories in no default are allowed too.
 `tests/test_filesystem.py` scans
 `application` and `composition` for any file access that bypasses the port.
 

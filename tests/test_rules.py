@@ -181,7 +181,7 @@ def test_entry_script_must_declare_every_third_party_package(repo: Path) -> None
             "app/adapters.py": "import psutil\nimport requests\n",
         },
     )
-    found = run(repo, **ENTRY, ring=ring_with(adapters={"may_import": ["domain", "ports"], "external": ["psutil", "requests"], "os_branching": True}))
+    found = run(repo, **ENTRY, ring=ring_with(adapters={"may_import": ["domain", "ports"], "external": ["psutil", "requests"], "traits": ["permits-os-branching"]}))
     assert [(v.rule, v.subject) for v in found] == [("undeclared-entry-dependency", "run")]
     assert "psutil" in found[0].detail
 
@@ -193,7 +193,7 @@ def test_distribution_mapping_is_used_for_entry_scripts(repo: Path) -> None:
     )
     found = run(
         repo, **ENTRY, dependencies={"lifecycle_runner": "lifecycle-runner"},
-        ring=ring_with(adapters={"may_import": ["domain", "ports"], "external": ["lifecycle_runner"], "os_branching": True}),
+        ring=ring_with(adapters={"may_import": ["domain", "ports"], "external": ["lifecycle_runner"], "traits": ["permits-os-branching"]}),
     )  # fmt: skip
     assert found == []
 

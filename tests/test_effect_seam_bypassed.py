@@ -19,7 +19,7 @@ from arborescent.rules import RuleContext, check_modules, fits_ring
 from arborescent.scan_cache_codec import CACHE_VERSION, facts_from_json, facts_to_json
 from arborescent.selftest import plan, selftest
 
-OPEN = {domain: {"may_import": ["domain"] if domain == "ports" else [], "external": ["*"], "forbid": []} for domain in ("domain", "ports")}
+OPEN = {domain: {"may_import": ["domain"] if domain == "ports" else [], "external": ["*"], "traits": ["permits-effects"]} for domain in ("domain", "ports")}
 
 
 def policy_for(**table: Any) -> Any:

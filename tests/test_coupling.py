@@ -198,7 +198,7 @@ def repo(tmp_path: Path, entrypoints: str = '["app.main"]') -> Path:
         'sources = ["app"]\nrings = ["domain", "ports", "adapters", "composition"]\n'
         '[groups]\npure = ["__future__"]\n[ring.domain]\nexternal = ["@pure"]\n'
         '[ring.ports]\nmay_import = ["domain"]\nexternal = ["@pure"]\n'
-        '[ring.adapters]\nmay_import = ["domain", "ports"]\nexternal = ["@pure", "os"]\nos_branching = true\n'
+        '[ring.adapters]\nmay_import = ["domain", "ports"]\nexternal = ["@pure", "os"]\ntraits = ["permits-os-branching"]\n'
         '[ring.composition]\nmay_import = ["*"]\nexternal = ["@pure", "sys"]\n'
         '[classify]\n"app" = "domain"\n"app.domain" = "domain"\n"app.ports" = "ports"\n"app.adapters" = "adapters"\n"app.main" = "composition"\n'
         f"[coupling]\nentrypoints = {entrypoints}\nhub_fan_in = 2\n[coupling.fan_in_max]\ndomain = 1\n",

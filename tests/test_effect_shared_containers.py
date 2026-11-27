@@ -203,11 +203,11 @@ def found(root: Path, files: dict[str, str], **ring: Any) -> list[tuple[str, str
 
 
 WRITER = {"app/ports.py": "REG = {}\n", "app/adapters.py": "from .ports import REG\n\n\ndef f() -> None:\n    REG['a'] = 1\n"}
-OPEN = {"may_import": ["domain", "ports"], "external": [], "forbid": []}
+OPEN = {"may_import": ["domain", "ports"], "external": [], "traits": ["permits-effects"]}
 
 
 def test_the_writing_modules_ring_decides(repo: Path) -> None:
-    assert found(repo, WRITER, adapters={**OPEN, "forbid": ["registry"]}) == [(Rule.EFFECT_STATE, "app.adapters")]
+    assert found(repo, WRITER, adapters={**OPEN, "traits": ["no-registry"]}) == [(Rule.EFFECT_STATE, "app.adapters")]
 
 
 def test_a_ring_that_does_not_list_registry_keeps_its_findings(repo: Path) -> None:
@@ -237,7 +237,7 @@ def test_a_call_at_import_into_an_imported_registry_writer_fires(repo: Path) -> 
         "app/adapters.py": "from .ports import add\n\nadd('a')\n",
     }
     write_files(repo, files)
-    policy = mini_policy(ring=ring_with(adapters={**OPEN, "forbid_at_import": ["registry"]}))
+    policy = mini_policy(ring=ring_with(adapters={**OPEN, "traits": ["no-registry-at-import"]}))
     scan = FsScanner().scan(policy, repo)
     findings = check_modules(policy, scan.modules, scan.known, scan.entry_deps, scan.arbor_index)
     assert [v.subject for v in findings if v.rule == Rule.EFFECT_AT_IMPORT] == ["app.adapters"]

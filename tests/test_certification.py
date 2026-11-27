@@ -4,7 +4,14 @@ import shutil
 from pathlib import Path
 
 import pytest
-from arborescent_helpers import MINI_FILES, mini_policy, services, tach, write_files
+from arborescent_helpers import (
+    MINI_FILES,
+    mini_policy,
+    ring_with,
+    services,
+    tach,
+    write_files,
+)
 
 from arborescent.adapters import FsScanner, LocalFileSystem, SubprocessToolRunner
 from arborescent.certification import (
@@ -17,10 +24,12 @@ from arborescent.certification import (
     version_warnings,
 )
 from arborescent.check_runner import run_check
+from arborescent.cli import main
 from arborescent.config import policy_from_mapping
 from arborescent.domain import ToolResult
 from arborescent.engine import Options
 from arborescent.installer_adapter import _toml_array_close
+from arborescent.presets import CATEGORY_TRAITS, DEFAULT_FORBID_CATEGORIES
 from arborescent.testing import FakeToolRunner
 
 
@@ -200,3 +209,99 @@ def test_other_tool_versions_warn_but_never_fail(tmp_path: Path) -> None:
     failures = certify(tmp_path, policy, scan, newer, LocalFileSystem())
     assert not any("requires 0.17.2" in failure or "version 0.17.3" in failure for failure in failures)
     assert any("not installed" in failure for failure in certify(tmp_path, policy, scan, FakeToolRunner(set()), LocalFileSystem()))
+
+
+# The innermost ring (per scope) keeps its positional effect default; every other ring may be loosened.
+
+_ALL_DEFAULT_TRAITS = ", ".join(CATEGORY_TRAITS[category] for category in sorted(DEFAULT_FORBID_CATEGORIES))
+
+
+def _traits(categories: object) -> list[str]:
+    return [CATEGORY_TRAITS[category] for category in sorted(categories)]  # type: ignore[call-overload]
+
+
+def _weakened(**overrides: object) -> list[str]:
+    return [failure for failure in _native_minimum(mini_policy(**overrides), object()) if "weakens" in failure]
+
+
+def test_an_innermost_ring_that_drops_categories_names_them_and_the_fix() -> None:
+    kept = sorted(DEFAULT_FORBID_CATEGORIES - {"clock", "env"})
+
+    assert _weakened(ring=ring_with(domain={"traits": _traits(kept)})) == [
+        "ring domain weakens positional effect defaults: its `traits` is missing no-clock, no-env; "
+        "add them to `traits` in [ring.domain], or remove its effect traits to take the default"
+    ]
+
+
+def test_an_innermost_ring_that_permits_effects_is_missing_every_default() -> None:
+    (failure,) = _weakened(ring=ring_with(domain={"traits": ["permits-effects"]}))
+
+    assert f"is missing {_ALL_DEFAULT_TRAITS};" in failure
+
+
+@pytest.mark.parametrize(
+    "forbid",
+    [
+        None,
+        sorted(DEFAULT_FORBID_CATEGORIES),
+        sorted(DEFAULT_FORBID_CATEGORIES - {"dynamic-import"}),  # added to any ring that forbids something
+        sorted(DEFAULT_FORBID_CATEGORIES | {"state", "cache"}),
+    ],
+)
+def test_an_innermost_ring_that_forbids_at_least_the_default_passes(forbid: list[str] | None) -> None:
+    domain = {} if forbid is None else {"traits": _traits(forbid)}
+
+    assert _weakened(ring=ring_with(domain=domain)) == []
+
+
+def test_no_effects_covers_every_default() -> None:
+    assert _weakened(ring=ring_with(domain={"traits": ["no-effects"]})) == []
+
+
+@pytest.mark.parametrize("ring", ["ports", "adapters", "composition"])
+def test_rings_outside_the_innermost_may_allow_effects(ring: str) -> None:
+    assert _weakened(ring=ring_with(**{ring: {"traits": ["permits-effects"]}})) == []
+    assert _weakened(ring=ring_with(**{ring: {"traits": ["no-env"]}})) == []
+
+
+def test_a_single_ring_has_no_positional_default_to_weaken() -> None:
+    assert _weakened(rings=["domain"], ring={"domain": {"traits": ["permits-effects"]}}, classify={"app": "domain"}) == []
+
+
+def test_every_scope_keeps_its_own_innermost_default() -> None:
+    def scope(folder: str, forbid: list[str] | None) -> dict[str, object]:
+        table = {} if forbid is None else {"traits": _traits(forbid)}
+        return {"sources": [folder], "source_roots": ["."], "rings": ["core", "edge"], "ring": {"core": table, "edge": {"traits": ["permits-effects"]}}}
+
+    policy = policy_from_mapping({"scopes": {
+        "alpha": scope("alpha", None),
+        "beta": scope("beta", sorted(DEFAULT_FORBID_CATEGORIES - {"network"})),
+    }})
+
+    assert [failure for failure in _native_minimum(policy, object()) if "weakens" in failure] == [
+        "scope beta ring core weakens positional effect defaults: its `traits` is missing no-network; "
+        "add them to `traits` in [scopes.beta.ring.core], or remove its effect traits to take the default"
+    ]
+
+
+# The callers of `certify`: the check report and the command line.
+
+
+def test_require_profile_fails_the_check_and_prints_the_missing_categories(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    policy = mini_policy(ring=ring_with(domain={"external": ["@pure"], "traits": ["permits-effects"]}))
+    report = run_check(policy, repo, services(), Options(require_profile=True))
+
+    assert any(_ALL_DEFAULT_TRAITS in failure for failure in report.profile_failures)
+    assert not report.ok
+
+    write_files(repo, {"arborescent.toml": (
+        'sources = ["app"]\nrings = ["domain", "composition"]\n[ring.domain]\ntraits = ["no-dynamic-import"]\n'
+        '[classify]\n"app" = "domain"\n"app.*" = "composition"\n'
+    )})
+
+    assert main(["--config", str(repo / "arborescent.toml"), "check", "--require-profile"]) == 1
+    out = capsys.readouterr().out
+    assert "PROFILE FAIL ring domain weakens positional effect defaults: its `traits` is missing no-clock," in out
+    assert "CERTIFIED" not in out

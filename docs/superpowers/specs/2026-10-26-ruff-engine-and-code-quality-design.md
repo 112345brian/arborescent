@@ -128,7 +128,8 @@ subprocess calls in about 12 files, and 31 `monkeypatch`/`mock.patch` calls in t
   selected tools and collects their findings; a repository gets an ongoing CI signal by running
   `arborescent check --require-tools` as a required job.
 - Certification v1 requires Arborescent's strict native minimum: classified first-party coverage, no non-composition
-  wildcard rings, and no weakening of positional effect defaults. It also requires Ruff rules `BLE001`, `E722`,
+  wildcard rings, and an innermost ring (in each scope) whose effective `forbid` contains what it would forbid with
+  `forbid` omitted; every other ring may be loosened. It also requires Ruff rules `BLE001`, `E722`,
   `F401`, `B006`, `C901`, `PLR0912`, `PLR0913`, `PLR0915`, `TID252`, `PLW1514`, `DTZ001`, `T201` and `PLC0415`,
   plus Tach's layer and external-dependency checks. Tighter project rules are welcome. Ruff and Tach use project-owned
   native configs; Arborescent verifies the minimum through canary probes, not TOML parsing. A missing tool, unsupported
@@ -215,7 +216,7 @@ Settled after the builder check (all my calls, not yet seen by the author):
   generated file's drift is advisory and never blocks `check` by itself. Certification instead uses canary probes to
   verify minimum behavior under the active configs.
 - **Certification profile v1.** Arborescent requires its strict native minimum (classified first-party coverage, no
-  non-composition wildcard rings, positional effect defaults not weakened), Ruff's `BLE001`, `E722`, `F401`, `B006`,
+  non-composition wildcard rings, the innermost ring's positional effect default not weakened, per scope; other rings may be loosened), Ruff's `BLE001`, `E722`, `F401`, `B006`,
   `C901`, `PLR0912`, `PLR0913`, `PLR0915`, `TID252`, `PLW1514`, `DTZ001`, `T201` and `PLC0415`, and Tach's layer
   and external-dependency checks. Tighter rules are allowed. Ruff canaries must trigger under the project's active
   config, including nested config, `extend`, per-file ignores, excludes and invocation flags. Tach canaries must show

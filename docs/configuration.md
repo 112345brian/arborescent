@@ -7,6 +7,9 @@ silently.
 
 ## Single-scope top-level keys
 
+An unknown key at the policy root, in a `[scopes.<name>]` table or in a `[ring.<name>]` table is a policy error that
+suggests the closest known one, and a root setting written inside a scope is refused as well.
+
 The keys below define the legacy single-scope form. It remains supported as written. For a repository with independently
 governed libraries, use `[tool.arborescent.scopes.<name>]` instead; the root retains only shared tool and repository
 settings. The two forms cannot be mixed.
@@ -27,7 +30,6 @@ settings. The two forms cannot be mixed.
 | `importable_by` | `{}` | Module glob -> importer globs: the inverse of `module_forbid_imports` (see below). A listed module, and its submodules, may be imported only by modules matching one of the globs. |
 | `construction` | `[]` | Array of tables: what a caller may not or must pass to a class, and which modules may construct it (see below). |
 | `preset` | `"strict"` | How much of the external and OS rules applies: `strict`, `standard` or `relaxed` (see below). |
-| `middle_forbid` | the preset's | Effect categories middle rings may not use, replacing the preset default (see below). |
 | `git_hook` | the preset's | Whether `generate` and `check` manage the `pre-push` hook, replacing the preset default (see below). `true` installs it under any preset; `false` removes an Arborescent-managed one. A hook Arborescent did not write is never touched either way. |
 | `io_modules` | built-in set | Stdlib modules that count as I/O, process or OS. Replaces the default set; `[]` means none. |
 | `groups` | `{}` | Named lists, used as `"@name"` inside any `may_import` or `external` list. |
@@ -71,10 +73,10 @@ repository component. Each scope requires non-empty `sources`, `source_roots` an
 | `source_roots` | required | Paths used to derive dotted module names for this scope. Two scopes may use the same local ring names and module names, but duplicate derived module names are an error. |
 | `rings` | required | This scope's distinct rings, innermost first. |
 | `classify` | `{}` | This scope's module glob -> local ring table. |
-| `ring` | `{}` | Per-ring `may_import`, `external`, `os_branching` and `forbid` tables, local to this scope. |
+| `ring` | `{}` | Per-ring `may_import`, `external`, `traits` and `max_reexport_ratio` tables, local to this scope. |
 | `public` | `[]` | Dotted module patterns consumers may import from this scope. |
 | `depends_on` | `[]` | Scope names this scope may import. Each cross-scope import must target a declared dependency and match its `public` patterns. |
-| `preset`, `middle_forbid`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
+| `preset`, `io_modules`, `groups` | existing defaults | Local external-import, OS and effect defaults, plus named allow-list groups. |
 | `module_forbid_imports`, `importable_by`, `construction`, `dependencies`, `entry_scripts`, `forbid_everywhere`, `forbidden_modules`, `forbid_circular_imports`, `tach_external_exclude`, `require_arbor_annotations`, `require_arbor_annotations_exclude` | existing defaults | Existing architecture settings, evaluated within this scope. |
 
 Root settings such as `python`, `type_checkers`, `disabled_tools`, `output_dir`, `baseline`, `suggestion_threshold`,
@@ -515,7 +517,7 @@ see (a third-party base class, `setattr`, `__getattr__`) is not followed. The ta
 across all scopes. `check --changed` skips the rule.
 
 `shadow` (opt-in per port) looks for a function reaching the port's resource by another route. The resource is an effect
-category you name, as in a ring's `forbid` (`monotonic`, `clock`, `process`, `network`, `database`, `filesystem`, ...;
+category you name, the same names the `no-<category>` traits are built from (`monotonic`, `clock`, `process`, `network`, `database`, `filesystem`, ...;
 not `state`, `registry`, `cache`, `global` or `patch`). Any function or module-level code that uses an effect of that
 category directly, outside the one implementation, gets a `port-shadow` note: a `NOTE` line that never fails `check` and
 never enters the baseline. `time.monotonic` is noted although the adapter calls `time.perf_counter`.
@@ -626,6 +628,12 @@ and skips every existing file. Drift is shown only for files still marked as Arb
 and is informational. `check --require-tools --require-profile` requires Arborescent minimum profile v1 (verified with Ruff 0.17.2,
 Tach 0.35.3) and behaviorally probes the required Ruff rules. A different installed Ruff or Tach version prints
 `PROFILE WARN` and does not fail the check; a missing tool or a rule whose probe no longer fires still fails.
+
+The profile also holds the innermost ring (the first of `rings`, in each scope) to its positional effect default: its
+effect traits must forbid everything the ring would forbid without any (the 14 categories listed under *Rings*
+below; `dynamic-import` is added to any ring that forbids something). Otherwise `PROFILE FAIL` names the missing traits: add
+them to that ring's `traits`, or remove its effect traits. Extra traits are fine. Every other ring may be loosened, because
+some ring has to be allowed to use effects. A one-ring policy has no such default.
 
 Use `disabled_tools` for tools this project deliberately does not use, so their absence does not keep appearing as a
 setup hint or prompt. Disabled tools are skipped even with `--require-tools`; certification still fails if its required
@@ -908,13 +916,18 @@ file, `arborescent.toml` or `[tool.arborescent.package.constraints]` in `pyproje
 
 ```toml
 [package.constraints]
-must_be_pure = true              # bool, default false: no effect use of any category
+must_be_pure = true              # bool, default false: no effect use of the 13 categories listed below
 forbid_effects = ["network"]     # effect categories this package never uses, default []
 ```
 
 `forbid_effects` takes the scanner's effect categories (`clock`, `env`, `identity`, `randomness`, `sleep`, `threads`,
-`process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`); duplicates collapse. They
-apply to paths with role `source`; test, docs and asset paths are exempt.
+`process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`, `state`, `monotonic`, `host`,
+`fs-query`, `registry`, `cache`); duplicates collapse. They apply to paths with role `source`; test, docs and asset paths
+are exempt.
+
+`must_be_pure` rules out the 14 default categories except the test-only `patch`: `clock`, `env`, `identity`, `randomness`,
+`sleep`, `threads`, `process`, `database`, `network`, `filesystem`, `dynamic-import`, `console` and `global`. It does not
+cover `state`, `monotonic`, `host`, `fs-query`, `registry` or `cache`; name those in `forbid_effects`, which adds to it.
 
 There is no blind spot in the schema: an unknown key under `package` or `package.constraints`, an unknown effect name
 (`netwrok`), a non-boolean `must_be_pure`, or a `forbid_effects` that is not a list of names is a policy error. With no
@@ -925,15 +938,16 @@ root, so in multi-scope mode one promise covers every scope and each module is c
 
 - `package-constraint-facts`: the module **uses** a forbidden effect, in whatever ring it sits, so a host cannot loosen the
   promise by placement. `forbid_effects` covers the module's own effect uses (the scanner's per-function analysis and
-  category taxonomy; no second detector). `must_be_pure` forbids every category and also: any non-type-only import of
+  category taxonomy; no second detector). `must_be_pure` forbids its 13 categories (above) and also: any non-type-only import of
   something that is neither first-party nor on the pure allow-list (the structural stdlib `__future__`, `typing`,
   `dataclasses`, `collections`, `enum`, `abc`, plus `math`, `re`, `functools`, `itertools`, `operator`, `json` and similar
   computation-only modules; `arborescent.package_constraint_rules.PURE_STDLIB` is the list), and any import of a first-party
   module from which a forbidden effect is reachable (the existing `effect-via-import` graph: first-party, same scope,
   type-only imports carry nothing).
 - `package-constraint-placement`: the ring the host put the module in **permits** an effect the package forbids (a ring's
-  `forbid` list, or the preset default, leaves it open). Failing here, before any module misbehaves, is the point: tighten the
-  ring or drop the constraint. For `must_be_pure` every effect category counts bar the test-only `patch`.
+  effect traits, or the positional default, leave it open). Failing here, before any module misbehaves, is the point: tighten the
+  ring or drop the constraint. For `must_be_pure` the same 13 categories count. The message still says "tighten the ring's
+  `forbid`": it is part of the finding's baseline key, so it was not reworded when `traits` replaced `forbid`.
 
 Limits: reachability is the file-level import graph, not a call graph, and it does not look inside third-party packages (the
 import itself is refused instead); `must_be_pure` placement compares effects and does not read a ring's `external` list;
@@ -1058,22 +1072,80 @@ Migrating an existing classify-only project:
 |---|---|---|
 | `may_import` | `[]` | Inner rings this ring may import; `["*"]` means every inner ring. A ring may always import itself. An outer ring in this list is a policy error (the onion rule). |
 | `external` | `[]` | Top-level packages (third-party and stdlib) this ring may import; `["*"]` means unrestricted. Which imports actually need an entry depends on the preset. |
-| `os_branching` | `false` | Whether this ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
-| `forbid` | positional preset default | Effect categories this ring may not use: `clock`, `env`, `identity`, `randomness`, `sleep`, `threads`, `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console`, `global`, and, since 0.8.0, `state`, `monotonic`, `host` and `fs-query`, and in the next release `registry` and `cache` (see *Effect categories*). That is every detected category. The positional and preset defaults never include the six newer ones: name them to opt in. |
-| `forbid_at_import` | `[]` | Effect categories (the same names as `forbid`) that may not run while a module of this ring is imported; fires `effect-at-import`. Opt-in, independent of `forbid`: a ring may use an effect inside functions and still ban it at import. See "Effects at import time". |
+| `traits` | `[]` | Names from the built-in catalog (see *Traits*): the effects the ring may not use, and what is required of or permitted to it. An omitted key and `[]` are the same. |
 | `max_reexport_ratio` | unset | A number from 0 to 1: the share of a module's public surface (a static `__all__`, else public top-level bindings; modules with fewer than 5 names are not judged) that may be first-party imports before `reexport-ratio` fires. Leave it unset on rings that legitimately aggregate (a composition root); the exemption is then visible in config. A dynamic `__all__` is ignored in favour of the bindings. Wrapping each name in a forwarding function evades it; that is the forwarded-import rule's job. |
-| `require_abstract` | `false` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
-| `require_typed_ports` | `false` | Every method of a `typing.Protocol` class in this ring must name its return type. A missing return annotation, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set`/`frozenset` or `Mapping[str, Any]` (also inside `Optional`, `\|` unions and string annotations) fires `weakly-typed-port`; `None`, named classes and parameterised containers pass. `__init__` is skipped. Parameters are not checked. |
 
-Any other key in a ring table is a policy error, as is a ring entry that is not a table: a misspelt `forbidd` would
+Any other key in a ring table is a policy error, as is a ring entry that is not a table: a misspelt `trait` would
 otherwise be ignored and enforce less. The error suggests the closest known key.
 
-A ring that is not given a table has no inner imports, no external imports and no OS branching. If `forbid` is omitted,
+A ring that is not given a table has no inner imports, no external imports and no OS branching. Without an effect trait,
 the innermost ring forbids 14 of the 20 categories (`clock`, `env`, `identity`, `randomness`, `sleep`, `threads`,
 `process`, `database`, `network`, `filesystem`, `dynamic-import`, `patch`, `console` and `global`; not `state`,
 `monotonic`, `host`, `fs-query`, `registry` or `cache`), the outermost allows every effect, and middle rings use the
-preset default. Custom ring names follow the same positional defaults. An explicit `forbid = []` allows every effect in that ring; if a
-ring forbids any category, `dynamic-import` is also forbidden automatically.
+preset default. Custom ring names follow the same positional defaults. If a ring forbids any category, `dynamic-import` is
+also forbidden automatically.
+
+## Traits
+
+A ring says what holds for it by naming traits:
+
+```toml
+[tool.arborescent.ring.domain]
+traits = ["no-effects", "require-abstract"]
+
+[tool.arborescent.ring.adapters]
+traits = ["no-clock", "no-env", "no-filesystem-at-import", "permits-os-branching"]
+```
+
+The catalog is built into Arborescent. A project cannot define or redefine a trait, `@group` references are not allowed in
+`traits`, and there is no key that takes a raw category list instead. An unknown name is a policy error that suggests the
+closest one. A numeric setting such as `max_reexport_ratio` is not a trait and stays its own key.
+
+**Effect traits** say what the ring may not use. **A ring with at least one of them replaces its positional default with
+what they list**; a ring with none keeps the default, whatever other traits it has.
+
+| trait | forbids |
+|---|---|
+| `no-<category>` | that one category: `no-clock`, `no-env`, `no-identity`, `no-randomness`, `no-sleep`, `no-threads`, `no-process`, `no-database`, `no-network`, `no-filesystem`, `no-dynamic-import`, `no-patch`, `no-console`, `no-global`, `no-monotonic`, `no-host`, `no-fs-query`, `no-registry`, `no-cache` |
+| `no-sync-primitives` | the `state` category: `threading.Lock`, `Event`, `local` and the other synchronisation primitives (see *Effect categories*). It is not about mutable state in general |
+| `no-module-state` | `global`, `registry` and `cache`: shared state kept in a module |
+| `no-effects` | every category. **It grows when a release adds one** |
+| `permits-effects` | nothing: the explicit "allow all". It cannot be combined with another trait of this table |
+
+**Import-time traits** ban an effect only while a module of the ring is imported (`effect-at-import`, see *Effects at
+import time*). They are independent of the table above: they leave the positional default as it is, and they combine with
+`permits-effects`. Every category has a `no-<category>-at-import` form (`no-sync-primitives-at-import` for `state`), and
+`no-effects-at-import` is all of them. There is no import-time form of `no-module-state`.
+
+**Other traits:**
+
+| trait | meaning |
+|---|---|
+| `require-abstract` | Every public (non-`_`-prefixed) top-level class or function in this ring must be an abstract shape: a class inheriting `abc.ABC`/`typing.Protocol` (or declaring `metaclass=ABCMeta`), or a function whose body is a stub (`...`, `pass`, or `raise NotImplementedError`, past an optional docstring). A concrete member fires `non-abstract-port`. |
+| `require-typed-ports` | Every method of a `typing.Protocol` class in this ring must name its return type. A missing return annotation, `Any`, `object`, a bare `dict`/`list`/`tuple`/`set`/`frozenset` or `Mapping[str, Any]` (also inside `Optional`, `\|` unions and string annotations) fires `weakly-typed-port`; `None`, named classes and parameterised containers pass. `__init__` is skipped. Parameters are not checked. |
+| `permits-os-branching` | This ring may read `os.name` or `sys.platform`. Only checked when the preset limits OS branching. |
+
+### Moving from `forbid` and the other removed keys
+
+`forbid`, `forbid_at_import`, `require_abstract`, `require_typed_ports`, `os_branching` (ring keys) and `middle_forbid`
+(root or scope key) no longer load. The error names every one in the policy, in every scope, with the `traits` line to
+write instead. The rules it follows:
+
+| old | new |
+|---|---|
+| `forbid = ["clock", "state"]` | `traits = ["no-clock", "no-sync-primitives"]`: one `no-<category>` each, `state` being `no-sync-primitives` |
+| `forbid = []` | `traits = ["permits-effects"]` (not `[]`, which means the default) |
+| no `forbid` | no effect trait |
+| `"@group"` in `forbid` or `forbid_at_import` | the traits of the group's categories, written out. Keep the group only if `may_import` or `external` use it |
+| `forbid_at_import = ["env"]` | `"no-env-at-import"`; an empty list is nothing |
+| `require_abstract = true` | `"require-abstract"`; `false` is nothing |
+| `require_typed_ports = true` | `"require-typed-ports"`; `false` is nothing |
+| `os_branching = true` | `"permits-os-branching"`; `false` is nothing |
+| `middle_forbid = [...]` | delete it, and give those `no-<category>` traits to every ring except the innermost and outermost **that had no `forbid`** (`permits-effects` if the list was empty). With one or two rings, just delete it |
+
+All of one ring's results go in one `traits` list. Do not shorten a long list to `no-effects` or `no-module-state` while
+converting: `no-effects` also covers categories added later. `forbid_effects` (package constraints), `dev_tools_forbid`,
+`taint_seeds` and `port_binding.shadow` still take category names: they are not ring settings.
 
 ## Presets
 
@@ -1090,16 +1162,15 @@ For middle rings, `strict` forbids the same 14 categories as the innermost ring 
 `fs-query`, `registry` or `cache`), `standard` forbids `env`, `sleep`, `threads` and `process`,
 and `relaxed` forbids none. The innermost and outermost positional defaults apply under every preset.
 
-`middle_forbid = ["clock", "env"]` replaces that middle-ring default under any preset, so a `relaxed` policy can enforce
-effect categories without the allow-lists `standard` and `strict` also require. A ring's own `forbid` still wins, and
-`dynamic-import` is added whenever a ring forbids anything. In a scoped policy the key is set per scope.
+Effect traits on a middle ring replace that default under any preset, so a `relaxed` policy can enforce effect categories
+without the allow-lists `standard` and `strict` also require.
 
 `io_modules` also drives the generated import-linter contracts, which ban the I/O modules a ring does not list. Under
 `relaxed` the contracts ban only declared third-party packages.
 
 Only `strict` installs the `pre-push` hook by default; `git_hook = true` replaces that default under any preset, and
 `git_hook = false` removes an Arborescent-managed hook (never a foreign one) the next time `generate` or `check` runs. In
-a scoped policy the key is set per scope, like `middle_forbid`. `ARBORESCENT_SKIP_HOOK=1 git push` skips the hook for one
+a scoped policy the key is set per scope. `ARBORESCENT_SKIP_HOOK=1 git push` skips the hook for one
 push without touching other hooks or the `git_hook` setting; `git push --no-verify` is git's own way to skip every hook.
 
 ## Rules Arborescent checks itself
@@ -1143,8 +1214,8 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `effect-host` | a ring that forbids `host` reads `sys.argv`, `sys.stdin`, `locale`, `platform`, the process id, the CPU count or the host name (0.8.0) |
 | `effect-fs-query` | a ring that forbids `fs-query` asks the filesystem a question: `os.path.exists`, `os.getcwd`, `Path.cwd`, `p.exists()`, `shutil.which`... (0.8.0) |
 | `effect-unsanctioned-import` | with `[effects] sanctioned` set, a ring that forbids effects imports a module of an `effects.rings` ring that is not listed as a sanctioned seam and has effects of its own (0.8.0) |
-| `effect-at-import` | a category in a ring's `forbid_at_import` runs while a module of the ring is imported, directly or through one call into a function of a scanned module. See "Effects at import time" |
-| `effect-unlisted-category` | informational, whole-repository runs only: one line per `console`, `network`, `global`, `registry`, `cache`, `state`, `monotonic`, `host` or `fs-query` that no ring of the policy (or scope) lists in `forbid` or `forbid_at_import`, with how many modules of restricted rings (those that forbid anything) use it directly. Listing the category in any ring ends the line (unreleased, #194) |
+| `effect-at-import` | a category a ring's `no-*-at-import` traits name runs while a module of the ring is imported, directly or through one call into a function of a scanned module. See "Effects at import time" |
+| `effect-unlisted-category` | informational, whole-repository runs only: one line per `console`, `network`, `global`, `registry`, `cache`, `state`, `monotonic`, `host` or `fs-query` that no ring of the policy (or scope) forbids, at call time or at import, with how many modules of restricted rings (those that forbid anything) use it directly. Naming its trait in any ring ends the line (unreleased, #194) |
 | `effect-seam-bypassed` | with `effect_seam_bypassed` set, a function (or a method of a class) that was given an injected clock, environment or generator also uses the real one. See "Bypassed effect seams" |
 | `effect-via-import` | a ring forbids an effect that a module it imports (directly or through that module's own imports, same scope, not an `if TYPE_CHECKING` import) uses directly; the message names the import chain |
 | `internal-import` | a ring imports a ring it may not, or a module imports a target prohibited by `module_forbid_imports` (top-level, lazy and `TYPE_CHECKING` imports all count) |
@@ -1173,13 +1244,13 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `port-binding` | a `port_binding` port has no production implementor, or more than its `max` (default 1); also a port that does not exist or is not a Protocol or abstract class. Whole-repository runs only |
 | `port-shadow` | information only (never fails, never baselined): a `port_binding` lists `shadow` categories and code outside the one implementation uses one directly. Whole-repository runs only |
 | `name-collision` | information only (never fails, never baselined): `name_collisions` is set and a field or local (for declared `words`, also a parameter or function name) reuses the name of a type defined in another module. Whole-repository runs only |
-| `non-abstract-port` | a ring with `require_abstract = true` has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
-| `weakly-typed-port` | a ring with `require_typed_ports = true` has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |
+| `non-abstract-port` | a ring with the `require-abstract` trait has a public top-level class or function that is not a recognized abstract shape (the Dependency Inversion Principle: a "ports" ring must hold abstractions, not concrete implementations) |
+| `weakly-typed-port` | a ring with the `require-typed-ports` trait has a `typing.Protocol` method whose return type is missing, `Any`, `object`, a bare container or `Mapping[str, Any]`, so callers cannot be type-checked against the port; allow a deliberate case with a baseline entry |
 | `scope-import` | a module imports another scope without declaring that dependency, or imports a target outside the dependency's `public` patterns |
 | `scope-effect-leak` | a module imports another scope's declared-`public` module, and that module uses an effect the importing ring forbids (one hop, not transitive) |
 | `circular-import` | when `forbid_circular_imports` is enabled, first-party modules form a circular import dependency, including cycles made only of lazy or `TYPE_CHECKING` imports |
 | `external-import` | a ring imports an external package missing from its `external` list (scope set by the preset) |
-| `os-branching` | a ring not marked `os_branching` reads `os.name` or `sys.platform` |
+| `os-branching` | a ring without `permits-os-branching` reads `os.name` or `sys.platform` |
 | `bad-import` | a relative import that points above the package root |
 | `undeclared-entry-dependency` | an entry script lacks a `# /// script` block, or omits a third-party distribution the project imports |
 | `invalid-arbor-annotation` | a module's `__arbor__` annotation is malformed or names an unknown ring |
@@ -1202,7 +1273,7 @@ The ids below are `arborescent.domain.Rule`. They appear in baseline entries (`r
 | `package-public-symbol-dropped` | a module on a package's declared public surface lost a public class or function in its part |
 | `package-private-import` | a module imports another package's module outside the `public` surface that package declares (checked in the origin and in each part) |
 
-| `package-constraint-facts` | a module uses an effect `[package.constraints]` forbids (`forbid_effects`, or any effect under `must_be_pure`), or under `must_be_pure` imports a non-pure external package or a first-party module that reaches one, whatever its ring |
+| `package-constraint-facts` | a module uses an effect `[package.constraints]` forbids (`forbid_effects`, or one of the 13 categories of `must_be_pure`), or under `must_be_pure` imports a non-pure external package or a first-party module that reaches one, whatever its ring |
 | `package-constraint-placement` | the ring a module is placed in permits an effect `[package.constraints]` forbids; tighten the ring or drop the constraint |
 | `package-pyproject-drift` | information only (never fails, never baselined): `package_pyproject` is set and a derived field of an existing package `pyproject.toml` disagrees with the annotations |
 
@@ -1230,8 +1301,11 @@ rules count a use at module level and one inside a function the same way; `effec
 
 ```toml
 [tool.arborescent.ring.application]
-forbid = []                                                    # functions may use effects
-forbid_at_import = ["filesystem", "env", "network", "process", "clock", "randomness"]   # importing may not
+traits = [
+    "permits-effects",                                                          # functions may use effects
+    "no-filesystem-at-import", "no-env-at-import", "no-network-at-import",      # importing may not
+    "no-process-at-import", "no-clock-at-import", "no-randomness-at-import",
+]
 ```
 
 **What counts as import time:** module-level statements (including under `if`, `try` and `with`), class bodies, parameter
@@ -1418,7 +1492,7 @@ signal compares a module with its importers and peers. Three signals:
 
 | signal | stated precisely | limits |
 |---|---|---|
-| could sit in an inner ring | the module defines at least one top-level class or function, has no `__main__` guard, defines no abstract class or stub function, is not an `entry_scripts` module, and passes every per-module rule of a more inner ring (internal imports, external packages, OS branching, effects, `require_abstract`). The note names the innermost such ring, and the function-level taint pass below appends which of the module's own functions it found reaching I/O, if any. | The scanner does not see `open()`, `print()`, `input()`, calls through objects that do I/O, or what a function does with its arguments, so "passes the rules" is weaker than "is pure" (the taint pass narrows this, it does not close it — see its own limits below). If your rings share one external allow-list, nearly everything fits the inner ring and the note carries no information. A ring can be right for its role (an adapter that only drives a port) even though its facts fit an inner one. |
+| could sit in an inner ring | the module defines at least one top-level class or function, has no `__main__` guard, defines no abstract class or stub function, is not an `entry_scripts` module, and passes every per-module rule of a more inner ring (internal imports, external packages, OS branching, effects, `require-abstract`). The note names the innermost such ring, and the function-level taint pass below appends which of the module's own functions it found reaching I/O, if any. | The scanner does not see `open()`, `print()`, `input()`, calls through objects that do I/O, or what a function does with its arguments, so "passes the rules" is weaker than "is pure" (the taint pass narrows this, it does not close it — see its own limits below). If your rings share one external allow-list, nearly everything fits the inner ring and the note carries no information. A ring can be right for its role (an adapter that only drives a port) even though its facts fit an inner one. |
 | composition-shaped | the module is not in the outermost ring, and the outermost ring may import every ring (`may_import = ["*"]`); the module defines functions and no class, no other module imports it, and it imports two or more distinct modules of its own ring plus at least one module of an inner ring. | It shows the shape of an entrypoint that wires adapters to a use case, not that it constructs or calls anything. Nothing is said about what the wiring does. A leaf script that is meant to be an adapter will match. |
 | program and library | the module has a top-level `if __name__ == "__main__":` and at least one other module imports it, and it is not in the outermost ring when that ring may import every ring (where programs belong). The function-level taint pass below appends which of the module's own functions reach I/O, if any. | It cannot tell which functions are pure and which read a database beyond what the taint pass resolves, so it reports the mix, not every part that should move. A `__main__` guard that only calls `main()` still counts. |
 
@@ -1684,7 +1758,7 @@ Not measured: `argv` paths such as `backfill --help`, cold against warm starts, 
 
 ## Effect categories and the `[effects]` table
 
-Every direct use of an effectful API is classified into a category; a ring's `forbid` list decides which categories fail there
+Every direct use of an effectful API is classified into a category; a ring's effect traits (or its positional default) decide which categories fail there
 (`effect-<category>`), and `effect-via-import` carries the same categories across imports. What each category matches:
 
 | category | matches |
@@ -1697,7 +1771,7 @@ Every direct use of an effectful API is classified into a category; a ring's `fo
 | `randomness` | `random.*`, `secrets.*`, `os.urandom`. **`random.Random(<seed>)` is deterministic and does not count**; `random.Random()`, `Random(None)`, `SystemRandom` and the module-level functions do |
 | `sleep` | `time.sleep`, `asyncio.sleep` |
 | `threads` | `threading.Thread`/`Timer`, `ThreadPoolExecutor`, `multiprocessing.pool.ThreadPool` and the rest of `threading` that starts or inspects threads |
-| `state` | `threading.Lock`/`RLock`/`Semaphore`/`BoundedSemaphore`/`Event`/`Condition`/`Barrier`/`local` (0.8.0; they guard shared state, they create no thread, so "inject a port" is the wrong remedy and the category is not in any default `forbid`) |
+| `state` | `threading.Lock`/`RLock`/`Semaphore`/`BoundedSemaphore`/`Event`/`Condition`/`Barrier`/`local` (0.8.0; they guard shared state, they create no thread, so "inject a port" is the wrong remedy and the category is in no default) |
 | `process` | `subprocess`, `multiprocessing`, `ProcessPoolExecutor`, `os.system`/`spawn*`/`exec*` |
 | `filesystem` | `open`, `os` file operations, `shutil`, `tempfile`, `glob`, and read/write/`mkdir`/`glob`/`stat`... methods on `Path(...)` **or on a name bound to a path** (0.8.0: a parameter or variable annotated `Path`, or assigned `Path(...)`, `a / b`, `p.parent`, `p.resolve()`; resolved per function, so a `str` of the same name elsewhere is not a path; needs `import pathlib`) |
 | `fs-query` | questions asked of the filesystem: `exists`/`is_file`/`is_dir`/`resolve`/`expanduser`/`samefile` on a path, `Path.cwd`/`home`, `os.path.exists`/`isfile`/`getsize`/`getmtime`/`abspath`/`realpath`/`expanduser`, `os.getcwd`, `os.access`, `shutil.which`, `tempfile.gettempdir` (0.8.0) |
@@ -1715,18 +1789,18 @@ call it. A bare parameter default naming an effect, and since 0.8.0 a `lambda` d
 (`clock=lambda: datetime.now(UTC)`), is an injection seam under the default `effect_defaults`; arguments passed *into* that
 call are still uses.
 
-Four categories were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`). They are valid in every `forbid`, `forbid_effects`,
+Four categories were added in 0.8.0 (`state`, `monotonic`, `host`, `fs-query`). They have `no-*` traits, are valid in every `forbid_effects`,
 `dev_tools_forbid` and `mixed_purity.kinds` list but are in **no default**: a policy that does not name them keeps its findings,
 except that the extended `Path` detection (a path held in a variable) and the narrower `dynamic-import`, `threads`
 and `randomness` definitions change which modules the pre-existing categories report. `must_be_pure` keeps meaning "every
-pre-0.8.0 category"; list the new ones under `forbid_effects` to add them.
+pre-0.8.0 category but `patch`"; list the new ones under `forbid_effects` to add them.
 
 ### Module-level state: `registry` and `cache` (#194)
 
 `global x` rebinding was already the `global` category. Two further ways of keeping shared state in a module are detected (unreleased), each in
 its own category so a ring opts in to exactly what it means to ban. Both report as `effect-state` (the same rule id as locks, `state`), are in
-no default `forbid`, are not taint seeds and are not part of `must_be_pure`; `coupling` accessor counts and `discover --suggest` evidence ignore
-them. A policy that does not list them in a `forbid` keeps every finding and baseline entry it had.
+no default, are not taint seeds and are not part of `must_be_pure`; `coupling` accessor counts and `discover --suggest` evidence ignore
+them. A policy that does not name their traits keeps every finding and baseline entry it had.
 
 - **Registry.** A module-level name bound (at the top of the module) to a `dict`/`list`/`set` literal, comprehension or constructor
   (`dict()`, `defaultdict(...)`, `OrderedDict`, `Counter`, `deque`) is a registry when a function or method writes it: `REG[k] = v`, `REG[k] += 1`,
@@ -1751,7 +1825,7 @@ them. A policy that does not list them in a `forbid` keeps every finding and bas
   `cache` or `memo` is also `cache`, not `registry`. A hand-rolled `global _x; if _x is None: _x = load()` slot is the `global` category.
 
 `mixed-purity` is unchanged: it keeps its own `state` and `memo` kinds for the same writes and decorators, and a `mixed_purity.kinds` list cannot
-name `registry` or `cache`. Every detected category, for a `forbid` list: `clock`, `monotonic`, `env`, `host`, `identity`, `randomness`, `sleep`,
+name `registry` or `cache`. Every detected category (the ring trait is `no-<category>`, `no-sync-primitives` for `state`): `clock`, `monotonic`, `env`, `host`, `identity`, `randomness`, `sleep`,
 `threads`, `state`, `process`, `filesystem`, `fs-query`, `network`, `database`, `dynamic-import`, `console`, `global`, `registry`, `cache`, `patch`.
 
 ### Unguarded module state: `[tool.arborescent.unguarded_module_state]` (#232)
@@ -1847,7 +1921,7 @@ kinds = ["clock", "env", "filesystem", "logging", "memo", "state"]   # default: 
 ambient = ["myapp.state.state_root", "myapp.env.*"]                    # globs on the absolute dotted name of an ambient lookup
 exclude_rings = ["entrypoints", "effects"]                             # default []: rings whose modules are never reported (they are meant to be effectful)
 rings = ["domain", "application"]                                      # default []: when set, the only rings the rule looks at
-skip_unrestricted_rings = true                                         # default false: skip every ring whose effective `forbid` is empty
+skip_unrestricted_rings = true                                         # default false: skip every ring that forbids no effect
 weak_kinds = ["console", "logging", "memo"]                            # default []: effects that alone do not make a module worth splitting
 
 [[tool.arborescent.mixed_purity.allow]]
@@ -1872,7 +1946,7 @@ module (mixed or not), the effect kind, the line and the call behind an "effectf
 output to a report of a wrong label.
 
 **Rings.** `rings` limits the rule to the listed rings (a name that is not a declared ring is an error); `exclude_rings` removes rings;
-`skip_unrestricted_rings = true` skips every ring whose effective `forbid` is empty, since effects are allowed there. The three
+`skip_unrestricted_rings = true` skips every ring that forbids no effect, since effects are allowed there. The three
 combine and all apply to `arborescent purity` and to `selftest`.
 
 **Weak kinds.** `weak_kinds` names effects that alone should not ask for a split. A module whose effects are all weak is

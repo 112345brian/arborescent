@@ -23,6 +23,7 @@ from arborescent.facts import ModuleInfo, extract
 from arborescent.package_constraint_rules import forbidden_by
 from arborescent.package_constraints import PackageConstraints
 from arborescent.presets import (
+    CATEGORY_TRAITS,
     DEFAULT_FORBID_CATEGORIES,
     EFFECT_CATEGORIES,
     MODULE_STATE_CATEGORIES,
@@ -93,7 +94,7 @@ def test_default_check_output_is_unchanged(repo: Path) -> None:
 
 def test_effect_via_import_default_is_unchanged(repo: Path) -> None:
     write_files(repo, {"app/ports.py": STATE_MODULE, "app/adapters.py": "from . import ports\n\n\ndef go() -> None:\n    ports.register('x')\n"})
-    rings = ring_with(adapters={"may_import": ["domain", "ports"], "external": [], "forbid": ["console", "global"]})
+    rings = ring_with(adapters={"may_import": ["domain", "ports"], "external": [], "traits": ["no-console", "no-global"]})
     assert effect_rules(repo, ring=rings) == []
 
 
@@ -207,8 +208,8 @@ def test_the_unsanctioned_guard_counts_module_state_only_where_the_importer_forb
         "app/adapters.py": "from . import ports\n",
     })
     rings = ring_with(
-        ports={"may_import": ["domain"], "external": ["functools"], "forbid": []},
-        adapters={"may_import": ["domain", "ports"], "external": [], "forbid": forbid},
+        ports={"may_import": ["domain"], "external": ["functools"], "traits": ["permits-effects"]},
+        adapters={"may_import": ["domain", "ports"], "external": [], "traits": [CATEGORY_TRAITS[category] for category in forbid]},
     )
     found = effect_rules(repo, ring=rings, effects={"sanctioned": [], "rings": ["ports"]})
     assert [rule for rule, _ in found] == expected
@@ -225,26 +226,26 @@ def test_each_category_is_valid_in_forbid_and_maps_to_effect_state() -> None:
 
 def test_forbidding_registry_fires_only_for_the_registry(repo: Path) -> None:
     write_files(repo, {"app/domain.py": STATE_MODULE})
-    found = effect_rules(repo, ring=ring_with(domain={"external": ["functools"], "forbid": ["registry"]}))
+    found = effect_rules(repo, ring=ring_with(domain={"external": ["functools"], "traits": ["no-registry"]}))
     assert found == [("effect-state", "app.domain")] * 2  # _REGISTRY and _NAMES, not the cache or the lru_cache loader
 
 
 def test_forbidding_cache_fires_only_for_the_cache(repo: Path) -> None:
     write_files(repo, {"app/domain.py": STATE_MODULE})
-    found = effect_rules(repo, ring=ring_with(domain={"external": ["functools"], "forbid": ["cache"]}))
+    found = effect_rules(repo, ring=ring_with(domain={"external": ["functools"], "traits": ["no-cache"]}))
     assert found == [("effect-state", "app.domain")] * 2  # the `_cache` write and the `lru_cache` loader
 
 
 def test_forbidding_the_lock_category_alone_keeps_its_old_meaning(repo: Path) -> None:
     write_files(repo, {"app/domain.py": STATE_MODULE})
-    assert effect_rules(repo, ring=ring_with(domain={"external": ["functools"], "forbid": ["state"]})) == []
+    assert effect_rules(repo, ring=ring_with(domain={"external": ["functools"], "traits": ["no-sync-primitives"]})) == []
 
 
 def test_effect_via_import_carries_an_opted_in_category(repo: Path) -> None:
     write_files(repo, {"app/ports.py": STATE_MODULE, "app/adapters.py": "from . import ports\n\n\ndef go() -> None:\n    ports.register('x')\n"})
     rings = ring_with(
-        ports={"may_import": ["domain"], "external": ["functools"], "forbid": []},
-        adapters={"may_import": ["domain", "ports"], "external": [], "forbid": ["registry"]},
+        ports={"may_import": ["domain"], "external": ["functools"], "traits": ["permits-effects"]},
+        adapters={"may_import": ["domain", "ports"], "external": [], "traits": ["no-registry"]},
     )
     assert ("effect-via-import", "app.adapters") in effect_rules(repo, ring=rings)
 
@@ -263,10 +264,11 @@ def test_scanner_cache_round_trips_the_new_uses(repo: Path) -> None:
 def test_every_category_has_a_rule_and_a_documented_row() -> None:
     assert set(EFFECT_RULES) == EFFECT_CATEGORIES
     docs = (ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
-    forbid_row = next(line for line in docs.splitlines() if line.startswith("| `forbid` |"))
+    trait_row = next(line for line in docs.splitlines() if line.startswith("| `no-<category>` |"))
     table = docs.split("## Effect categories and the `[effects]` table", 1)[1].split("###", 1)[0]
     for category in EFFECT_CATEGORIES:
-        assert f"`{category}`" in forbid_row, f"`forbid` row does not list {category}"
+        trait = CATEGORY_TRAITS[category]
+        assert f"`{trait}`" in (trait_row if trait == f"no-{category}" else docs), f"the traits table does not list {trait}"
         assert re.search(rf"^\| `{re.escape(category)}` \|", table, re.MULTILINE), f"category table has no row for {category}"
     assert "taint_seeds" in docs
 

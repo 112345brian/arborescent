@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
     from .facts import ModuleInfo
     from .ports import FileSystem, ScanResult, ToolRunner
 
-from .domain import NOISE_DIRS, ToolResult
+from .domain import NOISE_DIRS, ToolResult, trait_of
 from .generated_config import has_own_importlinter_config, is_generated
 
 PROFILE = "v1"
@@ -96,11 +97,29 @@ def _native_scope_minimum(scope_name: str, policy: ArchitecturePolicy) -> list[s
             failures.append(f"{prefix}ring {rule.name} has wildcard external access")
         if rule.name != outer and "*" in rule.may_import:
             failures.append(f"{prefix}ring {rule.name} has wildcard internal imports")
-    for rule in policy.rings[:-1]:
-        required = policy.forbidden_effects(rule.name)
-        if rule.forbid is not None and not required <= rule.forbid:
-            failures.append(f"{prefix}ring {rule.name} weakens positional effect defaults")
+    failures.extend(_innermost_effects(scope_name, policy))
     return failures
+
+
+def _innermost_effects(scope_name: str, policy: ArchitecturePolicy) -> list[str]:
+    """The innermost ring must forbid at least what it would with no effect trait.
+
+    Only that ring: an outer one exists to hold effects (an adapters ring must be allowed to use them).
+    """
+    ring = policy.rings[0]
+    if ring.forbid is None:
+        return []
+    defaulted = replace(policy, rings=(replace(ring, forbid=None), *policy.rings[1:]))
+    missing = sorted(defaulted.forbidden_effects(ring.name) - policy.forbidden_effects(ring.name))
+    if not missing:
+        return []
+    prefix = f"scope {scope_name} " if scope_name else ""
+    table = f"[scopes.{scope_name}.ring.{ring.name}]" if scope_name else f"[ring.{ring.name}]"
+    traits = ", ".join(trait_of(category) for category in missing)
+    return [
+        f"{prefix}ring {ring.name} weakens positional effect defaults: its `traits` is missing {traits}; "
+        f"add them to `traits` in {table}, or remove its effect traits to take the default"
+    ]
 
 
 def _installed_version(root: Path, runner: ToolRunner, executable: str) -> str:
