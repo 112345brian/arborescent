@@ -1,13 +1,13 @@
 """Opt-in save analysis for a project with an Arborescent policy.
 
-It reports only ``PARITY_RULES``, which match a fresh full scan, plus its own ``effect-via-call``. A clean result here
-does not mean ``arborescent check`` passes: no other rule is evaluated and no baseline is applied.
+``violations`` and ``notes`` hold only ``PARITY_RULES``, which match a fresh full scan of this project. ``call_paths``
+is advisory evidence of its own (``effect-via-call``), which ``arborescent check`` has no equivalent of. A clean result
+here does not mean ``arborescent check`` passes: no other rule is evaluated and no baseline is applied.
 """
 
 from __future__ import annotations
 
 import argparse
-import ast
 import json
 import subprocess
 import sys
@@ -18,17 +18,21 @@ from typing import TypedDict, cast
 
 from arborescent.adapters import FsScanner, LocalFileSystem, ScanData
 from arborescent.config import load_policy
-from arborescent.declaration_facts import arbor_annotation, script_deps
-from arborescent.domain import Policy, Rule, Violation
+from arborescent.domain import (
+    EFFECT_RULES,
+    INFORMATIONAL_RULES,
+    Policy,
+    Rule,
+    Violation,
+)
 from arborescent.effect_categories import effect_category_of
-from arborescent.engine import discovery_findings
-from arborescent.facts import SourceFacts
-from arborescent.import_syntax import raw_imports
+from arborescent.effect_import_rules import unlisted_category_findings
+from arborescent.engine import discovery_findings, patch_findings
+from arborescent.facts import SourceFacts, extract
 from arborescent.rules import RuleContext, check_modules
 
-# The rules decided by file discovery, module names, imports, `__arbor__` and PEP 723 metadata alone. Every other rule
-# needs facts the worker does not supply, so its findings are dropped rather than reported from partial facts.
-PARITY_RULES: frozenset[str] = frozenset(
+# `PARITY_RULES` are the rules `test_parity.py` proves equal to a full scan. Findings of every other rule are dropped.
+_IMPORT_RULES = frozenset(
     {
         Rule.ARBOR_RING_MISMATCH,
         Rule.BAD_IMPORT,
@@ -50,6 +54,20 @@ PARITY_RULES: frozenset[str] = frozenset(
         Rule.WILDCARD_RING,
     }
 )
+_EFFECT_PARITY_RULES = frozenset(EFFECT_RULES.values()) | {
+    Rule.EFFECT_AT_IMPORT,
+    Rule.EFFECT_SEAM_BYPASSED,
+    Rule.EFFECT_UNLISTED_CATEGORY,
+    Rule.EFFECT_UNSANCTIONED_IMPORT,
+    Rule.EFFECT_VIA_IMPORT,
+    Rule.OS_BRANCHING,
+    Rule.SCOPE_EFFECT_LEAK,
+    Rule.UNGUARDED_MODULE_STATE,
+    Rule.UNGUARDED_MODULE_STATE_NOTE,
+    Rule.UNREACHABLE_PATCH,
+    Rule.UNRESOLVED_PATCH_TARGET,
+}
+PARITY_RULES: frozenset[str] = _IMPORT_RULES | _EFFECT_PARITY_RULES
 EFFECT_TARGETS = ("os.getenv",)
 
 
@@ -60,6 +78,7 @@ class Source(TypedDict):
 
 class ModuleEvidence(TypedDict):
     syntax_error: bool
+    unresolved_calls: int
 
 
 class Effect(TypedDict):
@@ -105,62 +124,66 @@ class Worker:
 
 
 @dataclass(frozen=True)
-class Finding(Violation):
+class CallPath(Violation):
+    """``effect-via-call``: a function that reaches a forbidden effect through calls.
+
+    Its baseline identity (``key``) names only the rule, module, ring, function and effect category, so moved lines and
+    a different route to the same effect keep it. The route is evidence, in ``line``, ``target`` and ``chain``."""
+
     chain: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Result:
     parsed: int
-    violations: tuple[Finding, ...]
+    # `PARITY_RULES` findings: those `check` fails on (before its baseline), and those it only reports.
+    violations: tuple[Violation, ...]
+    notes: tuple[Violation, ...]
+    # Advisory: no full-scan equivalent, never a failure.
+    call_paths: tuple[CallPath, ...]
+    # Where `call_paths` may miss a path: module -> calls not followed, for modules whose ring forbids a traced effect.
+    unresolved_calls: dict[str, int]
     syntax_errors: tuple[str, ...]
-    # Valid Python the worker's grammar rejects: call evidence from these files is missing.
+    # Valid Python the worker's grammar rejects: `call_paths` evidence from these files is missing.
     incomplete: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class _Headline:
-    """What CPython decides for a file: whether it parses, its imports, and the metadata that selects modules and rings."""
+class _Parsed:
+    """One file as the full scan reads it, or empty facts when CPython rejects it."""
 
     source: str
     facts: SourceFacts
     syntax_error: bool
 
 
-def _headline(source: str) -> _Headline:
+def _parse(source: str, path: str) -> _Parsed:
     try:
-        tree = ast.parse(source)
+        return _Parsed(source, extract(source, path), False)
     except (SyntaxError, ValueError, RecursionError, MemoryError):
-        return _Headline(source, SourceFacts((), (), None), True)
-    ring, error, role, reason = arbor_annotation(tree)
-    facts = SourceFacts(
-        raw_imports(tree),
-        (),
-        script_deps(source),
-        arbor_ring=ring,
-        arbor_error=error,
-        arbor_role=role,
-        arbor_reason=reason,
-    )
-    return _Headline(source, facts, False)
+        return _Parsed(source, SourceFacts((), (), None), True)
 
 
-def _effect_findings(evidence: Evidence, context: RuleContext) -> list[Finding]:
-    findings: list[Finding] = []
+def _forbidden_in(context: RuleContext, name: str) -> tuple[str, frozenset[str]]:
+    """The module's ring and the effects it forbids; nothing for developer tooling and unclassified modules."""
+    if name in context.tool_modules:  # developer tooling has no ring
+        return "", frozenset()
+    owner = context.policy_for(name)
+    ring = context.resolve_ring(name)
+    if owner is None or ring is None:
+        return "", frozenset()
+    return ring, owner.forbidden_effects(ring)
+
+
+def _call_paths(evidence: Evidence, context: RuleContext) -> list[CallPath]:
+    findings: list[CallPath] = []
     for effect in evidence["effects"]:
         name = effect["module"]
-        if name in context.tool_modules:  # developer tooling has no ring
-            continue
-        owner = context.policy_for(name)
-        ring = context.resolve_ring(name)
+        ring, forbidden = _forbidden_in(context, name)
         category = effect_category_of(effect["target"])
-        if (
-            owner is not None
-            and ring is not None
-            and category in owner.forbidden_effects(ring)
-        ):
+        if category in forbidden:
             findings.append(
-                Finding(
+                CallPath(
                     "effect-via-call",
                     name,
                     f"[{ring}] {effect['function']} reaches forbidden {category} effect",
@@ -169,12 +192,21 @@ def _effect_findings(evidence: Evidence, context: RuleContext) -> list[Finding]:
                     chain=tuple(effect["chain"]),
                 )
             )
-    return findings
+    return sorted(findings, key=lambda found: (found.key, found.line, found.chain))
+
+
+def _unresolved_calls(evidence: Evidence, context: RuleContext) -> dict[str, int]:
+    traced = {effect_category_of(target) for target in EFFECT_TARGETS}
+    return {
+        name: facts["unresolved_calls"]
+        for name, facts in sorted(evidence["modules"].items())
+        if facts["unresolved_calls"] and traced & _forbidden_in(context, name)[1]
+    }
 
 
 @dataclass(frozen=True)
 class _Checked:
-    """Everything the parity rules read, so a save that leaves it alone reuses their findings."""
+    """Everything ``_scan_findings`` reads, so a save that leaves it alone reuses its findings."""
 
     policy: Policy
     scan: ScanData
@@ -190,26 +222,16 @@ def _context(checked: _Checked) -> RuleContext:
     )
 
 
-def _parity_findings(checked: _Checked) -> list[Finding]:
+def _scan_findings(checked: _Checked) -> list[Violation]:
+    """What the full scan's own rule functions find from the policy and the scan alone."""
     context = _context(checked)
     scan = checked.scan
     found = check_modules(
         checked.policy, scan.modules, scan.known, scan.entry_deps, context
     )
     found += discovery_findings(context, scan)
-    return [
-        Finding(
-            v.rule,
-            v.subject,
-            v.detail,
-            line=v.line,
-            target=v.target,
-            hint=v.hint,
-            root_cause=v.root_cause,
-        )
-        for v in found
-        if v.rule in PARITY_RULES
-    ]
+    found += unlisted_category_findings(context, scan.modules)
+    return found
 
 
 class Analysis:
@@ -218,34 +240,44 @@ class Analysis:
     def __init__(self, worker: Worker, root: Path) -> None:
         self._worker = worker
         self._root = root.resolve()
+        self._fs = LocalFileSystem()
         # The full scan's own discovery and module selection. No fact cache, so every refresh reads every source.
         self._scanner = FsScanner(extractor=self._extract)
-        self._parsed: dict[str, _Headline] = {}
-        self._seen: dict[str, _Headline] = {}  # the files this refresh's scan read
+        self._parsed: dict[str, _Parsed] = {}
+        self._seen: dict[str, _Parsed] = {}  # the files this refresh's scan read
         self._sources: dict[str, Source] = {}
         self._evidence: Evidence | None = None
-        self._scan: ScanData | None = None
-        self._policy: Policy | None = None
-        self._result: Result | None = None
         self._checked: _Checked | None = None
-        self._parity: list[Finding] = []
+        self._found: list[Violation] = []
 
     def _extract(self, source: str, path: str) -> SourceFacts:
-        headline = self._parsed.get(path)
-        if headline is None or headline.source != source:
-            headline = self._parsed[path] = _headline(source)
-        self._seen[path] = headline
-        return headline.facts
+        parsed = self._parsed.get(path)
+        if parsed is None or parsed.source != source:
+            parsed = self._parsed[path] = _parse(source, path)
+        self._seen[path] = parsed
+        return parsed.facts
 
-    def refresh(self, policy: Policy) -> Result:
+    def _broken(self, path: str) -> bool:
+        return path in self._seen and self._seen[path].syntax_error
+
+    def _scan(self, policy: Policy) -> ScanData:
         self._seen = {}
         scan = self._scanner.scan(policy, self._root)
+        # A full scan leaves out a test file that does not parse, so its empty facts must not count as a test.
+        tests = {
+            path: facts
+            for path, facts in scan.test_facts.items()
+            if not self._broken(path)
+        }
+        return replace(scan, test_facts=tests)
+
+    def _update(self, scan: ScanData) -> tuple[int, Evidence]:
         sources: dict[str, Source] = {}
         for name, info in scan.modules.items():
-            headline = self._seen[info.path]
+            parsed = self._seen[info.path]
             # The worker never sees what CPython rejects, so it keeps no calls from it. Python reads a lone carriage
             # return as a line end and tree-sitter does not.
-            text = "" if headline.syntax_error else headline.source
+            text = "" if parsed.syntax_error else parsed.source
             text = text.replace("\r\n", "\n").replace("\r", "\n")
             sources[name] = {"text": text, "is_package": info.is_package}
         upsert = {
@@ -254,55 +286,50 @@ class Analysis:
             if self._sources.get(name) != source
         }
         remove = sorted(self._sources.keys() - sources.keys())
-        # Only discovered source files: a full scan skips an excluded or test file that does not parse. A broken file
-        # outside enforcement changes neither the scan nor the worker's sources, so the cache must compare this too.
-        broken = tuple(
-            sorted(
-                path
-                for path in scan.paths.values()
-                if path in self._seen and self._seen[path].syntax_error
-            )
-        )
-        if self._evidence is None or upsert or remove:
-            self._evidence = self._worker.update(upsert, remove)
-            self._sources = sources
-            parsed = self._evidence["parsed"]
-        elif self._result is not None and (policy, scan, broken) == (
-            self._policy,
-            self._scan,
-            self._result.syntax_errors,
-        ):
-            return replace(self._result, parsed=0)
-        else:
-            parsed = 0
-        findings, incomplete = self._evaluate(self._evidence, policy, scan)
-        result = Result(parsed, findings, broken, incomplete)
-        self._result = result
-        self._policy = policy
-        self._scan = scan
-        return result
+        if self._evidence is not None and not upsert and not remove:
+            return 0, self._evidence
+        self._evidence = self._worker.update(upsert, remove)
+        self._sources = sources
+        return self._evidence["parsed"], self._evidence
 
-    def _evaluate(
-        self, evidence: Evidence, policy: Policy, scan: ScanData
-    ) -> tuple[tuple[Finding, ...], tuple[str, ...]]:
-        """The findings, and the paths whose calls are missing."""
-        # The worker is never sent what CPython rejects, so these are valid Python its grammar cannot parse.
-        incomplete = tuple(
-            sorted(
-                info.path
-                for name, info in scan.modules.items()
-                if evidence["modules"][name]["syntax_error"]
-            )
-        )
-        checked = _Checked(policy, scan)
+    def _findings(self, checked: _Checked) -> list[Violation]:
         if checked != self._checked:
-            self._parity = _parity_findings(checked)
+            self._found = _scan_findings(checked)
             self._checked = checked
-        findings = self._parity + _effect_findings(evidence, _context(checked))
-        ordered = sorted(
-            findings, key=lambda found: (found.key, found.line, found.chain)
+        # Not cached: `unresolved-patch-target` reads files and folders that the scan does not describe.
+        patched = patch_findings(checked.policy, self._root, self._fs, checked.scan)
+        found = [v for v in self._found + patched if v.rule in PARITY_RULES]
+        return sorted(found, key=lambda violation: (violation.key, violation.line))
+
+    def refresh(self, policy: Policy) -> Result:
+        # `mixed-purity` is not a parity rule, so do not spend a save on it.
+        policy = replace(
+            policy, mixed_purity=replace(policy.mixed_purity, enabled=False)
         )
-        return tuple(ordered), incomplete
+        scan = self._scan(policy)
+        parsed, evidence = self._update(scan)
+        checked = _Checked(policy, scan)
+        found = self._findings(checked)
+        context = _context(checked)
+        return Result(
+            parsed,
+            violations=tuple(v for v in found if v.rule not in INFORMATIONAL_RULES),
+            notes=tuple(v for v in found if v.rule in INFORMATIONAL_RULES),
+            call_paths=tuple(_call_paths(evidence, context)),
+            unresolved_calls=_unresolved_calls(evidence, context),
+            # Only discovered source files: a full scan skips an excluded or test file that does not parse.
+            syntax_errors=tuple(
+                sorted(path for path in scan.paths.values() if self._broken(path))
+            ),
+            # The worker is never sent what CPython rejects, so these are valid Python its grammar cannot parse.
+            incomplete=tuple(
+                sorted(
+                    info.path
+                    for name, info in scan.modules.items()
+                    if evidence["modules"][name]["syntax_error"]
+                )
+            ),
+        )
 
 
 def main() -> int:
@@ -326,7 +353,8 @@ def main() -> int:
                         raise
                     time.sleep(0.05)  # renamed between listing and reading
                     continue
-                current = (result.violations, result.syntax_errors, result.incomplete)
+                # Compared as data: `Violation` equality leaves out hints and targets, which are shown.
+                current = asdict(replace(result, parsed=0))
                 if current != previous:
                     sys.stdout.write(json.dumps(asdict(result)) + "\n")
                     sys.stdout.flush()

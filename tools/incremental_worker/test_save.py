@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from arborescent.config import policy_from_mapping
-from tools.incremental_analysis import Analysis, Worker
+from tools.incremental_analysis import Analysis, Result, Worker
+
+
+def both(result: Result):
+    return result.violations, result.call_paths
 
 
 def test_saved_helper_changes_untouched_caller_and_matches_full_scan(
@@ -55,39 +59,43 @@ def test_saved_helper_changes_untouched_caller_and_matches_full_scan(
 
     def full(policy):
         with Worker(worker_binary) as fresh:
-            return Analysis(fresh, tmp_path).refresh(policy).violations
+            result = Analysis(fresh, tmp_path).refresh(policy)
+        return result.violations, result.call_paths
 
     with Worker(worker_binary) as worker:
         analysis = Analysis(worker, tmp_path)
-        assert analysis.refresh(strict).violations == full(strict) == ()
+        assert both(analysis.refresh(strict)) == full(strict) == ((), ())
         helper.write_text(
             "import os as operating_system\n\ndef load():\n    return operating_system.getenv('QUOTE')\n",
             encoding="utf-8",
         )
         added = analysis.refresh(strict)
         assert added.parsed == 1
-        assert added.violations == full(strict)
+        assert both(added) == full(strict)
         assert [(v.rule, v.subject, v.line) for v in added.violations] == [
+            ("effect-via-import", "domain", 1),
+        ]
+        assert [(v.rule, v.subject, v.line) for v in added.call_paths] == [
             ("effect-via-call", "domain", 4),
         ]
-        assert added.violations[0].chain == ("domain.quote", "helper.load", "os.getenv")
+        assert added.call_paths[0].chain == ("domain.quote", "helper.load", "os.getenv")
         relaxed = analysis.refresh(permissive)
         assert relaxed.parsed == 0
-        assert relaxed.violations == full(permissive) == ()
-        assert analysis.refresh(strict).violations == added.violations
+        assert both(relaxed) == full(permissive) == ((), ())
+        assert both(analysis.refresh(strict)) == both(added)
         helper.write_text("def load():\n    return 'fixed'\n", encoding="utf-8")
         removed = analysis.refresh(strict)
         assert removed.parsed == 1
-        assert removed.violations == full(strict) == ()
+        assert both(removed) == full(strict) == ((), ())
 
         caller.write_text("import adapters\n", encoding="utf-8")
         blocked = analysis.refresh(strict)
-        assert blocked.violations == full(strict)
+        assert both(blocked) == full(strict)
         assert [(v.rule, v.subject, v.line) for v in blocked.violations] == [
             ("internal-import", "domain", 1),
         ]
         caller.write_text("", encoding="utf-8")
-        assert analysis.refresh(strict).violations == full(strict) == ()
+        assert both(analysis.refresh(strict)) == full(strict) == ((), ())
 
 
 def test_deleted_functions_and_syntax_errors_remove_stale_recursive_paths(
@@ -121,14 +129,14 @@ def test_deleted_functions_and_syntax_errors_remove_stale_recursive_paths(
         result = analysis.refresh(policy)
         with Worker(worker_binary) as fresh:
             expected = Analysis(fresh, tmp_path).refresh(policy)
-        assert result.violations == expected.violations
+        assert both(result) == both(expected)
         assert result.syntax_errors == expected.syntax_errors
         return result
 
     with Worker(worker_binary) as worker:
         analysis = Analysis(worker, tmp_path)
         initial = assert_full(analysis)
-        assert initial.violations[0].chain == (
+        assert initial.call_paths[0].chain == (
             "domain.quote",
             "helper.first",
             "helper.second",
@@ -138,22 +146,22 @@ def test_deleted_functions_and_syntax_errors_remove_stale_recursive_paths(
         helper.write_text("def first(:\n", encoding="utf-8")
         broken = assert_full(analysis)
         assert broken.syntax_errors == ("helper.py",)
-        assert broken.violations == ()
+        assert broken.call_paths == ()
 
         helper.write_text(effectful, encoding="utf-8")
         recovered = assert_full(analysis)
-        assert recovered.violations == initial.violations
+        assert both(recovered) == both(initial)
         assert recovered.syntax_errors == ()
 
         helper.write_text(
             effectful.replace("os.getenv('QUOTE')", "True"), encoding="utf-8"
         )
         cleared = assert_full(analysis)
-        assert cleared.violations == ()
+        assert both(cleared) == ((), ())
         assert cleared.parsed == 1
 
         helper.write_text(effectful, encoding="utf-8")
-        assert assert_full(analysis).violations == initial.violations
+        assert both(assert_full(analysis)) == both(initial)
         helper.rename(tmp_path / "relocated.py")
         renamed = assert_full(analysis)
         assert renamed.parsed == 1
@@ -192,4 +200,4 @@ def test_shadowed_import_does_not_create_effect_path(
     )
     (tmp_path / "domain.py").write_text(caller, encoding="utf-8")
     with Worker(worker_binary) as worker:
-        assert Analysis(worker, tmp_path).refresh(policy).violations == ()
+        assert Analysis(worker, tmp_path).refresh(policy).call_paths == ()

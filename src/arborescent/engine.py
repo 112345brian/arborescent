@@ -83,7 +83,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CheckReport", "EngineRun", "Options", "Services", "apply_modularity", "apply_ratchet", "blocking", "changed_files",
     "child_arbor_runs", "contract_renderers", "dev_tool_counts", "discovery_findings", "drift", "drift_report", "enforced",
-    "nested_exclusions", "package_checks", "plan_engines", "ratchet_runs", "record_inventories", "run_engine",
+    "nested_exclusions", "package_checks", "patch_findings", "plan_engines", "ratchet_runs", "record_inventories", "run_engine",
     "run_own", "run_tool", "tool_is_disabled", "write_generated",
 ]
 
@@ -239,8 +239,7 @@ def run_own(
         if checks is not None:
             found += checks.gap_violations(policy, root, services.fs, scan, services.scanner)
         # selftest runs without practices and still has to probe these two
-        found += _unreachable_patch_findings(policy, scan)
-        found += _unresolved_patch_findings(policy, root, services.fs, scan)
+        found += patch_findings(policy, root, services.fs, scan)
     if policy.practices.get("shadowed-callee"):  # per module, so a `--changed` run reports it too
         found += shadowed_callee_findings(_module_sources(root, services, scan))
     return found, scan
@@ -290,6 +289,12 @@ def _unresolved_patch_findings(policy: Policy, root: Path, fs: FileSystem, scan:
 
     sources = PatchSources(lambda path: _source_text(fs, root / path), on_disk)
     return unresolved_patch_targets(scan.modules, scan.known, tests, sources, exempt)
+
+
+def patch_findings(policy: Policy, root: Path, fs: FileSystem, scan: ScanResult) -> list[Violation]:
+    """``unreachable-patch`` and ``unresolved-patch-target`` (empty when neither practice is set): shared with the incremental
+    worker. The second also reads patched modules from disk, so an unchanged ``scan`` does not mean unchanged findings."""
+    return _unreachable_patch_findings(policy, scan) + _unresolved_patch_findings(policy, root, fs, scan)
 
 
 def nested_exclusions(excluded: Mapping[str, int], patterns: Sequence[str]) -> dict[str, str]:
