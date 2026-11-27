@@ -627,6 +627,12 @@ and is informational. `check --require-tools --require-profile` requires Arbores
 Tach 0.35.3) and behaviorally probes the required Ruff rules. A different installed Ruff or Tach version prints
 `PROFILE WARN` and does not fail the check; a missing tool or a rule whose probe no longer fires still fails.
 
+The profile also holds the innermost ring (the first of `rings`, in each scope) to its positional effect default: its
+effective `forbid` must contain everything it would forbid with `forbid` omitted (the 14 categories listed under *Rings*
+below; `dynamic-import` is added to any non-empty list). Otherwise `PROFILE FAIL` names the missing categories: add
+them to that ring's `forbid`, or remove the key. Extra categories are fine. Every other ring may be loosened, because
+some ring has to be allowed to use effects. A one-ring policy has no such default.
+
 Use `disabled_tools` for tools this project deliberately does not use, so their absence does not keep appearing as a
 setup hint or prompt. Disabled tools are skipped even with `--require-tools`; certification still fails if its required
 Ruff or Tach checks are disabled. For example, `disabled_tools = ["import-linter", "tach", "ruff"]` leaves only the

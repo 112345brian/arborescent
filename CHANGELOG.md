@@ -12,6 +12,12 @@
 - The `entrypoint-eager-commands` note now names `arborescent coupling startup --measure` for the time cost (#215).
 
 ### Fixed
+- **`--require-profile` can now fail where it passed.** The "weakens positional effect defaults" check compared a ring's
+  `forbid` with itself, so it fired only for a list without `dynamic-import`. It now holds the innermost ring of each
+  scope to its default: its effective `forbid` must contain everything it would forbid with `forbid` omitted (14
+  categories). The failure names the missing categories; add them to that ring's `forbid`, or remove the key. Every
+  other ring may be loosened (an adapters ring has to allow effects), so a middle ring whose `forbid` lacks
+  `dynamic-import` no longer fails. `check` without `--require-profile` is unchanged.
 - **Coupling closure baselines may grow.** The closure of an entrypoint did not count parent packages, so with
   `app/__init__.py` importing `app.heavy`, `app.cli` was reported as 1 module while importing it loads 3, and a
   `closure_max` budget passed. Closure sizes, `closure_max`, the ratchet, `startup` blame and lazy-mount costs,

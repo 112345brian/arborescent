@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -96,11 +97,28 @@ def _native_scope_minimum(scope_name: str, policy: ArchitecturePolicy) -> list[s
             failures.append(f"{prefix}ring {rule.name} has wildcard external access")
         if rule.name != outer and "*" in rule.may_import:
             failures.append(f"{prefix}ring {rule.name} has wildcard internal imports")
-    for rule in policy.rings[:-1]:
-        required = policy.forbidden_effects(rule.name)
-        if rule.forbid is not None and not required <= rule.forbid:
-            failures.append(f"{prefix}ring {rule.name} weakens positional effect defaults")
+    failures.extend(_innermost_effects(scope_name, policy))
     return failures
+
+
+def _innermost_effects(scope_name: str, policy: ArchitecturePolicy) -> list[str]:
+    """The innermost ring must forbid at least what it would with `forbid` omitted.
+
+    Only that ring: an outer one exists to hold effects (an adapters ring must be allowed to use them).
+    """
+    ring = policy.rings[0]
+    if ring.forbid is None:
+        return []
+    defaulted = replace(policy, rings=(replace(ring, forbid=None), *policy.rings[1:]))
+    missing = sorted(defaulted.forbidden_effects(ring.name) - policy.forbidden_effects(ring.name))
+    if not missing:
+        return []
+    prefix = f"scope {scope_name} " if scope_name else ""
+    table = f"[scopes.{scope_name}.ring.{ring.name}]" if scope_name else f"[ring.{ring.name}]"
+    return [
+        f"{prefix}ring {ring.name} weakens positional effect defaults: its `forbid` is missing {', '.join(missing)}; "
+        f"add them to `forbid` in {table}, or remove that `forbid` to take the default"
+    ]
 
 
 def _installed_version(root: Path, runner: ToolRunner, executable: str) -> str:
