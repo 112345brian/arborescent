@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## 0.10.0 — 2026-11-27
+
 - `check`, `selftest` and every other command that runs the checks raise the garbage collector's threshold to 50,000
   while they run and restore the previous one afterwards, also after an error: on macOS a cold run of this repository took
   about 16% less time on Python 3.11 and 7% less on 3.14, with at most 1 MB more peak memory. A library caller passes
@@ -26,6 +28,8 @@ and run `check`: findings and baseline keys do not change.
 - `middle_forbid` goes to each ring except the innermost and outermost that had no `forbid`.
 - `@group` references are written out: a group cannot appear in `traits`.
 - Also check scripts and templates that write ring tables, and every child, scoped and shipped policy.
+- Require `arborescent>=0.10.0` wherever a converted policy runs: 0.9 and earlier silently ignore `traits`, so the check
+  passes while enforcing less.
 - Unchanged: `max_reexport_ratio`, `preset`, `forbid_effects`, `dev_tools_forbid`, `taint_seeds`, `port_binding.shadow`.
 
 Details in `docs/configuration.md`, "Traits".
