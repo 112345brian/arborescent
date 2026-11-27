@@ -118,32 +118,33 @@ _SITE_NODES = frozenset({ast.ImportFrom, ast.Attribute, ast.Name, ast.Call})
 
 
 def _is_seam_annotation(node: ast.expr | None) -> bool:
-    """Whether a parameter annotation says "a callable or a mapping", looking through Optional/Union/`|` and string forms."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return _is_seam_string(node.value)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return _is_seam_annotation(node.left) or _is_seam_annotation(node.right)
-    if isinstance(node, ast.Subscript):
-        return _is_seam_subscript(node)
-    if isinstance(node, ast.Attribute):
-        return node.attr in _SEAM_ANNOTATIONS
-    return isinstance(node, ast.Name) and node.id in _SEAM_ANNOTATIONS
+    """Whether a parameter annotation says "a callable or a mapping", looking through Optional/Union/`|` and string forms.
+
+    An explicit stack, so a long ``|`` or subscript chain cannot overflow it."""
+    pending: list[ast.expr | None] = [node]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            pending.append(_parsed_annotation(node.value))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            pending += (node.right, node.left)
+        elif isinstance(node, ast.Subscript):
+            base = node.value
+            name = base.attr if isinstance(base, ast.Attribute) else base.id if isinstance(base, ast.Name) else ""
+            inner = node.slice
+            wrapper = name in {"Optional", "Union", "Annotated"}
+            pending += (inner.elts if isinstance(inner, ast.Tuple) else [inner]) if wrapper else [base]
+        elif (isinstance(node, ast.Attribute) and node.attr in _SEAM_ANNOTATIONS) or (isinstance(node, ast.Name) and node.id in _SEAM_ANNOTATIONS):
+            return True
+    return False
 
 
-def _is_seam_string(text: str) -> bool:
+def _parsed_annotation(text: str) -> ast.expr | None:
+    """A string annotation's expression; None when the parser cannot take it (a very deep one raises MemoryError)."""
     try:
-        return _is_seam_annotation(ast.parse(text, mode="eval").body)
-    except SyntaxError:
-        return False
-
-
-def _is_seam_subscript(node: ast.Subscript) -> bool:
-    base = node.value
-    name = base.attr if isinstance(base, ast.Attribute) else base.id if isinstance(base, ast.Name) else ""
-    if name in {"Optional", "Union", "Annotated"}:
-        inner = node.slice
-        return any(_is_seam_annotation(item) for item in (inner.elts if isinstance(inner, ast.Tuple) else [inner]))
-    return _is_seam_annotation(base)
+        return ast.parse(text, mode="eval").body
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        return None
 
 
 def _injection_defaults(nodes: Sequence[ast.AST]) -> dict[int, int]:
@@ -195,34 +196,52 @@ def rebound_names(nodes: Sequence[ast.AST]) -> set[str]:
 
 def _annotation_is_path(node: ast.expr | None, aliases: dict[str, str]) -> bool:
     """Whether an annotation names a ``pathlib`` path, looking through ``Optional``/``Union``/``|`` and string forms."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        try:
-            return _annotation_is_path(ast.parse(node.value, mode="eval").body, aliases)
-        except SyntaxError:
-            return False
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return _annotation_is_path(node.left, aliases) or _annotation_is_path(node.right, aliases)
-    if isinstance(node, ast.Subscript):
-        base = dotted_name(node.value, aliases) or ""
-        if base.rsplit(".", 1)[-1] in {"Optional", "Union", "Annotated"}:
-            inner = node.slice
-            return any(_annotation_is_path(item, aliases) for item in (inner.elts if isinstance(inner, ast.Tuple) else [inner]))
-        return False
-    return isinstance(node, ast.Name | ast.Attribute) and dotted_name(node, aliases) in _PATH_CONSTRUCTORS
+    pending: list[ast.expr | None] = [node]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            pending.append(_parsed_annotation(node.value))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            pending += (node.right, node.left)
+        elif isinstance(node, ast.Subscript):
+            if (dotted_name(node.value, aliases) or "").rsplit(".", 1)[-1] in {"Optional", "Union", "Annotated"}:
+                inner = node.slice
+                pending += inner.elts if isinstance(inner, ast.Tuple) else [inner]
+        elif isinstance(node, ast.Name | ast.Attribute) and dotted_name(node, aliases) in _PATH_CONSTRUCTORS:
+            return True
+    return False
 
 
 def _is_pathish(node: ast.expr, bound: set[str], aliases: dict[str, str]) -> bool:
-    """Whether an expression is a path: a ``Path(...)`` call, a name bound from one, ``a / b`` with a path side, ``p.parent`` or ``p.resolve()``."""
-    if isinstance(node, ast.Name):
-        return node.id in bound
-    if isinstance(node, ast.Call):
-        callee = dotted_name(node.func, aliases)
-        if callee in _PATH_CONSTRUCTORS or callee in {"pathlib.Path.cwd", "pathlib.Path.home"}:
+    """Whether an expression is a path: a ``Path(...)`` call, a name bound from one, ``a / b`` with a path side, ``p.parent`` or ``p.resolve()``.
+
+    An explicit stack, so generated code with a very long ``a / b / c`` or method chain cannot overflow it."""
+    pending = [node]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Name):
+            if node.id in bound:
+                return True
+        elif isinstance(node, ast.Call) and _is_path_constructor(node, aliases):
             return True
-        return isinstance(node.func, ast.Attribute) and node.func.attr in _PATH_RETURNING and _is_pathish(node.func.value, bound, aliases)
+        else:
+            pending += _path_sources(node)
+    return False
+
+
+def _is_path_constructor(node: ast.Call, aliases: dict[str, str]) -> bool:
+    callee = dotted_name(node.func, aliases)
+    return callee in _PATH_CONSTRUCTORS or callee in {"pathlib.Path.cwd", "pathlib.Path.home"}
+
+
+def _path_sources(node: ast.expr) -> tuple[ast.expr, ...]:
+    """The expressions whose being a path makes ``node`` one."""
+    if isinstance(node, ast.Call):
+        func = node.func
+        return (func.value,) if isinstance(func, ast.Attribute) and func.attr in _PATH_RETURNING else ()
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-        return _is_pathish(node.left, bound, aliases) or _is_pathish(node.right, bound, aliases)
-    return isinstance(node, ast.Attribute) and node.attr in _PATH_ATTRIBUTES and _is_pathish(node.value, bound, aliases)
+        return (node.right, node.left)
+    return (node.value,) if isinstance(node, ast.Attribute) and node.attr in _PATH_ATTRIBUTES else ()
 
 
 def _path_binding(node: ast.AST, aliases: dict[str, str]) -> tuple[list[str], ast.expr | None]:

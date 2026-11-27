@@ -51,6 +51,21 @@ Details in `docs/configuration.md`, "Traits".
   names the missing traits; add them to that ring's `traits`, or remove its effect traits. Every other ring may be
   loosened (an adapters ring has to allow effects), so a middle ring that lacks `dynamic-import` no longer fails.
   `check` without `--require-profile` is unchanged.
+- The order of `effect-via-import` findings (and the `must_be_pure` reach form of `package-constraint-facts`) changed
+  from run to run with `PYTHONHASHSEED` when several effect categories reached a module. Reports are now the same on every
+  run. Only the order varied: the chains, root causes and baselines were already stable, so no baseline changes.
+- Other walkers now skip folders while walking instead of listing them first, and leave nested checkouts (clones, linked
+  worktrees such as `.claude/worktrees/*`, submodules) alone: the package asset listing, the test-reference and
+  adapter-equivalence tests folder, the scan of a project that is not a git repository, the `selftest` project copy, the
+  migration rewriter (which could rewrite files of another checkout) and the temporary copy Windows tach runs on.
+  `duplicate_logic.reference_paths` skips environments while walking but still reads a submodule below a reference path,
+  and the tach copy keeps a nested checkout that a `source_roots` entry other than `.` reaches. Files inside a nested
+  checkout are no longer reported as `package-unowned-asset`; a catalog entry that owns files inside one now matches
+  nothing.
+- `check` still stopped with `RecursionError` (or `MemoryError`) on Python 3.12 and later on a very long `a / "b" / ...`
+  path expression or method chain, `X | Y | ...` or `X[0][0]...` annotation, `not not ...` test or `elif` ladder at module
+  or class level, on a string annotation too deep for the parser, and on chains of about a thousand modules that import,
+  re-export or forward to one another. A source file that the parser itself cannot take is still an error.
 - **Coupling closure baselines may grow.** The closure of an entrypoint did not count parent packages, so with
   `app/__init__.py` importing `app.heavy`, `app.cli` was reported as 1 module while importing it loads 3, and a
   `closure_max` budget passed. Closure sizes, `closure_max`, the ratchet, `startup` blame and lazy-mount costs,

@@ -22,7 +22,7 @@ from .package_pyproject_gaps import (
     existing_derived_paths,
     pyproject_violations,
 )
-from .package_tree import is_generated
+from .package_tree import GENERATED_DIRS, is_generated
 from .packages import read_catalog
 from .path_exclusion import excluded_by_policy
 from .ports import FileSystem, ModuleScanner, ScanResult
@@ -109,7 +109,8 @@ def asset_paths(policy: Policy, root: Path, fs: FileSystem) -> tuple[str, ...]:
         base = root if source in ("", ".") else root.joinpath(*Path(source).parts)
         if not fs.is_dir(base):
             continue
-        for path in fs.rglob(base, "*"):
+        # pruned while walking: environments and nested checkouts are not entered. A package named like output is.
+        for path in fs.walk_files(base, GENERATED_DIRS, enter_packages=True):
             rel = path.relative_to(root).as_posix()
             if path.suffix == ".py" or not fs.is_file(path):
                 continue

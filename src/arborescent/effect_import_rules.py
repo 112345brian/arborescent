@@ -124,32 +124,46 @@ def _effect_reachable(
 ) -> dict[str, dict[str, tuple[str, ...]]]:
     """module -> {effect category: the chain of modules, starting with itself, down to the one that directly uses it}.
 
-    Only edges in ``effect_graph`` (first-party, non-type-only, same scope) propagate. A cycle stops recursion rather
-    than looping; the modules on it still get whatever their own direct effects and acyclic imports contribute."""
+    Only edges in ``effect_graph`` (first-party, non-type-only, same scope) propagate. A cycle stops the walk rather
+    than looping; the modules on it still get whatever their own direct effects and acyclic imports contribute. Depth
+    first over the targets in name order, on an explicit stack, so a long import chain cannot overflow it."""
     memo: dict[str, dict[str, tuple[str, ...]]] = {}
     visiting: set[str] = set()
+    # (module, its effects so far, the targets still to take, the next one last)
+    stack: list[tuple[str, dict[str, tuple[str, ...]], list[str]]] = []
 
-    def compute(name: str) -> dict[str, tuple[str, ...]]:
-        if name in memo:
-            return memo[name]
-        if name in visiting:
-            return {}
+    def enter(name: str) -> None:
         visiting.add(name)
         info = modules.get(name)
         local_policy = context.policy_for(name)
         result: dict[str, tuple[str, ...]] = (
-            dict.fromkeys(direct_propagating_effects(context.policy.effects, local_policy, info), (name,))
+            # sorted: the set's own order follows PYTHONHASHSEED, and this dict's order is the order of the findings
+            dict.fromkeys(sorted(direct_propagating_effects(context.policy.effects, local_policy, info)), (name,))
             if local_policy is not None and info is not None else {}
         )
-        for target in sorted(effect_graph.get(name, ())):
-            for category, chain in compute(target).items():
-                if category not in result:
-                    result[category] = (name, *chain)
-        visiting.discard(name)
-        memo[name] = result
-        return result
+        stack.append((name, result, sorted(effect_graph.get(name, ()), reverse=True)))
 
-    return {name: compute(name) for name in modules}
+    for root in modules:
+        if root not in memo:
+            enter(root)
+        while stack:
+            name, result, targets = stack[-1]
+            if not targets:
+                stack.pop()
+                visiting.discard(name)
+                memo[name] = result
+            elif targets[-1] not in memo and targets[-1] not in visiting:
+                enter(targets[-1])  # taken again, from the memo, once it is done
+            else:
+                _extend_chains(result, name, memo.get(targets.pop(), {}))  # nothing yet for one on the cycle
+    return {name: memo[name] for name in modules}
+
+
+def _extend_chains(result: dict[str, tuple[str, ...]], name: str, found: Mapping[str, tuple[str, ...]]) -> None:
+    """Add what ``name`` reaches through one import; an effect it already reaches keeps its chain."""
+    for category, chain in found.items():
+        if category not in result:
+            result[category] = (name, *chain)
 
 
 def _via_import_cause(category: str, chain: tuple[str, ...]) -> str:

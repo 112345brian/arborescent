@@ -69,10 +69,15 @@ def _mentioned(nodes: Sequence[ast.expr]) -> frozenset[str]:
 
 def _tested(test: ast.expr) -> tuple[frozenset[str], frozenset[str]]:
     """``(names absent when the test holds, names absent when it does not)``: where a fallback for them may sit."""
+    negated = False
+    while isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):  # a loop: ``not not not ...`` may be very long
+        test, negated = test.operand, not negated
+    holds, fails = _tested_plain(test)
+    return (fails, holds) if negated else (holds, fails)
+
+
+def _tested_plain(test: ast.expr) -> tuple[frozenset[str], frozenset[str]]:
     nothing = frozenset[str]()
-    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
-        present_absent = _tested(test.operand)
-        return present_absent[1], present_absent[0]
     if isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.comparators[0], ast.Constant) and test.comparators[0].value is None:
         name = _name_of(test.left)
         found = nothing if name is None else frozenset({name})
@@ -130,18 +135,24 @@ class _Context(NamedTuple):
 
 
 def _annotation(node: ast.expr | None, aliases: dict[str, str], dotted: Dotted) -> str:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        try:
-            node = ast.parse(node.value, mode="eval").body
-        except (SyntaxError, ValueError):
-            return ""
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        sides = [side for side in (node.left, node.right) if not (isinstance(side, ast.Constant) and side.value is None)]
-        return next((found for side in sides if (found := _annotation(side, aliases, dotted))), "")
-    if isinstance(node, ast.Subscript) and (dotted(node.value, aliases) or "").rsplit(".", 1)[-1] in {"Optional", "Annotated"}:
-        inner = node.slice
-        return _annotation(inner.elts[0] if isinstance(inner, ast.Tuple) and inner.elts else inner, aliases, dotted)
-    return "" if node is None else dotted(node, aliases) or ""
+    pending: list[ast.expr | None] = [node]
+    while pending:  # an explicit stack, first name in source order, so a long ``|`` chain cannot overflow it
+        node = pending.pop()
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            try:
+                node = ast.parse(node.value, mode="eval").body
+            except (SyntaxError, ValueError, MemoryError, RecursionError):  # MemoryError: too deep for the parser
+                continue
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            pending += [side for side in (node.right, node.left) if not (isinstance(side, ast.Constant) and side.value is None)]
+        elif isinstance(node, ast.Subscript) and (dotted(node.value, aliases) or "").rsplit(".", 1)[-1] in {"Optional", "Annotated"}:
+            inner = node.slice
+            pending.append(inner.elts[0] if isinstance(inner, ast.Tuple) and inner.elts else inner)
+        elif node is not None:
+            found = dotted(node, aliases)
+            if found is not None and found != "":
+                return found
+    return ""
 
 
 def _default_category(node: ast.expr | None, aliases: dict[str, str], dotted: Dotted) -> str:

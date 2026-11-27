@@ -199,18 +199,24 @@ def _forwarded_imports(context: RuleContext, name: str, imp: RawImport, env: _Im
 
 
 def _forwarded_targets(env: _ImportEnv, host: str, fwd: Forwarder, seen: set[str]) -> list[str]:
-    """The modules a forwarder reaches, following forwarders that themselves only forward (a chain, not a cycle)."""
-    raw = RawImport(fwd.level, fwd.module, (fwd.imported,) if fwd.imported else (), fwd.line, False, False)
-    targets, _, _ = resolve_targets(host, env.modules[host].is_package, raw, env.known, env.tops)
-    out = list(targets)
-    callee = (fwd.member or fwd.imported).split(".")[0]
-    for target in targets:
-        info = env.modules.get(target)
-        if info is None or target in seen:
-            continue
-        for nxt in info.facts.forwarders:
-            if nxt.name == callee:
-                out += _forwarded_targets(env, target, nxt, seen | {target})
+    """The modules a forwarder reaches, following forwarders that themselves only forward (a chain, not a cycle).
+
+    Each forwarder's targets, then what they forward to, depth first on an explicit stack: a chain may be very long."""
+    out: list[str] = []
+    pending = [(host, fwd, seen)]
+    while pending:
+        host, fwd, seen = pending.pop()
+        raw = RawImport(fwd.level, fwd.module, (fwd.imported,) if fwd.imported else (), fwd.line, False, False)
+        targets, _, _ = resolve_targets(host, env.modules[host].is_package, raw, env.known, env.tops)
+        out += targets
+        callee = (fwd.member or fwd.imported).split(".")[0]
+        pending += reversed([
+            (target, nxt, seen | {target})
+            for target in targets
+            if target not in seen and (info := env.modules.get(target)) is not None
+            for nxt in info.facts.forwarders
+            if nxt.name == callee
+        ])
     return out
 
 

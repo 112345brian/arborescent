@@ -84,7 +84,8 @@ class FileSystem(Protocol):
     def rglob(self, root: Path, pattern: str) -> list[Path]: ...  # sorted; files and folders at any depth
 
     # sorted; files only. Never enters a folder named in ``prune``, nor one below ``root`` that holds its own ``.git``.
-    def walk_files(self, root: Path, prune: Collection[str]) -> list[Path]: ...
+    # ``enter_checkouts`` enters the latter; ``enter_packages`` enters a pruned name that holds an ``__init__.py``.
+    def walk_files(self, root: Path, prune: Collection[str], *, enter_checkouts: bool = False, enter_packages: bool = False) -> list[Path]: ...
 
     def mkdir(self, path: Path) -> None: ...  # with parents; existing is fine
 
@@ -94,7 +95,8 @@ class FileSystem(Protocol):
 
     def remove_tree(self, path: Path) -> None: ...  # a missing path is fine
 
-    def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = ()) -> None: ...  # ``ignore``: name globs to skip
+    # ``ignore``: name globs to skip. ``skip_checkouts``: leave out folders below ``src`` that hold their own ``.git``.
+    def copy_tree(self, src: Path, dst: Path, ignore: Sequence[str] = (), *, skip_checkouts: bool = False) -> None: ...
 
     def temporary_directory(self, prefix: str, parent: Path | None = None) -> AbstractContextManager[Path]: ...  # removed with its contents on exit
 

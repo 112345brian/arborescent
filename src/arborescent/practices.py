@@ -386,17 +386,21 @@ def _resolve_reference(target: str, index: _Index) -> tuple[str, str] | None:
 
 
 def _defining_module(module: str, name: str, index: _Index, seen: frozenset[tuple[str, str]]) -> tuple[str, str] | None:
-    info = index.modules[module]
-    if (module, name) in seen:
-        return None
-    if any(not d.is_class and d.name == name for d in info.facts.top_level_defs):
-        return module, name
-    for imp in info.facts.imports:
-        if name not in imp.names or imp.lazy or imp.type_only:
+    pending = [(module, seen)]  # depth first in import order, on an explicit stack: a re-export chain may be very long
+    while pending:
+        module, seen = pending.pop()
+        if (module, name) in seen:
             continue
-        for edge in resolve_targets(module, info.is_package, imp, index.known, index.tops)[0]:
-            if edge in index.modules and edge != module and (found := _defining_module(edge, name, index, seen | {(module, name)})):
-                return found
+        info = index.modules[module]
+        if any(not d.is_class and d.name == name for d in info.facts.top_level_defs):
+            return module, name
+        pending += reversed([
+            (edge, seen | {(module, name)})
+            for imp in info.facts.imports
+            if name in imp.names and not imp.lazy and not imp.type_only
+            for edge in resolve_targets(module, info.is_package, imp, index.known, index.tops)[0]
+            if edge in index.modules and edge != module
+        ])
     return None
 
 
@@ -413,9 +417,9 @@ def function_references(fs: FileSystem, root: Path, tests_dir: str, scan: ScanRe
         return []
     index = _Index(scan.modules, scan.known, {module.split(".", 1)[0] for module in scan.known})
     out: list[FunctionReferences] = []
-    for path in fs.rglob(folder, "*.py"):
+    for path in fs.walk_files(folder, _NOISE):
         rel = path.relative_to(root).as_posix()
-        if _NOISE & set(rel.split("/")):
+        if path.suffix != ".py" or _NOISE & set(rel.split("/")):
             continue
         try:
             facts = extract(fs.read_text(path), rel)

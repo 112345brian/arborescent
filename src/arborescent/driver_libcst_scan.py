@@ -17,6 +17,7 @@ Parses Python with LibCST's parser (never regular expressions) and prints findin
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -35,6 +36,19 @@ def _write(path: Path, data: bytes) -> None:
     _ = path.write_bytes(data)
 
 
+def _walked(base: Path, root: Path) -> list[Path]:
+    """The Python files below ``base``, never entering an environment or a nested checkout: another checkout is not rewritten."""
+    found: list[Path] = []
+    for folder, folders, files in os.walk(base):
+        here = Path(folder)
+        if here != base and (".git" in folders or ".git" in files):
+            folders.clear()
+            continue
+        folders[:] = [name for name in folders if name not in SKIP]
+        found += [here / name for name in files if name.endswith(".py") and not SKIP & set((here / name).relative_to(root).parts)]
+    return found
+
+
 def _files(root: Path, under: list[str]) -> list[Path]:
     out: set[Path] = set()
     for item in under:
@@ -42,7 +56,7 @@ def _files(root: Path, under: list[str]) -> list[Path]:
         if path.is_file():
             out.add(path)
         else:
-            out.update(p for p in path.rglob("*.py") if not SKIP & set(p.relative_to(root).parts))
+            out.update(_walked(path, root))
     return sorted(out)
 
 

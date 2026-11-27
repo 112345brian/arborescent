@@ -11,6 +11,7 @@ import time
 import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import cast
 
 from .domain import ToolResult
 from .generated_config import unread_tach_roots, windows_tach_config
@@ -75,14 +76,35 @@ def _stop(error: OSError) -> None:
     raise error
 
 
+def _named_roots(project: Path) -> list[tuple[str, ...]]:
+    """The folders ``tach.toml``'s ``source_roots`` name, as path parts up to the first glob; ``.`` names none."""
+    try:
+        roots: object = tomllib.loads((project / "tach.toml").read_text(encoding="utf-8-sig")).get("source_roots")
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return []
+    named: list[tuple[str, ...]] = []
+    for root in cast("list[object]", roots) if isinstance(roots, list) else []:
+        parts = [part for part in str(root).replace(chr(92), "/").split("/") if part not in ("", ".")]
+        cut = next((index for index, part in enumerate(parts) if set("*?[{") & set(part)), len(parts))
+        if cut:
+            named.append(tuple(parts[:cut]))
+    return named
+
+
+def _enters_for_tach(folder: Path, parts: tuple[str, ...], roots: Sequence[tuple[str, ...]]) -> bool:
+    """Not an environment, and not a nested checkout unless a source root holds it or is inside it (tach was told to read it)."""
+    if folder.name in {".git", "node_modules", "__pycache__"} or (folder / "pyvenv.cfg").is_file():
+        return False
+    return not (folder / ".git").exists() or any(parts[: len(root)] == root[: len(parts)] for root in roots)
+
+
 def _copy_for_tach(project: Path, target: Path) -> None:
-    """Copy what tach reads, keeping relative paths; installed environments, symlinks and other files stay behind."""
+    """Copy what tach reads, keeping relative paths; environments, unnamed nested checkouts, symlinks and other files stay behind."""
+    roots = _named_roots(project)
     for folder, folders, files in os.walk(project, onerror=_stop):
         here = Path(folder)
-        folders[:] = [
-            name for name in folders
-            if name not in {".git", "node_modules", "__pycache__"} and not (here / name / "pyvenv.cfg").is_file()
-        ]
+        above = here.relative_to(project).parts
+        folders[:] = [name for name in folders if _enters_for_tach(here / name, (*above, name), roots)]
         copy = target / here.relative_to(project)
         copy.mkdir(exist_ok=True)
         for name in files:

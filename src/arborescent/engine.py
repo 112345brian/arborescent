@@ -372,7 +372,8 @@ def _source_text(fs: FileSystem, path: Path) -> str | None:
 def _reference_sources(root: Path, fs: FileSystem, entry: str) -> dict[str, str | None]:
     """The Python files of one reference path (a file or a folder), whether or not the scan covers them."""
     base = root / entry
-    files = [base] if fs.is_file(base) else fs.rglob(base, "*.py") if fs.is_dir(base) else []
+    # nested checkouts are entered: a vendored submodule below a reference path is part of what was named
+    files = [base] if fs.is_file(base) else fs.walk_files(base, NOISE_DIRS, enter_checkouts=True) if fs.is_dir(base) else []
     return {
         path.relative_to(root).as_posix(): _source_text(fs, path)
         for path in files
